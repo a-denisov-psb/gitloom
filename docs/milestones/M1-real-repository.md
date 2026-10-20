@@ -88,7 +88,9 @@ Acceptance:
 - `./scripts/check.sh` green on Linux or Windows (whatever the maintainer uses).
 - Helper can create a repo with commits, branches and a merge in a test; one smoke test uses it.
 
-### [ ] M1-02 `git-graph`: topological order
+### [x] M1-02 `git-graph`: topological order
+
+> Done: `topo_order` returns `Result<TopoOrder, git_graph::Error>`; `Id` is the input position (mismatch → error). Extra tests: equal times, duplicate parents, cycles, merge of two roots.
 
 Goal: new crate `crates/git-graph` that orders commits like `git log --date-order`.
 
