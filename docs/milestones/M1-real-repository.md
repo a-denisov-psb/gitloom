@@ -74,7 +74,9 @@ M1-02/03 and M1-04/05/06 can be done in either order.
 
 ## Tasks
 
-### [ ] M1-01 Tooling baseline
+### [x] M1-01 Tooling baseline
+
+> Done: check.sh green on Linux (WSL2, Rust 1.99.1 via rustup). Fixed missing executable bit on `scripts/check.sh`. Helper: `crates/git-core/tests/support/mod.rs` (`TestRepo`), smoke test `tests/support_smoke.rs`.
 
 Goal: a reliable quality gate before real work starts.
 
