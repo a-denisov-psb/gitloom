@@ -84,6 +84,12 @@ Kahn's algorithm over the loaded commits:
 
 Result: children always before parents, newest first otherwise (equivalent to `git log --date-order`). Clock skew cannot break topology.
 
+API: `topo_order(&[GraphCommit]) -> Result<TopoOrder, git_graph::Error>`.
+
+- `Id(u32)` is the commit's position in the input slice; `GraphCommit::id` must equal it (`Error::IdMismatch` otherwise). The caller keeps the mapping to Git object ids.
+- Parent ids `>= input.len()` are missing parents (truncated or shallow history). They are reported in `TopoOrder::open_ends` as `(child, parent)`.
+- Corrupt input with cycles loses no commits: the unreachable rest is appended newest first.
+
 ### Lanes
 
 State: `lanes: Vec<Option<Slot>>`, `Slot { waiting_for: Id, color: ColorId }`.

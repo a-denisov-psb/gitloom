@@ -997,6 +997,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "git-graph"
+version = "0.1.0"
+
+[[package]]
 name = "gitloom"
 version = "0.1.0"
 dependencies = [
