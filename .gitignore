@@ -1,0 +1,6 @@
+/target
+*.profraw
+.DS_Store
+
+# Windows download artefacts
+*:Zone.Identifier
