@@ -15,6 +15,10 @@ use crate::ui;
 
 /// Window focus events closer together than this trigger one refresh.
 const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
+/// Text inputs; keyboard shortcuts pause while one of them has focus.
+pub const FILTER_INPUT: &str = "sidebar-filter";
+pub const START_PATH_INPUT: &str = "start-path";
+
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
 
@@ -158,6 +162,11 @@ pub enum Message {
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
+    /// A shortcut after checking whether a text input has focus.
+    ShortcutChecked {
+        shortcut: Shortcut,
+        text_input_focused: bool,
+    },
     /// Show the native folder dialog.
     OpenRepository,
     FolderPicked(Option<PathBuf>),
@@ -415,6 +424,26 @@ impl App {
             Shortcut::Refresh => return self.update(Message::Refresh),
             Shortcut::ToggleSidebar => self.panes.toggle_sidebar(),
             Shortcut::TogglePanel => self.panes.toggle_panel(),
+            Shortcut::Navigate(step) => {
+                let target = self.active_tab().and_then(Tab::view).and_then(|view| {
+                    crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
+                });
+                if let Some(selection) = target {
+                    let task = self.select(selection);
+                    return Task::batch([task, self.reveal_selection()]);
+                }
+            }
+            Shortcut::FocusFilter => {
+                if !self.panes.sidebar_visible {
+                    self.panes.toggle_sidebar();
+                }
+                return iced::widget::operation::focus(FILTER_INPUT);
+            }
+            Shortcut::Close => {
+                if let Some(view) = self.active_view_mut() {
+                    view.center = CenterView::Graph;
+                }
+            }
         }
         Task::none()
     }
@@ -651,7 +680,27 @@ impl App {
                     None => self.refresh(id),
                 };
             }
-            Message::Shortcut(shortcut) => return self.shortcut(shortcut),
+            Message::Shortcut(shortcut) if shortcut.works_in_text_input() => {
+                return self.shortcut(shortcut)
+            }
+            Message::Shortcut(shortcut) => {
+                // Typing in the filter must not move the selection.
+                use iced::widget::operation::is_focused;
+                return is_focused(FILTER_INPUT).then(move |filter| {
+                    is_focused(START_PATH_INPUT).map(move |path| Message::ShortcutChecked {
+                        shortcut,
+                        text_input_focused: filter || path,
+                    })
+                });
+            }
+            Message::ShortcutChecked {
+                shortcut,
+                text_input_focused,
+            } => {
+                if !text_input_focused {
+                    return self.shortcut(shortcut);
+                }
+            }
             Message::OpenRepository => {
                 return Task::perform(
                     rfd::AsyncFileDialog::new()
@@ -869,12 +918,12 @@ mod tests {
     #[test]
     fn new_and_close_tab() {
         let mut app = app_with_tabs(1);
-        let _ = app.update(Message::Shortcut(Shortcut::NewTab));
+        let _ = app.update(checked(Shortcut::NewTab, false));
         assert_eq!((app.tabs.len(), app.active), (2, 1));
-        let _ = app.update(Message::Shortcut(Shortcut::CloseTab));
+        let _ = app.update(checked(Shortcut::CloseTab, false));
         assert_eq!((app.tabs.len(), app.active), (1, 0));
         // Closing the last tab leaves a fresh start tab.
-        let _ = app.update(Message::Shortcut(Shortcut::CloseTab));
+        let _ = app.update(checked(Shortcut::CloseTab, false));
         assert_eq!(app.tabs.len(), 1);
     }
 
@@ -891,13 +940,13 @@ mod tests {
     fn cycle_and_switch_tabs() {
         let mut app = app_with_tabs(3);
         assert_eq!(app.active, 2);
-        let _ = app.update(Message::Shortcut(Shortcut::NextTab));
+        let _ = app.update(checked(Shortcut::NextTab, false));
         assert_eq!(app.active, 0);
-        let _ = app.update(Message::Shortcut(Shortcut::PreviousTab));
+        let _ = app.update(checked(Shortcut::PreviousTab, false));
         assert_eq!(app.active, 2);
-        let _ = app.update(Message::Shortcut(Shortcut::SwitchTab(1)));
+        let _ = app.update(checked(Shortcut::SwitchTab(1), false));
         assert_eq!(app.active, 1);
-        let _ = app.update(Message::Shortcut(Shortcut::SwitchTab(7)));
+        let _ = app.update(checked(Shortcut::SwitchTab(7), false));
         assert_eq!(app.active, 1);
     }
 
@@ -999,7 +1048,7 @@ mod tests {
         let (mut app, _) = App::new(Vec::new(), None);
         let _ = app.update(loaded(Session::default()));
         let _ = app.update(Message::FolderPicked(Some(PathBuf::from("/repo"))));
-        let _ = app.update(Message::Shortcut(Shortcut::NewTab));
+        let _ = app.update(checked(Shortcut::NewTab, false));
         assert_eq!(app.session.tabs, [PathBuf::from("/repo")]);
         assert_eq!(app.session.active, 0);
     }
@@ -1063,6 +1112,110 @@ mod tests {
         let details = app.tabs[0].view().unwrap().details.as_ref().unwrap();
         assert_eq!(details.id, "c1");
         assert_eq!(details.changes, Loadable::Loading);
+    }
+
+    /// App with one ready tab showing commits `ids` (linear, newest first).
+    fn ready_app(ids: &[&str]) -> App {
+        use git_core::{Commit, Head, Log, WorkingTree};
+
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let commits = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| Commit {
+                id: id.to_string(),
+                parents: ids.get(i + 1).map(|p| p.to_string()).into_iter().collect(),
+                summary: String::new(),
+                body: String::new(),
+                author: String::new(),
+                email: String::new(),
+                author_time: 100 - i as i64,
+                commit_time: 100 - i as i64,
+            })
+            .collect();
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits,
+                truncated: false,
+            },
+            Head::Detached {
+                target: ids[0].into(),
+            },
+            Vec::new(),
+            Vec::new(),
+            WorkingTree::default(),
+        )
+        .unwrap();
+        let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("mock"));
+        app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
+        app
+    }
+
+    fn selected(app: &App) -> Option<Selection> {
+        app.tabs[app.active]
+            .view()
+            .and_then(|v| v.selection.clone())
+    }
+
+    fn checked(shortcut: Shortcut, text_input_focused: bool) -> Message {
+        Message::ShortcutChecked {
+            shortcut,
+            text_input_focused,
+        }
+    }
+
+    #[test]
+    fn keyboard_moves_the_selection() {
+        use crate::nav::Move;
+        let mut app = ready_app(&["c", "b", "a"]);
+        assert_eq!(selected(&app), Some(Selection::Commit("c".into())));
+        let _ = app.update(checked(Shortcut::Navigate(Move::Next), false));
+        assert_eq!(selected(&app), Some(Selection::Commit("b".into())));
+        let _ = app.update(checked(Shortcut::Navigate(Move::Last), false));
+        assert_eq!(selected(&app), Some(Selection::Commit("a".into())));
+        let _ = app.update(checked(Shortcut::Navigate(Move::Child), false));
+        assert_eq!(selected(&app), Some(Selection::Commit("b".into())));
+    }
+
+    #[test]
+    fn shortcuts_pause_while_typing() {
+        use crate::nav::Move;
+        let mut app = ready_app(&["c", "b"]);
+        let _ = app.update(checked(Shortcut::Navigate(Move::Next), true));
+        assert_eq!(selected(&app), Some(Selection::Commit("c".into())));
+        let _ = app.update(checked(Shortcut::NewTab, true));
+        assert_eq!(app.tabs.len(), 1);
+    }
+
+    #[test]
+    fn escape_closes_the_diff() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::DiffOpened(DiffRequest {
+            kind: git_core::DiffKind::Staged,
+            path: "f".into(),
+            old_path: None,
+        }));
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Diff(_)
+        ));
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Graph
+        ));
+    }
+
+    #[test]
+    fn toggling_panels_by_shortcut() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::ToggleSidebar, false));
+        assert!(!app.panes.sidebar_visible);
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        assert!(!app.panes.panel_visible);
+        let _ = app.update(checked(Shortcut::FocusFilter, false));
+        assert!(app.panes.sidebar_visible);
     }
 
     #[test]

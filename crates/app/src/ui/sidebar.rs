@@ -67,6 +67,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     .spacing(6);
 
     let filter = text_input("Filter", &repo.filter)
+        .id(crate::app::FILTER_INPUT)
         .on_input(Message::FilterChanged)
         .padding([4, 8]);
 

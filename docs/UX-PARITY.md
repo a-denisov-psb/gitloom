@@ -57,10 +57,10 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Next / previous item | ↓ / J, ↑ / K (verify direction, docs table looks swapped) | M1 |
-| Item right / left | → / L, ← / H | M1 (where applicable) |
-| Next / previous commit in branch | Shift+↓ / Shift+J, Shift+↑ / Shift+K | M1 |
-| First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | M1 |
+| Next / previous item | ↓ / J older, ↑ / K newer (natural direction; verify against GitKraken, its docs table looks swapped) | done (M1) |
+| Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
+| Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
+| First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
 | Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | M4 |
 
 ### Command palette and search
@@ -71,7 +71,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Search commits | Ctrl+F | M5 |
 | Open repo via palette | Ctrl+Shift+O | M5 |
 | File history and blame | Ctrl+Shift+H | M5 |
-| Focus left panel filter | Ctrl+Alt+F | M1 |
+| Focus left panel filter | Ctrl+Alt+F | done (M1) |
 | Open repo in terminal | Alt+T | M5 |
 | Open repo in file manager | Alt+O | M5 |
 | Open diff/merge tool | Ctrl+D | M5 |
@@ -85,7 +85,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | M5 |
 | Toggle left panel | Ctrl+J | done (M1) |
 | Toggle commit detail panel | Ctrl+K | done (M1) |
-| Close current panel | Esc | M1 (diff view) |
+| Close current panel | Esc | done (M1, diff view) |
 | Keyboard shortcut list | Ctrl+/ | M5 |
 
 ### Tabs
