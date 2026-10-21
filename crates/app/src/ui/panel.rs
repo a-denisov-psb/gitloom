@@ -126,7 +126,7 @@ fn details<'a>(repo: &'a Repo, index: usize, commit: &'a Commit) -> Element<'a, 
         muted(format!(
             "{} · authored {}",
             commit.email,
-            format::date_time(commit.time)
+            format::date_time(commit.author_time)
         ))
         .size(12),
     ]

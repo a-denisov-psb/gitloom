@@ -5,7 +5,12 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# Static sample backend for tests and UI development.
+mock = []
+
 [dependencies]
+gix = { version = "0.88", default-features = false, features = ["max-performance-safe", "basic", "status", "mailmap", "sha1"] }
 
 [lints]
 workspace = true
