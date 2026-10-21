@@ -183,8 +183,28 @@ pub fn change_color(kind: ChangeKind) -> Color {
     }
 }
 
-pub fn lane_color(lane: usize) -> Color {
-    LANE_COLORS[lane % LANE_COLORS.len()]
+/// Palette color for a lane color id from `git-graph`.
+pub fn lane_color(color: u32) -> Color {
+    LANE_COLORS[color as usize % LANE_COLORS.len()]
+}
+
+/// Graph table row; the selected row is tinted with its lane color.
+pub fn graph_row(selected: bool, lane: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let background = match (selected, status) {
+            (true, _) => Some(Color::from_rgb(
+                BG_GRAPH.r * 0.75 + lane.r * 0.25,
+                BG_GRAPH.g * 0.75 + lane.g * 0.25,
+                BG_GRAPH.b * 0.75 + lane.b * 0.25,
+            )),
+            (false, button::Status::Hovered | button::Status::Pressed) => Some(BG_HOVER),
+            _ => None,
+        };
+        button::Style {
+            border: Border::default(),
+            ..button_style(background, TEXT)
+        }
+    }
 }
 
 /// In-tab error banner.

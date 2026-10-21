@@ -13,7 +13,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | layout done, actions M2–M4 |
 | Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts | done (M0), real data M1 |
-| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M0), real M1 |
+| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M1) |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
 | Diff | Replaces the graph in the center; close returns to graph | placeholder M0, real M1 |
 | Status bar | Bottom line | done |
@@ -32,8 +32,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M3 |
 | Hover file in staging | Shows stage/unstage button | M2 |
-| Local + remote branch on same commit | One combined pill | M1 |
-| Commit node | Avatar (placeholder: initials) | M1 initials, M5 avatars |
+| Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
+| Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 
 ## Keyboard shortcuts
 
