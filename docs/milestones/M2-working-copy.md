@@ -210,7 +210,9 @@ Acceptance:
 Acceptance:
 - Integration tests: normal, first commit, failing `pre-commit` hook, template, merge conclusion.
 
-### [ ] M2-10 Amend
+### [x] M2-10 Amend
+
+> Done: checkbox next to the "Commit" title (disabled before the first commit and during a merge); unchecking removes an unchanged prefill. "Already pushed" = HEAD branch has an upstream and is not ahead of it. Undo for amend follows in M2-12. Checked by hand: checking the box fills "ignore target", "Amend previous commit" rewrote HEAD (938ee5c → 7e45398, same parent), the panel reset afterwards.
 
 - "Amend previous commit" checkbox in the commit panel; enabling it fills summary/description from HEAD (if the fields are empty).
 - Allows amending with no staged changes (message only).

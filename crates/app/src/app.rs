@@ -238,6 +238,7 @@ pub enum Message {
     DescriptionEdited(iced::widget::text_editor::Action),
     /// Commit the staged changes with the entered message.
     CommitRequested,
+    AmendToggled(bool),
     /// Ask before discarding (file, all, hunk or selected lines).
     Discard(DiscardTarget),
     /// Confirmed in the dialog.
@@ -762,11 +763,13 @@ impl App {
             return Task::none();
         }
         let message = view.commit_message();
-        let task = self.run_write(tab, "Commit", move |git| {
+        let amend = view.amend;
+        let label = if amend { "Amend" } else { "Commit" };
+        let task = self.run_write(tab, label, move |git| {
             if stage_all {
                 git.stage_all()?;
             }
-            git.commit(&message, false)
+            git.commit(&message, amend)
         });
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
@@ -1197,6 +1200,7 @@ impl App {
                     if std::mem::take(&mut view.clear_message_after_write) && result.is_ok() {
                         view.summary.clear();
                         view.description = iced::widget::text_editor::Content::new();
+                        view.amend = false;
                     }
                 }
                 if let Err(error) = result {
@@ -1243,6 +1247,11 @@ impl App {
                 }
             }
             Message::CommitRequested => return self.commit(false),
+            Message::AmendToggled(amend) => {
+                if let Some(view) = self.active_view_mut() {
+                    view.set_amend(amend);
+                }
+            }
             Message::IgnoreFile(path) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -1667,7 +1676,8 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<&'static str> 
     let tree = &view.snapshot.working_tree;
     let merging = view.snapshot.merge_message.is_some();
     let has_changes = !tree.staged.is_empty() || (stage_all && !tree.unstaged.is_empty());
-    if !has_changes && !merging {
+    // Amending may only change the message.
+    if !has_changes && !merging && !view.amend {
         Some("Stage files to commit")
     } else if view.summary.trim().is_empty() {
         Some("Enter a commit summary")
@@ -2595,6 +2605,69 @@ mod tests {
         snapshot.commit_template = Some("Ticket: \n# help text\n".into());
         view.apply_snapshot(Arc::new(snapshot));
         assert_eq!(view.description.text().trim(), "Ticket:");
+    }
+
+    /// Staging app whose HEAD commit "c" has a message.
+    fn amend_app() -> App {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        commits[0].summary = "Old summary".into();
+        commits[0].body = "Old body".into();
+        snapshot.commits = Arc::new(commits);
+        view.apply_snapshot(Arc::new(snapshot));
+        app
+    }
+
+    #[test]
+    fn amend_fills_and_clears_the_message() {
+        let mut app = amend_app();
+        let _ = app.update(Message::AmendToggled(true));
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.amend);
+        assert_eq!(view.commit_message(), "Old summary\n\nOld body");
+        assert!(commit_blocker(view, false).is_none(), "message-only amend");
+
+        let _ = app.update(Message::CommitRequested);
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Amend"));
+
+        let mut app = amend_app();
+        let _ = app.update(Message::AmendToggled(true));
+        let _ = app.update(Message::AmendToggled(false));
+        let view = app.tabs[0].view().unwrap();
+        assert!(
+            view.summary.is_empty(),
+            "unchanged prefill is removed again"
+        );
+    }
+
+    #[test]
+    fn amend_keeps_an_edited_message() {
+        let mut app = amend_app();
+        let _ = app.update(Message::SummaryChanged("New summary".into()));
+        let _ = app.update(Message::AmendToggled(true));
+        assert_eq!(app.tabs[0].view().unwrap().summary, "New summary");
+        let _ = app.update(Message::AmendToggled(false));
+        assert_eq!(app.tabs[0].view().unwrap().summary, "New summary");
+    }
+
+    #[test]
+    fn pushed_head_is_detected() {
+        let mut app = amend_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        assert!(!view.head_pushed(), "no upstream");
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs = vec![git_core::Reference {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "c".into(),
+            is_head: true,
+            upstream: Some("origin/main".into()),
+            ahead_behind: Some((0, 0)),
+        }];
+        view.apply_snapshot(Arc::new(snapshot));
+        assert!(view.head_pushed());
     }
 
     #[test]

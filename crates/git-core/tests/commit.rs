@@ -120,3 +120,34 @@ fn commit_concludes_a_merge() {
     );
     assert!(backend.merge_message().unwrap().is_none());
 }
+
+#[test]
+fn amend_message_only() {
+    let repo = isolated();
+    repo.commit("a.txt", "a\n", "Base");
+    repo.commit("b.txt", "b\n", "Typo in mesage");
+    let parent = repo.git(&["rev-parse", "HEAD~1"]);
+    writer(&repo).commit("Fixed message", true).unwrap();
+    assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "Fixed message");
+    assert_eq!(repo.git(&["rev-parse", "HEAD~1"]), parent);
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2");
+    assert_eq!(
+        repo.git(&["show", "--format=", "--name-only", "HEAD"]),
+        "b.txt"
+    );
+}
+
+#[test]
+fn amend_with_staged_changes() {
+    let repo = isolated();
+    repo.commit("a.txt", "a\n", "Base");
+    repo.commit("b.txt", "b\n", "Add b");
+    repo.write("c.txt", "c\n");
+    repo.git(&["add", "c.txt"]);
+    writer(&repo).commit("Add b and c", true).unwrap();
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2");
+    assert_eq!(
+        repo.git(&["show", "--format=", "--name-only", "HEAD"]),
+        "b.txt\nc.txt"
+    );
+}

@@ -204,6 +204,8 @@ pub struct RepoView {
     pub description: iced::widget::text_editor::Content,
     /// The fields were filled from `MERGE_MSG` for the current merge.
     pub merge_prefilled: bool,
+    /// "Amend previous commit" is checked.
+    pub amend: bool,
     /// Runs write operations through the `git` executable.
     pub writer: Arc<dyn git_core::GitWriter>,
     /// Label of the running write operation; one at a time per tab.
@@ -239,6 +241,50 @@ impl RepoView {
         } else {
             format!("{summary}\n\n{description}")
         }
+    }
+
+    /// Commit HEAD points to, if it is loaded.
+    pub fn head_commit(&self) -> Option<&git_core::Commit> {
+        self.snapshot
+            .head
+            .target()
+            .and_then(|id| self.snapshot.commit(id))
+    }
+
+    /// Message of the HEAD commit as (summary, description).
+    fn head_message(&self) -> Option<(String, String)> {
+        self.head_commit()
+            .map(|c| (c.summary.clone(), c.body.clone()))
+    }
+
+    /// Checks or unchecks "Amend previous commit". Checking fills empty
+    /// fields with the HEAD message; unchecking clears them if unchanged.
+    pub fn set_amend(&mut self, amend: bool) {
+        let Some((summary, body)) = self.head_message() else {
+            self.amend = false;
+            return;
+        };
+        let current_description = self.description.text();
+        if amend {
+            if self.summary.trim().is_empty() && current_description.trim().is_empty() {
+                self.summary = summary;
+                self.description = iced::widget::text_editor::Content::with_text(&body);
+            }
+        } else if self.summary == summary && current_description.trim() == body.trim() {
+            self.summary.clear();
+            self.description = iced::widget::text_editor::Content::new();
+        }
+        self.amend = amend;
+    }
+
+    /// HEAD is already part of its upstream branch (amending rewrites pushed history).
+    pub fn head_pushed(&self) -> bool {
+        self.snapshot
+            .refs
+            .iter()
+            .find(|r| r.is_head)
+            .and_then(|r| r.ahead_behind)
+            .is_some_and(|(ahead, _)| ahead == 0)
     }
 
     /// Fills empty message fields from a merge in progress or the commit template.
@@ -284,6 +330,7 @@ impl RepoView {
             summary: String::new(),
             description: iced::widget::text_editor::Content::new(),
             merge_prefilled: false,
+            amend: false,
             writer,
             busy: None,
             write_block: None,
