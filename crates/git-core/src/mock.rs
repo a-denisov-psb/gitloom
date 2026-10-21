@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::{
-    ChangeKind, Commit, Error, FileChange, GitBackend, Head, Log, Oid, RefKind, Reference, Result,
-    Stash, WorkingTree,
+    diff, ChangeKind, Commit, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head, Log, Oid,
+    RefKind, Reference, Result, Stash, WorkingTree,
 };
 
 /// Static sample repository for UI development without a real repo.
@@ -187,6 +187,24 @@ impl GitBackend for MockBackend {
                 old_path: None,
             })
             .collect())
+    }
+
+    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
+        Ok(Self::sample_diff(request))
+    }
+}
+
+impl MockBackend {
+    /// Same sample diff for every file.
+    fn sample_diff(request: &DiffRequest) -> FileDiff {
+        let text = diff::text_diff(b"fn main() {}\n", b"fn main() {\n    run();\n}\n");
+        FileDiff {
+            old_path: Some(request.path.clone()),
+            new_path: Some(request.path.clone()),
+            binary: text.binary,
+            too_large: text.too_large,
+            hunks: text.hunks,
+        }
     }
 }
 
