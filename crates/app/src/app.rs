@@ -234,6 +234,17 @@ pub enum Message {
         label: String,
         result: Result<Option<UndoAction>, String>,
     },
+    /// Toolbar "Stash": stash all changes including untracked files.
+    StashPush,
+    StashPop(String),
+    StashApply(String),
+    /// Ask before deleting a stash.
+    StashDrop(String),
+    StashDropConfirmed(String),
+    StashContextMenu {
+        id: String,
+        position: iced::Point,
+    },
     SummaryChanged(String),
     DescriptionEdited(iced::widget::text_editor::Action),
     /// Commit the staged changes with the entered message.
@@ -1236,6 +1247,63 @@ impl App {
                 ));
             }
             Message::DiscardConfirmed(target) => return self.discard(target),
+            Message::StashPush => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_write(tab, "Stash", |git| git.stash_push(None));
+                }
+            }
+            Message::StashPop(id) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_write(tab, "Pop stash", move |git| git.stash_pop(&id));
+                }
+            }
+            Message::StashApply(id) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_write(tab, "Apply stash", move |git| git.stash_apply(&id));
+                }
+            }
+            Message::StashDrop(id) => {
+                let name = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.stashes.iter().find(|s| s.id == id))
+                    .map_or_else(|| "this stash".to_owned(), |s| format!("\"{}\"", s.message));
+                self.modal = Some(Modal::confirm(
+                    "Delete stash",
+                    format!("Delete {name}? Its changes are lost."),
+                    "Delete",
+                    true,
+                    Message::StashDropConfirmed(id),
+                ));
+            }
+            Message::StashDropConfirmed(id) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    if let Some(view) = self.active_view_mut() {
+                        if view.selected_commit() == Some(id.as_str()) {
+                            view.selection = None;
+                        }
+                    }
+                    return self.run_write(tab, "Delete stash", move |git| git.stash_drop(&id));
+                }
+            }
+            Message::StashContextMenu { id, position } => {
+                let enabled = self.write_block().is_none();
+                let item = |label: &str, message: Message| MenuEntry::Item {
+                    label: label.into(),
+                    shortcut: None,
+                    enabled,
+                    message: Box::new(message),
+                };
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![
+                        item("Apply stash", Message::StashApply(id.clone())),
+                        item("Pop stash", Message::StashPop(id.clone())),
+                        MenuEntry::Separator,
+                        item("Delete stash", Message::StashDrop(id)),
+                    ],
+                ));
+            }
             Message::SummaryChanged(summary) => {
                 if let Some(view) = self.active_view_mut() {
                     view.summary = summary;
@@ -1333,7 +1401,10 @@ impl App {
                 }
             }
             Message::WipSelected => return self.select(Selection::Wip),
-            Message::CommitSelected(id) => return self.select(Selection::Commit(id)),
+            Message::CommitSelected(id) => {
+                let task = self.select(Selection::Commit(id));
+                return Task::batch([task, self.reveal_selection()]);
+            }
             Message::DiffOpened(request) => {
                 let Some(tab) = self.tabs.get_mut(self.active) else {
                     return Task::none();
@@ -2668,6 +2739,33 @@ mod tests {
         }];
         view.apply_snapshot(Arc::new(snapshot));
         assert!(view.head_pushed());
+    }
+
+    #[test]
+    fn stash_menu_and_confirmed_delete() {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::StashContextMenu {
+            id: "s1".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::StashApply(id)) if id == "s1"));
+        assert!(matches!(menu.select(1), Some(Message::StashPop(id)) if id == "s1"));
+        let _ = app.update(Message::MenuSelected(3));
+        // Deleting asks first.
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Delete stash")
+        );
+    }
+
+    #[test]
+    fn toolbar_stash_runs_a_write() {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::StashPush);
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stash"));
     }
 
     #[test]

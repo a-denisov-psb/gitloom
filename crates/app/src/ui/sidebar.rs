@@ -48,13 +48,24 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .map(|r| ref_item(r, &r.name, 1))
         .collect();
 
-    // Stashes are listed only; showing them in the graph follows in M2.
+    // Click selects the stash row in the graph; right click opens its menu.
     let stashes: Vec<_> = repo
         .snapshot
         .stashes
         .iter()
         .filter(|s| matches(&s.message))
-        .map(|s| list_label(text(&s.message).wrapping(text::Wrapping::None).into(), 1))
+        .map(|s| {
+            let item = list_button(
+                text(&s.message).wrapping(text::Wrapping::None).into(),
+                1,
+                Message::CommitSelected(s.id.clone()),
+            );
+            let id = s.id.clone();
+            crate::ui::context_area::context_area(item, move |position| Message::StashContextMenu {
+                id: id.clone(),
+                position,
+            })
+        })
         .collect();
 
     let sections = column![
@@ -166,14 +177,6 @@ pub fn ahead_behind_badge(ahead_behind: Option<(usize, usize)>) -> Option<String
 fn group_label<'a>(name: &'a str) -> Element<'a, Message> {
     container(muted(name))
         .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT))
-        .into()
-}
-
-fn list_label<'a>(content: Element<'a, Message>, depth: u16) -> Element<'a, Message> {
-    container(content)
-        .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT * f32::from(depth)))
-        .width(Fill)
-        .clip(true)
         .into()
 }
 

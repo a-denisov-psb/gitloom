@@ -16,6 +16,8 @@ struct GraphInput {
     commits: Vec<GraphCommit>,
     order: Vec<Id>,
     head: Option<Id>,
+    /// Stash rows; their edges to the base commit are dashed.
+    dashed: Vec<Id>,
 }
 
 /// History parts are shared between snapshots, so a status-only refresh
@@ -29,6 +31,8 @@ pub struct RepoSnapshot {
     graph: Arc<GraphInput>,
     /// Graph rows; row 0 is the WIP row if `has_wip`.
     pub layout: Arc<Layout>,
+    /// Ids of the rows in `commits` that are stashes.
+    pub stash_ids: Arc<std::collections::HashSet<String>>,
     /// The working tree has changes; a WIP row is shown above the commits.
     pub has_wip: bool,
     pub refs: Vec<Reference>,
@@ -61,12 +65,31 @@ impl RepoSnapshot {
 
     /// Orders the commits, computes the graph layout and the lookup tables.
     pub fn build(
-        log: Log,
+        mut log: Log,
         head: Head,
         refs: Vec<Reference>,
         stashes: Vec<Stash>,
         working_tree: WorkingTree,
     ) -> Result<Self, String> {
+        // Stashes become graph rows attached to their base commit.
+        let first_stash = log.commits.len();
+        for stash in &stashes {
+            log.commits.push(Commit {
+                id: stash.id.clone(),
+                parents: stash.base.iter().cloned().collect(),
+                summary: stash.message.clone(),
+                body: String::new(),
+                author: stash.author.clone(),
+                email: String::new(),
+                author_time: stash.time,
+                commit_time: stash.time,
+            });
+        }
+        let stash_ids: std::collections::HashSet<String> =
+            stashes.iter().map(|s| s.id.clone()).collect();
+        let dashed: Vec<Id> = (first_stash..log.commits.len())
+            .map(|i| Id(i as u32))
+            .collect();
         let count = log.commits.len();
         let position: HashMap<&str, u32> = log
             .commits
@@ -103,7 +126,11 @@ impl RepoSnapshot {
             .order;
         let has_wip = !working_tree.is_empty();
         let wip = has_wip.then_some(Wip { head: head_id });
-        let layout = git_graph::layout(&graph, &order, wip).map_err(|e| e.to_string())?;
+        let options = git_graph::LayoutOptions {
+            wip,
+            dashed: &dashed,
+        };
+        let layout = git_graph::layout_with(&graph, &order, &options).map_err(|e| e.to_string())?;
 
         let mut slots: Vec<Option<Commit>> = log.commits.into_iter().map(Some).collect();
         let commits: Vec<Commit> = order
@@ -130,7 +157,9 @@ impl RepoSnapshot {
                 commits: graph,
                 order,
                 head: head_id,
+                dashed,
             }),
+            stash_ids: Arc::new(stash_ids),
             layout: Arc::new(layout),
             has_wip,
             refs,
@@ -154,8 +183,12 @@ impl RepoSnapshot {
             let wip = has_wip.then_some(Wip {
                 head: self.graph.head,
             });
+            let options = git_graph::LayoutOptions {
+                wip,
+                dashed: &self.graph.dashed,
+            };
             Arc::new(
-                git_graph::layout(&self.graph.commits, &self.graph.order, wip)
+                git_graph::layout_with(&self.graph.commits, &self.graph.order, &options)
                     .map_err(|e| e.to_string())?,
             )
         };
@@ -165,6 +198,15 @@ impl RepoSnapshot {
             working_tree,
             ..self.clone()
         })
+    }
+
+    pub fn is_stash(&self, id: &str) -> bool {
+        self.stash_ids.contains(id)
+    }
+
+    /// Number of real commits (stash rows not counted).
+    pub fn commit_count(&self) -> usize {
+        self.commits.len() - self.stash_ids.len()
     }
 
     /// Layout row of the commit at `index`.
@@ -353,6 +395,38 @@ mod tests {
 
         let clean_again = dirty.with_working_tree(WorkingTree::default()).unwrap();
         assert_eq!(clean_again.layout.len(), 2);
+    }
+
+    #[test]
+    fn stashes_become_dashed_rows_on_their_base() {
+        let log = Log {
+            commits: vec![commit("b", &["a"], 20), commit("a", &[], 10)],
+            truncated: false,
+        };
+        let stash = Stash {
+            index: 0,
+            message: "WIP on main: b".into(),
+            id: "s".into(),
+            base: Some("a".into()),
+            time: 30,
+            author: "A".into(),
+        };
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "b".into(),
+        };
+        let snapshot =
+            RepoSnapshot::build(log, head, Vec::new(), vec![stash], WorkingTree::default())
+                .unwrap();
+        let ids: Vec<_> = snapshot.commits.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["s", "b", "a"], "newest first");
+        assert!(snapshot.is_stash("s"));
+        assert_eq!(snapshot.commit_count(), 2);
+        let stash_row = snapshot.layout.row(0).unwrap();
+        assert!(stash_row
+            .segments
+            .iter()
+            .any(|s| matches!(s, git_graph::Segment::FromNode { dashed: true, .. })));
     }
 
     #[test]

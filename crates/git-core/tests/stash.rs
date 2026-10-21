@@ -28,7 +28,11 @@ fn push_includes_untracked_files() {
     CliBackend::new(repo.path()).stash_push(None).unwrap();
 
     let tree = backend(&repo).working_tree().unwrap();
-    assert!(tree.is_empty(), "{tree:?} / git: {}", repo.git(&["status", "--porcelain"]));
+    assert!(
+        tree.is_empty(),
+        "{tree:?} / git: {}",
+        repo.git(&["status", "--porcelain"])
+    );
     let stashes = backend(&repo).stashes().unwrap();
     assert_eq!(stashes.len(), 1);
     assert_eq!(stashes[0].base.as_deref(), Some(base.as_str()));
@@ -67,7 +71,7 @@ fn pop_apply_and_drop_by_commit_id() {
         .into_iter()
         .map(|s| s.id)
         .collect();
-    assert_eq!(left, [newest.clone()]);
+    assert_eq!(left, std::slice::from_ref(&newest));
 
     cli.stash_pop(&newest).unwrap();
     assert_eq!(
