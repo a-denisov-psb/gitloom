@@ -254,3 +254,81 @@ fn unknown_commit_is_not_found() {
     let result = backend(&repo).commit_changes("0123456789012345678901234567890123456789");
     assert!(matches!(result, Err(git_core::Error::NotFound(_))));
 }
+
+/// Content with CRLF line endings in the working tree.
+fn crlf(lines: &[&str]) -> String {
+    lines.iter().map(|l| format!("{l}\r\n")).collect()
+}
+
+#[test]
+fn autocrlf_worktree_diff_matches_git() {
+    let repo = TestRepo::new();
+    repo.git(&["config", "core.autocrlf", "true"]);
+    // Stored with LF in the index, CRLF in the working tree.
+    repo.commit("a.txt", &crlf(&["one", "two", "three", "four"]), "Base");
+    repo.write("a.txt", &crlf(&["one", "TWO", "three", "four"]));
+
+    let result = diff(&repo, &request(DiffKind::Unstaged, "a.txt"));
+    let expected = git_diff(&repo, &["--", "a.txt"]);
+    assert_eq!(unified(&result), expected);
+    // Only the changed line differs, not every line because of CR.
+    assert_eq!(
+        result.hunks[0]
+            .lines
+            .iter()
+            .filter(|l| l.kind != DiffLineKind::Context)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn eol_attribute_worktree_diff_matches_git() {
+    let repo = TestRepo::new();
+    repo.commit(".gitattributes", "*.txt text eol=crlf\n", "Attributes");
+    repo.commit("b.txt", &crlf(&["alpha", "beta", "gamma"]), "Base");
+    repo.write("b.txt", &crlf(&["alpha", "beta", "gamma", "delta"]));
+
+    let result = diff(&repo, &request(DiffKind::Unstaged, "b.txt"));
+    assert_eq!(unified(&result), git_diff(&repo, &["--", "b.txt"]));
+    assert_eq!(
+        unified(&result),
+        "@@ -1,3 +1,4 @@\n alpha\n beta\n gamma\n+delta\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn clean_filter_driver_is_applied_like_git() {
+    let repo = TestRepo::new();
+    repo.git(&["config", "filter.upper.clean", "tr a-z A-Z"]);
+    repo.git(&["config", "filter.upper.smudge", "cat"]);
+    repo.commit(".gitattributes", "*.up filter=upper\n", "Attributes");
+    repo.commit("x.up", "hello\nworld\n", "Base");
+    repo.write("x.up", "hello\nthere\n");
+
+    let result = diff(&repo, &request(DiffKind::Unstaged, "x.up"));
+    assert_eq!(unified(&result), git_diff(&repo, &["--", "x.up"]));
+    assert!(unified(&result).contains("+THERE"));
+}
+
+#[cfg(unix)]
+#[test]
+fn failing_required_filter_reports_unavailable_diff() {
+    let repo = TestRepo::new();
+    repo.commit("y.bin", "data\n", "Base");
+    repo.commit(".gitattributes", "*.bin filter=broken\n", "Attributes");
+    repo.git(&["config", "filter.broken.clean", "false"]);
+    repo.git(&["config", "filter.broken.required", "true"]);
+    repo.write("y.bin", "changed\n");
+
+    let error = backend(&repo)
+        .file_diff(&request(DiffKind::Unstaged, "y.bin"))
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("Filtered file – diff not available"),
+        "{error}"
+    );
+}

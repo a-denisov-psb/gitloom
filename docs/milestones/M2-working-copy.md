@@ -122,7 +122,9 @@ Acceptance:
 - Unit tests for menu state (open, close, item selection).
 - Used by at least one real action by the end of the milestone (discard, stash).
 
-### [ ] M2-04 Filter-aware working tree diffs
+### [x] M2-04 Filter-aware working tree diffs
+
+> Done: worktree side of unstaged/untracked diffs goes through gix's filter pipeline including configured external drivers (ADR-018); failing drivers show "Filtered file – diff not available". Tests: `core.autocrlf=true` and `eol=crlf` equal `git diff`; clean filter and failing required filter (Unix only, they use shell commands as drivers).
 
 Goal: unstaged diffs match `git diff` in repositories with eol conversion, so patches built from them apply cleanly.
 

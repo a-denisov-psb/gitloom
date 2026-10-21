@@ -321,9 +321,9 @@ impl GitBackend for GixBackend {
             }
             DiffKind::Unstaged => (
                 index_blob(&repo, old_path)?,
-                worktree_file(&self.root, &request.path)?,
+                worktree_file(&repo, &self.root, &request.path)?,
             ),
-            DiffKind::Untracked => (None, worktree_file(&self.root, &request.path)?),
+            DiffKind::Untracked => (None, worktree_file(&repo, &self.root, &request.path)?),
         };
 
         let text = match (&old, &new) {
@@ -489,7 +489,10 @@ fn index_blob(repo: &gix::Repository, path: &str) -> Result<Option<Blob>> {
     }
 }
 
-fn worktree_file(root: &Path, path: &str) -> Result<Option<Blob>> {
+/// Working tree content as Git would store it: run through the filter
+/// pipeline (eol/`core.autocrlf`, `ident`, configured `filter.*` drivers),
+/// so the diff against the index matches `git diff` (ADR-018).
+fn worktree_file(repo: &gix::Repository, root: &Path, path: &str) -> Result<Option<Blob>> {
     let full = root.join(path);
     let Ok(metadata) = std::fs::symlink_metadata(&full) else {
         return Ok(None);
@@ -508,9 +511,33 @@ fn worktree_file(root: &Path, path: &str) -> Result<Option<Blob>> {
             .into_owned()
             .into_bytes()
     } else {
-        std::fs::read(&full).map_err(backend)?
+        to_git(repo, &full, path).map_err(|reason| {
+            Error::Backend(format!("Filtered file – diff not available ({reason})"))
+        })?
     };
     Ok(Some(Blob::Data(data)))
+}
+
+fn to_git(repo: &gix::Repository, full: &Path, path: &str) -> std::result::Result<Vec<u8>, String> {
+    use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
+    use std::io::Read as _;
+
+    let (mut pipeline, index) = repo.filter_pipeline(None).map_err(|e| e.to_string())?;
+    let file = std::fs::File::open(full).map_err(|e| e.to_string())?;
+    let mut data = Vec::new();
+    match pipeline
+        .convert_to_git(file, Path::new(path), &index)
+        .map_err(|e| e.to_string())?
+    {
+        ToGitOutcome::Unchanged(mut reader) => {
+            reader.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        }
+        ToGitOutcome::Process(mut reader) => {
+            reader.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        }
+        ToGitOutcome::Buffer(buffer) => data.extend_from_slice(buffer),
+    }
+    Ok(data)
 }
 
 fn index_change(change: &gix::diff::index::Change) -> FileChange {
