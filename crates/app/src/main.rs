@@ -1,6 +1,8 @@
 mod app;
 mod format;
+mod panes;
 mod repo_view;
+mod session;
 mod shortcuts;
 mod snapshot;
 mod theme;
@@ -20,14 +22,22 @@ fn main() -> iced::Result {
         })
         .collect();
 
-    iced::application(move || App::new(paths.clone()), App::update, App::view)
-        .title(App::title)
-        .subscription(App::subscription)
-        .theme(theme::app_theme())
-        .settings(iced::Settings {
-            default_text_size: 13.into(),
-            ..iced::Settings::default()
-        })
-        .window_size((1400.0, 860.0))
-        .run()
+    let session_path = session::default_path();
+
+    iced::application(
+        move || App::new(paths.clone(), session_path.clone()),
+        App::update,
+        App::view,
+    )
+    .title(App::title)
+    .subscription(App::subscription)
+    .theme(theme::app_theme())
+    .settings(iced::Settings {
+        default_text_size: 13.into(),
+        ..iced::Settings::default()
+    })
+    .window_size((1400.0, 860.0))
+    // The session is saved before the window closes.
+    .exit_on_close_request(false)
+    .run()
 }

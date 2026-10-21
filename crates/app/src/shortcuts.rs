@@ -12,6 +12,8 @@ pub enum Shortcut {
     SwitchTab(usize),
     OpenRepository,
     Refresh,
+    ToggleSidebar,
+    TogglePanel,
 }
 
 /// Maps a key press to a shortcut, if any.
@@ -30,6 +32,8 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             "t" | "T" => Some(Shortcut::NewTab),
             "w" | "W" => Some(Shortcut::CloseTab),
             "o" | "O" => Some(Shortcut::OpenRepository),
+            "j" | "J" => Some(Shortcut::ToggleSidebar),
+            "k" | "K" => Some(Shortcut::TogglePanel),
             digit => digit
                 .parse::<usize>()
                 .ok()
@@ -57,6 +61,13 @@ mod tests {
         assert_eq!(shortcut(&ch("1"), cmd), Some(Shortcut::SwitchTab(0)));
         assert_eq!(shortcut(&ch("9"), cmd), Some(Shortcut::SwitchTab(8)));
         assert_eq!(shortcut(&ch("0"), cmd), None);
+    }
+
+    #[test]
+    fn panel_toggles() {
+        let cmd = Modifiers::COMMAND;
+        assert_eq!(shortcut(&ch("j"), cmd), Some(Shortcut::ToggleSidebar));
+        assert_eq!(shortcut(&ch("k"), cmd), Some(Shortcut::TogglePanel));
     }
 
     #[test]

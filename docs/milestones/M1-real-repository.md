@@ -202,7 +202,9 @@ Acceptance:
 - All shortcuts work on Windows/Linux with Ctrl; on macOS with Cmd (use iced's platform modifier).
 - Opening a non-repo folder shows the error banner, not a crash.
 
-### [ ] M1-09 App: session persistence
+### [x] M1-09 App: session persistence
+
+> Done: `session.rs` (format v1, atomic write, `.bak` on corrupt/unknown files, notice in the status bar) and `panes.rs` (ratios, hideable panels). The session loads in the background before tabs are restored; command line paths open afterwards without duplicates. Ctrl+J/Ctrl+K (M1-12) landed here because the pane rebuild code is shared. Fixed on the way: details of a tab that finished loading in the background were never requested. Checked by hand: 3 tabs, `beta` active, sidebar dragged to 25 % → window closed (session written on close) → restart restores the same tabs, active tab and sidebar width.
 
 Goal: Gitloom reopens where the user left off.
 
