@@ -38,7 +38,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash (toolbar) | Stashes all changes including untracked files | M2 |
 | Stash in graph | Stash shown as node attached to its base commit | M2 |
 | Right click stash | Apply, Pop, Delete | M2 |
-| Amend | "Amend previous commit" checkbox fills message from HEAD | M2 |
+| Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Banner in the tab, commit concludes the merge | commit with prefilled MERGE_MSG done (M2-09), banner M2-13 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
