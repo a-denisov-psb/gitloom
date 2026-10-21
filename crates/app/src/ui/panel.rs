@@ -2,8 +2,8 @@
 
 use git_core::{Commit, DiffKind, DiffRequest, FileChange};
 use iced::widget::{
-    button, column, container, hover, row, scrollable, space, text, text_editor, text_input,
-    tooltip, Column,
+    button, checkbox, column, container, hover, row, scrollable, space, text, text_editor,
+    text_input, tooltip, Column,
 };
 use iced::{Element, Fill, FillPortion};
 
@@ -140,11 +140,20 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
 
     let staged = view.snapshot.working_tree.staged.len();
     let merging = view.snapshot.merge_message.is_some();
-    let label = match (merging, staged) {
-        (true, _) => "Commit and conclude merge".to_string(),
-        (false, 1) => "Commit changes to 1 file".to_string(),
-        (false, n) => format!("Commit changes to {n} files"),
+    let label = match (view.amend, merging, staged) {
+        (true, _, _) => "Amend previous commit".to_string(),
+        (false, true, _) => "Commit and conclude merge".to_string(),
+        (false, false, 1) => "Commit changes to 1 file".to_string(),
+        (false, false, n) => format!("Commit changes to {n} files"),
     };
+    let can_amend = writable && view.head_commit().is_some() && !merging;
+    let mut amend = checkbox(view.amend)
+        .label("Amend previous commit")
+        .size(14)
+        .text_size(12);
+    if can_amend {
+        amend = amend.on_toggle(Message::AmendToggled);
+    }
     let blocker = crate::app::commit_blocker(view, false);
     let commit = button(text(label).width(Fill).align_x(iced::Center))
         .width(Fill)
@@ -161,13 +170,20 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     };
 
     let mut content = column![
-        muted("Commit"),
+        row![muted("Commit"), space::horizontal(), amend].align_y(iced::Center),
         row![summary, counter].spacing(6).align_y(iced::Center),
         description,
         commit,
     ]
     .spacing(8)
     .padding(12);
+    if view.amend && view.head_pushed() {
+        content = content.push(
+            text("HEAD is already pushed; amending rewrites published history.")
+                .size(11)
+                .color(theme::WARNING),
+        );
+    }
     if let Some(hint) = blocker.filter(|_| writable) {
         content = content.push(muted(hint).size(11));
     }
