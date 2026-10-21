@@ -103,7 +103,9 @@ Acceptance:
 - Unit tests: linear, fork, merge, octopus (3+ parents), criss-cross merge, clock skew (parent newer than child), multiple roots, missing parents.
 - No dependency besides `std`.
 
-### [ ] M1-03 `git-graph`: lane layout
+### [x] M1-03 `git-graph`: lane layout
+
+> Done: `Segment::Through` got a `dashed` field (dashed WIP lane passing newer commits), approved by the maintainer. Timing (release, Intel Core Ultra 9 285H, WSL2): 100k synthetic commits, max width 31 lanes → topo ~7 ms, topo + layout ~27 ms. Rows store a segment per open lane, so memory grows with rows × width; very wide graphs need watching in M1-15.
 
 Goal: compute per-row lane geometry as specified in `docs/ARCHITECTURE.md` → "Graph layout".
 

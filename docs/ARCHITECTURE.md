@@ -92,7 +92,7 @@ API: `topo_order(&[GraphCommit]) -> Result<TopoOrder, git_graph::Error>`.
 
 ### Lanes
 
-State: `lanes: Vec<Option<Slot>>`, `Slot { waiting_for: Id, color: ColorId }`.
+State: `lanes: Vec<Option<Slot>>`, `Slot { waiting_for: Id, color: ColorId, dashed: bool }`. Colors are a sequential counter; the UI maps them onto its palette (modulo).
 
 For each commit `c` in order:
 
@@ -113,7 +113,9 @@ Properties:
 - Lanes never move sideways, only free slots are reused → stable, readable graphs.
 - Two children of the same parent produce two lanes that join at the parent row (fork rendering).
 - Missing parents (truncated history) keep their lane open to the bottom of the list.
-- WIP is a virtual first row with HEAD as its only parent; its edges are `dashed`.
+- WIP is a virtual first row with HEAD as its only parent; its edges are `dashed`, including `Through` segments while the dashed lane passes newer commits. A solid edge joining a dashed lane makes it solid.
+
+API: `layout(&commits, &order, wip: Option<Wip>) -> Result<Layout, git_graph::Error>` with `Wip { head: Option<Id> }` and `Layout { rows, max_width }`. The WIP row (if any) is `rows[0]`. `order` must be a permutation of the commits (`Error::InvalidOrder`); more than `u16::MAX` lanes give `Error::TooManyLanes`.
 
 Output per row:
 
@@ -126,7 +128,7 @@ pub struct Row {
 }
 
 pub enum Segment {
-    Through { lane: u16, color: ColorId },
+    Through { lane: u16, color: ColorId, dashed: bool },
     IntoNode { from: u16, color: ColorId, dashed: bool },
     FromNode { to: u16, color: ColorId, dashed: bool },
 }

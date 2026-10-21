@@ -1,10 +1,15 @@
-//! Pure commit graph algorithms: topological ordering and (from M1-03) lane layout.
+//! Pure commit graph algorithms: topological ordering and lane layout.
 //!
 //! The crate knows nothing about Git object ids. The caller maps its commits
 //! to positions in an input slice and passes plain [`GraphCommit`] values.
 
+mod layout;
 mod topo;
 
+#[cfg(test)]
+mod test_support;
+
+pub use layout::{layout, ColorId, Layout, Row, Segment, Wip};
 pub use topo::{topo_order, TopoOrder};
 
 use std::fmt;
@@ -41,6 +46,10 @@ pub enum Error {
     IdMismatch { position: usize, id: Id },
     /// More commits than fit into an [`Id`].
     TooManyCommits(usize),
+    /// The row order is not a permutation of the input commits.
+    InvalidOrder,
+    /// The graph needs more lanes than fit into a `u16`.
+    TooManyLanes,
 }
 
 impl fmt::Display for Error {
@@ -52,8 +61,30 @@ impl fmt::Display for Error {
             Self::TooManyCommits(count) => {
                 write!(f, "{count} commits exceed the supported maximum")
             }
+            Self::InvalidOrder => {
+                f.write_str("row order does not contain every commit exactly once")
+            }
+            Self::TooManyLanes => f.write_str("graph exceeds the supported number of lanes"),
         }
     }
 }
 
 impl std::error::Error for Error {}
+
+/// Checks that the input fits into [`Id`] and that every id equals its position.
+fn check_ids(commits: &[GraphCommit]) -> Result<(), Error> {
+    if u32::try_from(commits.len()).is_err() {
+        return Err(Error::TooManyCommits(commits.len()));
+    }
+    match commits
+        .iter()
+        .enumerate()
+        .find(|(position, commit)| commit.id.index() != *position)
+    {
+        Some((position, commit)) => Err(Error::IdMismatch {
+            position,
+            id: commit.id,
+        }),
+        None => Ok(()),
+    }
+}

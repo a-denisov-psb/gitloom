@@ -3,7 +3,7 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::{Error, GraphCommit, Id};
+use crate::{check_ids, Error, GraphCommit, Id};
 
 /// Result of [`topo_order`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -21,20 +21,8 @@ pub struct TopoOrder {
 /// commit time comes first; equal times keep input order. Clock skew cannot
 /// break topology because a parent is only ready after all its children.
 pub fn topo_order(commits: &[GraphCommit]) -> Result<TopoOrder, Error> {
+    check_ids(commits)?;
     let count = commits.len();
-    if u32::try_from(count).is_err() {
-        return Err(Error::TooManyCommits(count));
-    }
-    if let Some((position, commit)) = commits
-        .iter()
-        .enumerate()
-        .find(|(position, commit)| commit.id.index() != *position)
-    {
-        return Err(Error::IdMismatch {
-            position,
-            id: commit.id,
-        });
-    }
 
     // Number of not yet emitted children per commit (duplicate parent entries count twice).
     let mut pending = vec![0u32; count];
@@ -98,18 +86,7 @@ pub fn topo_order(commits: &[GraphCommit]) -> Result<TopoOrder, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Builds the input from `(parents, time)` pairs; ids are positions.
-    fn history(spec: &[(&[u32], i64)]) -> Vec<GraphCommit> {
-        spec.iter()
-            .enumerate()
-            .map(|(i, (parents, time))| GraphCommit {
-                id: Id(i as u32),
-                parents: parents.iter().map(|&p| Id(p)).collect(),
-                time: *time,
-            })
-            .collect()
-    }
+    use crate::test_support::history;
 
     /// Orders and checks the invariants every result must satisfy.
     fn order(commits: &[GraphCommit]) -> TopoOrder {
