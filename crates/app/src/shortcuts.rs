@@ -18,6 +18,11 @@ pub enum Shortcut {
     TogglePanel,
     Navigate(Move),
     FocusFilter,
+    /// S / U: stage or unstage the file whose diff is shown.
+    StageSelected,
+    UnstageSelected,
+    StageAll,
+    UnstageAll,
     /// Esc: close the dialog, the menu or the diff view (in that order).
     Close,
     /// Enter: confirm the default button of an open dialog.
@@ -63,8 +68,12 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             "k" => Some(Shortcut::Navigate(Move::Previous)),
             "J" => Some(Shortcut::Navigate(Move::FirstParent)),
             "K" => Some(Shortcut::Navigate(Move::Child)),
+            "s" => Some(Shortcut::StageSelected),
+            "u" => Some(Shortcut::UnstageSelected),
             _ => None,
         },
+        Key::Character("s" | "S") if command && shift && !alt => Some(Shortcut::StageAll),
+        Key::Character("u" | "U") if command && shift && !alt => Some(Shortcut::UnstageAll),
         Key::Character("f" | "F") if command && alt => Some(Shortcut::FocusFilter),
         Key::Named(Named::Tab) if modifiers.control() && !alt => Some(if shift {
             Shortcut::PreviousTab
@@ -189,6 +198,21 @@ mod tests {
             Some(Shortcut::Confirm)
         );
         assert!(!Shortcut::Navigate(Move::Next).works_in_text_input());
+    }
+
+    #[test]
+    fn staging_shortcuts() {
+        assert_eq!(
+            shortcut(&ch("s"), Modifiers::empty()),
+            Some(Shortcut::StageSelected)
+        );
+        assert_eq!(
+            shortcut(&ch("u"), Modifiers::empty()),
+            Some(Shortcut::UnstageSelected)
+        );
+        let all = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(shortcut(&ch("S"), all), Some(Shortcut::StageAll));
+        assert_eq!(shortcut(&ch("U"), all), Some(Shortcut::UnstageAll));
     }
 
     #[test]

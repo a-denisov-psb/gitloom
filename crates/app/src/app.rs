@@ -28,6 +28,15 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
 
+/// Which list a file row belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileArea {
+    Unstaged,
+    Staged,
+    /// Files of a commit (read-only).
+    Commit,
+}
+
 /// Stable tab identity; async results are routed by it, not by position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
@@ -186,9 +195,14 @@ pub enum Message {
     MenuClosed,
     /// Right click on a file row.
     FileContextMenu {
-        path: String,
+        file: git_core::FileChange,
+        area: FileArea,
         position: iced::Point,
     },
+    Stage(git_core::FileChange),
+    Unstage(git_core::FileChange),
+    StageAll,
+    UnstageAll,
     CopyToClipboard(String),
     WindowResized(iced::Size),
     GitDetected(git_core::GitAvailability),
@@ -291,8 +305,6 @@ impl App {
 
     /// Runs a write operation in the background, one at a time per tab, and
     /// refreshes the tab afterwards.
-    // First used by staging (M2-06).
-    #[allow(dead_code)]
     fn run_write(
         &mut self,
         tab: TabId,
@@ -507,6 +519,18 @@ impl App {
                     return Task::batch([task, self.reveal_selection()]);
                 }
             }
+            Shortcut::StageSelected => {
+                if let Some((file, false)) = self.selected_file() {
+                    return self.stage_file(file, true);
+                }
+            }
+            Shortcut::UnstageSelected => {
+                if let Some((file, true)) = self.selected_file() {
+                    return self.stage_file(file, false);
+                }
+            }
+            Shortcut::StageAll => return self.update(Message::StageAll),
+            Shortcut::UnstageAll => return self.update(Message::UnstageAll),
             Shortcut::FocusFilter => {
                 if !self.panes.sidebar_visible {
                     self.panes.toggle_sidebar();
@@ -578,6 +602,71 @@ impl App {
                 result,
             },
         )
+    }
+
+    /// Stages (or unstages) one file in the active tab. If its diff is open,
+    /// the selection moves to the next file of the same list.
+    fn stage_file(&mut self, file: git_core::FileChange, stage: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let mut paths = vec![file.path.clone()];
+        paths.extend(file.old_path.clone());
+        let label = format!("{} {}", if stage { "Stage" } else { "Unstage" }, file.path);
+        let write = self.run_write(tab, label, move |git| {
+            if stage {
+                git.stage(&paths)
+            } else {
+                git.unstage(&paths)
+            }
+        });
+
+        // Only move on if the write was accepted and this file is the one shown.
+        let Some(view) = self.active_view_mut() else {
+            return write;
+        };
+        if view.busy.is_none() {
+            return write;
+        }
+        let shown = matches!(&view.center, CenterView::Diff(diff)
+            if diff.request.path == file.path
+                && matches!(diff.request.kind, git_core::DiffKind::Staged) != stage);
+        if !shown {
+            return write;
+        }
+        let tree = &view.snapshot.working_tree;
+        let list = if stage { &tree.unstaged } else { &tree.staged };
+        let next = crate::repo_view::next_file_after(list, &file.path)
+            .map(|next| crate::repo_view::diff_request(next, !stage));
+        match next {
+            Some(request) => Task::batch([write, self.update(Message::DiffOpened(request))]),
+            None => {
+                view.center = CenterView::Graph;
+                write
+            }
+        }
+    }
+
+    /// File whose diff is open in the active tab, with the list it belongs to.
+    fn selected_file(&self) -> Option<(git_core::FileChange, bool)> {
+        let view = self.active_tab()?.view()?;
+        let CenterView::Diff(diff) = &view.center else {
+            return None;
+        };
+        let tree = &view.snapshot.working_tree;
+        match diff.request.kind {
+            git_core::DiffKind::Staged => tree
+                .staged
+                .iter()
+                .find(|f| f.path == diff.request.path)
+                .map(|f| (f.clone(), true)),
+            git_core::DiffKind::Unstaged | git_core::DiffKind::Untracked => tree
+                .unstaged
+                .iter()
+                .find(|f| f.path == diff.request.path)
+                .map(|f| (f.clone(), false)),
+            git_core::DiffKind::Commit(_) => None,
+        }
     }
 
     /// Reloads only the working tree status of tab `id` (watcher, window focus).
@@ -749,14 +838,44 @@ impl App {
                 }
             }
             Message::MenuClosed => self.context_menu = None,
-            Message::FileContextMenu { path, position } => {
-                self.context_menu = Some(ContextMenu::new(
-                    position,
-                    vec![MenuEntry::item(
-                        "Copy file path",
-                        Message::CopyToClipboard(path),
-                    )],
+            Message::FileContextMenu {
+                file,
+                area,
+                position,
+            } => {
+                let writable = self.write_block().is_none();
+                let mut entries = Vec::new();
+                let stage = match area {
+                    FileArea::Unstaged => Some(("Stage", "S", Message::Stage(file.clone()))),
+                    FileArea::Staged => Some(("Unstage", "U", Message::Unstage(file.clone()))),
+                    FileArea::Commit => None,
+                };
+                if let Some((label, key, message)) = stage {
+                    entries.push(MenuEntry::Item {
+                        label: label.into(),
+                        shortcut: Some(key.into()),
+                        enabled: writable,
+                        message: Box::new(message),
+                    });
+                    entries.push(MenuEntry::Separator);
+                }
+                entries.push(MenuEntry::item(
+                    "Copy file path",
+                    Message::CopyToClipboard(file.path),
                 ));
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::Stage(file) => return self.stage_file(file, true),
+            Message::Unstage(file) => return self.stage_file(file, false),
+            Message::StageAll => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_write(tab, "Stage all changes", |git| git.stage_all());
+                }
+            }
+            Message::UnstageAll => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_write(tab, "Unstage all changes", |git| git.unstage_all());
+                }
             }
             Message::CopyToClipboard(text) => {
                 self.status = "Copied to the clipboard".into();
@@ -1756,11 +1875,117 @@ mod tests {
         assert_eq!(modal.details.as_deref(), Some("boom"));
     }
 
+    fn file(path: &str) -> git_core::FileChange {
+        git_core::FileChange {
+            path: path.into(),
+            kind: git_core::ChangeKind::Modified,
+            old_path: None,
+        }
+    }
+
+    /// Ready app with git available and the given unstaged/staged files.
+    fn staging_app(unstaged: &[&str], staged: &[&str]) -> App {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(git_available());
+        let tree = git_core::WorkingTree {
+            unstaged: unstaged.iter().map(|p| file(p)).collect(),
+            staged: staged.iter().map(|p| file(p)).collect(),
+        };
+        let view = app.tabs[0].view_mut().unwrap();
+        view.snapshot = Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+        app
+    }
+
+    fn shown_diff(app: &App) -> Option<DiffRequest> {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Diff(diff) => Some(diff.request.clone()),
+            CenterView::Graph => None,
+        }
+    }
+
+    #[test]
+    fn staging_the_shown_file_moves_to_the_next_unstaged_file() {
+        let mut app = staging_app(&["a", "b", "c"], &[]);
+        let _ = app.update(Message::DiffOpened(crate::repo_view::diff_request(
+            &file("b"),
+            false,
+        )));
+        let _ = app.update(checked(Shortcut::StageSelected, false));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Stage b"));
+        let shown = shown_diff(&app).unwrap();
+        assert_eq!(
+            (shown.path.as_str(), shown.kind),
+            ("c", git_core::DiffKind::Unstaged)
+        );
+    }
+
+    #[test]
+    fn staging_the_last_unstaged_file_closes_the_diff() {
+        let mut app = staging_app(&["only"], &[]);
+        let _ = app.update(Message::DiffOpened(crate::repo_view::diff_request(
+            &file("only"),
+            false,
+        )));
+        let _ = app.update(Message::Stage(file("only")));
+        assert!(shown_diff(&app).is_none());
+    }
+
+    #[test]
+    fn staging_another_file_keeps_the_shown_diff() {
+        let mut app = staging_app(&["a", "b"], &[]);
+        let _ = app.update(Message::DiffOpened(crate::repo_view::diff_request(
+            &file("a"),
+            false,
+        )));
+        let _ = app.update(Message::Stage(file("b")));
+        assert_eq!(shown_diff(&app).unwrap().path, "a");
+    }
+
+    #[test]
+    fn unstaging_moves_within_the_staged_list() {
+        let mut app = staging_app(&[], &["x", "y"]);
+        let _ = app.update(Message::DiffOpened(crate::repo_view::diff_request(
+            &file("y"),
+            true,
+        )));
+        let _ = app.update(checked(Shortcut::UnstageSelected, false));
+        let shown = shown_diff(&app).unwrap();
+        assert_eq!(
+            (shown.path.as_str(), shown.kind),
+            ("x", git_core::DiffKind::Staged)
+        );
+        // S does nothing for a staged file.
+        let _ = app.update(Message::WriteFinished {
+            tab: app.tabs[0].id,
+            label: "Unstage y".into(),
+            result: Ok(()),
+        });
+        let _ = app.update(checked(Shortcut::StageSelected, false));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn unstaged_file_menu_offers_stage() {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::FileContextMenu {
+            file: file("a"),
+            area: FileArea::Unstaged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::Stage(f)) if f.path == "a"));
+        assert!(menu.select(1).is_none(), "separator");
+        let _ = app.update(Message::MenuSelected(0));
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stage a"));
+    }
+
     #[test]
     fn file_context_menu_copies_the_path() {
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::FileContextMenu {
-            path: "src/main.rs".into(),
+            file: file("src/main.rs"),
+            area: FileArea::Commit,
             position: iced::Point::new(10.0, 20.0),
         });
         assert!(app.context_menu.is_some());
