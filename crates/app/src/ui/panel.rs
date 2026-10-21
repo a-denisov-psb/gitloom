@@ -7,7 +7,7 @@ use iced::widget::{
 };
 use iced::{Element, Fill, FillPortion};
 
-use crate::app::{FileArea, Message};
+use crate::app::{DiscardTarget, FileArea, Message};
 use crate::format;
 use crate::repo_view::{CenterView, Loadable, RepoView, Selection};
 use crate::theme;
@@ -43,13 +43,24 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 
     let unstaged = file_section(
         format!("Unstaged Files ({})", tree.unstaged.len()),
-        all_button(
-            view,
-            "Stage all changes",
-            button::success,
-            !tree.unstaged.is_empty(),
-            Message::StageAll,
-        ),
+        row![
+            all_button(
+                view,
+                "Discard all",
+                button::danger,
+                !tree.unstaged.is_empty(),
+                Message::Discard(DiscardTarget::All),
+            ),
+            all_button(
+                view,
+                "Stage all changes",
+                button::success,
+                !tree.unstaged.is_empty(),
+                Message::StageAll,
+            ),
+        ]
+        .spacing(6)
+        .into(),
         tree.unstaged.iter().map(|file| {
             let kind = if file.kind == git_core::ChangeKind::Untracked {
                 DiffKind::Untracked
@@ -170,9 +181,15 @@ fn file_section<'a>(
     action: Element<'a, Message>,
     files: impl Iterator<Item = Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let header = row![text(title), space::horizontal(), action]
-        .padding([6, 12])
-        .align_y(iced::Center);
+    // The buttons move below the title when the panel is narrow.
+    let header = container(
+        row![text(title).wrapping(text::Wrapping::None), action]
+            .spacing(8)
+            .align_y(iced::Center)
+            .wrap()
+            .vertical_spacing(4),
+    )
+    .padding([6, 12]);
 
     column![
         header,
@@ -214,25 +231,32 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
     .style(theme::list_item(selected));
 
     // Like GitKraken: the stage/unstage button appears while hovering the row.
-    let quick_action = match area {
-        FileArea::Unstaged => Some(("Stage File", Message::Stage(file.clone()))),
-        FileArea::Staged => Some(("Unstage File", Message::Unstage(file.clone()))),
+    let quick_actions = match area {
+        FileArea::Unstaged => Some(row![
+            button(text("Discard").size(11))
+                .on_press(Message::Discard(DiscardTarget::File(file.clone())))
+                .padding([2, 8])
+                .style(button::danger),
+            button(text("Stage File").size(11))
+                .on_press(Message::Stage(file.clone()))
+                .padding([2, 8])
+                .style(button::secondary),
+        ]),
+        FileArea::Staged => Some(row![button(text("Unstage File").size(11))
+            .on_press(Message::Unstage(file.clone()))
+            .padding([2, 8])
+            .style(button::secondary)]),
         FileArea::Commit => None,
     };
-    let content: Element<'a, Message> = match quick_action {
-        Some((label, message)) if view.write_block.is_none() && view.busy.is_none() => hover(
+    let content: Element<'a, Message> = match quick_actions {
+        Some(actions) if view.write_block.is_none() && view.busy.is_none() => hover(
             row,
-            container(
-                button(text(label).size(11))
-                    .on_press(message)
-                    .padding([2, 8])
-                    .style(button::secondary),
-            )
-            .align_x(iced::Right)
-            .align_y(iced::Center)
-            .padding([0, 8])
-            .width(Fill)
-            .height(Fill),
+            container(actions.spacing(4))
+                .align_x(iced::Right)
+                .align_y(iced::Center)
+                .padding([0, 8])
+                .width(Fill)
+                .height(Fill),
         ),
         _ => row.into(),
     };
@@ -253,7 +277,9 @@ fn all_button<'a>(
     enabled: bool,
     message: Message,
 ) -> Element<'a, Message> {
-    let button = button(text(label).size(12)).padding([3, 8]).style(style);
+    let button = button(text(label).size(12).wrapping(text::Wrapping::None))
+        .padding([3, 8])
+        .style(style);
     if view.write_block.is_some() {
         return write_tooltip(button.into(), view);
     }

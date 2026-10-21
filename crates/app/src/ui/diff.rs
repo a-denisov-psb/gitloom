@@ -4,7 +4,7 @@ use git_core::{DiffHunk, DiffKind, DiffLine, DiffLineKind, FileDiff};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text, Column};
 use iced::{alignment, Element, Fill, Font};
 
-use crate::app::Message;
+use crate::app::{DiscardTarget, Message};
 use crate::repo_view::{DiffView, Loadable, RepoView, HUNK_HEADER};
 use crate::theme;
 use crate::ui::muted;
@@ -44,14 +44,25 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
             } else {
                 "Stage selected lines"
             };
-            let button = button(text(label).size(12))
+            let apply = button(text(label).size(12))
                 .padding([2, 8])
                 .style(if staged {
                     button::danger
                 } else {
                     button::success
                 });
-            Some(write_action(repo, button, Message::ApplySelectedLines))
+            let mut actions = row![].spacing(6);
+            if !staged {
+                let discard = button(text("Discard selected lines").size(12))
+                    .padding([2, 8])
+                    .style(button::danger);
+                actions = actions.push(write_action(
+                    repo,
+                    discard,
+                    Message::Discard(DiscardTarget::Lines),
+                ));
+            }
+            Some(actions.push(write_action(repo, apply, Message::ApplySelectedLines)))
         }
         _ => None,
     };
@@ -171,15 +182,24 @@ fn hunk_header<'a>(
         .wrapping(text::Wrapping::None)]
     .align_y(iced::Center);
     if let Some(staged) = staged {
+        content = content.push(space::horizontal());
+        if !staged {
+            let discard = button(text("Discard hunk").size(11))
+                .padding([0, 8])
+                .style(button::danger);
+            content = content
+                .push(write_action(
+                    repo,
+                    discard,
+                    Message::Discard(DiscardTarget::Hunk(index)),
+                ))
+                .push(space::horizontal().width(6));
+        }
         let label = if staged { "Unstage hunk" } else { "Stage hunk" };
         let button = button(text(label).size(11))
             .padding([0, 8])
             .style(button::secondary);
-        content = content.push(space::horizontal()).push(write_action(
-            repo,
-            button,
-            Message::ApplyHunk(index),
-        ));
+        content = content.push(write_action(repo, button, Message::ApplyHunk(index)));
     }
     container(content)
         .padding([0, 12])

@@ -9,8 +9,6 @@ pub enum ButtonKind {
     Primary,
     Secondary,
     /// Destructive action, shown in the danger style.
-    // First used by discard confirmations (M2-08).
-    #[allow(dead_code)]
     Danger,
 }
 
@@ -59,8 +57,6 @@ impl Modal {
     }
 
     /// Asks before an action; destructive actions get the danger style.
-    // First used by discard confirmations (M2-08).
-    #[allow(dead_code)]
     pub fn confirm(
         title: impl Into<String>,
         text: impl Into<String>,
@@ -112,8 +108,6 @@ pub enum MenuEntry {
         enabled: bool,
         message: Box<Message>,
     },
-    // First used by the file and stash menus (M2-08, M2-11).
-    #[allow(dead_code)]
     Separator,
 }
 
