@@ -53,6 +53,17 @@ pub struct DiffView {
 }
 
 /// How a line click changes the selection.
+/// Write actions that would break an operation in progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guarded {
+    Commit,
+    Amend,
+    /// Stash, pop and apply (deleting a stash is harmless).
+    Stash,
+    /// Undo or redo of a commit or amend (moves HEAD).
+    MoveHead,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClickMode {
     /// Plain click: select only this line.
@@ -186,6 +197,22 @@ pub enum WatchState {
     Failed,
 }
 
+/// Background write operation; repeatable so it can be retried.
+pub type WriteOp = Arc<
+    dyn Fn(&dyn git_core::GitWriter) -> git_core::Result<Option<crate::undo::History>>
+        + Send
+        + Sync,
+>;
+
+/// The most recently started write, kept for "Retry" after a lock error.
+#[derive(Clone)]
+pub struct LastWrite {
+    pub label: String,
+    pub op: WriteOp,
+    /// The write was a commit whose success clears the message fields.
+    pub clears_message: bool,
+}
+
 pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
@@ -221,6 +248,7 @@ pub struct RepoView {
     pub reload_diff: bool,
     /// Clear the commit message when the running write (a commit) succeeds.
     pub clear_message_after_write: bool,
+    pub last_write: Option<LastWrite>,
     /// Undoable actions, most recent last.
     pub undo: Vec<crate::undo::UndoAction>,
     /// Undone actions that can be redone, most recent last.
@@ -275,6 +303,26 @@ impl RepoView {
             self.description = iced::widget::text_editor::Content::new();
         }
         self.amend = amend;
+    }
+
+    /// Why `action` is disabled by the operation in progress, if it is.
+    /// Committing concludes a merge, cherry-pick or revert and stays allowed.
+    pub fn state_block(&self, action: Guarded) -> Option<String> {
+        let state = &self.snapshot.state;
+        let operation = state.operation()?;
+        let blocked = match action {
+            Guarded::Commit => !state.concluded_by_commit(),
+            Guarded::Amend | Guarded::Stash | Guarded::MoveHead => true,
+        };
+        blocked.then(|| {
+            let verb = match action {
+                Guarded::Commit => "commit",
+                Guarded::Amend => "amend",
+                Guarded::Stash => "stash",
+                Guarded::MoveHead => "undo or redo commits",
+            };
+            format!("Cannot {verb} while a {operation} is in progress")
+        })
     }
 
     /// HEAD is already part of its upstream branch (amending rewrites pushed history).
@@ -339,6 +387,7 @@ impl RepoView {
             status_refreshing: false,
             reload_diff: false,
             clear_message_after_write: false,
+            last_write: None,
             undo: Vec::new(),
             redo: Vec::new(),
             graph_scroll_id: iced::widget::Id::unique(),

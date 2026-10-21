@@ -43,7 +43,9 @@ pub struct RepoSnapshot {
     pub head: Head,
     /// More commits exist than [`LOG_LIMIT`].
     pub truncated: bool,
-    /// Prepared message of a merge in progress (`MERGE_MSG`).
+    /// Operation in progress (merge, rebase, cherry-pick, revert).
+    pub state: git_core::RepoState,
+    /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
     pub commit_template: Option<String>,
@@ -58,6 +60,7 @@ impl RepoSnapshot {
         let stashes = backend.stashes().map_err(|e| e.to_string())?;
         let working_tree = backend.working_tree().map_err(|e| e.to_string())?;
         let mut snapshot = Self::build(log, head, refs, stashes, working_tree)?;
+        snapshot.state = backend.state().map_err(|e| e.to_string())?;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
         Ok(snapshot)
@@ -168,6 +171,7 @@ impl RepoSnapshot {
             working_tree,
             head,
             truncated: log.truncated,
+            state: git_core::RepoState::Clean,
             merge_message: None,
             commit_template: None,
         })
@@ -222,6 +226,64 @@ impl RepoSnapshot {
         }
     }
 
+    /// Readable name of `id`: a branch or tag pointing at it (local
+    /// branches first), otherwise the short id.
+    pub fn commit_name(&self, id: &str) -> String {
+        let rank = |r: &&Reference| match r.kind {
+            git_core::RefKind::LocalBranch => 0,
+            git_core::RefKind::RemoteBranch => 1,
+            git_core::RefKind::Tag => 2,
+        };
+        self.refs
+            .iter()
+            .filter(|r| r.target == id)
+            .min_by_key(rank)
+            .map_or_else(|| id[..id.len().min(7)].to_owned(), |r| r.name.clone())
+    }
+
+    /// Banner text for the operation in progress, like GitKraken's
+    /// "Merging X into Y".
+    pub fn state_banner(&self) -> Option<String> {
+        use git_core::RepoState;
+        let target = match &self.head {
+            Head::Branch { name, .. } | Head::Unborn { name } => name.clone(),
+            Head::Detached { .. } => "HEAD".to_owned(),
+        };
+        let picked = |verb: &str, commit: &Option<String>| match commit {
+            Some(id) => {
+                let short = &id[..id.len().min(7)];
+                match self.commit(id) {
+                    Some(c) => format!("{verb} {short} \"{}\"", c.summary),
+                    None => format!("{verb} {short}"),
+                }
+            }
+            None => format!("{verb} commits"),
+        };
+        Some(match &self.state {
+            RepoState::Clean => return None,
+            RepoState::Merging { merge_head } => {
+                let source = self
+                    .merge_message
+                    .as_deref()
+                    .and_then(merge_source)
+                    .unwrap_or_else(|| self.commit_name(merge_head));
+                format!("Merging {source} into {target}")
+            }
+            RepoState::Rebasing { branch, onto, step } => {
+                let mut text = format!("Rebasing {}", branch.as_deref().unwrap_or("HEAD"));
+                if let Some(onto) = onto {
+                    text.push_str(&format!(" onto {}", self.commit_name(onto)));
+                }
+                if let Some((current, total)) = step {
+                    text.push_str(&format!(" (step {current} of {total})"));
+                }
+                text
+            }
+            RepoState::CherryPicking { commit } => picked("Cherry-picking", commit),
+            RepoState::Reverting { commit } => picked("Reverting", commit),
+        })
+    }
+
     pub fn commit(&self, id: &str) -> Option<&Commit> {
         self.index.get(id).and_then(|&i| self.commits.get(i))
     }
@@ -233,6 +295,20 @@ impl RepoSnapshot {
             .flatten()
             .filter_map(|&r| self.refs.get(r))
     }
+}
+
+/// Merged branch named in the first line of a default merge message
+/// ("Merge branch 'x'", "Merge remote-tracking branch 'origin/x'", ...).
+fn merge_source(message: &str) -> Option<String> {
+    let first = message.lines().next()?;
+    let rest = [
+        "Merge branch '",
+        "Merge remote-tracking branch '",
+        "Merge tag '",
+    ]
+    .iter()
+    .find_map(|prefix| first.strip_prefix(prefix))?;
+    rest.split_once('\'').map(|(name, _)| name.to_owned())
 }
 
 #[cfg(test)]
@@ -312,6 +388,61 @@ mod tests {
             ["main"]
         );
         assert_eq!(snapshot.refs_at(1).count(), 0);
+    }
+
+    fn two_branches() -> RepoSnapshot {
+        let log = Log {
+            commits: vec![commit("b", &["a"], 2), commit("a", &[], 1)],
+            truncated: false,
+        };
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "a".into(),
+        };
+        let mut topic = reference("topic", "b");
+        topic.kind = RefKind::LocalBranch;
+        let mut remote = reference("origin/topic", "b");
+        remote.kind = RefKind::RemoteBranch;
+        let refs = vec![remote, topic, reference("main", "a")];
+        RepoSnapshot::build(log, head, refs, Vec::new(), WorkingTree::default()).unwrap()
+    }
+
+    #[test]
+    fn banner_names_the_operation_like_gitkraken() {
+        use git_core::RepoState;
+        let mut s = two_branches();
+        assert_eq!(s.state_banner(), None);
+
+        s.state = RepoState::Merging {
+            merge_head: "b".into(),
+        };
+        assert_eq!(s.state_banner().unwrap(), "Merging topic into main");
+        s.merge_message = Some("Merge remote-tracking branch 'origin/topic'\n".into());
+        assert_eq!(s.state_banner().unwrap(), "Merging origin/topic into main");
+
+        s.state = RepoState::Rebasing {
+            branch: Some("topic".into()),
+            onto: Some("a".into()),
+            step: Some((2, 5)),
+        };
+        assert_eq!(
+            s.state_banner().unwrap(),
+            "Rebasing topic onto main (step 2 of 5)"
+        );
+
+        s.state = RepoState::CherryPicking {
+            commit: Some("b".into()),
+        };
+        assert_eq!(s.state_banner().unwrap(), "Cherry-picking b \"commit b\"");
+        s.state = RepoState::Reverting { commit: None };
+        assert_eq!(s.state_banner().unwrap(), "Reverting commits");
+    }
+
+    #[test]
+    fn merge_source_reads_default_messages() {
+        assert_eq!(merge_source("Merge branch 'x' into y"), Some("x".into()));
+        assert_eq!(merge_source("Merge tag 'v1'"), Some("v1".into()));
+        assert_eq!(merge_source("Custom message"), None);
     }
 
     #[test]

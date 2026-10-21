@@ -277,6 +277,16 @@ pub fn notice_banner(_: &Theme) -> container::Style {
     }
 }
 
+/// Operation in progress (merge, rebase, ...) at the top of a tab.
+pub fn state_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ACCENT.scale_alpha(0.16))),
+        border: Border::default().width(1).color(ACCENT.scale_alpha(0.5)),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
 /// Dimmed backdrop behind a modal dialog.
 pub fn backdrop(_: &Theme) -> container::Style {
     filled(Color::BLACK.scale_alpha(0.55))

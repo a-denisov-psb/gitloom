@@ -9,7 +9,8 @@ use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 use crate::overlay::{ContextMenu, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, Loadable, RepoView, Section, Selection, WatchState,
+    CenterView, CommitDetails, Guarded, LastWrite, Loadable, RepoView, Section, Selection,
+    WatchState, WriteOp,
 };
 use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
@@ -234,6 +235,8 @@ pub enum Message {
         label: String,
         result: Result<Option<History>, String>,
     },
+    /// Run the last write of the tab again (after a lock error).
+    RetryWrite(TabId),
     Undo,
     Redo,
     /// Toolbar "Stash": stash all changes including untracked files.
@@ -355,25 +358,48 @@ impl App {
         }
     }
 
+    /// True (with the reason in the status bar) if the operation in progress
+    /// in the active tab forbids `action`.
+    fn state_blocked(&mut self, action: Guarded) -> bool {
+        match self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.state_block(action))
+        {
+            Some(reason) => {
+                self.status = reason;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Runs a write operation in the background, one at a time per tab, and
     /// refreshes the tab afterwards.
     fn run_write(
         &mut self,
         tab: TabId,
         label: impl Into<String>,
-        op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<()> + Send + 'static,
+        op: impl Fn(&dyn git_core::GitWriter) -> git_core::Result<()> + Send + Sync + 'static,
     ) -> Task<Message> {
         self.run_undoable(tab, label, move |git| op(git).map(|()| None))
     }
 
     /// Like [`Self::run_write`]; the operation may return an undo entry.
+    /// Operations are repeatable so a failure caused by a lock can be retried.
     fn run_undoable(
         &mut self,
         tab: TabId,
         label: impl Into<String>,
-        op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<Option<History>> + Send + 'static,
+        op: impl Fn(&dyn git_core::GitWriter) -> git_core::Result<Option<History>>
+            + Send
+            + Sync
+            + 'static,
     ) -> Task<Message> {
-        let label = label.into();
+        self.start_write(tab, label.into(), Arc::new(op))
+    }
+
+    fn start_write(&mut self, tab: TabId, label: String, op: WriteOp) -> Task<Message> {
         if let Some(reason) = self.write_block() {
             self.status = reason;
             return Task::none();
@@ -388,6 +414,11 @@ impl App {
         }
         view.busy = Some(label.clone());
         view.suppress_watch = true;
+        view.last_write = Some(LastWrite {
+            label: label.clone(),
+            op: Arc::clone(&op),
+            clears_message: false,
+        });
         let writer = Arc::clone(&view.writer);
         Task::perform(
             blocking(move || op(writer.as_ref()).map_err(|e| e.to_string())),
@@ -772,7 +803,7 @@ impl App {
             return Task::none();
         };
         if let Some(reason) = commit_blocker(view, stage_all) {
-            self.status = reason.into();
+            self.status = reason;
             return Task::none();
         }
         let message = view.commit_message();
@@ -816,6 +847,13 @@ impl App {
         if view.busy.is_some() {
             return Task::none();
         }
+        let stack = if undo { &view.undo } else { &view.redo };
+        if let Some(UndoAction::Commit { .. }) = stack.last() {
+            if let Some(reason) = view.state_block(Guarded::MoveHead) {
+                self.status = reason;
+                return Task::none();
+            }
+        }
         let stack = if undo { &mut view.undo } else { &mut view.redo };
         let Some(action) = stack.pop() else {
             return Task::none();
@@ -823,7 +861,7 @@ impl App {
         let root = view.backend.path().to_path_buf();
         let label = format!("{} {}", if undo { "Undo" } else { "Redo" }, action.label());
         self.run_undoable(tab, label, move |git| {
-            let next = match action {
+            let next = match action.clone() {
                 UndoAction::Commit {
                     amend,
                     before,
@@ -875,9 +913,10 @@ impl App {
                     view.center = CenterView::Graph;
                 }
                 self.run_undoable(tab, label, move |git| {
-                    let snapshot = git_core::discard_files(git, &root, &[file])?;
+                    let snapshot =
+                        git_core::discard_files(git, &root, std::slice::from_ref(&file))?;
                     Ok(Some(History::Push(UndoAction::Discard {
-                        label: undo_label,
+                        label: undo_label.clone(),
                         snapshot,
                     })))
                 })
@@ -941,7 +980,7 @@ impl App {
                 selected.contains(&(h, l))
             })?;
             Ok(Some(History::Push(UndoAction::Discard {
-                label: undo_label,
+                label: undo_label.clone(),
                 snapshot,
             })))
         });
@@ -1045,9 +1084,8 @@ impl App {
                 let head = backend.head().map_err(|e| e.to_string())?;
                 let refs = backend.references().map_err(|e| e.to_string())?;
                 let stashes = backend.stashes().map_err(|e| e.to_string())?;
-                let merge = backend.merge_message().map_err(|e| e.to_string())?;
-                Ok(refs_changed(&snapshot, &head, &refs, &stashes)
-                    || merge.is_some() != snapshot.merge_message.is_some())
+                let state = backend.state().map_err(|e| e.to_string())?;
+                Ok(refs_changed(&snapshot, &head, &refs, &stashes) || state != snapshot.state)
             }),
             move |changed| Message::RefsChecked { tab: id, changed },
         )
@@ -1279,17 +1317,42 @@ impl App {
                         Ok(Some(History::Redone(action))) => view.undo.push(action.clone()),
                         Ok(None) | Err(_) => {}
                     }
+                    let clears_message = std::mem::take(&mut view.clear_message_after_write);
+                    if let (Some(last), Err(error)) = (&mut view.last_write, &result) {
+                        if git_core::locked_file(error).is_some() {
+                            last.clears_message = clears_message;
+                        }
+                    }
                     // The message stays after a failed commit so nothing is lost.
-                    if std::mem::take(&mut view.clear_message_after_write) && result.is_ok() {
+                    if clears_message && result.is_ok() {
                         view.summary.clear();
                         view.description = iced::widget::text_editor::Content::new();
                         view.amend = false;
                     }
                 }
                 if let Err(error) = result {
-                    self.modal = Some(Modal::error(format!("{label} failed"), error));
+                    self.modal = Some(match git_core::locked_file(&error) {
+                        Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
+                        None => Modal::error(format!("{label} failed"), error),
+                    });
                 }
                 return self.refresh(tab);
+            }
+            Message::RetryWrite(tab) => {
+                let Some(last) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.last_write.clone())
+                else {
+                    return Task::none();
+                };
+                let task = self.start_write(tab, last.label, last.op);
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    if view.busy.is_some() {
+                        view.clear_message_after_write = last.clears_message;
+                    }
+                }
+                return task;
             }
             Message::Discard(target) => {
                 let (title, text) = match &target {
@@ -1321,6 +1384,8 @@ impl App {
             Message::DiscardConfirmed(target) => return self.discard(target),
             Message::Undo => return self.undo_redo(true),
             Message::Redo => return self.undo_redo(false),
+            Message::StashPush | Message::StashPop(_) | Message::StashApply(_)
+                if self.state_blocked(Guarded::Stash) => {}
             Message::StashPush => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     return self.run_write(tab, "Stash", |git| git.stash_push(None));
@@ -1361,8 +1426,13 @@ impl App {
                 }
             }
             Message::StashContextMenu { id, position } => {
-                let enabled = self.write_block().is_none();
-                let item = |label: &str, message: Message| MenuEntry::Item {
+                let writable = self.write_block().is_none();
+                let restorable = writable
+                    && self
+                        .active_tab()
+                        .and_then(Tab::view)
+                        .is_some_and(|v| v.state_block(Guarded::Stash).is_none());
+                let item = |label: &str, enabled: bool, message: Message| MenuEntry::Item {
                     label: label.into(),
                     shortcut: None,
                     enabled,
@@ -1371,10 +1441,10 @@ impl App {
                 self.context_menu = Some(ContextMenu::new(
                     position,
                     vec![
-                        item("Apply stash", Message::StashApply(id.clone())),
-                        item("Pop stash", Message::StashPop(id.clone())),
+                        item("Apply stash", restorable, Message::StashApply(id.clone())),
+                        item("Pop stash", restorable, Message::StashPop(id.clone())),
                         MenuEntry::Separator,
-                        item("Delete stash", Message::StashDrop(id)),
+                        item("Delete stash", writable, Message::StashDrop(id)),
                     ],
                 ));
             }
@@ -1389,6 +1459,7 @@ impl App {
                 }
             }
             Message::CommitRequested => return self.commit(false),
+            Message::AmendToggled(true) if self.state_blocked(Guarded::Amend) => {}
             Message::AmendToggled(amend) => {
                 if let Some(view) = self.active_view_mut() {
                     view.set_amend(amend);
@@ -1817,15 +1888,22 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
 }
 
 /// Why committing is not possible right now, if it is not.
-pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<&'static str> {
+pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     let tree = &view.snapshot.working_tree;
     let merging = view.snapshot.merge_message.is_some();
     let has_changes = !tree.staged.is_empty() || (stage_all && !tree.unstaged.is_empty());
-    // Amending may only change the message.
-    if !has_changes && !merging && !view.amend {
-        Some("Stage files to commit")
+    let state = if view.amend {
+        Guarded::Amend
+    } else {
+        Guarded::Commit
+    };
+    if let Some(reason) = view.state_block(state) {
+        Some(reason)
+    } else if !has_changes && !merging && !view.amend {
+        // Amending may only change the message.
+        Some("Stage files to commit".into())
     } else if view.summary.trim().is_empty() {
-        Some("Enter a commit summary")
+        Some("Enter a commit summary".into())
     } else {
         None
     }

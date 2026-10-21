@@ -85,6 +85,9 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
         }
         TabState::Ready(view) => {
             let mut content = column![toolbar::view(view)].spacing(1);
+            if let Some(state) = view.snapshot.state_banner() {
+                content = content.push(state_banner(view, state));
+            }
             if let Some(error) = &view.error {
                 content = content.push(banner(error, tab.id));
             }
@@ -129,6 +132,44 @@ fn notice_banner(notice: &str) -> Element<'_, Message> {
     .padding([8, 12])
     .width(Fill)
     .style(theme::notice_banner)
+    .into()
+}
+
+/// Operation in progress, like GitKraken's "Merging X into Y" bar. Abort
+/// and continue arrive with M4 and are shown disabled.
+fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
+    let git_state = &view.snapshot.state;
+    let hint = if git_state.concluded_by_commit() {
+        "Resolve conflicts, stage them and commit to conclude."
+    } else {
+        "Resolve conflicts and stage them, then continue in a terminal."
+    };
+    let disabled = |label: &'static str| {
+        panel::with_tooltip(
+            button(text(label).size(12))
+                .padding([3, 10])
+                .style(button::secondary)
+                .into(),
+        )
+    };
+    let mut actions = row![].spacing(6);
+    if !git_state.concluded_by_commit() {
+        actions = actions.push(disabled("Continue"));
+    }
+    actions = actions.push(disabled("Abort"));
+    container(
+        row![
+            text(state).color(theme::TEXT),
+            muted(hint).size(12),
+            space::horizontal(),
+            actions,
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([6, 12])
+    .width(Fill)
+    .style(theme::state_banner)
     .into()
 }
 

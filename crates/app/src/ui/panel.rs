@@ -139,14 +139,21 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     }
 
     let staged = view.snapshot.working_tree.staged.len();
-    let merging = view.snapshot.merge_message.is_some();
-    let label = match (view.amend, merging, staged) {
+    let concludes = view
+        .snapshot
+        .state
+        .operation()
+        .filter(|_| view.snapshot.state.concluded_by_commit());
+    let label = match (view.amend, concludes, staged) {
         (true, _, _) => "Amend previous commit".to_string(),
-        (false, true, _) => "Commit and conclude merge".to_string(),
-        (false, false, 1) => "Commit changes to 1 file".to_string(),
-        (false, false, n) => format!("Commit changes to {n} files"),
+        (false, Some(operation), _) => format!("Commit and conclude {operation}"),
+        (false, None, 1) => "Commit changes to 1 file".to_string(),
+        (false, None, n) => format!("Commit changes to {n} files"),
     };
-    let can_amend = writable && view.head_commit().is_some() && !merging;
+    let can_amend = writable
+        && view.head_commit().is_some()
+        // Unchecking stays possible when an operation started meanwhile.
+        && (view.amend || view.state_block(crate::repo_view::Guarded::Amend).is_none());
     let mut amend = checkbox(view.amend)
         .label("Amend previous commit")
         .size(14)
