@@ -1982,6 +1982,18 @@ fn changes_content(kind: &notify::EventKind) -> bool {
     !matches!(kind, notify::EventKind::Access(_))
 }
 
+/// Whether the watcher callback passes `event` on. Access events are
+/// dropped right there: a batch of them would still be classified, and
+/// classifying reads `.git/info/exclude`, which produces the next access
+/// event (endless refresh checks with constant CPU load).
+fn forward_event(event: &notify::Result<notify::Event>) -> bool {
+    match event {
+        Ok(event) => changes_content(&event.kind),
+        // Errors (lost events) force a full refresh.
+        Err(_) => true,
+    }
+}
+
 /// Watches one repository and emits classified, debounced change messages.
 fn watch_repository(data: &(u64, PathBuf)) -> impl iced::futures::Stream<Item = Message> {
     let (tab, root) = (TabId(data.0), data.1.clone());
@@ -1993,7 +2005,9 @@ fn watch_repository(data: &(u64, PathBuf)) -> impl iced::futures::Stream<Item = 
 
             let (sender, mut events) = iced::futures::channel::mpsc::unbounded();
             let watcher = notify::recommended_watcher(move |event| {
-                let _ = sender.unbounded_send(event);
+                if forward_event(&event) {
+                    let _ = sender.unbounded_send(event);
+                }
             });
             let mut watcher = match watcher {
                 Ok(watcher) => watcher,
@@ -3558,6 +3572,15 @@ mod tests {
         assert!(changes_content(&EventKind::Create(CreateKind::File)));
         assert!(changes_content(&EventKind::Modify(ModifyKind::Any)));
         assert!(changes_content(&EventKind::Any));
+
+        let event = |kind| Ok(notify::Event::new(kind));
+        assert!(!forward_event(&event(EventKind::Access(AccessKind::Open(
+            notify::event::AccessMode::Any
+        )))));
+        assert!(forward_event(&event(EventKind::Modify(ModifyKind::Any))));
+        assert!(forward_event(&Err(notify::Error::generic(
+            "queue overflow"
+        ))));
     }
 
     #[test]

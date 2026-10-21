@@ -282,7 +282,9 @@ Acceptance:
 Acceptance:
 - Tests with hints for two and four groups; benchmark shows no regression without hints.
 
-### [ ] M2-16 Performance and regression check
+### [x] M2-16 Performance and regression check
+
+> Done: all targets met (`docs/PERFORMANCE.md` → "M2"): status refresh after one change 78 ms, watcher idle CPU 0.00 %, no refresh from 20 000 writes into ignored folders, staging a hunk of a 1.8 MB file 8 ms. Found and fixed a watcher feedback loop (0.48 % idle CPU: classifying access-only batches read `.git/info/exclude`, producing the next access event). New ignored perf tests for status refresh, ignored paths and hunk staging. Optional pack mapping / allocator items stay as follow-up proposals (not cheap).
 
 - Measure on the benchmark clone: status refresh after a single file change, watcher idle CPU, patch apply time on a large file.
 - Targets: status refresh < 200 ms on the large clean repo, watcher idle CPU ≈ 0 %, no refresh caused by ignored paths.
