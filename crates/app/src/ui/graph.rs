@@ -111,7 +111,7 @@ fn commit_row<'a>(
             COL_AUTHOR
         ),
         cell(
-            muted(format::date_time(commit.time)).wrapping(text::Wrapping::None),
+            muted(format::date_time(commit.author_time)).wrapping(text::Wrapping::None),
             COL_DATE
         ),
         cell(

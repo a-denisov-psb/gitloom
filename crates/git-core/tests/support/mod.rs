@@ -144,3 +144,47 @@ impl TestRepo {
         self.clock.set(self.clock.get() + TIME_STEP);
     }
 }
+
+impl Default for TestRepo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TestRepo {
+    /// Creates a bare repository (no working tree).
+    pub fn new_bare() -> Self {
+        let repo = Self::new();
+        repo.git(&["config", "core.bare", "true"]);
+        repo
+    }
+
+    /// Creates an annotated tag at HEAD.
+    pub fn tag_annotated(&self, name: &str, message: &str) {
+        self.git(&["tag", "-a", name, "-m", message]);
+    }
+
+    /// Creates a lightweight tag at HEAD.
+    pub fn tag(&self, name: &str) {
+        self.git(&["tag", name]);
+    }
+
+    /// Fakes a remote-tracking branch `refs/remotes/<remote>/<branch>` at `rev`
+    /// and configures `branch` to track it.
+    pub fn fake_upstream(&self, remote: &str, branch: &str, rev: &str) {
+        let fetch = format!("+refs/heads/*:refs/remotes/{remote}/*");
+        self.git(&["config", &format!("remote.{remote}.url"), "."]);
+        self.git(&["config", &format!("remote.{remote}.fetch"), &fetch]);
+        self.git(&["config", &format!("branch.{branch}.remote"), remote]);
+        self.git(&[
+            "config",
+            &format!("branch.{branch}.merge"),
+            &format!("refs/heads/{branch}"),
+        ]);
+        self.git(&[
+            "update-ref",
+            &format!("refs/remotes/{remote}/{branch}"),
+            rev,
+        ]);
+    }
+}

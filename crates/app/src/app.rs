@@ -155,7 +155,7 @@ impl Repo {
 
         let mut repo = Self {
             name: backend.name().to_string(),
-            commits: backend.log(LOG_LIMIT)?,
+            commits: backend.log(LOG_LIMIT)?.commits,
             refs: backend.references()?,
             stashes: backend.stashes()?,
             working_tree,
