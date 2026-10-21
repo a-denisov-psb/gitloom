@@ -7,6 +7,7 @@ use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
 use crate::repo_view::{CenterView, CommitDetails, Loadable, RepoView, Section, Selection};
+use crate::shortcuts::{self, Shortcut};
 use crate::snapshot::RepoSnapshot;
 use crate::ui;
 
@@ -146,6 +147,13 @@ pub enum Message {
     DiffClosed,
     Retry(TabId),
     Refresh,
+    Shortcut(Shortcut),
+    /// Show the native folder dialog.
+    OpenRepository,
+    FolderPicked(Option<PathBuf>),
+    /// Path typed on the start screen (fallback when no folder dialog is available).
+    StartPathChanged(String),
+    StartPathSubmitted,
     WindowFocused,
     FocusRefreshDue(u64),
     RepoOpened {
@@ -170,6 +178,8 @@ pub struct App {
     pub active: usize,
     pub panes: pane_grid::State<PaneKind>,
     pub status: String,
+    /// Content of the path input on the start screen.
+    pub start_path: String,
     next_tab: u64,
     focus_seq: u64,
 }
@@ -196,6 +206,7 @@ impl App {
             active: 0,
             panes,
             status: String::new(),
+            start_path: String::new(),
             next_tab: 0,
             focus_seq: 0,
         };
@@ -243,6 +254,62 @@ impl App {
     fn open_in_new_tab(&mut self, path: PathBuf) -> Task<Message> {
         let id = self.add_tab(TabState::Start);
         self.open_in_tab(id, path)
+    }
+
+    /// Opens `path`: switches to a tab that already shows it, reuses the
+    /// active start tab, or opens a new tab.
+    fn open_path(&mut self, path: PathBuf) -> Task<Message> {
+        if let Some(index) = self
+            .tabs
+            .iter()
+            .position(|t| t.view().is_some_and(|v| same_repo(v.backend.path(), &path)))
+        {
+            self.active = index;
+            return Task::none();
+        }
+        match self.active_tab() {
+            Some(tab) if matches!(tab.state, TabState::Start) => {
+                let id = tab.id;
+                self.open_in_tab(id, path)
+            }
+            _ => self.open_in_new_tab(path),
+        }
+    }
+
+    fn close_tab(&mut self, id: TabId) {
+        if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
+            self.tabs.remove(index);
+            if self.active > index || self.active >= self.tabs.len() {
+                self.active = self.active.saturating_sub(1);
+            }
+            if self.tabs.is_empty() {
+                self.add_tab(TabState::Start);
+            }
+        }
+    }
+
+    fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
+        let count = self.tabs.len();
+        match shortcut {
+            Shortcut::NewTab => {
+                self.add_tab(TabState::Start);
+            }
+            Shortcut::CloseTab => {
+                if let Some(id) = self.active_tab().map(|t| t.id) {
+                    self.close_tab(id);
+                }
+            }
+            Shortcut::NextTab => self.active = (self.active + 1) % count.max(1),
+            Shortcut::PreviousTab => self.active = (self.active + count.max(1) - 1) % count.max(1),
+            Shortcut::SwitchTab(index) => {
+                if index < count {
+                    self.active = index;
+                }
+            }
+            Shortcut::OpenRepository => return self.update(Message::OpenRepository),
+            Shortcut::Refresh => return self.update(Message::Refresh),
+        }
+        Task::none()
     }
 
     /// Opens the repository containing `path` in tab `id`.
@@ -339,17 +406,7 @@ impl App {
                     self.active = index;
                 }
             }
-            Message::TabClosed(id) => {
-                if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
-                    self.tabs.remove(index);
-                    if self.active > index || self.active >= self.tabs.len() {
-                        self.active = self.active.saturating_sub(1);
-                    }
-                    if self.tabs.is_empty() {
-                        self.add_tab(TabState::Start);
-                    }
-                }
-            }
+            Message::TabClosed(id) => self.close_tab(id),
             Message::TabOpened => {
                 self.add_tab(TabState::Start);
             }
@@ -411,6 +468,27 @@ impl App {
                     None => self.refresh(id),
                 };
             }
+            Message::Shortcut(shortcut) => return self.shortcut(shortcut),
+            Message::OpenRepository => {
+                return Task::perform(
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Open repository")
+                        .pick_folder(),
+                    |folder| Message::FolderPicked(folder.map(|f| f.path().to_path_buf())),
+                );
+            }
+            Message::FolderPicked(Some(path)) => return self.open_path(path),
+            Message::FolderPicked(None) => {}
+            Message::StartPathChanged(path) => self.start_path = path,
+            Message::StartPathSubmitted => {
+                let input = self.start_path.trim();
+                if !input.is_empty() {
+                    let path = PathBuf::from(input);
+                    let path = std::path::absolute(&path).unwrap_or(path);
+                    self.start_path.clear();
+                    return self.open_path(path);
+                }
+            }
             Message::Refresh => {
                 if let Some(id) = self.active_tab().map(|t| t.id) {
                     return self.refresh(id);
@@ -443,12 +521,30 @@ impl App {
                     TabState::Loading { path } => path.clone(),
                     _ => return Task::none(),
                 };
+                let id = tab.id;
                 tab.state = match result {
                     Ok(opened) => {
                         TabState::Ready(Box::new(RepoView::new(opened.backend, opened.snapshot)))
                     }
                     Err(error) => TabState::Failed { path, error },
                 };
+                // A subfolder of an already open repository: keep the existing tab.
+                let root = self
+                    .tab_mut(id)
+                    .and_then(|t| t.view())
+                    .map(|v| v.backend.path().to_path_buf());
+                if let Some(root) = root {
+                    if let Some(existing) = self.tabs.iter().position(|t| {
+                        t.id != id && t.view().is_some_and(|v| same_repo(v.backend.path(), &root))
+                    }) {
+                        let existing_id = self.tabs[existing].id;
+                        self.close_tab(id);
+                        if let Some(index) = self.tabs.iter().position(|t| t.id == existing_id) {
+                            self.active = index;
+                        }
+                        return Task::none();
+                    }
+                }
                 return self.load_details();
             }
             Message::SnapshotLoaded {
@@ -499,16 +595,22 @@ impl App {
     }
 }
 
-/// Maps window and keyboard events that no widget handled.
+/// Maps window events and keyboard shortcuts no widget handled.
 fn global_event(event: Event, status: event::Status, _window: window::Id) -> Option<Message> {
     match event {
         Event::Window(window::Event::Focused) => Some(Message::WindowFocused),
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::F5),
-            ..
-        }) if status == event::Status::Ignored => Some(Message::Refresh),
+        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+            if status == event::Status::Ignored =>
+        {
+            shortcuts::shortcut(&key, modifiers).map(Message::Shortcut)
+        }
         _ => None,
     }
+}
+
+/// True if `path` is `root` or inside it (compared without touching the file system).
+fn same_repo(root: &std::path::Path, path: &std::path::Path) -> bool {
+    path.starts_with(root)
 }
 
 /// Runs blocking work (Git, file I/O) on tokio's blocking pool.
@@ -518,4 +620,123 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(work)
         .await
         .map_err(|e| format!("Background task failed: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app_with_tabs(count: usize) -> App {
+        let (mut app, _) = App::new(Vec::new());
+        for _ in 1..count {
+            app.add_tab(TabState::Start);
+        }
+        app
+    }
+
+    #[test]
+    fn starts_with_one_start_tab() {
+        let (app, _) = App::new(Vec::new());
+        assert_eq!(app.tabs.len(), 1);
+        assert!(matches!(app.tabs[0].state, TabState::Start));
+        assert_eq!(app.title(), "Gitloom");
+    }
+
+    #[test]
+    fn command_line_paths_open_in_own_tabs() {
+        let (app, _) = App::new(vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(app.tabs.len(), 2);
+        assert!(app
+            .tabs
+            .iter()
+            .all(|t| matches!(t.state, TabState::Loading { .. })));
+        assert_eq!(app.active, 1);
+    }
+
+    #[test]
+    fn new_and_close_tab() {
+        let mut app = app_with_tabs(1);
+        let _ = app.update(Message::Shortcut(Shortcut::NewTab));
+        assert_eq!((app.tabs.len(), app.active), (2, 1));
+        let _ = app.update(Message::Shortcut(Shortcut::CloseTab));
+        assert_eq!((app.tabs.len(), app.active), (1, 0));
+        // Closing the last tab leaves a fresh start tab.
+        let _ = app.update(Message::Shortcut(Shortcut::CloseTab));
+        assert_eq!(app.tabs.len(), 1);
+    }
+
+    #[test]
+    fn closing_a_tab_before_the_active_one_keeps_it_active() {
+        let mut app = app_with_tabs(3);
+        let active_id = app.tabs[2].id;
+        let first = app.tabs[0].id;
+        let _ = app.update(Message::TabClosed(first));
+        assert_eq!(app.tabs[app.active].id, active_id);
+    }
+
+    #[test]
+    fn cycle_and_switch_tabs() {
+        let mut app = app_with_tabs(3);
+        assert_eq!(app.active, 2);
+        let _ = app.update(Message::Shortcut(Shortcut::NextTab));
+        assert_eq!(app.active, 0);
+        let _ = app.update(Message::Shortcut(Shortcut::PreviousTab));
+        assert_eq!(app.active, 2);
+        let _ = app.update(Message::Shortcut(Shortcut::SwitchTab(1)));
+        assert_eq!(app.active, 1);
+        let _ = app.update(Message::Shortcut(Shortcut::SwitchTab(7)));
+        assert_eq!(app.active, 1);
+    }
+
+    #[test]
+    fn opening_reuses_the_active_start_tab() {
+        let mut app = app_with_tabs(1);
+        let _ = app.update(Message::FolderPicked(Some(PathBuf::from("/repo"))));
+        assert_eq!(app.tabs.len(), 1);
+        assert!(matches!(app.tabs[0].state, TabState::Loading { .. }));
+
+        let _ = app.update(Message::FolderPicked(Some(PathBuf::from("/other"))));
+        assert_eq!((app.tabs.len(), app.active), (2, 1));
+    }
+
+    #[test]
+    fn stale_results_are_dropped() {
+        let mut app = app_with_tabs(1);
+        let _ = app.update(Message::FolderPicked(Some(PathBuf::from("/repo"))));
+        let id = app.tabs[0].id;
+        let _ = app.update(Message::RepoOpened {
+            tab: id,
+            generation: 0,
+            result: Err("old".into()),
+        });
+        assert!(matches!(app.tabs[0].state, TabState::Loading { .. }));
+        let _ = app.update(Message::RepoOpened {
+            tab: id,
+            generation: 1,
+            result: Err("not a repository".into()),
+        });
+        assert!(
+            matches!(&app.tabs[0].state, TabState::Failed { error, .. } if error == "not a repository")
+        );
+    }
+
+    #[test]
+    fn typed_path_opens_in_start_tab() {
+        let mut app = app_with_tabs(1);
+        let _ = app.update(Message::StartPathChanged("  /some/repo ".into()));
+        let _ = app.update(Message::StartPathSubmitted);
+        assert!(app.start_path.is_empty());
+        assert!(
+            matches!(&app.tabs[0].state, TabState::Loading { path } if path == std::path::Path::new("/some/repo"))
+        );
+    }
+
+    #[test]
+    fn subfolders_belong_to_the_open_repository() {
+        let root = std::path::Path::new("/work/repo");
+        assert!(same_repo(root, std::path::Path::new("/work/repo")));
+        assert!(same_repo(root, std::path::Path::new("/work/repo/src/ui")));
+        assert!(!same_repo(root, std::path::Path::new("/work/repository")));
+        assert!(!same_repo(root, std::path::Path::new("/work")));
+    }
 }

@@ -185,7 +185,9 @@ Acceptance:
 - Changing a file outside the app and focusing the window updates the WIP row.
 - Unit tests for selection restore logic.
 
-### [ ] M1-08 App: open flow and tabs
+### [x] M1-08 App: open flow and tabs
+
+> Done: shortcuts in `shortcuts.rs` (iced's `Modifiers::command()`; Ctrl+Tab stays Ctrl on macOS like browsers). Deviation: start screen also has a path input because the XDG portal is missing on some Linux setups (ADR-010, UX-PARITY). Checked by hand: subfolder opens the repo root, non-repo shows the banner with Retry, F5/Ctrl+1/Ctrl+T/Ctrl+W/Ctrl+Tab work, title `gitloom – Gitloom`. Ctrl+O shows no dialog under WSL (no portal), the app stays responsive. Keyboard input could only be injected while the WSLg window had host focus; tab logic is covered by unit tests.
 
 Goal: open repositories like GitKraken.
 

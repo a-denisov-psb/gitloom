@@ -1,6 +1,7 @@
 mod app;
 mod format;
 mod repo_view;
+mod shortcuts;
 mod snapshot;
 mod theme;
 mod ui;
@@ -11,7 +12,13 @@ use app::App;
 
 fn main() -> iced::Result {
     // `gitloom [PATH]...` opens each path in its own tab.
-    let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let paths: Vec<PathBuf> = std::env::args_os()
+        .skip(1)
+        .map(|arg| {
+            let path = PathBuf::from(arg);
+            std::path::absolute(&path).unwrap_or(path)
+        })
+        .collect();
 
     iced::application(move || App::new(paths.clone()), App::update, App::view)
         .title(App::title)

@@ -53,3 +53,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 - Status: accepted (M0)
 - Decision: no telemetry, no accounts, offline by default. Features that contact the network (avatars, update check) are opt-in.
+
+## ADR-010 Native folder dialog via rfd
+
+- Status: accepted (M1)
+- Decision: `rfd` 0.17 (`AsyncFileDialog`) with its default backends: Win32 on Windows, AppKit on macOS, XDG desktop portal over D-Bus on Linux (no GTK build dependency).
+- Consequences: Linux needs a running `xdg-desktop-portal`; without it the dialog silently returns nothing. The start screen therefore also accepts a typed path (see UX-PARITY deviations).

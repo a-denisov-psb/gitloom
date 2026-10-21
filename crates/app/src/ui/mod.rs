@@ -44,7 +44,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
 fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
     match &tab.state {
-        TabState::Start => start::view(),
+        TabState::Start => start::view(app),
         TabState::Loading { path } => centered(column![
             text("Loading repository…").size(16),
             muted(path.display().to_string()),
