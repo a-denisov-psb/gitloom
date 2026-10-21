@@ -51,6 +51,8 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] GitHub → Settings → General → Default branch: set to `develop`.
 - [ ] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`
 - [ ] Delete the accidental `main` branch on GitHub (only after the default branch is `develop`): `git push origin --delete main`
+- [ ] M2-01: give Claude Code read access to CI results (the repository is private): install `gh` in WSL and run `gh auth login`, or export a fine-grained token with "Actions: read" as `GH_TOKEN`. Until then, please report failing CI jobs (Windows, macOS, Linux, MSRV) with their log.
+- [ ] M2-01: run the app natively on Windows (`cargo run -p gitloom -- <repo>`) and check the M1 shortcuts from `docs/UX-PARITY.md`; report findings.
 
 ## Environment notes
 
