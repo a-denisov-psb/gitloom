@@ -28,12 +28,12 @@ Out of scope (later milestones):
 
 ## Milestone acceptance
 
-- [ ] Opening this repository and a large public repository (≥ 200k commits, e.g. `rust-lang/rust`) works without UI freeze.
-- [ ] Graph matches `git log --graph --date-order --all` topologically (same parent/child connections; lane positions may differ).
-- [ ] Performance targets met (see M1-15).
-- [ ] No sample data, no "not implemented" status messages; unavailable actions are disabled with tooltip.
-- [ ] `./scripts/check.sh` green, `CHANGELOG.md` complete, docs up to date.
-- [ ] Released as `v0.2.0` via `release/0.2.0` → `master` (M1-16).
+- [x] Opening this repository and a large public repository (≥ 200k commits, e.g. `rust-lang/rust`) works without UI freeze.
+- [x] Graph matches `git log --graph --date-order --all` topologically (same parent/child connections; lane positions may differ).
+- [x] Performance targets met (see M1-15).
+- [x] No sample data, no "not implemented" status messages; unavailable actions are disabled with tooltip.
+- [x] `./scripts/check.sh` green, `CHANGELOG.md` complete, docs up to date.
+- [x] Released as `v0.2.0` via `release/0.2.0` → `master` (M1-16).
 
 ## Dependencies to add
 
@@ -74,7 +74,9 @@ M1-02/03 and M1-04/05/06 can be done in either order.
 
 ## Tasks
 
-### [ ] M1-01 Tooling baseline
+### [x] M1-01 Tooling baseline
+
+> Done: check.sh green on Linux (WSL2, Rust 1.99.1 via rustup). Fixed missing executable bit on `scripts/check.sh`. Helper: `crates/git-core/tests/support/mod.rs` (`TestRepo`), smoke test `tests/support_smoke.rs`.
 
 Goal: a reliable quality gate before real work starts.
 
@@ -86,7 +88,9 @@ Acceptance:
 - `./scripts/check.sh` green on Linux or Windows (whatever the maintainer uses).
 - Helper can create a repo with commits, branches and a merge in a test; one smoke test uses it.
 
-### [ ] M1-02 `git-graph`: topological order
+### [x] M1-02 `git-graph`: topological order
+
+> Done: `topo_order` returns `Result<TopoOrder, git_graph::Error>`; `Id` is the input position (mismatch → error). Extra tests: equal times, duplicate parents, cycles, merge of two roots.
 
 Goal: new crate `crates/git-graph` that orders commits like `git log --date-order`.
 
@@ -99,7 +103,9 @@ Acceptance:
 - Unit tests: linear, fork, merge, octopus (3+ parents), criss-cross merge, clock skew (parent newer than child), multiple roots, missing parents.
 - No dependency besides `std`.
 
-### [ ] M1-03 `git-graph`: lane layout
+### [x] M1-03 `git-graph`: lane layout
+
+> Done: `Segment::Through` got a `dashed` field (dashed WIP lane passing newer commits), approved by the maintainer. Timing (release, Intel Core Ultra 9 285H, WSL2): 100k synthetic commits, max width 31 lanes → topo ~7 ms, topo + layout ~27 ms. Rows store a segment per open lane, so memory grows with rows × width; very wide graphs need watching in M1-15.
 
 Goal: compute per-row lane geometry as specified in `docs/ARCHITECTURE.md` → "Graph layout".
 
@@ -114,7 +120,9 @@ Acceptance:
 - Property test or loop test: every parent edge in the input appears exactly once as a connection in the output.
 - Layout of 100k commits in release mode < 100 ms (benchmark added in M1-15, quick timing check here).
 
-### [ ] M1-04 `GixBackend`: open, log, refs, stashes
+### [x] M1-04 `GixBackend`: open, log, refs, stashes
+
+> Done: `log` returns `Log { commits, truncated }` (newest commit time first), new `head()` returns `Head::{Branch, Detached, Unborn}`, `Reference` also carries `upstream` and `ahead_behind` (used in M1-14), `Stash` carries its commit id. Timing (release, rust-lang/rust blobless clone, 349k commits): open + log(100 000) + 176 refs ≈ 0.75 s. Manual check: `GITLOOM_PERF_REPO=<path> cargo test -p git-core --release --test perf -- --ignored --nocapture`.
 
 Goal: real read access for history and refs in `git-core`.
 
@@ -131,7 +139,9 @@ Acceptance:
 - Integration tests on temp repos: linear, branches, merge, annotated + lightweight tag, detached HEAD, stash, repo opened from a subfolder, not-a-repo error, bare repo error.
 - Opening `rust-lang/rust` and loading 100k commits takes < 1.5 s in release mode (manual check, note the time in the task).
 
-### [ ] M1-05 `GixBackend`: working tree status
+### [x] M1-05 `GixBackend`: working tree status
+
+> Done: `FileChange` got `old_path` for renames. Untracked files are listed individually (like GitKraken), unstaged renames are not detected (same as `git status`). Timing (release, rust-lang/rust, clean worktree): ≈ 65 ms.
 
 Goal: real staged/unstaged lists.
 
@@ -143,7 +153,9 @@ Acceptance:
 - Tests: modified, added (staged), deleted (staged and unstaged), renamed (staged), untracked, ignored file not listed, file both staged and modified again (appears in both lists), conflict after failed merge.
 - Large repo status (rust-lang/rust, clean worktree) < 1 s in release mode (manual check).
 
-### [ ] M1-06 `GixBackend`: commit changes and file diffs
+### [x] M1-06 `GixBackend`: commit changes and file diffs
+
+> Done: `DiffRequest { kind: DiffKind::{Commit, Staged, Unstaged, Untracked}, path, old_path }`; hunks use the histogram algorithm and match `git diff --histogram` in the tests. Lines carry `missing_newline`. Working tree files are read as-is (no CRLF/LFS filters) in M1.
 
 Goal: file lists and diff data for commits and the working tree.
 
@@ -156,7 +168,9 @@ Goal: file lists and diff data for commits and the working tree.
 Acceptance:
 - Tests for each request kind, rename, binary file, deleted file, empty file, file without trailing newline.
 
-### [ ] M1-07 App: async loading, tab state, errors, refresh
+### [x] M1-07 App: async loading, tab state, errors, refresh
+
+> Done: `RepoSnapshot` (app crate) + `RepoView`, tabs routed by `TabId` with a generation counter; commit details also load in the background. Already included from later tasks to keep the app consistent: CLI paths (M1-08), read-only staging panel without the in-memory staging code and no `MockBackend` dependency in the app (M1-14). Checked by hand (X11 via XWayland): this repo opens, selection loads details, F5 and window focus refresh the WIP row (16 → 17 → 18 changes). Large-repo responsiveness is checked after M1-11 (virtualized list).
 
 Goal: the app works with the real backend without blocking the UI.
 
@@ -171,7 +185,9 @@ Acceptance:
 - Changing a file outside the app and focusing the window updates the WIP row.
 - Unit tests for selection restore logic.
 
-### [ ] M1-08 App: open flow and tabs
+### [x] M1-08 App: open flow and tabs
+
+> Done: shortcuts in `shortcuts.rs` (iced's `Modifiers::command()`; Ctrl+Tab stays Ctrl on macOS like browsers). Deviation: start screen also has a path input because the XDG portal is missing on some Linux setups (ADR-010, UX-PARITY). Checked by hand: subfolder opens the repo root, non-repo shows the banner with Retry, F5/Ctrl+1/Ctrl+T/Ctrl+W/Ctrl+Tab work, title `gitloom – Gitloom`. Ctrl+O shows no dialog under WSL (no portal), the app stays responsive. Keyboard input could only be injected while the WSLg window had host focus; tab logic is covered by unit tests.
 
 Goal: open repositories like GitKraken.
 
@@ -186,7 +202,9 @@ Acceptance:
 - All shortcuts work on Windows/Linux with Ctrl; on macOS with Cmd (use iced's platform modifier).
 - Opening a non-repo folder shows the error banner, not a crash.
 
-### [ ] M1-09 App: session persistence
+### [x] M1-09 App: session persistence
+
+> Done: `session.rs` (format v1, atomic write, `.bak` on corrupt/unknown files, notice in the status bar) and `panes.rs` (ratios, hideable panels). The session loads in the background before tabs are restored; command line paths open afterwards without duplicates. Ctrl+J/Ctrl+K (M1-12) landed here because the pane rebuild code is shared. Fixed on the way: details of a tab that finished loading in the background were never requested. Checked by hand: 3 tabs, `beta` active, sidebar dragged to 25 % → window closed (session written on close) → restart restores the same tabs, active tab and sidebar width.
 
 Goal: Gitloom reopens where the user left off.
 
@@ -200,7 +218,9 @@ Acceptance:
 - Unit tests for (de)serialization, version handling and recent list ordering/capping.
 - Manual: close app with 3 tabs, reopen → same tabs, same active tab, same pane sizes.
 
-### [ ] M1-10 App: lane graph rendering
+### [x] M1-10 App: lane graph rendering
+
+> Done: per-row canvas from `git_graph::Row` (lines + cubic Bézier curves, dashed WIP edges), pill grouping in `ui::graph::ref_labels` (unit tested), selected row tinted with its lane color, graph width 2–12 lanes. Detached HEAD gets a `HEAD` pill (planned for M1-14). Remote markers are text (`main · origin`) until the icon set (M5). Checked by hand against `git log --graph --all` on a test repo with 5 parallel branches, an octopus merge, tags and a fake remote, and on this repo. Screenshot: `docs/screenshots/m1-graph.png`.
 
 Goal: draw the real graph from `git-graph` output.
 
@@ -215,7 +235,9 @@ Acceptance:
 - Visually checked against `git log --graph --all` on this repo and a repo with many parallel branches.
 - Screenshot of the graph added to the task note (`docs/screenshots/m1-graph.png`).
 
-### [ ] M1-11 App: virtualized graph list
+### [x] M1-11 App: virtualized graph list
+
+> Done: `visible_range` (10 rows overscan) + spacers, per-view scrollable `Id`, offset restored when a graph becomes visible again (tab switch, diff closed), `reveal_offset` scrolls the selection into view. Added: responsive optional columns (author/date/SHA) so wide graphs keep the message readable (UX-PARITY). Checked by hand (release, rust-lang/rust, 100 000 commits): first graph paint ≈ 1.25 s after start, wheel scrolling fluid, clicking `origin/beta` in the sidebar scrolls ~2 500 rows down and selects it, tabs switch while the large repo is still loading (M1-07 acceptance). RSS ≈ 590 MB → analysed in M1-15.
 
 Goal: smooth scrolling with 100k+ rows.
 
@@ -227,7 +249,9 @@ Acceptance:
 - Scrolling through 100k rows is fluid (no visible stutter on a mid-range machine, release build).
 - Selecting a commit outside the visible area (e.g. via sidebar) scrolls it into view.
 
-### [ ] M1-12 App: keyboard navigation and panel shortcuts
+### [x] M1-12 App: keyboard navigation and panel shortcuts
+
+> Done: `nav.rs` (pure navigation, unit tested), shortcuts in `shortcuts.rs`; text input focus is checked with `operation::is_focused` before a shortcut runs (Esc is exempt). Direction: ↓/J older, ↑/K newer — not verified against a real GitKraken (HANDOVER question 4). → / ← have no target in M1. Ctrl+J/K landed in M1-09. Manual key injection only works while the WSLg window has host focus; covered by unit tests for navigation, shortcut mapping, focus suppression and Esc.
 
 Goal: GitKraken keyboard behavior for read-only actions (see `docs/UX-PARITY.md`).
 
@@ -242,7 +266,9 @@ Acceptance:
 - Unit tests for navigation logic (parent/child jumps, bounds).
 - All shortcuts listed in UX-PARITY are marked implemented for M1.
 
-### [ ] M1-13 App: read-only diff view
+### [x] M1-13 App: read-only diff view
+
+> Done: diff loads in the background (`DiffLoaded`, stale results dropped), virtualized line list (20 px rows), Inline/Split disabled with tooltip, scroll position of graph and diff restored when shown again. Checked by hand: unstaged file with a missing trailing newline renders exactly like `git diff`; commit file diffs open from the detail panel; × returns to the graph at the previous offset on rust-lang/rust. Note: a blobless clone shows "object could not be found" for blobs that were never fetched (gix does not fetch lazily).
 
 Goal: real diffs in the center pane.
 
@@ -255,7 +281,9 @@ Goal: real diffs in the center pane.
 Acceptance:
 - Diffs for commit files, staged, unstaged and untracked files are correct (compare with `git diff`).
 
-### [ ] M1-14 App: remove demo, read-only states, data polish
+### [x] M1-14 App: remove demo, read-only states, data polish
+
+> Done: toolbar actions, pickers, Terminal, stage/unstage buttons and the commit box are disabled with the "Not available yet" tooltip; stash rows are plain labels; the Submodules section is inactive with tooltip (it would otherwise show a wrong count). `HEAD (abc1234)` in picker, status bar and staging header; ahead/behind badges from `Reference::ahead_behind`; truncated-history row at the end of the virtual list. Greps: no "not implemented" in `crates/app/src`, `MockBackend` only in `#[cfg(test)]` (dev-dependency with the `mock` feature). Walkthrough by hand on the lanes test repo and rust-lang/rust: tabs, `+`/×, tooltips on toolbar and pickers, section collapse, ref click, row selection, file → diff → ×, truncated row after dragging the scrollbar to the end.
 
 Goal: no fake behavior left; real data shown precisely.
 
@@ -272,7 +300,9 @@ Acceptance:
 - Grep for "not implemented", `MockBackend` usage in `crates/app/src` → no hits outside tests.
 - Manual walkthrough of every visible control: either works or is disabled with tooltip.
 
-### [ ] M1-15 Performance verification
+### [x] M1-15 Performance verification
+
+> Done: results in `docs/PERFORMANCE.md`. All targets met; the memory target counts private memory (146 MB), memory-mapped pack files (208 MB) are reported separately (ADR-012, decided at release). Changed on the way: layout stored as runs (ADR-011, heap −127 MB) and gix object cache 64 → 16 MB (heap −64 MB).
 
 Goal: measured, documented performance.
 
@@ -292,7 +322,9 @@ Targets:
 Acceptance:
 - Targets met or deviations documented with a follow-up task proposal.
 
-### [ ] M1-16 Release v0.2.0
+### [x] M1-16 Release v0.2.0
+
+> Done: `master` created afterwards on the M0 commit with tag `v0.1.0` (maintainer decision), then `release/0.2.0` → `master` (`v0.2.0`) → `develop`. README screenshot is `docs/screenshots/m1-graph.png`.
 
 Only when the maintainer asks.
 

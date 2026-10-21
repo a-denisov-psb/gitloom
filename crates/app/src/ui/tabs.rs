@@ -7,18 +7,18 @@ use crate::app::{App, Message};
 use crate::theme;
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let tabs = app.repos.iter().enumerate().map(|(index, repo)| {
+    let tabs = app.tabs.iter().enumerate().map(|(index, tab)| {
         let close = button(text("×").size(14))
-            .on_press(Message::TabClosed(index))
+            .on_press(Message::TabClosed(tab.id))
             .padding([0, 5])
             .style(theme::flat);
 
-        let label = row![text(&repo.name), close]
+        let label = row![text(tab.title()), close]
             .spacing(10)
             .align_y(iced::Center);
 
         button(label)
-            .on_press(Message::TabSelected(index))
+            .on_press(Message::TabSelected(tab.id))
             .padding([5, 12])
             .style(theme::tab(index == app.active))
             .into()

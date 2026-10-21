@@ -13,44 +13,30 @@
 
 mod diff;
 mod graph;
-mod panel;
+pub(crate) mod panel;
 mod sidebar;
+mod start;
 mod statusbar;
 mod tabs;
 mod toolbar;
 
-use iced::widget::{button, column, container, pane_grid, text};
+pub use graph::reveal_offset;
+
+use iced::widget::{button, column, container, pane_grid, row, space, text};
 use iced::{Element, Fill};
 
-use crate::app::{App, CenterView, Message, PaneKind};
+use crate::app::{App, Message, Tab, TabState};
+use crate::panes::PaneKind;
+use crate::repo_view::{CenterView, RepoView};
 use crate::theme;
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let body: Element<'_, Message> = match app.repo() {
-        Some(repo) => pane_grid(&app.panes, move |_pane, kind, _maximized| {
-            let content = match kind {
-                PaneKind::Sidebar => sidebar::view(repo),
-                PaneKind::Center => match &repo.center {
-                    CenterView::Graph => graph::view(repo),
-                    CenterView::Diff(target) => diff::view(repo, target),
-                },
-                PaneKind::Panel => panel::view(repo),
-            };
-            pane_grid::Content::new(content)
-        })
-        .spacing(1)
-        .min_size(160)
-        .on_resize(6, Message::PaneResized)
-        .style(theme::panes)
-        .into(),
-        None => empty_state(),
-    };
-
     let mut layout = column![tabs::view(app)].spacing(1);
-    if let Some(repo) = app.repo() {
-        layout = layout.push(toolbar::view(repo));
-    }
-    layout = layout.push(body).push(statusbar::view(app));
+    layout = match app.active_tab() {
+        Some(tab) => layout.push(tab_body(app, tab)),
+        None => layout.push(space::vertical()),
+    };
+    layout = layout.push(statusbar::view(app));
 
     container(layout)
         .width(Fill)
@@ -59,18 +45,95 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-fn empty_state<'a>() -> Element<'a, Message> {
-    let content = column![
-        text("No repository open").size(18),
-        button(text("Open sample repository"))
-            .on_press(Message::TabOpened)
-            .padding([6, 14])
-            .style(button::primary),
-    ]
-    .spacing(12)
-    .align_x(iced::Center);
+fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
+    match &tab.state {
+        TabState::Start => start::view(app),
+        TabState::Loading { path } => centered(column![
+            text("Loading repository…").size(16),
+            muted(path.display().to_string()),
+        ]),
+        TabState::Failed { path, error } => {
+            let mut content = column![banner(error, tab.id), muted(path.display().to_string())];
+            if app.session.is_recent(path) {
+                content = content.push(
+                    button(text("Remove from recent").size(12))
+                        .on_press(Message::RemoveRecent(tab.id))
+                        .padding([3, 10])
+                        .style(button::secondary),
+                );
+            }
+            centered(content)
+        }
+        TabState::Ready(view) => {
+            let mut content = column![toolbar::view(view)].spacing(1);
+            if let Some(error) = &view.error {
+                content = content.push(banner(error, tab.id));
+            }
+            content.push(panes(app, view)).into()
+        }
+    }
+}
 
-    container(content).center(Fill).style(theme::graph).into()
+fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
+    pane_grid(&app.panes.state, move |_pane, kind, _maximized| {
+        let content = match kind {
+            PaneKind::Sidebar => sidebar::view(view),
+            PaneKind::Center => match &view.center {
+                CenterView::Graph => graph::view(view),
+                CenterView::Diff(diff) => diff::view(view, diff),
+            },
+            PaneKind::Panel => panel::view(view),
+        };
+        pane_grid::Content::new(content)
+    })
+    .spacing(1)
+    .min_size(160)
+    .on_resize(6, Message::PaneResized)
+    .style(theme::panes)
+    .into()
+}
+
+/// Error message with a retry button, shown inside the tab.
+fn banner<'a>(error: &'a str, tab: crate::app::TabId) -> Element<'a, Message> {
+    container(
+        row![
+            text(error).color(theme::TEXT),
+            space::horizontal(),
+            button(text("Retry").size(12))
+                .on_press(Message::Retry(tab))
+                .padding([3, 10])
+                .style(button::secondary),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([8, 12])
+    .width(Fill)
+    .style(theme::error_banner)
+    .into()
+}
+
+fn centered<'a>(content: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
+    container(content.spacing(10).align_x(iced::Center).max_width(720))
+        .center(Fill)
+        .style(theme::graph)
+        .into()
+}
+
+/// Rows `first..last` of a fixed-height list intersecting the viewport,
+/// extended by `overscan` rows on both sides.
+pub fn rows_in_view(
+    offset: f32,
+    height: f32,
+    total: usize,
+    row_height: f32,
+    overscan: usize,
+) -> (usize, usize) {
+    let top = (offset.max(0.0) / row_height).floor() as usize;
+    let bottom = ((offset.max(0.0) + height.max(0.0)) / row_height).ceil() as usize;
+    let first = top.saturating_sub(overscan).min(total);
+    let last = (bottom + overscan).min(total);
+    (first, last.max(first))
 }
 
 /// Muted secondary text.
@@ -78,7 +141,7 @@ pub(crate) fn muted<'a>(content: impl text::IntoFragment<'a>) -> text::Text<'a> 
     text(content).color(theme::TEXT_MUTED)
 }
 
-/// Single-letter badge for a file change (M, A, D, R, ?).
+/// Single-letter badge for a file change (M, A, D, R, ?, !).
 pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> text::Text<'a> {
     use git_core::ChangeKind;
     let letter = match kind {
@@ -87,6 +150,7 @@ pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> text::Text<'a> {
         ChangeKind::Deleted => "D",
         ChangeKind::Renamed => "R",
         ChangeKind::Untracked => "?",
+        ChangeKind::Conflicted => "!",
     };
     text(letter)
         .color(theme::change_color(kind))

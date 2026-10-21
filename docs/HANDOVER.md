@@ -20,31 +20,37 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M0, version 0.1.0)
+## Current state (end of M1, version 0.2.0)
 
-Done:
+Done (M1-01 … M1-16, see the notes in `docs/milestones/M1-real-repository.md`):
 
-- Cargo workspace: `git-core` (types, `GitBackend` trait, `MockBackend`), `app` (iced 0.14 UI, binary `gitloom`).
-- Full layout shell: tabs, toolbar, sidebar, graph table with WIP row and single-lane graph, staging panel, commit details, diff placeholder, status bar, resizable panes.
-- Theme module with all colors and styles.
-- Tooling: workspace lints, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `scripts/check.sh` + `.ps1`, CI workflow prepared (`.github/workflows/ci.yml`, active once pushed to GitHub).
-- Claude Code setup: `CLAUDE.md`, `.claude/settings.json`, slash commands.
+- `git-core`: `GixBackend` (gix 0.88) for log, refs with upstream ahead/behind, HEAD, stashes, working tree status, commit changes and file diffs; `MockBackend` only behind the `mock` feature.
+- `git-graph`: topological order and stable lane layout, stored as vertical runs (ADR-011); criterion benchmark.
+- `app`: background loading per tab, refresh (F5, window focus), open flow (start screen with native folder dialog as the default way, typed path as fallback, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
+- Measurements: `docs/PERFORMANCE.md` (memory target counts private memory, ADR-012).
+- Branches: `master` with `v0.1.0` (M0) and `v0.2.0` (M1), `develop`.
 
 Verified:
 
-- Builds with Rust 1.91 (MSRV set to 1.88 because iced 0.14 requires it).
-- `cargo fmt`, `cargo clippy -D warnings`, tests pass.
-- App ran under a virtual display (software renderer); layout, commit selection, diff opening and branch double click detection were checked by hand.
+- `./scripts/check.sh` green on Linux (WSL2, Rust 1.99.1).
+- UI checked by hand through WSLg/XWayland (screenshots and synthetic mouse input); keyboard input could only be injected while the window had host focus, so shortcuts are mainly covered by unit tests.
 
-Known limitations (all addressed in M1 unless noted):
+Not done / known limitations:
 
-- All data is sample data from `MockBackend`.
-- Graph uses a single lane.
-- Staging is in-memory only; toolbar actions only write a status message.
-- Selection uses row indices instead of commit ids.
-- Rows are not virtualized.
-- Icons are Unicode placeholders (M5).
-- Double click is detected in `App::update` with a 400 ms timer, because iced buttons swallow the events a `mouse_area` would need. Keep this approach for sidebar items.
+- CI has never run (no remote yet); Windows and macOS are untested.
+- Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0.
+- Keyboard shortcuts and the J/K direction still need a check on a real display.
+- Working tree files are diffed as-is (no CRLF/LFS filters).
+- Icons are Unicode placeholders (M5); remote markers on pills are text.
+
+## Follow-up tasks (for M2 planning)
+
+| Task | Origin |
+|---|---|
+| Blobless/partial clones: fall back to `CliBackend` (which fetches missing blobs like plain Git) for diffs; until then show an understandable message instead of "object could not be found" | M1 release |
+| LaneHints preparation for a Git-flow aware graph layout (backlog "Git flow graph layout") — not implemented in M1-03 and not part of the M1 plan in this repo; add the backlog entry and plan it | M1 release |
+| Incremental refresh with the file watcher instead of rebuilding the full snapshot on every window focus | M1-15 |
+| Optional: release or limit gix pack mappings; allocator retention after refresh | M1-15 |
 
 ## Environment notes
 
@@ -79,4 +85,7 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 1 | Final project name ("Gitloom" is a working title) | M0 | open |
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
-| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | verify in M1-12 |
+| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | M1-12 implements the natural direction (↓/J older, ↑/K newer); maintainer please verify in GitKraken |
+| 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |
+| 6 | Memory target: accept "private memory < 300 MB" or require total RSS | M1-15 | done: private memory counts (ADR-012) |
+| 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | done: native dialog is the default on all platforms, path input stays as fallback |

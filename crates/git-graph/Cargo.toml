@@ -1,0 +1,18 @@
+[package]
+name = "git-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "layout"
+harness = false
+
+[lints]
+workspace = true

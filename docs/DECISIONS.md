@@ -53,3 +53,23 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 - Status: accepted (M0)
 - Decision: no telemetry, no accounts, offline by default. Features that contact the network (avatars, update check) are opt-in.
+
+## ADR-010 Native folder dialog via rfd
+
+- Status: accepted (M1)
+- Decision: `rfd` 0.17 (`AsyncFileDialog`) with its default backends: Win32 on Windows, AppKit on macOS, XDG desktop portal over D-Bus on Linux (no GTK build dependency).
+- Consequences: Linux needs a running `xdg-desktop-portal`; without it the dialog silently returns nothing. The start screen therefore also accepts a typed path (see UX-PARITY deviations).
+
+## ADR-011 Lane layout stored as runs
+
+- Status: accepted (M1-15)
+- Context: rust-lang/rust keeps up to 254 lanes open; one `Through` segment per lane and row meant 17.8 million segments (142 MB) for 100 000 commits.
+- Decision: `git_graph::Layout` stores per row only the node and its curve segments (`IntoNode`, `FromNode`), plus vertical runs of `Through` segments with a checkpoint index every 64 rows. `Layout::row(i)` rebuilds the same `Row` as before; `Layout::rows()` iterates all rows.
+- Consequences: memory is proportional to edges instead of rows × lanes; layout got faster (27 ms → 8 ms for 100k synthetic commits). Callers use `row(i)` / `len()` instead of a public `rows` vector.
+
+## ADR-012 Memory target counts private memory
+
+- Status: accepted (M1-16, maintainer)
+- Context: with rust-lang/rust loaded, total RSS was 396 MB, of which 208 MB were pack files memory-mapped by gix. These pages are file-backed page cache that the OS can drop at any time.
+- Decision: memory targets apply to private memory (heap and anonymous mappings, i.e. `RssAnon` on Linux). Memory-mapped pack files are reported separately and not counted.
+- Consequences: M1 meets its 300 MB target (146 MB private). `docs/PERFORMANCE.md` lists both numbers.

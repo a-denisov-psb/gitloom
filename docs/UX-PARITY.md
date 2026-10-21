@@ -10,12 +10,12 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 
 | Area | GitKraken behavior | Status |
 |---|---|---|
-| Repo tabs | Top row, one tab per repo, `+` opens a new tab | done (M0 layout) |
+| Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | layout done, actions M2–M4 |
 | Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts | done (M0), real data M1 |
-| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M0), real M1 |
+| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M1) |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
-| Diff | Replaces the graph in the center; close returns to graph | placeholder M0, real M1 |
+| Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view; inline/split later) |
 | Status bar | Bottom line | done |
 | Resizable panes | All splits draggable | done |
 
@@ -25,15 +25,15 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 |---|---|---|
 | Click commit | Select, show details right | done |
 | Click WIP | Staging area right | done |
-| Click file in panel | Diff in center | done (placeholder), M1 real |
+| Click file in panel | Diff in center | done (M1) |
 | Click branch in left panel | Jump to and select its commit | done |
 | Double click local branch | Checkout | M3 |
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M3 |
 | Hover file in staging | Shows stage/unstage button | M2 |
-| Local + remote branch on same commit | One combined pill | M1 |
-| Commit node | Avatar (placeholder: initials) | M1 initials, M5 avatars |
+| Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
+| Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 
 ## Keyboard shortcuts
 
@@ -57,10 +57,10 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Next / previous item | ↓ / J, ↑ / K (verify direction, docs table looks swapped) | M1 |
-| Item right / left | → / L, ← / H | M1 (where applicable) |
-| Next / previous commit in branch | Shift+↓ / Shift+J, Shift+↑ / Shift+K | M1 |
-| First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | M1 |
+| Next / previous item | ↓ / J older, ↑ / K newer (natural direction; verify against GitKraken, its docs table looks swapped) | done (M1) |
+| Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
+| Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
+| First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
 | Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | M4 |
 
 ### Command palette and search
@@ -71,11 +71,11 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Search commits | Ctrl+F | M5 |
 | Open repo via palette | Ctrl+Shift+O | M5 |
 | File history and blame | Ctrl+Shift+H | M5 |
-| Focus left panel filter | Ctrl+Alt+F | M1 |
+| Focus left panel filter | Ctrl+Alt+F | done (M1) |
 | Open repo in terminal | Alt+T | M5 |
 | Open repo in file manager | Alt+O | M5 |
 | Open diff/merge tool | Ctrl+D | M5 |
-| Close current repo | Ctrl+W | M1 |
+| Close current repo | Ctrl+W | done (M1) |
 
 ### Interface
 
@@ -83,19 +83,19 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|---|
 | Fullscreen | F11 | M5 |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | M5 |
-| Toggle left panel | Ctrl+J | M1 |
-| Toggle commit detail panel | Ctrl+K | M1 |
-| Close current panel | Esc | M1 (diff view) |
+| Toggle left panel | Ctrl+J | done (M1) |
+| Toggle commit detail panel | Ctrl+K | done (M1) |
+| Close current panel | Esc | done (M1, diff view) |
 | Keyboard shortcut list | Ctrl+/ | M5 |
 
 ### Tabs
 
 | Action | Shortcut | Status |
 |---|---|---|
-| New tab | Ctrl+T | M1 |
-| Close tab | Ctrl+W | M1 |
-| Switch to tab 1–9 | Ctrl+1…9 | M1 |
-| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | M1 |
+| New tab | Ctrl+T | done (M1) |
+| Close tab | Ctrl+W | done (M1) |
+| Switch to tab 1–9 | Ctrl+1…9 | done (M1) |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | done (M1) |
 
 ## Intentional deviations
 
@@ -103,4 +103,6 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|
 | Ctrl+O opens a folder dialog directly | Quick access before the command palette exists (M5); does not collide with a GitKraken shortcut |
 | F5 refreshes the repository | No file watcher until M2 |
+| Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
+| Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

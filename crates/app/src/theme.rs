@@ -179,10 +179,76 @@ pub fn change_color(kind: ChangeKind) -> Color {
     match kind {
         ChangeKind::Added | ChangeKind::Untracked => SUCCESS,
         ChangeKind::Modified | ChangeKind::Renamed => WARNING,
-        ChangeKind::Deleted => DANGER,
+        ChangeKind::Deleted | ChangeKind::Conflicted => DANGER,
     }
 }
 
-pub fn lane_color(lane: usize) -> Color {
-    LANE_COLORS[lane % LANE_COLORS.len()]
+/// Palette color for a lane color id from `git-graph`.
+pub fn lane_color(color: u32) -> Color {
+    LANE_COLORS[color as usize % LANE_COLORS.len()]
+}
+
+/// Graph table row; the selected row is tinted with its lane color.
+pub fn graph_row(selected: bool, lane: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let background = match (selected, status) {
+            (true, _) => Some(Color::from_rgb(
+                BG_GRAPH.r * 0.75 + lane.r * 0.25,
+                BG_GRAPH.g * 0.75 + lane.g * 0.25,
+                BG_GRAPH.b * 0.75 + lane.b * 0.25,
+            )),
+            (false, button::Status::Hovered | button::Status::Pressed) => Some(BG_HOVER),
+            _ => None,
+        };
+        button::Style {
+            border: Border::default(),
+            ..button_style(background, TEXT)
+        }
+    }
+}
+
+/// In-tab error banner.
+pub fn error_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(DANGER.scale_alpha(0.18))),
+        border: Border::default().width(1).color(DANGER.scale_alpha(0.6)),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn tooltip(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_CHROME)),
+        border: Border::default().rounded(3).width(1).color(BORDER),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+/// Hunk header row in the diff view.
+pub fn diff_hunk_header(_: &Theme) -> container::Style {
+    filled(BG_PANEL)
+}
+
+/// Diff line background by kind.
+pub fn diff_line(kind: git_core::DiffLineKind) -> impl Fn(&Theme) -> container::Style {
+    move |_| match kind {
+        git_core::DiffLineKind::Context => container::Style::default(),
+        git_core::DiffLineKind::Added => filled(SUCCESS.scale_alpha(0.16)),
+        git_core::DiffLineKind::Removed => filled(DANGER.scale_alpha(0.16)),
+    }
+}
+
+/// Selected segment of a segmented control (diff modes).
+pub fn mode_active(_: &Theme, _: button::Status) -> button::Style {
+    button_style(Some(BG_SELECTED), TEXT)
+}
+
+/// Toolbar pickers: readable text even while they cannot be opened yet.
+pub fn picker(_: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Hovered | button::Status::Pressed => button_style(Some(BG_HOVER), TEXT),
+        _ => button_style(None, TEXT),
+    }
 }

@@ -3,16 +3,58 @@
 use iced::widget::{button, column, container, row, space, text};
 use iced::{Element, Fill};
 
-use crate::app::{Message, Picker, Repo, ToolbarAction};
+use crate::app::Message;
+use crate::repo_view::RepoView;
 use crate::theme;
 use crate::ui::muted;
+use crate::ui::panel::with_tooltip;
 
-pub fn view(repo: &Repo) -> Element<'_, Message> {
-    let branch = repo.head().map_or("(detached)", |r| r.name.as_str());
+/// Toolbar actions; all write operations arrive in later milestones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolbarAction {
+    Undo,
+    Redo,
+    Pull,
+    Push,
+    Branch,
+    Stash,
+    Pop,
+    Terminal,
+}
 
+impl ToolbarAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Undo => "Undo",
+            Self::Redo => "Redo",
+            Self::Pull => "Pull",
+            Self::Push => "Push",
+            Self::Branch => "Branch",
+            Self::Stash => "Stash",
+            Self::Pop => "Pop",
+            Self::Terminal => "Terminal",
+        }
+    }
+
+    /// Placeholder glyphs until a proper icon set is added.
+    fn glyph(self) -> &'static str {
+        match self {
+            Self::Undo => "↶",
+            Self::Redo => "↷",
+            Self::Pull => "↓",
+            Self::Push => "↑",
+            Self::Branch => "⑂",
+            Self::Stash => "⊕",
+            Self::Pop => "⊖",
+            Self::Terminal => "›_",
+        }
+    }
+}
+
+pub fn view(view: &RepoView) -> Element<'_, Message> {
     let pickers = row![
-        picker(Picker::Repository, "repository", &repo.name),
-        picker(Picker::Branch, "branch", branch),
+        picker("repository", view.name().to_owned()),
+        picker("branch", view.snapshot.branch_label()),
     ]
     .spacing(20);
 
@@ -43,13 +85,14 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
     container(content).width(Fill).style(theme::chrome).into()
 }
 
-// TODO: open a dropdown (recent repos / branch list) on press.
-fn picker<'a>(picker: Picker, caption: &'a str, value: &'a str) -> Element<'a, Message> {
-    button(column![muted(caption).size(10), text(format!("{value} ▾"))].spacing(1))
-        .on_press(Message::PickerOpened(picker))
-        .padding([3, 8])
-        .style(theme::flat)
-        .into()
+/// Repository / branch picker; the dropdowns follow with checkout (M3).
+fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
+    with_tooltip(
+        button(column![muted(caption).size(10), text(format!("{value} ▾"))].spacing(1))
+            .padding([3, 8])
+            .style(theme::picker)
+            .into(),
+    )
 }
 
 fn action<'a>(action: ToolbarAction) -> Element<'a, Message> {
@@ -57,12 +100,13 @@ fn action<'a>(action: ToolbarAction) -> Element<'a, Message> {
         .spacing(1)
         .align_x(iced::Center);
 
-    button(content)
-        .on_press(Message::Toolbar(action))
-        .padding([3, 10])
-        .width(64)
-        .style(theme::flat)
-        .into()
+    with_tooltip(
+        button(content)
+            .padding([3, 10])
+            .width(64)
+            .style(theme::flat)
+            .into(),
+    )
 }
 
 fn divider<'a>() -> Element<'a, Message> {

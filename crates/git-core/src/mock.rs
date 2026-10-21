@@ -1,6 +1,8 @@
+use std::path::Path;
+
 use crate::{
-    ChangeKind, Commit, Error, FileChange, GitBackend, Oid, RefKind, Reference, Result, Stash,
-    WorkingTree,
+    diff, ChangeKind, Commit, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head, Log, Oid,
+    RefKind, Reference, Result, Stash, WorkingTree,
 };
 
 /// Static sample repository for UI development without a real repo.
@@ -84,7 +86,8 @@ impl MockBackend {
                 body: body.to_string(),
                 author: author.to_string(),
                 email: format!("{}@example.com", author.to_lowercase().replace(' ', ".")),
-                time: BASE_TIME - hours * 3600,
+                author_time: BASE_TIME - hours * 3600,
+                commit_time: BASE_TIME - hours * 3600,
             })
             .collect();
 
@@ -100,6 +103,8 @@ impl MockBackend {
             kind,
             target: self.commits[index].id.clone(),
             is_head,
+            upstream: None,
+            ahead_behind: None,
         }
     }
 }
@@ -109,8 +114,22 @@ impl GitBackend for MockBackend {
         &self.name
     }
 
-    fn log(&self, limit: usize) -> Result<Vec<Commit>> {
-        Ok(self.commits.iter().take(limit).cloned().collect())
+    fn path(&self) -> &Path {
+        Path::new(".")
+    }
+
+    fn log(&self, limit: usize) -> Result<Log> {
+        Ok(Log {
+            commits: self.commits.iter().take(limit).cloned().collect(),
+            truncated: self.commits.len() > limit,
+        })
+    }
+
+    fn head(&self) -> Result<Head> {
+        Ok(Head::Branch {
+            name: "main".into(),
+            target: self.commits[1].id.clone(),
+        })
     }
 
     fn references(&self) -> Result<Vec<Reference>> {
@@ -129,6 +148,7 @@ impl GitBackend for MockBackend {
         Ok(vec![Stash {
             index: 0,
             message: "WIP on main: try icon font".into(),
+            id: fake_oid(HISTORY.len()),
         }])
     }
 
@@ -136,6 +156,7 @@ impl GitBackend for MockBackend {
         let change = |path: &str, kind| FileChange {
             path: path.into(),
             kind,
+            old_path: None,
         };
         Ok(WorkingTree {
             unstaged: vec![
@@ -163,8 +184,27 @@ impl GitBackend for MockBackend {
                 } else {
                     ChangeKind::Modified
                 },
+                old_path: None,
             })
             .collect())
+    }
+
+    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
+        Ok(Self::sample_diff(request))
+    }
+}
+
+impl MockBackend {
+    /// Same sample diff for every file.
+    fn sample_diff(request: &DiffRequest) -> FileDiff {
+        let text = diff::text_diff(b"fn main() {}\n", b"fn main() {\n    run();\n}\n");
+        FileDiff {
+            old_path: Some(request.path.clone()),
+            new_path: Some(request.path.clone()),
+            binary: text.binary,
+            too_large: text.too_large,
+            hunks: text.hunks,
+        }
     }
 }
 

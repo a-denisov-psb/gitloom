@@ -6,17 +6,19 @@ use git_core::{RefKind, Reference};
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill};
 
-use crate::app::{Message, Repo, Section};
+use crate::app::Message;
+use crate::repo_view::{RepoView, Section};
 use crate::theme;
 use crate::ui::muted;
 
 const INDENT: f32 = 14.0;
 
-pub fn view(repo: &Repo) -> Element<'_, Message> {
+pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let needle = repo.filter.to_lowercase();
     let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
     let refs_of = |kind: RefKind| {
-        repo.refs
+        repo.snapshot
+            .refs
             .iter()
             .filter(move |r| r.kind == kind)
             .filter(|r| matches(&r.name))
@@ -46,11 +48,13 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
         .map(|r| ref_item(r, &r.name, 1))
         .collect();
 
+    // Stashes are listed only; showing them in the graph follows in M2.
     let stashes: Vec<_> = repo
+        .snapshot
         .stashes
         .iter()
         .filter(|s| matches(&s.message))
-        .map(|s| list_button(text(&s.message).into(), 1, Message::StashClicked(s.index)))
+        .map(|s| list_label(text(&s.message).wrapping(text::Wrapping::None).into(), 1))
         .collect();
 
     let sections = column![
@@ -58,11 +62,12 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
         section(repo, Section::Remote, "REMOTE", remote_count, remote),
         section(repo, Section::Tags, "TAGS", tags.len(), tags),
         section(repo, Section::Stashes, "STASHES", stashes.len(), stashes),
-        section(repo, Section::Submodules, "SUBMODULES", 0, Vec::new()),
+        submodules(),
     ]
     .spacing(6);
 
     let filter = text_input("Filter", &repo.filter)
+        .id(crate::app::FILTER_INPUT)
         .on_input(Message::FilterChanged)
         .padding([4, 8]);
 
@@ -79,7 +84,7 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
 }
 
 fn section<'a>(
-    repo: &Repo,
+    repo: &RepoView,
     section: Section,
     title: &'a str,
     count: usize,
@@ -109,20 +114,66 @@ fn section<'a>(
     }
 }
 
+/// Submodules are listed from M2 on; the header stays visible but inactive.
+fn submodules<'a>() -> Element<'a, Message> {
+    crate::ui::panel::with_tooltip(
+        container(
+            row![
+                text("▸").width(INDENT),
+                text("SUBMODULES").size(11),
+                space::horizontal(),
+            ]
+            .align_y(iced::Center),
+        )
+        .padding([4, 6])
+        .width(Fill)
+        .style(|_| container::Style {
+            text_color: Some(theme::TEXT_MUTED.scale_alpha(0.6)),
+            ..container::Style::default()
+        })
+        .into(),
+    )
+}
+
 fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element<'a, Message> {
     let marker = if reference.is_head { "✓" } else { "" };
-    let content = row![
+    let mut content = row![
         text(marker).width(INDENT).color(theme::ACCENT),
         text(label).wrapping(text::Wrapping::None),
+        space::horizontal(),
     ]
-    .into();
+    .align_y(iced::Center);
+    // Like GitKraken: commits ahead/behind the upstream as small badges.
+    if let Some(badge) = ahead_behind_badge(reference.ahead_behind) {
+        content = content.push(muted(badge).size(11));
+    }
+    let content = content.into();
 
     list_button(content, depth, Message::RefClicked(reference.name.clone()))
+}
+
+/// `↑2 ↓1` style badge; nothing when in sync or without upstream.
+pub fn ahead_behind_badge(ahead_behind: Option<(usize, usize)>) -> Option<String> {
+    let (ahead, behind) = ahead_behind?;
+    let parts: Vec<String> = [(ahead, '↑'), (behind, '↓')]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, arrow)| format!("{arrow}{n}"))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
 }
 
 fn group_label<'a>(name: &'a str) -> Element<'a, Message> {
     container(muted(name))
         .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT))
+        .into()
+}
+
+fn list_label<'a>(content: Element<'a, Message>, depth: u16) -> Element<'a, Message> {
+    container(content)
+        .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT * f32::from(depth)))
+        .width(Fill)
+        .clip(true)
         .into()
 }
 
@@ -138,4 +189,18 @@ fn list_button<'a>(
         .clip(true)
         .style(theme::list_item(false))
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ahead_behind_badges() {
+        assert_eq!(ahead_behind_badge(None), None);
+        assert_eq!(ahead_behind_badge(Some((0, 0))), None);
+        assert_eq!(ahead_behind_badge(Some((2, 0))).as_deref(), Some("↑2"));
+        assert_eq!(ahead_behind_badge(Some((0, 5))).as_deref(), Some("↓5"));
+        assert_eq!(ahead_behind_badge(Some((3, 1))).as_deref(), Some("↑3 ↓1"));
+    }
 }

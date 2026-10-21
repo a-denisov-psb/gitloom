@@ -84,9 +84,15 @@ Kahn's algorithm over the loaded commits:
 
 Result: children always before parents, newest first otherwise (equivalent to `git log --date-order`). Clock skew cannot break topology.
 
+API: `topo_order(&[GraphCommit]) -> Result<TopoOrder, git_graph::Error>`.
+
+- `Id(u32)` is the commit's position in the input slice; `GraphCommit::id` must equal it (`Error::IdMismatch` otherwise). The caller keeps the mapping to Git object ids.
+- Parent ids `>= input.len()` are missing parents (truncated or shallow history). They are reported in `TopoOrder::open_ends` as `(child, parent)`.
+- Corrupt input with cycles loses no commits: the unreachable rest is appended newest first.
+
 ### Lanes
 
-State: `lanes: Vec<Option<Slot>>`, `Slot { waiting_for: Id, color: ColorId }`.
+State: `lanes: Vec<Option<Slot>>`, `Slot { waiting_for: Id, color: ColorId, dashed: bool }`. Colors are a sequential counter; the UI maps them onto its palette (modulo).
 
 For each commit `c` in order:
 
@@ -107,7 +113,9 @@ Properties:
 - Lanes never move sideways, only free slots are reused → stable, readable graphs.
 - Two children of the same parent produce two lanes that join at the parent row (fork rendering).
 - Missing parents (truncated history) keep their lane open to the bottom of the list.
-- WIP is a virtual first row with HEAD as its only parent; its edges are `dashed`.
+- WIP is a virtual first row with HEAD as its only parent; its edges are `dashed`, including `Through` segments while the dashed lane passes newer commits. A solid edge joining a dashed lane makes it solid.
+
+API: `layout(&commits, &order, wip: Option<Wip>) -> Result<Layout, git_graph::Error>` with `Wip { head: Option<Id> }`. `Layout::row(i)` returns the `Row` below, `len()` the number of rows and `max_width` the widest row; the WIP row (if any) is row 0. Internally the layout stores vertical runs instead of one `Through` segment per row (ADR-011). `order` must be a permutation of the commits (`Error::InvalidOrder`); more than `u16::MAX` lanes give `Error::TooManyLanes`.
 
 Output per row:
 
@@ -120,7 +128,7 @@ pub struct Row {
 }
 
 pub enum Segment {
-    Through { lane: u16, color: ColorId },
+    Through { lane: u16, color: ColorId, dashed: bool },
     IntoNode { from: u16, color: ColorId, dashed: bool },
     FromNode { to: u16, color: ColorId, dashed: bool },
 }
