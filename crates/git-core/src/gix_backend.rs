@@ -46,6 +46,57 @@ impl GixBackend {
         Ok(Self { repo, root, name })
     }
 
+    /// What a batch of changed absolute paths (from a file watcher) requires.
+    /// Ignored working tree paths and `.git` internals other than the index,
+    /// refs and operation state are dropped.
+    pub fn classify_changes(&self, paths: &[PathBuf]) -> crate::ChangeSet {
+        use gix::index::entry::Mode;
+
+        let repo = self.local();
+        let git_dir = std::path::absolute(repo.git_dir()).unwrap_or_else(|_| repo.git_dir().into());
+        // Watchers may report canonical paths (e.g. /private/var on macOS).
+        let roots: Vec<PathBuf> = [Some(self.root.clone()), self.root.canonicalize().ok()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let git_dirs: Vec<PathBuf> = [Some(git_dir.clone()), git_dir.canonicalize().ok()]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let index = repo.index_or_empty().ok();
+        let mut stack = index
+            .as_ref()
+            .and_then(|index| repo.excludes(index, None, Default::default()).ok());
+        let mut ignored = crate::watch::IgnoreCache::new(|path: &Path, is_dir: bool| {
+            let mode = if is_dir { Mode::DIR } else { Mode::FILE };
+            stack.as_mut().is_some_and(|stack| {
+                stack
+                    .at_path(path, Some(mode))
+                    .is_ok_and(|platform| platform.is_excluded())
+            })
+        });
+
+        let mut changes = crate::ChangeSet::default();
+        for path in paths {
+            if let Some(relative) = git_dirs.iter().find_map(|dir| path.strip_prefix(dir).ok()) {
+                let change = crate::classify_git_path(relative);
+                changes.status |= change.status;
+                changes.refs |= change.refs;
+            } else if let Some(relative) =
+                roots.iter().find_map(|root| path.strip_prefix(root).ok())
+            {
+                if !relative.as_os_str().is_empty() && !ignored.is_ignored(relative) {
+                    changes.status = true;
+                }
+            }
+            if changes.status && changes.refs {
+                break;
+            }
+        }
+        changes
+    }
+
     fn local(&self) -> gix::Repository {
         let mut repo = self.repo.to_thread_local();
         repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);

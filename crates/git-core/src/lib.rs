@@ -10,6 +10,7 @@ mod diff;
 mod gix_backend;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
+mod watch;
 
 pub use cli_backend::{
     detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter, RunOptions,
@@ -18,6 +19,7 @@ pub use cli_backend::{
 pub use gix_backend::GixBackend;
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
+pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;
 use std::path::Path;
