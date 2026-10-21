@@ -16,6 +16,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // Fallback for systems without a folder dialog (e.g. no XDG portal on Linux).
     let path = row![
         text_input("Or enter a path", &app.start_path)
+            .id(crate::app::START_PATH_INPUT)
             .on_input(Message::StartPathChanged)
             .on_submit(Message::StartPathSubmitted)
             .padding(6)

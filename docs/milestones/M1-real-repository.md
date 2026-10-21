@@ -249,7 +249,9 @@ Acceptance:
 - Scrolling through 100k rows is fluid (no visible stutter on a mid-range machine, release build).
 - Selecting a commit outside the visible area (e.g. via sidebar) scrolls it into view.
 
-### [ ] M1-12 App: keyboard navigation and panel shortcuts
+### [x] M1-12 App: keyboard navigation and panel shortcuts
+
+> Done: `nav.rs` (pure navigation, unit tested), shortcuts in `shortcuts.rs`; text input focus is checked with `operation::is_focused` before a shortcut runs (Esc is exempt). Direction: ↓/J older, ↑/K newer — not verified against a real GitKraken (HANDOVER question 4). → / ← have no target in M1. Ctrl+J/K landed in M1-09. Manual key injection only works while the WSLg window has host focus; covered by unit tests for navigation, shortcut mapping, focus suppression and Esc.
 
 Goal: GitKraken keyboard behavior for read-only actions (see `docs/UX-PARITY.md`).
 

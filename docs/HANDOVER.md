@@ -79,4 +79,4 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 1 | Final project name ("Gitloom" is a working title) | M0 | open |
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
-| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | verify in M1-12 |
+| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | M1-12 implements the natural direction (↓/J older, ↑/K newer); maintainer please verify in GitKraken |

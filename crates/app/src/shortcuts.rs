@@ -2,6 +2,8 @@
 
 use iced::keyboard::{key::Named, Key, Modifiers};
 
+use crate::nav::Move;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shortcut {
     NewTab,
@@ -14,6 +16,17 @@ pub enum Shortcut {
     Refresh,
     ToggleSidebar,
     TogglePanel,
+    Navigate(Move),
+    FocusFilter,
+    /// Esc: close the diff view.
+    Close,
+}
+
+impl Shortcut {
+    /// Shortcuts that still work while a text input has focus.
+    pub fn works_in_text_input(self) -> bool {
+        matches!(self, Self::Close)
+    }
 }
 
 /// Maps a key press to a shortcut, if any.
@@ -21,8 +34,34 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
     let command = modifiers.command();
     let shift = modifiers.shift();
     let alt = modifiers.alt();
+    let plain = !command && !alt && !modifiers.logo();
+    // macOS: Cmd+↑ / Cmd+↓ jump to the first / last commit.
+    let mac_jump = cfg!(target_os = "macos") && modifiers.logo() && !alt;
     match key.as_ref() {
         Key::Named(Named::F5) if !command && !alt => Some(Shortcut::Refresh),
+        Key::Named(Named::Escape) if plain && !shift => Some(Shortcut::Close),
+        Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
+        Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
+        Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
+        Key::Named(Named::End) if command && !alt => Some(Shortcut::Navigate(Move::Last)),
+        Key::Named(Named::ArrowDown) if plain => Some(Shortcut::Navigate(if shift {
+            Move::FirstParent
+        } else {
+            Move::Next
+        })),
+        Key::Named(Named::ArrowUp) if plain => Some(Shortcut::Navigate(if shift {
+            Move::Child
+        } else {
+            Move::Previous
+        })),
+        Key::Character(c) if plain => match c {
+            "j" => Some(Shortcut::Navigate(Move::Next)),
+            "k" => Some(Shortcut::Navigate(Move::Previous)),
+            "J" => Some(Shortcut::Navigate(Move::FirstParent)),
+            "K" => Some(Shortcut::Navigate(Move::Child)),
+            _ => None,
+        },
+        Key::Character("f" | "F") if command && alt => Some(Shortcut::FocusFilter),
         Key::Named(Named::Tab) if modifiers.control() && !alt => Some(if shift {
             Shortcut::PreviousTab
         } else {
@@ -88,6 +127,60 @@ mod tests {
             shortcut(&ch("t"), Modifiers::COMMAND | Modifiers::ALT),
             None
         );
+    }
+
+    #[test]
+    fn graph_navigation() {
+        let none = Modifiers::empty();
+        let nav = |m| Some(Shortcut::Navigate(m));
+        assert_eq!(
+            shortcut(&Key::Named(Named::ArrowDown), none),
+            nav(Move::Next)
+        );
+        assert_eq!(
+            shortcut(&Key::Named(Named::ArrowUp), none),
+            nav(Move::Previous)
+        );
+        assert_eq!(shortcut(&ch("j"), none), nav(Move::Next));
+        assert_eq!(shortcut(&ch("k"), none), nav(Move::Previous));
+        assert_eq!(
+            shortcut(&Key::Named(Named::ArrowDown), Modifiers::SHIFT),
+            nav(Move::FirstParent)
+        );
+        assert_eq!(
+            shortcut(&Key::Named(Named::ArrowUp), Modifiers::SHIFT),
+            nav(Move::Child)
+        );
+        assert_eq!(shortcut(&ch("J"), Modifiers::SHIFT), nav(Move::FirstParent));
+        assert_eq!(shortcut(&ch("K"), Modifiers::SHIFT), nav(Move::Child));
+        assert_eq!(
+            shortcut(&Key::Named(Named::Home), Modifiers::COMMAND),
+            nav(Move::First)
+        );
+        assert_eq!(
+            shortcut(&Key::Named(Named::End), Modifiers::COMMAND),
+            nav(Move::Last)
+        );
+        // Plain Home/End and Alt+arrows are not graph shortcuts.
+        assert_eq!(shortcut(&Key::Named(Named::Home), none), None);
+        assert_eq!(
+            shortcut(&Key::Named(Named::ArrowDown), Modifiers::ALT),
+            None
+        );
+    }
+
+    #[test]
+    fn filter_focus_and_close() {
+        assert_eq!(
+            shortcut(&ch("f"), Modifiers::COMMAND | Modifiers::ALT),
+            Some(Shortcut::FocusFilter)
+        );
+        assert_eq!(
+            shortcut(&Key::Named(Named::Escape), Modifiers::empty()),
+            Some(Shortcut::Close)
+        );
+        assert!(Shortcut::Close.works_in_text_input());
+        assert!(!Shortcut::Navigate(Move::Next).works_in_text_input());
     }
 
     #[test]
