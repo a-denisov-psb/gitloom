@@ -31,8 +31,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M3 |
-| Hover file in staging | Stage/Unstage and Discard buttons appear | Stage/Unstage done (M2), Discard M2-08 |
-| Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | M2 |
+| Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
+| Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | M2 |
@@ -113,5 +113,6 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
 | Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
+| "Discard all" only discards unstaged changes and untracked files; staged changes stay | Safer default chosen in M2-08; GitKraken's exact behavior to be confirmed by the maintainer (HANDOVER open question 8) |
 | Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
