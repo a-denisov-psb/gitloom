@@ -154,6 +154,15 @@ pub enum Message {
     WipSelected,
     CommitSelected(String),
     DiffOpened(DiffRequest),
+    DiffLoaded {
+        tab: TabId,
+        request: DiffRequest,
+        result: Result<git_core::FileDiff, String>,
+    },
+    DiffScrolled {
+        offset: f32,
+        height: f32,
+    },
     GraphScrolled {
         offset: f32,
         height: f32,
@@ -217,9 +226,9 @@ pub struct App {
     save_seq: u64,
     next_tab: u64,
     focus_seq: u64,
-    /// Tab whose graph was visible after the last update; a change means the
-    /// scrollable was recreated and needs its offset restored.
-    shown_graph: Option<TabId>,
+    /// Tab and center content (graph or diff) visible after the last update;
+    /// a change means the scrollable was recreated and needs its offset restored.
+    shown_center: Option<(TabId, bool)>,
 }
 
 impl App {
@@ -238,7 +247,7 @@ impl App {
             save_seq: 0,
             next_tab: 0,
             focus_seq: 0,
-            shown_graph: None,
+            shown_center: None,
         };
         app.add_tab(TabState::Start);
         let task = match session_path {
@@ -543,18 +552,22 @@ impl App {
         Task::batch([task, details, scroll, self.persist()])
     }
 
-    /// Re-applies the stored offset when a different graph became visible.
+    /// Re-applies the stored offset when a different graph or diff became visible.
     fn restore_scroll(&mut self) -> Task<Message> {
         let shown = self.active_tab().and_then(|tab| {
             let view = tab.view()?;
-            let task = (view.scroll.offset > 0.0).then(|| scroll_to(view, view.scroll.offset));
-            matches!(view.center, CenterView::Graph).then_some((tab.id, task))
+            let (is_diff, id, offset) = match &view.center {
+                CenterView::Graph => (false, &view.graph_scroll_id, view.scroll.offset),
+                CenterView::Diff(diff) => (true, &diff.scroll_id, diff.scroll.offset),
+            };
+            let task = (offset > 0.0).then(|| scroll_by_id(id.clone(), offset));
+            Some(((tab.id, is_diff), task))
         });
-        let id = shown.as_ref().map(|(id, _)| *id);
-        if id == self.shown_graph {
+        let key = shown.as_ref().map(|(key, _)| *key);
+        if key == self.shown_center {
             return Task::none();
         }
-        self.shown_graph = id;
+        self.shown_center = key;
         shown.and_then(|(_, task)| task).unwrap_or_else(Task::none)
     }
 
@@ -651,9 +664,44 @@ impl App {
             Message::WipSelected => return self.select(Selection::Wip),
             Message::CommitSelected(id) => return self.select(Selection::Commit(id)),
             Message::DiffOpened(request) => {
+                let Some(tab) = self.tabs.get_mut(self.active) else {
+                    return Task::none();
+                };
+                let tab_id = tab.id;
+                let Some(view) = tab.view_mut() else {
+                    return Task::none();
+                };
+                view.center =
+                    CenterView::Diff(Box::new(crate::repo_view::DiffView::new(request.clone())));
+                let backend = Arc::clone(&view.backend);
+                let load = request.clone();
+                return Task::perform(
+                    blocking(move || backend.file_diff(&load).map_err(|e| e.to_string())),
+                    move |result| Message::DiffLoaded {
+                        tab: tab_id,
+                        request: request.clone(),
+                        result,
+                    },
+                );
+            }
+            Message::DiffLoaded {
+                tab,
+                request,
+                result,
+            } => {
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    if let CenterView::Diff(diff) = &mut view.center {
+                        if diff.request == request {
+                            diff.set_diff(result);
+                        }
+                    }
+                }
+            }
+            Message::DiffScrolled { offset, height } => {
                 if let Some(view) = self.active_view_mut() {
-                    view.center =
-                        CenterView::Diff(Box::new(crate::repo_view::DiffView { request }));
+                    if let CenterView::Diff(diff) = &mut view.center {
+                        diff.scroll = crate::repo_view::Scroll { offset, height };
+                    }
                 }
             }
             Message::GraphScrolled { offset, height } => {
@@ -838,8 +886,12 @@ impl App {
 }
 
 fn scroll_to(view: &RepoView, offset: f32) -> Task<Message> {
+    scroll_by_id(view.graph_scroll_id.clone(), offset)
+}
+
+fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
     iced::widget::operation::scroll_to(
-        view.graph_scroll_id.clone(),
+        id,
         iced::widget::operation::AbsoluteOffset {
             x: None,
             y: Some(offset),
@@ -1204,6 +1256,88 @@ mod tests {
         assert!(matches!(
             app.tabs[0].view().unwrap().center,
             CenterView::Graph
+        ));
+    }
+
+    fn sample_diff(lines: usize) -> git_core::FileDiff {
+        use git_core::{DiffHunk, DiffLine, DiffLineKind};
+        git_core::FileDiff {
+            old_path: Some("f".into()),
+            new_path: Some("f".into()),
+            binary: false,
+            too_large: false,
+            hunks: vec![DiffHunk {
+                header: "@@ -1 +1 @@".into(),
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                lines: (0..lines)
+                    .map(|i| DiffLine {
+                        kind: DiffLineKind::Added,
+                        old_line: None,
+                        new_line: Some(i as u32 + 1),
+                        content: format!("line {i}"),
+                        missing_newline: false,
+                    })
+                    .collect(),
+            }],
+        }
+    }
+
+    #[test]
+    fn diff_loads_in_the_background_and_ignores_stale_results() {
+        let mut app = ready_app(&["c"]);
+        let request = |path: &str| DiffRequest {
+            kind: git_core::DiffKind::Commit("c".into()),
+            path: path.into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request("f")));
+        let tab = app.tabs[0].id;
+        let diff_state = |app: &App| match &app.tabs[0].view().unwrap().center {
+            CenterView::Diff(diff) => (diff.diff.clone(), diff.rows.len()),
+            CenterView::Graph => panic!("diff closed"),
+        };
+        assert_eq!(diff_state(&app).0, Loadable::Loading);
+
+        // A result for another file (opened earlier) is dropped.
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request("other"),
+            result: Ok(sample_diff(1)),
+        });
+        assert_eq!(diff_state(&app).0, Loadable::Loading);
+
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request("f"),
+            result: Ok(sample_diff(3)),
+        });
+        let (diff, rows) = diff_state(&app);
+        assert!(matches!(diff, Loadable::Ready(_)));
+        // One header row plus three lines.
+        assert_eq!(rows, 4);
+    }
+
+    #[test]
+    fn diff_errors_are_shown() {
+        let mut app = ready_app(&["c"]);
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Staged,
+            path: "f".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            result: Err("boom".into()),
+        });
+        assert!(matches!(
+            &app.tabs[0].view().unwrap().center,
+            CenterView::Diff(diff) if diff.diff == Loadable::Failed("boom".into())
         ));
     }
 

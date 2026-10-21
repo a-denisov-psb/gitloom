@@ -128,11 +128,7 @@ impl Columns {
 
 /// Rows `first..last` intersecting the viewport, extended by [`OVERSCAN`].
 pub fn visible_range(offset: f32, height: f32, total: usize) -> (usize, usize) {
-    let top = (offset.max(0.0) / ROW_HEIGHT).floor() as usize;
-    let bottom = ((offset.max(0.0) + height.max(0.0)) / ROW_HEIGHT).ceil() as usize;
-    let first = top.saturating_sub(OVERSCAN).min(total);
-    let last = (bottom + OVERSCAN).min(total);
-    (first, last.max(first))
+    crate::ui::rows_in_view(offset, height, total, ROW_HEIGHT, OVERSCAN)
 }
 
 /// New scroll offset that brings `row` fully into view, if it is not visible.

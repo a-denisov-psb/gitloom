@@ -266,7 +266,9 @@ Acceptance:
 - Unit tests for navigation logic (parent/child jumps, bounds).
 - All shortcuts listed in UX-PARITY are marked implemented for M1.
 
-### [ ] M1-13 App: read-only diff view
+### [x] M1-13 App: read-only diff view
+
+> Done: diff loads in the background (`DiffLoaded`, stale results dropped), virtualized line list (20 px rows), Inline/Split disabled with tooltip, scroll position of graph and diff restored when shown again. Checked by hand: unstaged file with a missing trailing newline renders exactly like `git diff`; commit file diffs open from the detail panel; × returns to the graph at the previous offset on rust-lang/rust. Note: a blobless clone shows "object could not be found" for blobs that were never fetched (gix does not fetch lazily).
 
 Goal: real diffs in the center pane.
 
