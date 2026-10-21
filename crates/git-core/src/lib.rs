@@ -13,6 +13,7 @@ mod history;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
 mod patch;
+mod state;
 mod watch;
 
 pub use cli_backend::{
@@ -27,6 +28,7 @@ pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use patch::{build_patch, PatchDirection};
+pub use state::{locked_file, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;
@@ -340,7 +342,11 @@ pub trait GitBackend: Send + Sync {
     /// Content of the configured `commit.template`, if any.
     fn commit_template(&self) -> Result<Option<String>>;
 
-    /// Prepared message of a merge in progress (`MERGE_MSG`), if one is running.
+    /// Operation in progress (merge, rebase, cherry-pick, revert).
+    fn state(&self) -> Result<RepoState>;
+
+    /// Prepared message (`MERGE_MSG`) of a merge, cherry-pick or revert in
+    /// progress, if one is running.
     fn merge_message(&self) -> Result<Option<String>>;
 
     /// Working tree content of `path` as Git stores it (filters applied);

@@ -11,7 +11,7 @@ use gix::ObjectId;
 
 use crate::{
     diff, ChangeKind, Commit, DiffKind, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head,
-    Log, RefKind, Reference, Result, Stash, WorkingTree,
+    Log, RefKind, Reference, RepoState, Result, Stash, WorkingTree,
 };
 
 /// Object cache per call; avoids decoding commits twice during date-ordered walks.
@@ -357,10 +357,14 @@ impl GitBackend for GixBackend {
         Ok(std::fs::read_to_string(path).ok())
     }
 
+    fn state(&self) -> Result<RepoState> {
+        Ok(crate::state::detect(self.local().git_dir()))
+    }
+
     fn merge_message(&self) -> Result<Option<String>> {
         let repo = self.local();
         let git_dir = repo.git_dir();
-        if !git_dir.join("MERGE_HEAD").exists() {
+        if !crate::state::detect(git_dir).concluded_by_commit() {
             return Ok(None);
         }
         Ok(std::fs::read_to_string(git_dir.join("MERGE_MSG")).ok())
