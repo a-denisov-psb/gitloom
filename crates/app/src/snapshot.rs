@@ -596,6 +596,50 @@ mod perf {
             .unwrap_or(0)
     }
 
+    /// Restores a file's content when dropped, also after a failed check.
+    struct Restore(std::path::PathBuf, Vec<u8>);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, &self.1);
+        }
+    }
+
+    /// Status refresh as the watcher triggers it after one file changed:
+    /// working tree status plus the snapshot update (history reused).
+    /// Modifies `README.md` of the repository and restores it afterwards.
+    #[test]
+    #[ignore = "manual timing, needs GITLOOM_PERF_REPO"]
+    fn status_refresh_after_one_change() {
+        let Ok(path) = std::env::var("GITLOOM_PERF_REPO") else {
+            return;
+        };
+        let backend = git_core::GixBackend::discover(path).unwrap();
+        let snapshot = RepoSnapshot::load(&backend).unwrap();
+        let readme = backend.path().join("README.md");
+        let original = std::fs::read(&readme).unwrap();
+        let _restore = Restore(readme.clone(), original.clone());
+
+        let mut times = Vec::new();
+        for run in 0..7 {
+            let mut changed = original.clone();
+            changed.extend_from_slice(format!("\nperf run {run}\n").as_bytes());
+            std::fs::write(&readme, &changed).unwrap();
+            let start = std::time::Instant::now();
+            let tree = backend.working_tree().unwrap();
+            let updated = snapshot.with_working_tree(tree).unwrap();
+            times.push(start.elapsed());
+            assert_eq!(updated.working_tree.unstaged.len(), 1);
+        }
+        times.sort();
+        eprintln!(
+            "status refresh after one change: median {:?} (min {:?}, max {:?})",
+            times[times.len() / 2],
+            times[0],
+            times[times.len() - 1]
+        );
+    }
+
     #[test]
     #[ignore = "manual memory check, needs GITLOOM_PERF_REPO"]
     fn snapshot_memory() {
