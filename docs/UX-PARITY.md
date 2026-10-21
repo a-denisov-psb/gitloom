@@ -39,7 +39,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash in graph | Stash shown as node attached to its base commit | M2 |
 | Right click stash | Apply, Pop, Delete | M2 |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | M2 |
-| Merge in progress | Banner in the tab, commit concludes the merge | M2 |
+| Merge in progress | Banner in the tab, commit concludes the merge | commit with prefilled MERGE_MSG done (M2-09), banner M2-13 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 
@@ -57,9 +57,9 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Stage all files | Ctrl+Shift+S | done (M2) |
 | Unstage current file | U | done (M2) |
 | Unstage all files | Ctrl+Shift+U | done (M2) |
-| Commit staged files | Ctrl+Enter | M2 |
-| Stage all and commit | Ctrl+Shift+Enter | M2 |
-| Focus commit message | Ctrl+Shift+M | M2 |
+| Commit staged files | Ctrl+Enter | done (M2) |
+| Stage all and commit | Ctrl+Shift+Enter | done (M2) |
+| Focus commit message | Ctrl+Shift+M | done (M2) |
 
 ### Navigation
 
