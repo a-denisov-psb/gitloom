@@ -198,8 +198,12 @@ pub struct RepoView {
     pub refreshing: bool,
     /// Last refresh failed; the previous snapshot stays visible.
     pub error: Option<String>,
-    /// Empty, read-only commit description until committing arrives (M2).
+    /// Commit summary (first line).
+    pub summary: String,
+    /// Commit description.
     pub description: iced::widget::text_editor::Content,
+    /// The fields were filled from `MERGE_MSG` for the current merge.
+    pub merge_prefilled: bool,
     /// Runs write operations through the `git` executable.
     pub writer: Arc<dyn git_core::GitWriter>,
     /// Label of the running write operation; one at a time per tab.
@@ -213,6 +217,8 @@ pub struct RepoView {
     pub status_refreshing: bool,
     /// Reload the shown diff once the refresh after a write completes.
     pub reload_diff: bool,
+    /// Clear the commit message when the running write (a commit) succeeds.
+    pub clear_message_after_write: bool,
     /// Undoable actions, most recent last.
     pub undo: Vec<crate::undo::UndoAction>,
     /// Undone actions that can be redone, most recent last.
@@ -223,11 +229,49 @@ pub struct RepoView {
 }
 
 impl RepoView {
+    /// Full commit message from summary and description.
+    pub fn commit_message(&self) -> String {
+        let summary = self.summary.trim();
+        let description = self.description.text();
+        let description = description.trim();
+        if description.is_empty() {
+            summary.to_owned()
+        } else {
+            format!("{summary}\n\n{description}")
+        }
+    }
+
+    /// Fills empty message fields from a merge in progress or the commit template.
+    pub fn prefill_message(&mut self) {
+        let empty = self.summary.trim().is_empty() && self.description.text().trim().is_empty();
+        match &self.snapshot.merge_message {
+            Some(message) if !self.merge_prefilled => {
+                if empty {
+                    let (summary, description) = split_message(&strip_comments(message));
+                    self.summary = summary;
+                    self.description = iced::widget::text_editor::Content::with_text(&description);
+                }
+                self.merge_prefilled = true;
+            }
+            Some(_) => {}
+            None => {
+                self.merge_prefilled = false;
+                if empty {
+                    if let Some(template) = &self.snapshot.commit_template {
+                        self.description = iced::widget::text_editor::Content::with_text(
+                            &strip_comments(template),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub fn new(backend: Arc<dyn GitBackend>, snapshot: Arc<RepoSnapshot>) -> Self {
         let selection = restore_selection(None, &snapshot);
         let writer: Arc<dyn git_core::GitWriter> =
             Arc::new(git_core::CliBackend::new(backend.path()));
-        Self {
+        let mut view = Self {
             backend,
             snapshot,
             selection,
@@ -237,7 +281,9 @@ impl RepoView {
             collapsed: HashSet::from([Section::Submodules]),
             refreshing: false,
             error: None,
+            summary: String::new(),
             description: iced::widget::text_editor::Content::new(),
+            merge_prefilled: false,
             writer,
             busy: None,
             write_block: None,
@@ -245,11 +291,14 @@ impl RepoView {
             suppress_watch: false,
             status_refreshing: false,
             reload_diff: false,
+            clear_message_after_write: false,
             undo: Vec::new(),
             redo: Vec::new(),
             graph_scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
-        }
+        };
+        view.prefill_message();
+        view
     }
 
     pub fn name(&self) -> &str {
@@ -268,6 +317,7 @@ impl RepoView {
         self.refreshing = false;
         self.suppress_watch = false;
         self.error = None;
+        self.prefill_message();
     }
 
     /// Selected commit id, if a commit (not WIP) is selected.
@@ -276,6 +326,20 @@ impl RepoView {
             Some(Selection::Commit(id)) => Some(id),
             _ => None,
         }
+    }
+}
+
+/// Message without `#` comment lines (as Git's editor cleanup would remove them).
+pub fn strip_comments(message: &str) -> String {
+    let kept: Vec<&str> = message.lines().filter(|l| !l.starts_with('#')).collect();
+    kept.join("\n").trim().to_owned()
+}
+
+/// First line as summary, the rest (after the blank line) as description.
+pub fn split_message(message: &str) -> (String, String) {
+    match message.split_once('\n') {
+        Some((summary, rest)) => (summary.trim().to_owned(), rest.trim().to_owned()),
+        None => (message.trim().to_owned(), String::new()),
     }
 }
 
@@ -455,6 +519,19 @@ mod tests {
         assert_eq!(view.selection.len(), 2);
         view.click(3, ClickMode::Replace);
         assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 2)]);
+    }
+
+    #[test]
+    fn message_helpers() {
+        assert_eq!(
+            strip_comments("Merge branch 'x'\n\n# Conflicts:\n#\ta.txt\n"),
+            "Merge branch 'x'"
+        );
+        assert_eq!(
+            split_message("Summary\n\nBody line\nmore"),
+            ("Summary".to_owned(), "Body line\nmore".to_owned())
+        );
+        assert_eq!(split_message("Only"), ("Only".to_owned(), String::new()));
     }
 
     #[test]

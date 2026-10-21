@@ -23,6 +23,12 @@ pub enum Shortcut {
     UnstageSelected,
     StageAll,
     UnstageAll,
+    /// Ctrl+Enter: commit staged changes.
+    Commit,
+    /// Ctrl+Shift+Enter: stage everything and commit.
+    StageAllAndCommit,
+    /// Ctrl+Shift+M: focus the commit summary.
+    FocusSummary,
     /// Esc: close the dialog, the menu or the diff view (in that order).
     Close,
     /// Enter: confirm the default button of an open dialog.
@@ -33,7 +39,14 @@ impl Shortcut {
     /// Shortcuts that still work while a text input has focus
     /// (Enter only acts while a dialog is open).
     pub fn works_in_text_input(self) -> bool {
-        matches!(self, Self::Close | Self::Confirm)
+        matches!(
+            self,
+            Self::Close
+                | Self::Confirm
+                | Self::Commit
+                | Self::StageAllAndCommit
+                | Self::FocusSummary
+        )
     }
 }
 
@@ -49,6 +62,12 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
         Key::Named(Named::F5) if !command && !alt => Some(Shortcut::Refresh),
         Key::Named(Named::Escape) if plain && !shift => Some(Shortcut::Close),
         Key::Named(Named::Enter) if plain && !shift => Some(Shortcut::Confirm),
+        Key::Named(Named::Enter) if command && !alt => Some(if shift {
+            Shortcut::StageAllAndCommit
+        } else {
+            Shortcut::Commit
+        }),
+        Key::Character("m" | "M") if command && shift && !alt => Some(Shortcut::FocusSummary),
         Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
@@ -213,6 +232,21 @@ mod tests {
         let all = Modifiers::COMMAND | Modifiers::SHIFT;
         assert_eq!(shortcut(&ch("S"), all), Some(Shortcut::StageAll));
         assert_eq!(shortcut(&ch("U"), all), Some(Shortcut::UnstageAll));
+    }
+
+    #[test]
+    fn commit_shortcuts() {
+        let enter = Key::Named(Named::Enter);
+        assert_eq!(shortcut(&enter, Modifiers::COMMAND), Some(Shortcut::Commit));
+        assert_eq!(
+            shortcut(&enter, Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Shortcut::StageAllAndCommit)
+        );
+        assert_eq!(
+            shortcut(&ch("M"), Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Shortcut::FocusSummary)
+        );
+        assert!(Shortcut::Commit.works_in_text_input());
     }
 
     #[test]

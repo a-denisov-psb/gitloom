@@ -96,27 +96,86 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 
 /// Commit box, read-only until committing arrives in M2.
 fn commit_box(view: &RepoView) -> Element<'_, Message> {
-    let summary = text_input("Summary", "").padding(6);
-    let description = text_editor(&view.description)
+    let writable = view.write_block.is_none();
+    let remaining = SUMMARY_LIMIT as i64 - view.summary.chars().count() as i64;
+    let mut summary = text_input("Summary", &view.summary)
+        .id(crate::app::COMMIT_SUMMARY_INPUT)
+        .padding(6);
+    if writable {
+        summary = summary.on_input(Message::SummaryChanged);
+    }
+    let counter = muted(remaining.to_string())
+        .size(11)
+        .width(28)
+        .align_x(iced::Right)
+        .color(if remaining < 0 {
+            theme::DANGER
+        } else {
+            theme::TEXT_MUTED
+        });
+
+    let mut description = text_editor(&view.description)
         .placeholder("Description")
         .padding(6)
-        .height(90);
-    let commit = button(text("Commit changes").width(Fill).align_x(iced::Center))
+        .height(90)
+        // Ctrl+Enter commits instead of inserting a line break.
+        .key_binding(|press| {
+            let enter = matches!(
+                press.key.as_ref(),
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
+            );
+            if enter && press.modifiers.command() {
+                let shortcut = if press.modifiers.shift() {
+                    crate::shortcuts::Shortcut::StageAllAndCommit
+                } else {
+                    crate::shortcuts::Shortcut::Commit
+                };
+                return Some(text_editor::Binding::Custom(Message::Shortcut(shortcut)));
+            }
+            text_editor::Binding::from_key_press(press)
+        });
+    if writable {
+        description = description.on_action(Message::DescriptionEdited);
+    }
+
+    let staged = view.snapshot.working_tree.staged.len();
+    let merging = view.snapshot.merge_message.is_some();
+    let label = match (merging, staged) {
+        (true, _) => "Commit and conclude merge".to_string(),
+        (false, 1) => "Commit changes to 1 file".to_string(),
+        (false, n) => format!("Commit changes to {n} files"),
+    };
+    let blocker = crate::app::commit_blocker(view, false);
+    let commit = button(text(label).width(Fill).align_x(iced::Center))
         .width(Fill)
         .padding(8)
         .style(button::primary);
+    let commit: Element<'_, Message> = if writable {
+        commit
+            .on_press_maybe(
+                (blocker.is_none() && view.busy.is_none()).then_some(Message::CommitRequested),
+            )
+            .into()
+    } else {
+        write_tooltip(commit.into(), view)
+    };
 
-    column![
+    let mut content = column![
         muted("Commit"),
-        summary,
+        row![summary, counter].spacing(6).align_y(iced::Center),
         description,
-        write_tooltip(commit.into(), view),
-        muted("Committing is available from version 0.3.").size(11),
+        commit,
     ]
     .spacing(8)
-    .padding(12)
-    .into()
+    .padding(12);
+    if let Some(hint) = blocker.filter(|_| writable) {
+        content = content.push(muted(hint).size(11));
+    }
+    content.into()
 }
+
+/// GitKraken counts down from 72 characters for the summary.
+const SUMMARY_LIMIT: usize = 72;
 
 fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
     let id = row![
