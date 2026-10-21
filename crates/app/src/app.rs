@@ -1,56 +1,23 @@
-use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
-use git_core::{
-    Commit, FileChange, GitBackend, MockBackend, RefKind, Reference, Stash, WorkingTree,
-};
-use iced::widget::{pane_grid, text_editor};
-use iced::{Element, Task};
+use git_core::{DiffRequest, FileChange, GitBackend, GixBackend};
+use iced::widget::pane_grid;
+use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
+use crate::repo_view::{CenterView, CommitDetails, Loadable, RepoView, Section, Selection};
+use crate::snapshot::RepoSnapshot;
 use crate::ui;
 
-const LOG_LIMIT: usize = 5_000;
-const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// Window focus events closer together than this trigger one refresh.
+const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneKind {
     Sidebar,
     Center,
     Panel,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Section {
-    Local,
-    Remote,
-    Tags,
-    Stashes,
-    Submodules,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Selection {
-    Wip,
-    Commit(usize),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CenterView {
-    Graph,
-    Diff(DiffTarget),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiffTarget {
-    pub path: String,
-    pub source: DiffSource,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiffSource {
-    Unstaged,
-    Staged,
-    Commit(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,145 +67,116 @@ pub enum Picker {
     Branch,
 }
 
+/// Stable tab identity; async results are routed by it, not by position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TabId(u64);
+
+pub enum TabState {
+    Start,
+    Loading { path: PathBuf },
+    Ready(Box<RepoView>),
+    Failed { path: PathBuf, error: String },
+}
+
+pub struct Tab {
+    pub id: TabId,
+    pub state: TabState,
+    /// Incremented per load; results of older loads are dropped.
+    generation: u64,
+}
+
+impl Tab {
+    pub fn title(&self) -> String {
+        match &self.state {
+            TabState::Start => "New Tab".into(),
+            TabState::Ready(view) => view.name().to_owned(),
+            TabState::Loading { path } | TabState::Failed { path, .. } => {
+                path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
+            }
+        }
+    }
+
+    pub fn view(&self) -> Option<&RepoView> {
+        match &self.state {
+            TabState::Ready(view) => Some(view),
+            _ => None,
+        }
+    }
+
+    fn view_mut(&mut self) -> Option<&mut RepoView> {
+        match &mut self.state {
+            TabState::Ready(view) => Some(view),
+            _ => None,
+        }
+    }
+}
+
+/// Backend and first snapshot of a freshly opened repository.
+#[derive(Clone)]
+pub struct Opened {
+    backend: Arc<dyn GitBackend>,
+    snapshot: Arc<RepoSnapshot>,
+}
+
+impl std::fmt::Debug for Opened {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Opened")
+            .field("path", &self.backend.path())
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
-    TabSelected(usize),
-    TabClosed(usize),
+    TabSelected(TabId),
+    TabClosed(TabId),
     TabOpened,
     Toolbar(ToolbarAction),
     PickerOpened(Picker),
     PaneResized(pane_grid::ResizeEvent),
     FilterChanged(String),
     SectionToggled(Section),
-    /// Single click selects the target commit, double click checks out.
     RefClicked(String),
-    StashClicked(usize),
     WipSelected,
-    CommitSelected(usize),
-    DiffOpened(DiffTarget),
+    CommitSelected(String),
+    DiffOpened(DiffRequest),
     DiffClosed,
-    Stage(String),
-    Unstage(String),
-    StageAll,
-    UnstageAll,
-    SummaryChanged(String),
-    DescriptionEdited(text_editor::Action),
-    CommitRequested,
-}
-
-/// One open repository tab.
-pub struct Repo {
-    pub name: String,
-    pub commits: Vec<Commit>,
-    pub refs: Vec<Reference>,
-    pub stashes: Vec<Stash>,
-    pub working_tree: WorkingTree,
-    /// Changed files of the selected commit.
-    pub commit_changes: Vec<FileChange>,
-    pub selection: Selection,
-    pub center: CenterView,
-    pub filter: String,
-    pub collapsed: HashSet<Section>,
-    pub summary: String,
-    pub description: text_editor::Content,
-    backend: Box<dyn GitBackend>,
-}
-
-impl Repo {
-    pub fn open(backend: Box<dyn GitBackend>) -> git_core::Result<Self> {
-        let working_tree = backend.working_tree()?;
-        let selection = if working_tree.is_empty() {
-            Selection::Commit(0)
-        } else {
-            Selection::Wip
-        };
-
-        let mut repo = Self {
-            name: backend.name().to_string(),
-            commits: backend.log(LOG_LIMIT)?.commits,
-            refs: backend.references()?,
-            stashes: backend.stashes()?,
-            working_tree,
-            commit_changes: Vec::new(),
-            selection: Selection::Wip,
-            center: CenterView::Graph,
-            filter: String::new(),
-            collapsed: HashSet::from([Section::Submodules]),
-            summary: String::new(),
-            description: text_editor::Content::new(),
-            backend,
-        };
-        repo.select(selection);
-        Ok(repo)
-    }
-
-    pub fn head(&self) -> Option<&Reference> {
-        self.refs.iter().find(|r| r.is_head)
-    }
-
-    pub fn refs_at<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a Reference> + 'a {
-        self.refs.iter().filter(move |r| r.target == id)
-    }
-
-    fn select(&mut self, selection: Selection) {
-        self.selection = selection;
-        self.commit_changes = match selection {
-            Selection::Commit(index) => self
-                .commits
-                .get(index)
-                .and_then(|c| self.backend.commit_changes(&c.id).ok())
-                .unwrap_or_default(),
-            Selection::Wip => Vec::new(),
-        };
-    }
-
-    fn select_ref(&mut self, name: &str) {
-        let index = self
-            .refs
-            .iter()
-            .find(|r| r.name == name)
-            .and_then(|r| self.commits.iter().position(|c| c.id == r.target));
-        if let Some(index) = index {
-            self.select(Selection::Commit(index));
-        }
-    }
-
-    // TODO: route staging through the write backend once it exists.
-    fn stage(&mut self, path: &str) {
-        move_file(
-            &mut self.working_tree.unstaged,
-            &mut self.working_tree.staged,
-            path,
-        );
-    }
-
-    fn unstage(&mut self, path: &str) {
-        move_file(
-            &mut self.working_tree.staged,
-            &mut self.working_tree.unstaged,
-            path,
-        );
-    }
-}
-
-fn move_file(from: &mut Vec<FileChange>, to: &mut Vec<FileChange>, path: &str) {
-    if let Some(pos) = from.iter().position(|f| f.path == path) {
-        to.push(from.remove(pos));
-        to.sort_by(|a, b| a.path.cmp(&b.path));
-    }
+    Retry(TabId),
+    Refresh,
+    WindowFocused,
+    FocusRefreshDue(u64),
+    RepoOpened {
+        tab: TabId,
+        generation: u64,
+        result: Result<Opened, String>,
+    },
+    SnapshotLoaded {
+        tab: TabId,
+        generation: u64,
+        result: Result<Arc<RepoSnapshot>, String>,
+    },
+    CommitChangesLoaded {
+        tab: TabId,
+        id: String,
+        result: Result<Vec<FileChange>, String>,
+    },
 }
 
 pub struct App {
-    pub repos: Vec<Repo>,
+    pub tabs: Vec<Tab>,
     pub active: usize,
     pub panes: pane_grid::State<PaneKind>,
     pub status: String,
-    last_click: Option<(String, Instant)>,
-    opened: usize,
+    next_tab: u64,
+    focus_seq: u64,
 }
 
 impl App {
-    pub fn new() -> Self {
+    /// Starts with one tab per path given on the command line, or a start tab.
+    pub fn new(paths: Vec<PathBuf>) -> (Self, Task<Message>) {
         use pane_grid::{Axis, Configuration};
 
         let panes = pane_grid::State::with_configuration(Configuration::Split {
@@ -254,67 +192,167 @@ impl App {
         });
 
         let mut app = Self {
-            repos: Vec::new(),
+            tabs: Vec::new(),
             active: 0,
             panes,
-            status: "Ready".into(),
-            last_click: None,
-            opened: 0,
+            status: String::new(),
+            next_tab: 0,
+            focus_seq: 0,
         };
-        app.open_sample();
-        app
+        let tasks: Vec<_> = paths
+            .into_iter()
+            .map(|path| app.open_in_new_tab(path))
+            .collect();
+        if app.tabs.is_empty() {
+            app.add_tab(TabState::Start);
+        }
+        (app, Task::batch(tasks))
     }
 
     pub fn title(&self) -> String {
-        match self.repo() {
-            Some(repo) => format!("{} - Gitloom", repo.name),
+        match self.active_tab().and_then(Tab::view) {
+            Some(view) => format!("{} – Gitloom", view.name()),
             None => "Gitloom".into(),
         }
     }
 
-    pub fn repo(&self) -> Option<&Repo> {
-        self.repos.get(self.active)
+    pub fn active_tab(&self) -> Option<&Tab> {
+        self.tabs.get(self.active)
     }
 
-    fn repo_mut(&mut self) -> Option<&mut Repo> {
-        self.repos.get_mut(self.active)
+    fn active_view_mut(&mut self) -> Option<&mut RepoView> {
+        self.tabs.get_mut(self.active).and_then(Tab::view_mut)
     }
 
-    // TODO: replace with a folder picker and the real backend.
-    fn open_sample(&mut self) {
-        self.opened += 1;
-        let name = format!("sample-repo-{}", self.opened);
-        match Repo::open(Box::new(MockBackend::new(name))) {
-            Ok(repo) => {
-                self.repos.push(repo);
-                self.active = self.repos.len() - 1;
-            }
-            Err(error) => self.status = error.to_string(),
+    fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id == id)
+    }
+
+    fn add_tab(&mut self, state: TabState) -> TabId {
+        self.next_tab += 1;
+        let id = TabId(self.next_tab);
+        self.tabs.push(Tab {
+            id,
+            state,
+            generation: 0,
+        });
+        self.active = self.tabs.len() - 1;
+        id
+    }
+
+    fn open_in_new_tab(&mut self, path: PathBuf) -> Task<Message> {
+        let id = self.add_tab(TabState::Start);
+        self.open_in_tab(id, path)
+    }
+
+    /// Opens the repository containing `path` in tab `id`.
+    fn open_in_tab(&mut self, id: TabId, path: PathBuf) -> Task<Message> {
+        let Some(tab) = self.tab_mut(id) else {
+            return Task::none();
+        };
+        tab.generation += 1;
+        let generation = tab.generation;
+        tab.state = TabState::Loading { path: path.clone() };
+        Task::perform(
+            blocking(move || {
+                let backend: Arc<dyn GitBackend> =
+                    Arc::new(GixBackend::discover(&path).map_err(|e| e.to_string())?);
+                let snapshot = Arc::new(RepoSnapshot::load(backend.as_ref())?);
+                Ok(Opened { backend, snapshot })
+            }),
+            move |result| Message::RepoOpened {
+                tab: id,
+                generation,
+                result,
+            },
+        )
+    }
+
+    /// Reloads the snapshot of tab `id` unless a load is already running.
+    fn refresh(&mut self, id: TabId) -> Task<Message> {
+        let Some(tab) = self.tab_mut(id) else {
+            return Task::none();
+        };
+        let TabState::Ready(view) = &mut tab.state else {
+            return Task::none();
+        };
+        if view.refreshing {
+            return Task::none();
         }
+        view.refreshing = true;
+        tab.generation += 1;
+        let generation = tab.generation;
+        let backend = Arc::clone(&view.backend);
+        Task::perform(
+            blocking(move || RepoSnapshot::load(backend.as_ref()).map(Arc::new)),
+            move |result| Message::SnapshotLoaded {
+                tab: id,
+                generation,
+                result,
+            },
+        )
     }
 
-    fn is_double_click(&mut self, key: &str) -> bool {
-        let now = Instant::now();
-        let double = matches!(
-            &self.last_click,
-            Some((last, at)) if last == key && now.duration_since(*at) < DOUBLE_CLICK
-        );
-        self.last_click = (!double).then(|| (key.to_string(), now));
-        double
+    /// Loads the changed files of the selected commit if not loaded yet.
+    fn load_details(&mut self) -> Task<Message> {
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return Task::none();
+        };
+        let tab_id = tab.id;
+        let Some(view) = tab.view_mut() else {
+            return Task::none();
+        };
+        let Some(id) = view.selected_commit().map(str::to_owned) else {
+            return Task::none();
+        };
+        if view.details.as_ref().is_some_and(|d| d.id == id) {
+            return Task::none();
+        }
+        view.details = Some(CommitDetails {
+            id: id.clone(),
+            changes: Loadable::Loading,
+        });
+        let backend = Arc::clone(&view.backend);
+        let commit = id.clone();
+        Task::perform(
+            blocking(move || backend.commit_changes(&commit).map_err(|e| e.to_string())),
+            move |result| Message::CommitChangesLoaded {
+                tab: tab_id,
+                id: id.clone(),
+                result,
+            },
+        )
+    }
+
+    fn select(&mut self, selection: Selection) -> Task<Message> {
+        if let Some(view) = self.active_view_mut() {
+            view.selection = Some(selection);
+            view.center = CenterView::Graph;
+        }
+        self.load_details()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::TabSelected(index) => self.active = index,
-            Message::TabClosed(index) => {
-                if index < self.repos.len() {
-                    self.repos.remove(index);
-                    if self.active >= index && self.active > 0 {
-                        self.active -= 1;
+            Message::TabSelected(id) => {
+                if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
+                    self.active = index;
+                }
+            }
+            Message::TabClosed(id) => {
+                if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
+                    self.tabs.remove(index);
+                    if self.active > index || self.active >= self.tabs.len() {
+                        self.active = self.active.saturating_sub(1);
+                    }
+                    if self.tabs.is_empty() {
+                        self.add_tab(TabState::Start);
                     }
                 }
             }
-            Message::TabOpened => self.open_sample(),
+            Message::TabOpened => {
+                self.add_tab(TabState::Start);
+            }
             Message::Toolbar(action) => {
                 self.status = format!("{}: not implemented yet", action.label());
             }
@@ -323,107 +361,161 @@ impl App {
             }
             Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
             Message::FilterChanged(filter) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.filter = filter;
+                if let Some(view) = self.active_view_mut() {
+                    view.filter = filter;
                 }
             }
             Message::SectionToggled(section) => {
-                if let Some(repo) = self.repo_mut() {
-                    if !repo.collapsed.remove(&section) {
-                        repo.collapsed.insert(section);
+                if let Some(view) = self.active_view_mut() {
+                    if !view.collapsed.remove(&section) {
+                        view.collapsed.insert(section);
                     }
                 }
             }
             Message::RefClicked(name) => {
-                if self.is_double_click(&name) {
-                    let kind = self
-                        .repo()
-                        .and_then(|r| r.refs.iter().find(|x| x.name == name))
-                        .map(|r| r.kind);
-                    self.status = match kind {
-                        Some(RefKind::RemoteBranch) => {
-                            format!("Checkout {name} as local branch: not implemented yet")
-                        }
-                        _ => format!("Checkout {name}: not implemented yet"),
-                    };
-                } else if let Some(repo) = self.repo_mut() {
-                    repo.center = CenterView::Graph;
-                    repo.select_ref(&name);
+                let target = self.active_tab().and_then(Tab::view).and_then(|view| {
+                    view.snapshot
+                        .refs
+                        .iter()
+                        .find(|r| r.name == name)
+                        .map(|r| r.target.clone())
+                });
+                if let Some(target) = target {
+                    return self.select(Selection::Commit(target));
                 }
             }
-            Message::StashClicked(index) => {
-                self.status = format!("Show stash@{{{index}}}: not implemented yet");
-            }
-            Message::WipSelected => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.select(Selection::Wip);
-                }
-            }
-            Message::CommitSelected(index) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.select(Selection::Commit(index));
-                }
-            }
-            Message::DiffOpened(target) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.center = CenterView::Diff(target);
+            Message::WipSelected => return self.select(Selection::Wip),
+            Message::CommitSelected(id) => return self.select(Selection::Commit(id)),
+            Message::DiffOpened(request) => {
+                if let Some(view) = self.active_view_mut() {
+                    view.center =
+                        CenterView::Diff(Box::new(crate::repo_view::DiffView { request }));
                 }
             }
             Message::DiffClosed => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.center = CenterView::Graph;
+                if let Some(view) = self.active_view_mut() {
+                    view.center = CenterView::Graph;
                 }
             }
-            Message::Stage(path) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.stage(&path);
+            Message::Retry(id) => {
+                let path = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.id == id)
+                    .and_then(|t| match &t.state {
+                        TabState::Failed { path, .. } => Some(path.clone()),
+                        _ => None,
+                    });
+                return match path {
+                    Some(path) => self.open_in_tab(id, path),
+                    None => self.refresh(id),
+                };
+            }
+            Message::Refresh => {
+                if let Some(id) = self.active_tab().map(|t| t.id) {
+                    return self.refresh(id);
                 }
             }
-            Message::Unstage(path) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.unstage(&path);
+            Message::WindowFocused => {
+                self.focus_seq += 1;
+                let seq = self.focus_seq;
+                return Task::perform(tokio::time::sleep(FOCUS_DEBOUNCE), move |()| {
+                    Message::FocusRefreshDue(seq)
+                });
+            }
+            Message::FocusRefreshDue(seq) => {
+                if seq == self.focus_seq {
+                    return self.update(Message::Refresh);
                 }
             }
-            Message::StageAll => {
-                if let Some(repo) = self.repo_mut() {
-                    let paths: Vec<_> = repo
-                        .working_tree
-                        .unstaged
-                        .iter()
-                        .map(|f| f.path.clone())
-                        .collect();
-                    paths.iter().for_each(|p| repo.stage(p));
+            Message::RepoOpened {
+                tab,
+                generation,
+                result,
+            } => {
+                let Some(tab) = self.tab_mut(tab) else {
+                    return Task::none();
+                };
+                if tab.generation != generation {
+                    return Task::none();
                 }
+                let path = match &tab.state {
+                    TabState::Loading { path } => path.clone(),
+                    _ => return Task::none(),
+                };
+                tab.state = match result {
+                    Ok(opened) => {
+                        TabState::Ready(Box::new(RepoView::new(opened.backend, opened.snapshot)))
+                    }
+                    Err(error) => TabState::Failed { path, error },
+                };
+                return self.load_details();
             }
-            Message::UnstageAll => {
-                if let Some(repo) = self.repo_mut() {
-                    let paths: Vec<_> = repo
-                        .working_tree
-                        .staged
-                        .iter()
-                        .map(|f| f.path.clone())
-                        .collect();
-                    paths.iter().for_each(|p| repo.unstage(p));
+            Message::SnapshotLoaded {
+                tab,
+                generation,
+                result,
+            } => {
+                let Some(tab) = self.tab_mut(tab) else {
+                    return Task::none();
+                };
+                if tab.generation != generation {
+                    return Task::none();
                 }
-            }
-            Message::SummaryChanged(summary) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.summary = summary;
+                if let Some(view) = tab.view_mut() {
+                    match result {
+                        Ok(snapshot) => view.apply_snapshot(snapshot),
+                        Err(error) => {
+                            view.refreshing = false;
+                            view.error = Some(error);
+                        }
+                    }
                 }
+                return self.load_details();
             }
-            Message::DescriptionEdited(action) => {
-                if let Some(repo) = self.repo_mut() {
-                    repo.description.perform(action);
+            Message::CommitChangesLoaded { tab, id, result } => {
+                if let Some(details) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.details.as_mut())
+                    .filter(|d| d.id == id)
+                {
+                    details.changes = match result {
+                        Ok(changes) => Loadable::Ready(changes),
+                        Err(error) => Loadable::Failed(error),
+                    };
                 }
-            }
-            Message::CommitRequested => {
-                self.status = "Commit: not implemented yet (write backend pending)".into();
             }
         }
         Task::none()
     }
 
+    pub fn subscription(&self) -> Subscription<Message> {
+        event::listen_with(global_event)
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         ui::view(self)
     }
+}
+
+/// Maps window and keyboard events that no widget handled.
+fn global_event(event: Event, status: event::Status, _window: window::Id) -> Option<Message> {
+    match event {
+        Event::Window(window::Event::Focused) => Some(Message::WindowFocused),
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::F5),
+            ..
+        }) if status == event::Status::Ignored => Some(Message::Refresh),
+        _ => None,
+    }
+}
+
+/// Runs blocking work (Git, file I/O) on tokio's blocking pool.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| format!("Background task failed: {e}"))?
 }

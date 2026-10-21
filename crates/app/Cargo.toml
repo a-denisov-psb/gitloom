@@ -6,8 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-git-core = { path = "../git-core", features = ["mock"] }
-iced = { version = "0.14.0", features = ["canvas", "advanced"] }
+git-core = { path = "../git-core" }
+git-graph = { path = "../git-graph" }
+iced = { version = "0.14.0", features = ["canvas", "advanced", "tokio"] }
+tokio = { version = "1.53", features = ["rt", "time"] }
 
 [lints]
 workspace = true

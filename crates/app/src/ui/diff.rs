@@ -1,31 +1,28 @@
 //! Center pane: file diff (replaces the graph while open).
 
+use git_core::DiffKind;
 use iced::widget::{button, column, container, row, space, text};
 use iced::{Element, Fill};
 
-use crate::app::{DiffSource, DiffTarget, Message, Repo};
+use crate::app::Message;
+use crate::repo_view::{DiffView, RepoView};
 use crate::theme;
 use crate::ui::muted;
 
-pub fn view<'a>(repo: &'a Repo, target: &'a DiffTarget) -> Element<'a, Message> {
-    let source = match target.source {
-        DiffSource::Unstaged => "Unstaged".to_string(),
-        DiffSource::Staged => "Staged".to_string(),
-        DiffSource::Commit(index) => repo
-            .commits
-            .get(index)
-            .map_or_else(String::new, |c| format!("commit {}", c.short_id())),
+pub fn view<'a>(_repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
+    let request = &diff.request;
+    let source = match &request.kind {
+        DiffKind::Unstaged => "Unstaged".to_string(),
+        DiffKind::Untracked => "Untracked".to_string(),
+        DiffKind::Staged => "Staged".to_string(),
+        DiffKind::Commit(id) => format!("commit {}", &id[..id.len().min(7)]),
     };
-
-    // TODO: Hunk / Inline / Split modes once diffs are rendered.
-    let modes = row![mode("Hunk"), mode("Inline"), mode("Split")].spacing(2);
 
     let header = container(
         row![
-            text(&target.path),
+            text(&request.path),
             muted(source).size(12),
             space::horizontal(),
-            modes,
             button(text("×").size(15))
                 .on_press(Message::DiffClosed)
                 .padding([0, 8])
@@ -38,18 +35,11 @@ pub fn view<'a>(repo: &'a Repo, target: &'a DiffTarget) -> Element<'a, Message> 
     .width(Fill)
     .style(theme::column_header);
 
-    let body = container(muted("Diff rendering arrives with the git backend.")).center(Fill);
+    let body = container(muted("Diff rendering follows.")).center(Fill);
 
     container(column![header, body])
         .width(Fill)
         .height(Fill)
         .style(theme::graph)
-        .into()
-}
-
-fn mode(label: &str) -> Element<'_, Message> {
-    button(text(label).size(12))
-        .padding([2, 8])
-        .style(theme::flat)
         .into()
 }

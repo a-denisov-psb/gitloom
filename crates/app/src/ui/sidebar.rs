@@ -6,17 +6,19 @@ use git_core::{RefKind, Reference};
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill};
 
-use crate::app::{Message, Repo, Section};
+use crate::app::Message;
+use crate::repo_view::{RepoView, Section};
 use crate::theme;
 use crate::ui::muted;
 
 const INDENT: f32 = 14.0;
 
-pub fn view(repo: &Repo) -> Element<'_, Message> {
+pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let needle = repo.filter.to_lowercase();
     let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
     let refs_of = |kind: RefKind| {
-        repo.refs
+        repo.snapshot
+            .refs
             .iter()
             .filter(move |r| r.kind == kind)
             .filter(|r| matches(&r.name))
@@ -46,11 +48,13 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
         .map(|r| ref_item(r, &r.name, 1))
         .collect();
 
+    // Stashes are listed only; showing them in the graph follows in M2.
     let stashes: Vec<_> = repo
+        .snapshot
         .stashes
         .iter()
         .filter(|s| matches(&s.message))
-        .map(|s| list_button(text(&s.message).into(), 1, Message::StashClicked(s.index)))
+        .map(|s| list_label(text(&s.message).wrapping(text::Wrapping::None).into(), 1))
         .collect();
 
     let sections = column![
@@ -79,7 +83,7 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
 }
 
 fn section<'a>(
-    repo: &Repo,
+    repo: &RepoView,
     section: Section,
     title: &'a str,
     count: usize,
@@ -123,6 +127,14 @@ fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element
 fn group_label<'a>(name: &'a str) -> Element<'a, Message> {
     container(muted(name))
         .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT))
+        .into()
+}
+
+fn list_label<'a>(content: Element<'a, Message>, depth: u16) -> Element<'a, Message> {
+    container(content)
+        .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT * f32::from(depth)))
+        .width(Fill)
+        .clip(true)
         .into()
 }
 

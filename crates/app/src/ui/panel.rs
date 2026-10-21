@@ -1,25 +1,28 @@
 //! Right panel: staging area (WIP selected) or commit details.
 
-use git_core::{Commit, FileChange};
+use git_core::{Commit, DiffKind, DiffRequest, FileChange};
 use iced::widget::{
-    button, column, container, row, scrollable, space, text, text_editor, text_input, Column,
+    button, column, container, row, scrollable, space, text, text_editor, text_input, tooltip,
+    Column,
 };
 use iced::{Element, Fill, FillPortion};
 
-use crate::app::{CenterView, DiffSource, DiffTarget, Message, Repo, Selection};
+use crate::app::Message;
 use crate::format;
+use crate::repo_view::{CenterView, Loadable, RepoView, Selection};
 use crate::theme;
 use crate::ui::{change_badge, muted};
 
-const SUMMARY_LIMIT: usize = 72;
+const NOT_AVAILABLE: &str = "Not available yet";
 
-pub fn view(repo: &Repo) -> Element<'_, Message> {
-    let content = match repo.selection {
-        Selection::Wip => staging(repo),
-        Selection::Commit(index) => match repo.commits.get(index) {
-            Some(commit) => details(repo, index, commit),
+pub fn view(view: &RepoView) -> Element<'_, Message> {
+    let content = match &view.selection {
+        Some(Selection::Wip) => staging(view),
+        Some(Selection::Commit(id)) => match view.snapshot.commit(id) {
+            Some(commit) => details(view, commit),
             None => muted("Nothing selected").into(),
         },
+        None => container(muted("Nothing selected")).padding(12).into(),
     };
 
     container(content)
@@ -29,93 +32,71 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
         .into()
 }
 
-fn staging(repo: &Repo) -> Element<'_, Message> {
-    let tree = &repo.working_tree;
-    let branch = repo.head().map_or("(detached)", |r| r.name.as_str());
-
-    let header =
-        container(text(format!("{} file changes on {branch}", tree.len()))).padding([10, 12]);
+fn staging(view: &RepoView) -> Element<'_, Message> {
+    let tree = &view.snapshot.working_tree;
+    let header = match view.snapshot.head.branch() {
+        Some(branch) => format!("{} file changes on {branch}", tree.len()),
+        None => format!("{} file changes (detached HEAD)", tree.len()),
+    };
 
     let unstaged = file_section(
         format!("Unstaged Files ({})", tree.unstaged.len()),
-        button(text("Stage all changes").size(12))
-            .on_press_maybe((!tree.unstaged.is_empty()).then_some(Message::StageAll))
-            .padding([3, 8])
-            .style(button::success),
+        disabled_button("Stage all changes", button::success),
         tree.unstaged.iter().map(|file| {
-            file_row(
-                repo,
-                file,
-                DiffSource::Unstaged,
-                Some(("Stage", Message::Stage(file.path.clone()))),
-            )
+            let kind = if file.kind == git_core::ChangeKind::Untracked {
+                DiffKind::Untracked
+            } else {
+                DiffKind::Unstaged
+            };
+            file_row(view, file, kind)
         }),
     );
 
     let staged = file_section(
         format!("Staged Files ({})", tree.staged.len()),
-        button(text("Unstage all changes").size(12))
-            .on_press_maybe((!tree.staged.is_empty()).then_some(Message::UnstageAll))
-            .padding([3, 8])
-            .style(button::danger),
-        tree.staged.iter().map(|file| {
-            file_row(
-                repo,
-                file,
-                DiffSource::Staged,
-                Some(("Unstage", Message::Unstage(file.path.clone()))),
-            )
-        }),
+        disabled_button("Unstage all changes", button::danger),
+        tree.staged
+            .iter()
+            .map(|file| file_row(view, file, DiffKind::Staged)),
     );
 
-    column![header, unstaged, staged, commit_box(repo)].into()
+    column![
+        container(text(header)).padding([10, 12]),
+        unstaged,
+        staged,
+        commit_box(view)
+    ]
+    .into()
 }
 
-fn commit_box(repo: &Repo) -> Element<'_, Message> {
-    let staged = repo.working_tree.staged.len();
-    let remaining = SUMMARY_LIMIT as i64 - repo.summary.chars().count() as i64;
-    let can_commit = staged > 0 && !repo.summary.trim().is_empty();
-
-    let label = match staged {
-        0 => "Stage files to commit".to_string(),
-        1 => "Commit changes to 1 file".to_string(),
-        n => format!("Commit changes to {n} files"),
-    };
-
-    let summary = row![
-        text_input("Summary", &repo.summary)
-            .on_input(Message::SummaryChanged)
-            .padding(6),
-        muted(remaining.to_string())
-            .size(11)
-            .width(28)
-            .align_x(iced::Right),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-
-    let description = text_editor(&repo.description)
+/// Commit box, read-only until committing arrives in M2.
+fn commit_box(view: &RepoView) -> Element<'_, Message> {
+    let summary = text_input("Summary", "").padding(6);
+    let description = text_editor(&view.description)
         .placeholder("Description")
-        .on_action(Message::DescriptionEdited)
         .padding(6)
         .height(90);
-
-    let commit = button(text(label).width(Fill).align_x(iced::Center))
-        .on_press_maybe(can_commit.then_some(Message::CommitRequested))
+    let commit = button(text("Commit changes").width(Fill).align_x(iced::Center))
         .width(Fill)
         .padding(8)
         .style(button::primary);
 
-    column![muted("Commit"), summary, description, commit]
-        .spacing(8)
-        .padding(12)
-        .into()
+    column![
+        muted("Commit"),
+        summary,
+        description,
+        with_tooltip(commit.into()),
+        muted("Committing is available from version 0.3.").size(11),
+    ]
+    .spacing(8)
+    .padding(12)
+    .into()
 }
 
-fn details<'a>(repo: &'a Repo, index: usize, commit: &'a Commit) -> Element<'a, Message> {
+fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
     let id = row![
         muted("commit:"),
-        text(commit.short_id()).font(iced::Font::MONOSPACE),
+        text(short(&commit.id)).font(iced::Font::MONOSPACE),
     ]
     .spacing(6);
 
@@ -133,39 +114,49 @@ fn details<'a>(repo: &'a Repo, index: usize, commit: &'a Commit) -> Element<'a, 
     .spacing(2);
 
     let parents = commit.parents.iter().map(|p| {
-        muted(format!("parent: {}", &p[..p.len().min(7)]))
+        muted(format!("parent: {}", short(p)))
             .font(iced::Font::MONOSPACE)
             .size(12)
             .into()
     });
 
-    let files = repo
-        .commit_changes
-        .iter()
-        .map(|file| file_row(repo, file, DiffSource::Commit(index), None));
+    let files: Element<'a, Message> = match view.details.as_ref().map(|d| &d.changes) {
+        Some(Loadable::Ready(changes)) => column![
+            muted(format!("{} changed files", changes.len())),
+            Column::with_children(
+                changes
+                    .iter()
+                    .map(|file| { file_row(view, file, DiffKind::Commit(commit.id.clone())) })
+            ),
+        ]
+        .spacing(8)
+        .into(),
+        Some(Loadable::Failed(error)) => text(error).color(theme::DANGER).into(),
+        Some(Loadable::Loading) | None => muted("Loading changed files…").into(),
+    };
 
-    let content = column![id, text(&commit.summary).size(16),]
+    let content = column![id, text(&commit.summary).size(16)]
         .push(body)
         .push(author)
         .push(row(parents).spacing(12))
         .push(space::vertical().height(4))
-        .push(muted(format!(
-            "{} changed files",
-            repo.commit_changes.len()
-        )))
-        .push(Column::with_children(files))
+        .push(files)
         .spacing(8)
         .padding(12);
 
     scrollable(content).height(Fill).into()
 }
 
+fn short(id: &str) -> &str {
+    &id[..id.len().min(7)]
+}
+
 fn file_section<'a>(
     title: String,
-    action: impl Into<Element<'a, Message>>,
+    action: Element<'a, Message>,
     files: impl Iterator<Item = Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let header = row![text(title), space::horizontal(), action.into()]
+    let header = row![text(title), space::horizontal(), action]
         .padding([6, 12])
         .align_y(iced::Center);
 
@@ -177,38 +168,54 @@ fn file_section<'a>(
     .into()
 }
 
-fn file_row<'a>(
-    repo: &'a Repo,
-    file: &'a FileChange,
-    source: DiffSource,
-    quick_action: Option<(&'a str, Message)>,
-) -> Element<'a, Message> {
-    let target = DiffTarget {
+fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Element<'a, Message> {
+    let request = DiffRequest {
+        kind,
         path: file.path.clone(),
-        source,
+        old_path: file.old_path.clone(),
     };
-    let selected = repo.center == CenterView::Diff(target.clone());
+    let selected = matches!(&view.center, CenterView::Diff(diff) if diff.request == request);
 
-    let open = button(
+    let label = match &file.old_path {
+        Some(old) => format!("{old} → {}", file.path),
+        None => file.path.clone(),
+    };
+
+    button(
         row![
             change_badge(file.kind),
-            text(&file.path).wrapping(text::Wrapping::None),
+            text(label).wrapping(text::Wrapping::None),
         ]
         .align_y(iced::Center),
     )
-    .on_press(Message::DiffOpened(target))
+    .on_press(Message::DiffOpened(request))
     .padding([3, 12])
     .width(Fill)
     .clip(true)
-    .style(theme::list_item(selected));
+    .style(theme::list_item(selected))
+    .into()
+}
 
-    // TODO: show the quick action only on hover, like the original.
-    let action = quick_action.map(|(label, message)| {
-        button(text(label).size(11))
-            .on_press(message)
-            .padding([2, 6])
-            .style(theme::flat)
-    });
+fn disabled_button<'a>(
+    label: &'a str,
+    style: fn(&iced::Theme, button::Status) -> button::Style,
+) -> Element<'a, Message> {
+    with_tooltip(
+        button(text(label).size(12))
+            .padding([3, 8])
+            .style(style)
+            .into(),
+    )
+}
 
-    row![open].push(action).align_y(iced::Center).into()
+/// Wraps a disabled control in the standard "Not available yet" tooltip.
+pub(crate) fn with_tooltip(content: Element<'_, Message>) -> Element<'_, Message> {
+    tooltip(
+        content,
+        container(text(NOT_AVAILABLE).size(12))
+            .padding([4, 8])
+            .style(theme::tooltip),
+        tooltip::Position::Bottom,
+    )
+    .into()
 }

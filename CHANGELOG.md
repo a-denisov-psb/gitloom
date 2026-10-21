@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Real repositories are read with gitoxide in the background: history, branches, tags, stashes, working tree status and commit details. The UI stays responsive while loading.
+- Refresh with F5 and automatically when the window regains focus; load errors are shown in the tab with a "Retry" button.
+
 - Project documentation: roadmap, M1 plan, architecture, decisions, UX parity reference, handover.
 - Tooling: workspace lints, rustfmt and clippy config, check scripts, CI workflow, Claude Code setup.
 

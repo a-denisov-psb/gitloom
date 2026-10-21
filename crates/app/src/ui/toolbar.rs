@@ -3,15 +3,16 @@
 use iced::widget::{button, column, container, row, space, text};
 use iced::{Element, Fill};
 
-use crate::app::{Message, Picker, Repo, ToolbarAction};
+use crate::app::{Message, Picker, ToolbarAction};
+use crate::repo_view::RepoView;
 use crate::theme;
 use crate::ui::muted;
 
-pub fn view(repo: &Repo) -> Element<'_, Message> {
-    let branch = repo.head().map_or("(detached)", |r| r.name.as_str());
+pub fn view(view: &RepoView) -> Element<'_, Message> {
+    let branch = view.snapshot.head.branch().unwrap_or("(detached)");
 
     let pickers = row![
-        picker(Picker::Repository, "repository", &repo.name),
+        picker(Picker::Repository, "repository", view.name()),
         picker(Picker::Branch, "branch", branch),
     ]
     .spacing(20);
