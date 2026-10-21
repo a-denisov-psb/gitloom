@@ -73,6 +73,7 @@ pub fn text_diff(old: &[u8], new: &[u8]) -> TextDiff {
             new_line: new.map(|i| i + 1),
             content: display(data),
             missing_newline: last && !data.ends_with(b"\n"),
+            crlf: data.ends_with(b"\r\n"),
         };
         for change in group {
             while o < change.before.start {

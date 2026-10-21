@@ -1741,6 +1741,7 @@ mod tests {
                         new_line: Some(i as u32 + 1),
                         content: format!("line {i}"),
                         missing_newline: false,
+                        crlf: false,
                     })
                     .collect(),
             }],
