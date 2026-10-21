@@ -118,6 +118,77 @@ pub struct RunOptions<'a> {
 pub trait GitWriter: Send + Sync {
     /// Runs `git` with `args` in the repository root.
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput>;
+
+    /// True if HEAD points to a commit (false before the first commit).
+    fn has_head(&self) -> Result<bool> {
+        let read = RunOptions {
+            read_only: true,
+            ..RunOptions::default()
+        };
+        match self.run(&["rev-parse", "--verify", "--quiet", "HEAD"], read) {
+            Ok(_) => Ok(true),
+            Err(Error::Command { code: Some(1), .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Stages `paths` including deletions; staging a conflicted file marks it resolved.
+    fn stage(&self, paths: &[String]) -> Result<()> {
+        with_pathspecs(self, &["add", "--all"], paths)
+    }
+
+    /// Removes `paths` from the index (back to HEAD, or untracked before the first commit).
+    fn unstage(&self, paths: &[String]) -> Result<()> {
+        if self.has_head()? {
+            with_pathspecs(self, &["restore", "--staged"], paths)
+        } else {
+            with_pathspecs(self, &["rm", "--cached", "-r", "--quiet"], paths)
+        }
+    }
+
+    fn stage_all(&self) -> Result<()> {
+        self.run(&["add", "--all"], RunOptions::default()).map(drop)
+    }
+
+    fn unstage_all(&self) -> Result<()> {
+        if self.has_head()? {
+            self.run(&["reset", "--quiet"], RunOptions::default())
+        } else {
+            self.run(
+                &["rm", "--cached", "-r", "--quiet", "."],
+                RunOptions::default(),
+            )
+        }
+        .map(drop)
+    }
+}
+
+/// Runs `args` with `paths` passed NUL-separated on stdin, which avoids
+/// command line length limits; no-op without paths.
+fn with_pathspecs<W: GitWriter + ?Sized>(
+    writer: &W,
+    args: &[&str],
+    paths: &[String],
+) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+    }
+    let mut full = args.to_vec();
+    full.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
+    writer
+        .run(
+            &full,
+            RunOptions {
+                stdin: Some(&input),
+                read_only: false,
+            },
+        )
+        .map(drop)
 }
 
 /// Runs the `git` executable in one repository.
@@ -207,7 +278,9 @@ fn command(git: &Path) -> Command {
         // Never open an editor; messages are always passed via `-F -`.
         .env("GIT_EDITOR", ":")
         .env("GIT_SEQUENCE_EDITOR", ":")
-        .env("GIT_MERGE_AUTOEDIT", "no");
+        .env("GIT_MERGE_AUTOEDIT", "no")
+        // Paths we pass are file names, never glob patterns.
+        .env("GIT_LITERAL_PATHSPECS", "1");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;

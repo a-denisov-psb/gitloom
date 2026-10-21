@@ -2,12 +2,12 @@
 
 use git_core::{Commit, DiffKind, DiffRequest, FileChange};
 use iced::widget::{
-    button, column, container, row, scrollable, space, text, text_editor, text_input, tooltip,
-    Column,
+    button, column, container, hover, row, scrollable, space, text, text_editor, text_input,
+    tooltip, Column,
 };
 use iced::{Element, Fill, FillPortion};
 
-use crate::app::Message;
+use crate::app::{FileArea, Message};
 use crate::format;
 use crate::repo_view::{CenterView, Loadable, RepoView, Selection};
 use crate::theme;
@@ -43,7 +43,13 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 
     let unstaged = file_section(
         format!("Unstaged Files ({})", tree.unstaged.len()),
-        disabled_button(view, "Stage all changes", button::success),
+        all_button(
+            view,
+            "Stage all changes",
+            button::success,
+            !tree.unstaged.is_empty(),
+            Message::StageAll,
+        ),
         tree.unstaged.iter().map(|file| {
             let kind = if file.kind == git_core::ChangeKind::Untracked {
                 DiffKind::Untracked
@@ -56,7 +62,13 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 
     let staged = file_section(
         format!("Staged Files ({})", tree.staged.len()),
-        disabled_button(view, "Unstage all changes", button::danger),
+        all_button(
+            view,
+            "Unstage all changes",
+            button::danger,
+            !tree.staged.is_empty(),
+            Message::UnstageAll,
+        ),
         tree.staged
             .iter()
             .map(|file| file_row(view, file, DiffKind::Staged)),
@@ -183,6 +195,11 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         None => file.path.clone(),
     };
 
+    let area = match &request.kind {
+        DiffKind::Staged => FileArea::Staged,
+        DiffKind::Unstaged | DiffKind::Untracked => FileArea::Unstaged,
+        DiffKind::Commit(_) => FileArea::Commit,
+    };
     let row = button(
         row![
             change_badge(file.kind),
@@ -195,25 +212,54 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
     .width(Fill)
     .clip(true)
     .style(theme::list_item(selected));
-    let path = file.path.clone();
-    context_area(row, move |position| Message::FileContextMenu {
-        path: path.clone(),
+
+    // Like GitKraken: the stage/unstage button appears while hovering the row.
+    let quick_action = match area {
+        FileArea::Unstaged => Some(("Stage File", Message::Stage(file.clone()))),
+        FileArea::Staged => Some(("Unstage File", Message::Unstage(file.clone()))),
+        FileArea::Commit => None,
+    };
+    let content: Element<'a, Message> = match quick_action {
+        Some((label, message)) if view.write_block.is_none() && view.busy.is_none() => hover(
+            row,
+            container(
+                button(text(label).size(11))
+                    .on_press(message)
+                    .padding([2, 8])
+                    .style(button::secondary),
+            )
+            .align_x(iced::Right)
+            .align_y(iced::Center)
+            .padding([0, 8])
+            .width(Fill)
+            .height(Fill),
+        ),
+        _ => row.into(),
+    };
+
+    let file = file.clone();
+    context_area(content, move |position| Message::FileContextMenu {
+        file: file.clone(),
+        area,
         position,
     })
 }
 
-fn disabled_button<'a>(
+/// "Stage all" / "Unstage all": active when writing is possible and the list is not empty.
+fn all_button<'a>(
     view: &RepoView,
     label: &'a str,
     style: fn(&iced::Theme, button::Status) -> button::Style,
+    enabled: bool,
+    message: Message,
 ) -> Element<'a, Message> {
-    write_tooltip(
-        button(text(label).size(12))
-            .padding([3, 8])
-            .style(style)
-            .into(),
-        view,
-    )
+    let button = button(text(label).size(12)).padding([3, 8]).style(style);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    button
+        .on_press_maybe((enabled && view.busy.is_none()).then_some(message))
+        .into()
 }
 
 /// Wraps a disabled control in the standard "Not available yet" tooltip.

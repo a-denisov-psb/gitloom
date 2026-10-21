@@ -31,9 +31,9 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M3 |
-| Hover file in staging | Stage/Unstage and Discard buttons appear | M2 |
+| Hover file in staging | Stage/Unstage and Discard buttons appear | Stage/Unstage done (M2), Discard M2-08 |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | M2 |
-| Stage file | Selection moves to the next unstaged file and shows its diff | M2 |
+| Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | M2 |
 | Stash in graph | Stash shown as node attached to its base commit | M2 |
 | Right click stash | Apply, Pop, Delete | M2 |
@@ -52,10 +52,10 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|---|
 | Create branch | Ctrl+B | M3 |
 | Fetch all | Ctrl+L | M3 |
-| Stage current file | S | M2 |
-| Stage all files | Ctrl+Shift+S | M2 |
-| Unstage current file | U | M2 |
-| Unstage all files | Ctrl+Shift+U | M2 |
+| Stage current file | S | done (M2) |
+| Stage all files | Ctrl+Shift+S | done (M2) |
+| Unstage current file | U | done (M2) |
+| Unstage all files | Ctrl+Shift+U | done (M2) |
 | Commit staged files | Ctrl+Enter | M2 |
 | Stage all and commit | Ctrl+Shift+Enter | M2 |
 | Focus commit message | Ctrl+Shift+M | M2 |

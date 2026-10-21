@@ -195,6 +195,30 @@ impl RepoView {
     }
 }
 
+/// File to select after `path` left `list` (by staging or unstaging):
+/// the next one, or the previous one if it was the last (GitKraken behavior).
+pub fn next_file_after<'a>(list: &'a [FileChange], path: &str) -> Option<&'a FileChange> {
+    let index = list.iter().position(|f| f.path == path)?;
+    list.get(index + 1)
+        .or_else(|| index.checked_sub(1).and_then(|i| list.get(i)))
+}
+
+/// Diff request that shows `file` from the given list.
+pub fn diff_request(file: &FileChange, staged: bool) -> DiffRequest {
+    let kind = if staged {
+        git_core::DiffKind::Staged
+    } else if file.kind == git_core::ChangeKind::Untracked {
+        git_core::DiffKind::Untracked
+    } else {
+        git_core::DiffKind::Unstaged
+    };
+    DiffRequest {
+        kind,
+        path: file.path.clone(),
+        old_path: file.old_path.clone(),
+    }
+}
+
 /// Graph row of a selection, if it is visible in the snapshot.
 pub fn selection_row(selection: Option<&Selection>, snapshot: &RepoSnapshot) -> Option<usize> {
     match selection? {
@@ -277,6 +301,25 @@ mod tests {
 
     fn commit(id: &str) -> Selection {
         Selection::Commit(id.into())
+    }
+
+    fn change(path: &str) -> FileChange {
+        FileChange {
+            path: path.into(),
+            kind: ChangeKind::Modified,
+            old_path: None,
+        }
+    }
+
+    #[test]
+    fn next_file_after_staging() {
+        let list = [change("a"), change("b"), change("c")];
+        assert_eq!(next_file_after(&list, "a").unwrap().path, "b");
+        assert_eq!(next_file_after(&list, "b").unwrap().path, "c");
+        // The last one falls back to the previous file.
+        assert_eq!(next_file_after(&list, "c").unwrap().path, "b");
+        assert!(next_file_after(&list[..1], "a").is_none());
+        assert!(next_file_after(&list, "missing").is_none());
     }
 
     #[test]

@@ -152,7 +152,9 @@ Acceptance:
 - Editing a tracked file updates the WIP row within 1 s.
 - Unit tests for event classification.
 
-### [ ] M2-06 Stage and unstage files
+### [x] M2-06 Stage and unstage files
+
+> Done: `GitWriter::stage/unstage/stage_all/unstage_all` (paths NUL-separated via `--pathspec-from-file`, `GIT_LITERAL_PATHSPECS=1`; unborn HEAD uses `git rm --cached`; renames unstage both paths). The selection rule applies when the staged file's diff is shown; unstaging moves within the staged list the same way (not specified, symmetric choice). Checked by hand: hover button stages, the next file's diff opens, an existing `index.lock` shows the error dialog with Git's output.
 
 - Hovering a file row shows the "Stage File" / "Unstage File" button (remove the always-visible variant).
 - "Stage all changes" / "Unstage all changes" buttons.
