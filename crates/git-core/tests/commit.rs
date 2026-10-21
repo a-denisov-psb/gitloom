@@ -3,7 +3,7 @@
 
 mod support;
 
-use git_core::{CliBackend, Error, GitBackend, GitWriter, GixBackend};
+use git_core::{CliBackend, GitBackend, GitWriter, GixBackend};
 use support::TestRepo;
 
 /// Repository whose commits through CliBackend do not depend on the user's
@@ -49,6 +49,7 @@ fn first_commit_in_an_empty_repository() {
 #[cfg(unix)]
 #[test]
 fn failing_pre_commit_hook_reports_its_output() {
+    use git_core::Error;
     use std::os::unix::fs::PermissionsExt as _;
     let repo = isolated();
     repo.commit("a.txt", "a\n", "Base");
