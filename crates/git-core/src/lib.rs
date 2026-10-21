@@ -3,13 +3,18 @@
 //! The UI only talks to [`GitBackend`]. Concrete implementations:
 //! - [`GixBackend`]: read operations via gitoxide
 //! - `MockBackend`: static sample data, only for tests and the `mock` feature
-//! - `CliBackend` (planned, M2): write operations via the `git` executable
+//! - [`CliBackend`]: write operations via the `git` executable
 
+mod cli_backend;
 mod diff;
 mod gix_backend;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
 
+pub use cli_backend::{
+    detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter, RunOptions,
+    MIN_GIT_VERSION,
+};
 pub use gix_backend::GixBackend;
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
@@ -249,6 +254,12 @@ pub enum Error {
     BareRepository(String),
     NotFound(String),
     Backend(String),
+    /// A `git` command failed.
+    Command {
+        command: String,
+        code: Option<i32>,
+        stderr: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -260,6 +271,20 @@ impl fmt::Display for Error {
             }
             Error::NotFound(what) => write!(f, "Not found: {what}"),
             Error::Backend(msg) => write!(f, "Git error: {msg}"),
+            Error::Command {
+                command,
+                code,
+                stderr,
+            } => {
+                match code {
+                    Some(code) => write!(f, "{command} failed (exit code {code})")?,
+                    None => write!(f, "{command} was terminated")?,
+                }
+                if !stderr.is_empty() {
+                    write!(f, ": {stderr}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
