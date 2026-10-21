@@ -2124,7 +2124,8 @@ mod tests {
         let _ = app.update(Message::StartPathSubmitted);
         assert!(app.start_path.is_empty());
         assert!(
-            matches!(&app.tabs[0].state, TabState::Loading { path } if path == std::path::Path::new("/some/repo"))
+            // On Windows the path gets the current drive.
+            matches!(&app.tabs[0].state, TabState::Loading { path } if *path == std::path::absolute("/some/repo").unwrap())
         );
     }
 
