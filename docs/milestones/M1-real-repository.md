@@ -139,7 +139,9 @@ Acceptance:
 - Integration tests on temp repos: linear, branches, merge, annotated + lightweight tag, detached HEAD, stash, repo opened from a subfolder, not-a-repo error, bare repo error.
 - Opening `rust-lang/rust` and loading 100k commits takes < 1.5 s in release mode (manual check, note the time in the task).
 
-### [ ] M1-05 `GixBackend`: working tree status
+### [x] M1-05 `GixBackend`: working tree status
+
+> Done: `FileChange` got `old_path` for renames. Untracked files are listed individually (like GitKraken), unstaged renames are not detected (same as `git status`). Timing (release, rust-lang/rust, clean worktree): ≈ 65 ms.
 
 Goal: real staged/unstaged lists.
 
