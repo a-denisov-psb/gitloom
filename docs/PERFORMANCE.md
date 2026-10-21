@@ -24,6 +24,24 @@ Measurements for M1 (task M1-15). Release builds, numbers are medians of 3 runs 
 | Memory with 100k commits loaded (private memory, ADR-012) | < 300 MB | **146 MB** private (`RssAnon`); reported separately: 208 MB memory-mapped pack files, 42 MB shared GPU buffers, 396 MB total RSS | `/proc/<pid>/status` after the graph is shown |
 | Scrolling 100k rows | fluid | Only visible rows (+10 overscan) are built per frame; wheel and scrollbar dragging work without visible delay in WSLg | by hand |
 
+## M2: working copy (task M2-16)
+
+Same machine and repository. Release builds.
+
+| Metric | Target | Result | How |
+|---|---|---|---|
+| Status refresh after one file change (status + snapshot update, history reused) | < 200 ms | **78 ms** median of 7 (75–83 ms) | `GITLOOM_PERF_REPO=<path> cargo test -p gitloom --release status_refresh_after_one_change -- --ignored --nocapture` (modifies and restores `README.md`) |
+| Status on large clean repo | < 1 s | **87 ms** | perf test `status` |
+| Watcher idle CPU, rust-lang/rust open | ≈ 0 % | **0.00 %** (0 ticks in 60 s); was 0.48 % before the fix below | `/proc/<pid>/stat` utime + stime over 60 s |
+| Refresh caused by ignored paths | none | 20 000 files written into ignored `build/` and `target/`: 0.15 s CPU in total for event handling and classification, no refresh; `classify_changes` of 11 000 ignored paths: 15 ms, empty result | by hand; perf test `ignored_build_output_causes_no_refresh` |
+| External change visible | < 1 s | WIP row shown 1 s after appending to `README.md` (screenshot) | by hand |
+| Stage one hunk of a 1.8 MB file (340 hunks) | – | diff **16 ms**, build patch + `git apply --cached` **8 ms** | `cargo test -p git-core --release --test perf stage_hunk -- --ignored --nocapture` |
+| Lane layout, 100k commits, without hints (M2-15) | no regression | 7.9–8.1 ms vs. 7.5–7.9 ms before (run-to-run variance) | `cargo bench -p git-graph` |
+
+### Fixed in M2-16
+
+- **Watcher feedback loop**: batches consisting only of access events were still classified; classifying opens `.git/info/exclude`, which produced the next access event, about three times per second (0.48 % CPU, one tokio worker). Access events are now dropped in the watcher callback.
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |
@@ -44,4 +62,6 @@ The memory target counts private memory (heap and anonymous mappings, ADR-012): 
 
 1. **Pack mappings** (optional, not part of the target): check whether gix can release or limit mapped pack data after loading.
 2. **Allocator retention after refresh**: evaluate returning memory after a snapshot swap (e.g. a different global allocator); needs a decision because it adds a dependency.
-3. **Incremental refresh** (with the file watcher in M2): reuse the commit list when only the working tree changed, instead of rebuilding the full snapshot on every window focus.
+3. ~~**Incremental refresh**~~: done in M2-05 (status-only refresh reuses the history).
+
+Items 1 and 2 were checked in M2-16 and stay open: neither is cheap (gix has no simple switch to unmap packs after loading; a different allocator is a new dependency and needs a decision).
