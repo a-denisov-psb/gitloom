@@ -39,7 +39,7 @@ Verified:
 Not done / known limitations:
 
 - CI has not run yet (starts with M2-01); Windows and macOS are untested.
-- Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0.
+- Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0. Fixed in M2-14: missing blobs are fetched through `git cat-file blob`.
 - Keyboard shortcuts still need a check on a real display (M2-01, maintainer).
 - Working tree files are diffed as-is (no CRLF/LFS filters).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
