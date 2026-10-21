@@ -339,6 +339,25 @@ impl GitBackend for GixBackend {
         Ok(files)
     }
 
+    fn commit_template(&self) -> Result<Option<String>> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        let Some(path) = config.trusted_path("commit.template").map_err(backend)? else {
+            return Ok(None);
+        };
+        // A missing template file is ignored like Git warns and continues.
+        Ok(std::fs::read_to_string(path).ok())
+    }
+
+    fn merge_message(&self) -> Result<Option<String>> {
+        let repo = self.local();
+        let git_dir = repo.git_dir();
+        if !git_dir.join("MERGE_HEAD").exists() {
+            return Ok(None);
+        }
+        Ok(std::fs::read_to_string(git_dir.join("MERGE_MSG")).ok())
+    }
+
     fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>> {
         let repo = self.local();
         match worktree_file(&repo, &self.root, path)? {
