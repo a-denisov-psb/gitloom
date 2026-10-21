@@ -35,9 +35,9 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
-| Stash (toolbar) | Stashes all changes including untracked files | M2 |
-| Stash in graph | Stash shown as node attached to its base commit | M2 |
-| Right click stash | Apply, Pop, Delete | M2 |
+| Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
+| Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
+| Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Banner in the tab, commit concludes the merge | commit with prefilled MERGE_MSG done (M2-09), banner M2-13 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
