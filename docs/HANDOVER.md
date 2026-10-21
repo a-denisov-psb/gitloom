@@ -29,6 +29,7 @@ Done (M1-01 … M1-16, see the notes in `docs/milestones/M1-real-repository.md`)
 - `app`: background loading per tab, refresh (F5, window focus), open flow (start screen with native folder dialog as the default way, typed path as fallback, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
 - Measurements: `docs/PERFORMANCE.md` (memory target counts private memory, ADR-012).
 - Branches: `master` with `v0.1.0` (M0) and `v0.2.0` (M1), `develop`.
+- GitHub repository exists (default branch `develop`); CI runs from M2-01 on.
 
 Verified:
 
@@ -37,20 +38,19 @@ Verified:
 
 Not done / known limitations:
 
-- CI has never run (no remote yet); Windows and macOS are untested.
+- CI has not run yet (starts with M2-01); Windows and macOS are untested.
 - Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0.
-- Keyboard shortcuts and the J/K direction still need a check on a real display.
+- Keyboard shortcuts still need a check on a real display (M2-01, maintainer).
 - Working tree files are diffed as-is (no CRLF/LFS filters).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
 
-## Follow-up tasks (for M2 planning)
+## Maintainer to-dos
 
-| Task | Origin |
-|---|---|
-| Blobless/partial clones: fall back to `CliBackend` (which fetches missing blobs like plain Git) for diffs; until then show an understandable message instead of "object could not be found" | M1 release |
-| LaneHints preparation for a Git-flow aware graph layout (backlog "Git flow graph layout") — not implemented in M1-03 and not part of the M1 plan in this repo; add the backlog entry and plan it | M1 release |
-| Incremental refresh with the file watcher instead of rebuilding the full snapshot on every window focus | M1-15 |
-| Optional: release or limit gix pack mappings; allocator retention after refresh | M1-15 |
+Tasks only the maintainer can do. Claude Code adds new items here and ticks them off when done.
+
+- [ ] GitHub → Settings → General → Default branch: set to `develop`.
+- [ ] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`
+- [ ] Delete the accidental `main` branch on GitHub (only after the default branch is `develop`): `git push origin --delete main`
 
 ## Environment notes
 
@@ -76,7 +76,7 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 
 1. Read `CLAUDE.md` and this file.
 2. Run `./scripts/check.sh`.
-3. Run `/next-task` → starts M1-01.
+3. `/next-task` starts the current milestone.
 
 ## Open questions
 
@@ -85,7 +85,7 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 1 | Final project name ("Gitloom" is a working title) | M0 | open |
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
-| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | M1-12 implements the natural direction (↓/J older, ↑/K newer); maintainer please verify in GitKraken |
+| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | done: confirmed by maintainer (J down/older, K up/newer) |
 | 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |
 | 6 | Memory target: accept "private memory < 300 MB" or require total RSS | M1-15 | done: private memory counts (ADR-012) |
 | 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | done: native dialog is the default on all platforms, path input stays as fallback |

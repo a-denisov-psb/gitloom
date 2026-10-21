@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M2 – Working copy** → milestone file to be planned with the maintainer (M1 finished with v0.2.0, see [`milestones/M1-real-repository.md`](milestones/M1-real-repository.md)).
+**M2 – Working copy: stage, commit, stash** → [`milestones/M2-working-copy.md`](milestones/M2-working-copy.md)
 
 ## Vision
 
@@ -14,7 +14,7 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 |---|---|---|---|
 | M0 | 0.1.0 | Layout shell | Done |
 | M1 | 0.2.0 | Real repository (read-only) and lane graph | Done |
-| M2 | 0.3.0 | Working copy: stage, commit, stash | Next |
+| M2 | 0.3.0 | Working copy: stage, commit, stash | In progress |
 | M3 | 0.4.0 | Branches and remotes | Planned |
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Planned |
 | M5 | 0.6.0 | Productivity parity | Planned |
@@ -32,12 +32,7 @@ Open any local non-bare repository and see real history with a correct lane grap
 
 ### M2 – Working copy
 
-- Stage and unstage by file, hunk and line; discard changes
-- Commit, amend, commit message templates; commit box behavior like GitKraken
-- Stash, pop, apply, drop; stashes shown in the graph
-- File watcher with automatic refresh
-- Introduce `CliBackend` for write operations (hooks, signing, credential helpers work as in plain Git)
-- Undo for commit and discard (reflog based)
+The daily loop without a terminal: file watcher, stage/unstage and discard by file, hunk and line, commit and amend, stash with stashes in the graph, undo/redo for commit, amend and discard. All writes go through the new `CliBackend`. Context menu and modal infrastructure moved here from M3. Details: [`milestones/M2-working-copy.md`](milestones/M2-working-copy.md).
 
 ### M3 – Branches and remotes
 
@@ -45,7 +40,7 @@ Open any local non-bare repository and see real history with a correct lane grap
 - Create, rename, delete branches; tags
 - Fetch, pull (fast-forward, merge, rebase), push including force-with-lease
 - Ahead/behind indicators, upstream management
-- Context menus in graph and sidebar
+- Context menus for commits and branches (infrastructure from M2)
 - Drag and drop a branch onto another branch → merge/rebase menu
 
 ### M4 – Merge, rebase, conflicts
@@ -63,7 +58,14 @@ Open any local non-bare repository and see real history with a correct lane grap
 
 ### M6 – Release readiness (1.0)
 
-- Installers: Windows (MSI, winget), macOS (signed, notarized dmg), Linux (AppImage, Flatpak, deb)
+- Automated release builds via GitHub Actions on every version tag (`v*.*.*`,
+  including hotfixes), attached to a draft GitHub release with SHA256 checksums:
+  - Linux: AppImage + `.tar.gz` (built on the oldest supported Ubuntu LTS for glibc compatibility)
+  - macOS: universal binary (arm64 + x86_64 via `lipo`) as signed and notarized `.app` in `.dmg`
+  - Windows x64: portable `.zip` + `.msi`, signed
+  - Windows x86: portable `.zip` + `.msi`, best effort (a failing x86 build must not block the release)
+  - Packaging tool candidate: `cargo-packager` (AppImage, dmg, msi from one config)
+- Code signing: Apple Developer ID (notarization), Windows code signing certificate or cloud signing service
 - Opt-in update check, crash logs, accessibility pass, user documentation
 
 ## Non-goals
@@ -77,4 +79,10 @@ Open any local non-bare repository and see real history with a correct lane grap
 
 Own ideas that go beyond GitKraken. To be collected and assigned to milestones with the maintainer.
 
-- _(open)_
+- **Git flow graph layout** (after M3): if git flow is initialized (`gitflow.*` config),
+  render the graph like the classic git flow diagram: fixed lane groups from left to right
+  (master, hotfix/*, release/*, develop, feature/*), one color per branch type.
+  Branch membership is inferred from git flow config, first-parent chains of branch tips
+  and merge commit messages (to recover deleted feature branches). Toggle in the toolbar;
+  falls back to the default layout when git flow is not configured.
+  Prepared in M2-15 via `LaneHints`.

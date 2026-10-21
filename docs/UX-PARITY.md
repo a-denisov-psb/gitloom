@@ -31,7 +31,14 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M3 |
-| Hover file in staging | Shows stage/unstage button | M2 |
+| Hover file in staging | Stage/Unstage and Discard buttons appear | M2 |
+| Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | M2 |
+| Stage file | Selection moves to the next unstaged file and shows its diff | M2 |
+| Stash (toolbar) | Stashes all changes including untracked files | M2 |
+| Stash in graph | Stash shown as node attached to its base commit | M2 |
+| Right click stash | Apply, Pop, Delete | M2 |
+| Amend | "Amend previous commit" checkbox fills message from HEAD | M2 |
+| Merge in progress | Banner in the tab, commit concludes the merge | M2 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 
@@ -57,11 +64,11 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Next / previous item | ↓ / J older, ↑ / K newer (natural direction; verify against GitKraken, its docs table looks swapped) | done (M1) |
+| Next / previous item | ↓ / J next (older), ↑ / K previous (newer) | done (M1) |
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | M4 |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | M2 (commit, amend, discard), rest M4 |
 
 ### Command palette and search
 
@@ -105,4 +112,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | F5 refreshes the repository | No file watcher until M2 |
 | Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
+| Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
