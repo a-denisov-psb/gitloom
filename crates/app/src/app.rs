@@ -129,6 +129,13 @@ pub enum Message {
         offset: f32,
         height: f32,
     },
+    /// Click on a diff line (display row index).
+    DiffLineClicked(usize),
+    /// Stage or unstage hunk `index` of the shown diff.
+    ApplyHunk(usize),
+    /// Stage or unstage the selected lines of the shown diff.
+    ApplySelectedLines,
+    ModifiersChanged(keyboard::Modifiers),
     GraphScrolled {
         offset: f32,
         height: f32,
@@ -239,6 +246,8 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
+    /// Keyboard modifiers held right now (for Shift/Ctrl clicks).
+    modifiers: keyboard::Modifiers,
     /// Where the session is stored; `None` disables persistence (tests).
     session_path: Option<PathBuf>,
     /// The session file was read; before that nothing is written.
@@ -268,6 +277,7 @@ impl App {
             modal: None,
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
+            modifiers: keyboard::Modifiers::default(),
             session_path: session_path.clone(),
             session_loaded: false,
             pending_paths: paths,
@@ -647,6 +657,78 @@ impl App {
         }
     }
 
+    /// Stages (or unstages) the lines of the shown diff for which `pick`
+    /// is true, then reloads the diff at the same position.
+    fn apply_diff_lines(
+        &mut self,
+        pick: impl Fn(&crate::repo_view::DiffView, usize, usize) -> bool,
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let CenterView::Diff(diff) = &view.center else {
+            return Task::none();
+        };
+        let (Some(staged), Loadable::Ready(file)) = (diff.staged(), &diff.diff) else {
+            return Task::none();
+        };
+        let direction = if staged {
+            git_core::PatchDirection::Unstage
+        } else {
+            git_core::PatchDirection::Stage
+        };
+        let Some(patch) = git_core::build_patch(file, direction, |h, l| pick(diff, h, l)) else {
+            return Task::none();
+        };
+        let label = format!(
+            "{} lines of {}",
+            if staged { "Unstage" } else { "Stage" },
+            diff.request.path
+        );
+        let task = self.run_write(tab, label, move |git| git.apply_cached(&patch, staged));
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                view.reload_diff = true;
+            }
+        }
+        task
+    }
+
+    /// Reloads the shown diff after a write, keeping its scroll position.
+    fn reload_diff(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        view.reload_diff = false;
+        let tree = view.snapshot.working_tree.clone();
+        let backend = Arc::clone(&view.backend);
+        let CenterView::Diff(diff) = &mut view.center else {
+            return Task::none();
+        };
+        // A partly staged new file is tracked now.
+        if diff.request.kind == git_core::DiffKind::Untracked
+            && tree
+                .unstaged
+                .iter()
+                .any(|f| f.path == diff.request.path && f.kind != git_core::ChangeKind::Untracked)
+        {
+            diff.request.kind = git_core::DiffKind::Unstaged;
+        }
+        let request = diff.request.clone();
+        let load = request.clone();
+        Task::perform(
+            blocking(move || backend.file_diff(&load).map_err(|e| e.to_string())),
+            move |result| Message::DiffLoaded {
+                tab,
+                request: request.clone(),
+                result,
+            },
+        )
+    }
+
     /// File whose diff is open in the active tab, with the list it belongs to.
     fn selected_file(&self) -> Option<(git_core::FileChange, bool)> {
         let view = self.active_tab()?.view()?;
@@ -882,6 +964,26 @@ impl App {
                 return iced::clipboard::write(text);
             }
             Message::WindowResized(size) => self.window_size = size,
+            Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
+            Message::DiffLineClicked(row) => {
+                let mode = if self.modifiers.shift() {
+                    crate::repo_view::ClickMode::Range
+                } else if self.modifiers.command() {
+                    crate::repo_view::ClickMode::Toggle
+                } else {
+                    crate::repo_view::ClickMode::Replace
+                };
+                if let Some(view) = self.active_view_mut() {
+                    if let CenterView::Diff(diff) = &mut view.center {
+                        diff.click(row, mode);
+                    }
+                }
+            }
+            Message::ApplyHunk(index) => return self.apply_diff_lines(move |_, h, _| h == index),
+            Message::ApplySelectedLines => {
+                return self
+                    .apply_diff_lines(|diff, h, l| diff.selection.contains(&(h as u32, l as u32)))
+            }
             Message::WriteFinished { tab, label, result } => {
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
@@ -1190,6 +1292,8 @@ impl App {
                 if tab.generation != generation {
                     return Task::none();
                 }
+                let id = tab.id;
+                let mut reload = false;
                 if let Some(view) = tab.view_mut() {
                     match result {
                         Ok(snapshot) => view.apply_snapshot(snapshot),
@@ -1198,6 +1302,10 @@ impl App {
                             view.error = Some(error);
                         }
                     }
+                    reload = view.reload_diff;
+                }
+                if reload {
+                    return Task::batch([self.reload_diff(id), self.load_details()]);
                 }
                 return self.load_details();
             }
@@ -1261,6 +1369,9 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
     match event {
         Event::Window(window::Event::Focused) => Some(Message::WindowFocused),
         Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
+        Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+            Some(Message::ModifiersChanged(modifiers))
+        }
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
             if status == event::Status::Ignored =>
         {
@@ -1741,6 +1852,7 @@ mod tests {
                         new_line: Some(i as u32 + 1),
                         content: format!("line {i}"),
                         missing_newline: false,
+                        crlf: false,
                     })
                     .collect(),
             }],
@@ -1780,6 +1892,83 @@ mod tests {
         assert!(matches!(diff, Loadable::Ready(_)));
         // One header row plus three lines.
         assert_eq!(rows, 4);
+    }
+
+    /// Staging app showing a loaded unstaged diff of "a" with three added lines.
+    fn app_with_open_diff(kind: git_core::DiffKind) -> App {
+        let mut app = staging_app(&["a"], &[]);
+        let request = DiffRequest {
+            kind,
+            path: "a".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            result: Ok(sample_diff(3)),
+        });
+        app
+    }
+
+    fn open_diff(app: &App) -> &crate::repo_view::DiffView {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Diff(diff) => diff,
+            CenterView::Graph => panic!("no diff"),
+        }
+    }
+
+    #[test]
+    fn line_clicks_follow_the_modifier_keys() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        let _ = app.update(Message::DiffLineClicked(1));
+        let _ = app.update(Message::ModifiersChanged(keyboard::Modifiers::SHIFT));
+        let _ = app.update(Message::DiffLineClicked(3));
+        assert_eq!(open_diff(&app).selection.len(), 3);
+        let _ = app.update(Message::ModifiersChanged(keyboard::Modifiers::COMMAND));
+        let _ = app.update(Message::DiffLineClicked(2));
+        let selected: Vec<_> = open_diff(&app).selection.iter().copied().collect();
+        assert_eq!(selected, [(0, 0), (0, 2)]);
+    }
+
+    #[test]
+    fn applying_lines_reloads_the_diff_after_the_refresh() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        let _ = app.update(Message::DiffLineClicked(2));
+        let _ = app.update(Message::ApplySelectedLines);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Stage lines of a"));
+        assert!(view.reload_diff);
+
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Stage lines of a".into(),
+            result: Ok(()),
+        });
+        let generation = app.tabs[0].generation;
+        let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+        let _ = app.update(Message::SnapshotLoaded {
+            tab,
+            generation,
+            result: Ok(snapshot),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(!view.reload_diff, "diff reload was requested");
+        assert!(
+            matches!(view.center, CenterView::Diff(_)),
+            "diff stays open"
+        );
+    }
+
+    #[test]
+    fn hunk_staging_is_not_offered_for_commit_diffs() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Commit("c".into()));
+        let _ = app.update(Message::ApplyHunk(0));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        let _ = app.update(Message::DiffLineClicked(1));
+        assert!(open_diff(&app).selection.is_empty());
     }
 
     #[test]

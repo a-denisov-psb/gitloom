@@ -46,6 +46,21 @@ pub struct DiffView {
     pub rows: Vec<(u32, u32)>,
     pub scroll_id: iced::widget::Id,
     pub scroll: Scroll,
+    /// Selected changed lines as `(hunk, line)`.
+    pub selection: std::collections::BTreeSet<(u32, u32)>,
+    /// Row index of the last plain or Ctrl click (start of a Shift range).
+    pub anchor: Option<usize>,
+}
+
+/// How a line click changes the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickMode {
+    /// Plain click: select only this line.
+    Replace,
+    /// Shift+click: select the range from the anchor.
+    Range,
+    /// Ctrl/Cmd+click: toggle this line.
+    Toggle,
 }
 
 /// Marks a hunk header row in [`DiffView::rows`].
@@ -59,12 +74,72 @@ impl DiffView {
             rows: Vec::new(),
             scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
+            selection: std::collections::BTreeSet::new(),
+            anchor: None,
+        }
+    }
+
+    /// Whether lines of this diff can be staged (`Some(false)`) or unstaged (`Some(true)`).
+    pub fn staged(&self) -> Option<bool> {
+        match self.request.kind {
+            git_core::DiffKind::Unstaged | git_core::DiffKind::Untracked => Some(false),
+            git_core::DiffKind::Staged => Some(true),
+            git_core::DiffKind::Commit(_) => None,
+        }
+    }
+
+    /// True if display row `row` is a changed (selectable) line.
+    fn is_changed(&self, row: usize) -> bool {
+        let Loadable::Ready(file) = &self.diff else {
+            return false;
+        };
+        self.rows.get(row).is_some_and(|&(h, l)| {
+            l != HUNK_HEADER
+                && file
+                    .hunks
+                    .get(h as usize)
+                    .and_then(|hunk| hunk.lines.get(l as usize))
+                    .is_some_and(|line| line.kind != git_core::DiffLineKind::Context)
+        })
+    }
+
+    /// Applies a click on display row `row` to the line selection.
+    pub fn click(&mut self, row: usize, mode: ClickMode) {
+        // Commit diffs are read-only.
+        if self.staged().is_none() || !self.is_changed(row) {
+            return;
+        }
+        let Some(&key) = self.rows.get(row) else {
+            return;
+        };
+        match (mode, self.anchor) {
+            (ClickMode::Range, Some(anchor)) => {
+                let (from, to) = (anchor.min(row), anchor.max(row));
+                for r in from..=to {
+                    if self.is_changed(r) {
+                        self.selection.insert(self.rows[r]);
+                    }
+                }
+            }
+            (ClickMode::Toggle, _) => {
+                if !self.selection.remove(&key) {
+                    self.selection.insert(key);
+                }
+                self.anchor = Some(row);
+            }
+            (ClickMode::Replace | ClickMode::Range, _) => {
+                self.selection.clear();
+                self.selection.insert(key);
+                self.anchor = Some(row);
+            }
         }
     }
 
     /// Stores the loaded diff and flattens its hunks into display rows.
     pub fn set_diff(&mut self, diff: Result<FileDiff, String>) {
         self.rows.clear();
+        self.selection.clear();
+        self.anchor = None;
         match diff {
             Ok(diff) => {
                 for (h, hunk) in diff.hunks.iter().enumerate() {
@@ -136,6 +211,8 @@ pub struct RepoView {
     pub suppress_watch: bool,
     /// A status-only refresh is running.
     pub status_refreshing: bool,
+    /// Reload the shown diff once the refresh after a write completes.
+    pub reload_diff: bool,
     /// Identifies this tab's graph scrollable for programmatic scrolling.
     pub graph_scroll_id: iced::widget::Id,
     pub scroll: Scroll,
@@ -163,6 +240,7 @@ impl RepoView {
             watcher: WatchState::Starting,
             suppress_watch: false,
             status_refreshing: false,
+            reload_diff: false,
             graph_scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
         }
@@ -309,6 +387,68 @@ mod tests {
             kind: ChangeKind::Modified,
             old_path: None,
         }
+    }
+
+    fn loaded_diff() -> DiffView {
+        use git_core::{DiffHunk, DiffLine, DiffLineKind};
+        let line = |kind| DiffLine {
+            kind,
+            old_line: None,
+            new_line: None,
+            content: String::new(),
+            missing_newline: false,
+            crlf: false,
+        };
+        let mut view = DiffView::new(DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "f".into(),
+            old_path: None,
+        });
+        view.set_diff(Ok(FileDiff {
+            old_path: Some("f".into()),
+            new_path: Some("f".into()),
+            binary: false,
+            too_large: false,
+            hunks: vec![DiffHunk {
+                header: "@@".into(),
+                old_start: 1,
+                old_count: 3,
+                new_start: 1,
+                new_count: 3,
+                // Rows: 0 header, 1 context, 2 removed, 3 added, 4 added, 5 context.
+                lines: vec![
+                    line(DiffLineKind::Context),
+                    line(DiffLineKind::Removed),
+                    line(DiffLineKind::Added),
+                    line(DiffLineKind::Added),
+                    line(DiffLineKind::Context),
+                ],
+            }],
+        }));
+        view
+    }
+
+    #[test]
+    fn line_selection_clicks() {
+        let mut view = loaded_diff();
+        view.click(2, ClickMode::Replace);
+        assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 1)]);
+        view.click(4, ClickMode::Range);
+        assert_eq!(
+            view.selection.iter().copied().collect::<Vec<_>>(),
+            [(0, 1), (0, 2), (0, 3)]
+        );
+        view.click(3, ClickMode::Toggle);
+        assert_eq!(
+            view.selection.iter().copied().collect::<Vec<_>>(),
+            [(0, 1), (0, 3)]
+        );
+        // Context lines and headers are not selectable.
+        view.click(1, ClickMode::Replace);
+        view.click(0, ClickMode::Replace);
+        assert_eq!(view.selection.len(), 2);
+        view.click(3, ClickMode::Replace);
+        assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 2)]);
     }
 
     #[test]

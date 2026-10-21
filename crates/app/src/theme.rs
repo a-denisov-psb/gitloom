@@ -231,12 +231,26 @@ pub fn diff_hunk_header(_: &Theme) -> container::Style {
     filled(BG_PANEL)
 }
 
-/// Diff line background by kind.
-pub fn diff_line(kind: git_core::DiffLineKind) -> impl Fn(&Theme) -> container::Style {
-    move |_| match kind {
-        git_core::DiffLineKind::Context => container::Style::default(),
-        git_core::DiffLineKind::Added => filled(SUCCESS.scale_alpha(0.16)),
-        git_core::DiffLineKind::Removed => filled(DANGER.scale_alpha(0.16)),
+/// Diff line background by kind; selected lines are stronger and outlined.
+pub fn diff_line(
+    kind: git_core::DiffLineKind,
+    selected: bool,
+) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let alpha = if selected { 0.38 } else { 0.16 };
+        let style = match kind {
+            git_core::DiffLineKind::Context => container::Style::default(),
+            git_core::DiffLineKind::Added => filled(SUCCESS.scale_alpha(alpha)),
+            git_core::DiffLineKind::Removed => filled(DANGER.scale_alpha(alpha)),
+        };
+        if selected {
+            container::Style {
+                border: Border::default().width(1).color(ACCENT.scale_alpha(0.8)),
+                ..style
+            }
+        } else {
+            style
+        }
     }
 }
 

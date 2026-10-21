@@ -33,6 +33,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Drag branch onto branch | Merge/rebase menu | M3 |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | Stage/Unstage done (M2), Discard M2-08 |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | M2 |
+| Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | M2 |
 | Stash in graph | Stash shown as node attached to its base commit | M2 |

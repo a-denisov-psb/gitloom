@@ -71,6 +71,18 @@ impl TestRepo {
         String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 
+    /// Runs `git` in the repository root and returns raw stdout (not trimmed).
+    pub fn git_bytes(&self, args: &[&str]) -> Vec<u8> {
+        let output = self.run_git(&self.root, args);
+        assert!(
+            output.status.success(),
+            "git {} failed:\n{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+
     /// Runs `git` in the repository root and returns whether it succeeded,
     /// for commands that are expected to fail (e.g. conflicting merges).
     pub fn try_git(&self, args: &[&str]) -> bool {

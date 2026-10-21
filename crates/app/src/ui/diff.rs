@@ -1,7 +1,7 @@
 //! Center pane: read-only file diff (replaces the graph while open).
 
 use git_core::{DiffHunk, DiffKind, DiffLine, DiffLineKind, FileDiff};
-use iced::widget::{button, column, container, row, scrollable, space, text, Column};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text, Column};
 use iced::{alignment, Element, Fill, Font};
 
 use crate::app::Message;
@@ -16,7 +16,7 @@ const MARKER_WIDTH: f32 = 16.0;
 const OVERSCAN: usize = 20;
 const TEXT_SIZE: f32 = 12.0;
 
-pub fn view<'a>(_repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
+pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
     let request = &diff.request;
     let source = match &request.kind {
         DiffKind::Unstaged => "Unstaged".to_string(),
@@ -36,17 +36,43 @@ pub fn view<'a>(_repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message>
     ]
     .spacing(2);
 
+    // Staging actions for the selected lines (working tree diffs only).
+    let selection_action = match diff.staged() {
+        Some(staged) if !diff.selection.is_empty() => {
+            let label = if staged {
+                "Unstage selected lines"
+            } else {
+                "Stage selected lines"
+            };
+            let button = button(text(label).size(12))
+                .padding([2, 8])
+                .style(if staged {
+                    button::danger
+                } else {
+                    button::success
+                });
+            Some(write_action(repo, button, Message::ApplySelectedLines))
+        }
+        _ => None,
+    };
+
     let header = container(
         row![
             text(title).wrapping(text::Wrapping::None),
             muted(source).size(12),
             space::horizontal(),
-            modes,
-            button(text("×").size(15))
-                .on_press(Message::DiffClosed)
-                .padding([0, 8])
-                .style(theme::flat),
         ]
+        .push(selection_action)
+        .push(
+            row![
+                modes,
+                button(text("×").size(15))
+                    .on_press(Message::DiffClosed)
+                    .padding([0, 8])
+                    .style(theme::flat),
+            ]
+            .spacing(12),
+        )
         .spacing(12)
         .padding([6, 12])
         .align_y(iced::Center),
@@ -58,7 +84,7 @@ pub fn view<'a>(_repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message>
     let body: Element<'a, Message> = match &diff.diff {
         Loadable::Loading => centered(muted("Loading diff…")),
         Loadable::Failed(error) => centered(text(error).color(theme::DANGER)),
-        Loadable::Ready(file) => content(diff, file),
+        Loadable::Ready(file) => content(repo, diff, file),
     };
 
     container(column![header, body])
@@ -68,7 +94,7 @@ pub fn view<'a>(_repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message>
         .into()
 }
 
-fn content<'a>(diff: &'a DiffView, file: &'a FileDiff) -> Element<'a, Message> {
+fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> Element<'a, Message> {
     if file.binary {
         return centered(muted("Binary file not shown"));
     }
@@ -94,15 +120,28 @@ fn content<'a>(diff: &'a DiffView, file: &'a FileDiff) -> Element<'a, Message> {
     );
     let mut rows = Column::with_capacity(last - first + 2)
         .push(space::vertical().height(first as f32 * LINE_HEIGHT));
-    for &(hunk, line) in &diff.rows[first..last] {
-        let Some(hunk) = file.hunks.get(hunk as usize) else {
+    let staged = diff.staged();
+    for (offset, &(h, l)) in diff.rows[first..last].iter().enumerate() {
+        let row_index = first + offset;
+        let Some(hunk) = file.hunks.get(h as usize) else {
             continue;
         };
-        rows = rows.push(if line == HUNK_HEADER {
-            hunk_header(hunk)
+        rows = rows.push(if l == HUNK_HEADER {
+            hunk_header(repo, hunk, h as usize, staged)
         } else {
-            match hunk.lines.get(line as usize) {
-                Some(line) => diff_line(line),
+            match hunk.lines.get(l as usize) {
+                Some(line) => {
+                    let selected = diff.selection.contains(&(h, l));
+                    let element = diff_line(line, selected);
+                    if staged.is_some() && line.kind != DiffLineKind::Context {
+                        mouse_area(element)
+                            .on_press(Message::DiffLineClicked(row_index))
+                            .interaction(iced::mouse::Interaction::Pointer)
+                            .into()
+                    } else {
+                        element
+                    }
+                }
                 None => space::vertical().height(LINE_HEIGHT).into(),
             }
         });
@@ -119,23 +158,39 @@ fn content<'a>(diff: &'a DiffView, file: &'a FileDiff) -> Element<'a, Message> {
         .into()
 }
 
-fn hunk_header(hunk: &DiffHunk) -> Element<'_, Message> {
-    container(
-        text(&hunk.header)
-            .font(Font::MONOSPACE)
-            .size(TEXT_SIZE)
-            .color(theme::TEXT_MUTED)
-            .wrapping(text::Wrapping::None),
-    )
-    .padding([0, 12])
-    .height(LINE_HEIGHT)
-    .width(Fill)
-    .align_y(alignment::Vertical::Center)
-    .style(theme::diff_hunk_header)
-    .into()
+fn hunk_header<'a>(
+    repo: &'a RepoView,
+    hunk: &'a DiffHunk,
+    index: usize,
+    staged: Option<bool>,
+) -> Element<'a, Message> {
+    let mut content = row![text(&hunk.header)
+        .font(Font::MONOSPACE)
+        .size(TEXT_SIZE)
+        .color(theme::TEXT_MUTED)
+        .wrapping(text::Wrapping::None)]
+    .align_y(iced::Center);
+    if let Some(staged) = staged {
+        let label = if staged { "Unstage hunk" } else { "Stage hunk" };
+        let button = button(text(label).size(11))
+            .padding([0, 8])
+            .style(button::secondary);
+        content = content.push(space::horizontal()).push(write_action(
+            repo,
+            button,
+            Message::ApplyHunk(index),
+        ));
+    }
+    container(content)
+        .padding([0, 12])
+        .height(LINE_HEIGHT)
+        .width(Fill)
+        .align_y(alignment::Vertical::Center)
+        .style(theme::diff_hunk_header)
+        .into()
 }
 
-fn diff_line(line: &DiffLine) -> Element<'_, Message> {
+fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
     let number = |n: Option<u32>| {
         container(
             text(n.map_or_else(String::new, |n| n.to_string()))
@@ -176,8 +231,22 @@ fn diff_line(line: &DiffLine) -> Element<'_, Message> {
     .width(Fill)
     .clip(true)
     .align_y(alignment::Vertical::Center)
-    .style(theme::diff_line(line.kind))
+    .style(theme::diff_line(line.kind, selected))
     .into()
+}
+
+/// Write button: enabled unless writing is blocked or busy (then with the reason).
+fn write_action<'a>(
+    repo: &RepoView,
+    button: iced::widget::Button<'a, Message>,
+    message: Message,
+) -> Element<'a, Message> {
+    if repo.write_block.is_some() {
+        return crate::ui::panel::write_tooltip(button.into(), repo);
+    }
+    button
+        .on_press_maybe(repo.busy.is_none().then_some(message))
+        .into()
 }
 
 fn mode_button(label: &str, active: bool) -> Element<'_, Message> {

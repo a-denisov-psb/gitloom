@@ -146,6 +146,23 @@ pub trait GitWriter: Send + Sync {
         }
     }
 
+    /// Applies `patch` to the index (`reverse` for unstaging).
+    fn apply_cached(&self, patch: &str, reverse: bool) -> Result<()> {
+        let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
+        if reverse {
+            args.push("--reverse");
+        }
+        args.push("-");
+        self.run(
+            &args,
+            RunOptions {
+                stdin: Some(patch.as_bytes()),
+                read_only: false,
+            },
+        )
+        .map(drop)
+    }
+
     fn stage_all(&self) -> Result<()> {
         self.run(&["add", "--all"], RunOptions::default()).map(drop)
     }

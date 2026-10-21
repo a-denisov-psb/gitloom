@@ -10,6 +10,7 @@ mod diff;
 mod gix_backend;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
+mod patch;
 mod watch;
 
 pub use cli_backend::{
@@ -19,6 +20,7 @@ pub use cli_backend::{
 pub use gix_backend::GixBackend;
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
+pub use patch::{build_patch, PatchDirection};
 pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;
@@ -247,6 +249,8 @@ pub struct DiffLine {
     pub content: String,
     /// Last line of its version without a trailing newline.
     pub missing_newline: bool,
+    /// The line ended with `\r\n` (needed to rebuild exact patches).
+    pub crlf: bool,
 }
 
 #[derive(Debug, Clone)]
