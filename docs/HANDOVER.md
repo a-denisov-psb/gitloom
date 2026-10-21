@@ -20,31 +20,28 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M0, version 0.1.0)
+## Current state (M1 implemented on `develop`, not released)
 
-Done:
+Done (M1-01 … M1-15, see the notes in `docs/milestones/M1-real-repository.md`):
 
-- Cargo workspace: `git-core` (types, `GitBackend` trait, `MockBackend`), `app` (iced 0.14 UI, binary `gitloom`).
-- Full layout shell: tabs, toolbar, sidebar, graph table with WIP row and single-lane graph, staging panel, commit details, diff placeholder, status bar, resizable panes.
-- Theme module with all colors and styles.
-- Tooling: workspace lints, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `scripts/check.sh` + `.ps1`, CI workflow prepared (`.github/workflows/ci.yml`, active once pushed to GitHub).
-- Claude Code setup: `CLAUDE.md`, `.claude/settings.json`, slash commands.
+- `git-core`: `GixBackend` (gix 0.88) for log, refs with upstream ahead/behind, HEAD, stashes, working tree status, commit changes and file diffs; `MockBackend` only behind the `mock` feature.
+- `git-graph`: topological order and stable lane layout, stored as vertical runs (ADR-011); criterion benchmark.
+- `app`: background loading per tab, refresh (F5, window focus), open flow (start screen, folder dialog, typed path, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
+- Measurements: `docs/PERFORMANCE.md`.
 
 Verified:
 
-- Builds with Rust 1.91 (MSRV set to 1.88 because iced 0.14 requires it).
-- `cargo fmt`, `cargo clippy -D warnings`, tests pass.
-- App ran under a virtual display (software renderer); layout, commit selection, diff opening and branch double click detection were checked by hand.
+- `./scripts/check.sh` green on Linux (WSL2, Rust 1.99.1).
+- UI checked by hand through WSLg/XWayland (screenshots and synthetic mouse input); keyboard input could only be injected while the window had host focus, so shortcuts are mainly covered by unit tests.
 
-Known limitations (all addressed in M1 unless noted):
+Not done / known limitations:
 
-- All data is sample data from `MockBackend`.
-- Graph uses a single lane.
-- Staging is in-memory only; toolbar actions only write a status message.
-- Selection uses row indices instead of commit ids.
-- Rows are not virtualized.
-- Icons are Unicode placeholders (M5).
-- Double click is detected in `App::update` with a 400 ms timer, because iced buttons swallow the events a `mouse_area` would need. Keep this approach for sidebar items.
+- M1-16 (release v0.2.0) is waiting for the maintainer. There is no `master` branch and no `v0.1.0` tag yet (the repository started with an initial commit on `develop`).
+- CI has never run (no remote yet); Windows and macOS are untested.
+- Total RSS with rust-lang/rust is 396 MB (target 300 MB) because of memory-mapped pack files; private memory ≈ 190 MB. Follow-ups in `docs/PERFORMANCE.md`.
+- Partial (blobless) clones: diffs of blobs that were never fetched show "object could not be found" (gix does not fetch lazily).
+- Working tree files are diffed as-is (no CRLF/LFS filters).
+- Icons are Unicode placeholders (M5); remote markers on pills are text.
 
 ## Environment notes
 
@@ -80,3 +77,6 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
 | 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | M1-12 implements the natural direction (↓/J older, ↑/K newer); maintainer please verify in GitKraken |
+| 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | open |
+| 6 | Memory target: accept "private memory < 300 MB" or require total RSS (needs the pack-mapping follow-up) | M1-15 | open |
+| 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | open |
