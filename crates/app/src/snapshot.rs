@@ -210,7 +210,7 @@ mod tests {
         let ids: Vec<_> = snapshot.commits.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, ["c", "b", "a"]);
         assert_eq!(snapshot.index["a"], 2);
-        assert_eq!(snapshot.layout.rows.len(), 3);
+        assert_eq!(snapshot.layout.len(), 3);
         assert!(!snapshot.has_wip);
         assert_eq!(
             snapshot
@@ -234,7 +234,7 @@ mod tests {
         };
         let snapshot = RepoSnapshot::build(log, head, Vec::new(), Vec::new(), dirty()).unwrap();
         assert!(snapshot.has_wip);
-        assert_eq!(snapshot.layout.rows.len(), 2);
+        assert_eq!(snapshot.layout.len(), 2);
         assert_eq!(snapshot.row_of(0), 1);
     }
 
@@ -254,7 +254,7 @@ mod tests {
         )
         .unwrap();
         // Two separate open lanes, not one merged lane.
-        assert_eq!(snapshot.layout.rows[0].width, 2);
+        assert_eq!(snapshot.layout.row(0).unwrap().width, 2);
         assert!(snapshot.truncated);
     }
 
@@ -286,6 +286,56 @@ mod tests {
         )
         .unwrap();
         assert!(snapshot.commits.is_empty());
-        assert_eq!(snapshot.layout.rows.len(), 1);
+        assert_eq!(snapshot.layout.len(), 1);
+    }
+}
+
+/// Manual memory check against a large repository:
+/// `GITLOOM_PERF_REPO=<path> cargo test -p gitloom --release snapshot_memory -- --ignored --nocapture`
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    fn rss_kb() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1)?.parse().ok())
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    #[ignore = "manual memory check, needs GITLOOM_PERF_REPO"]
+    fn snapshot_memory() {
+        let Ok(path) = std::env::var("GITLOOM_PERF_REPO") else {
+            return;
+        };
+        let before = rss_kb();
+        let backend = git_core::GixBackend::discover(path).unwrap();
+        let start = std::time::Instant::now();
+        let snapshot = RepoSnapshot::load(&backend).unwrap();
+        let elapsed = start.elapsed();
+        let after = rss_kb();
+
+        let text: usize = snapshot
+            .commits
+            .iter()
+            .map(|c| c.summary.len() + c.body.len() + c.author.len() + c.email.len())
+            .sum();
+        let bodies: usize = snapshot.commits.iter().map(|c| c.body.len()).sum();
+        let segments: usize = snapshot.layout.rows().map(|r| r.segments.len()).sum();
+        eprintln!(
+            "snapshot of {} commits in {elapsed:?}: RSS +{} MB, text {} MB (bodies {} MB), \
+             {segments} segments if stored per row ({} MB), max width {}",
+            snapshot.commits.len(),
+            (after.saturating_sub(before)) / 1024,
+            text / 1_000_000,
+            bodies / 1_000_000,
+            segments * std::mem::size_of::<git_graph::Segment>() / 1_000_000,
+            snapshot.layout.max_width,
+        );
     }
 }

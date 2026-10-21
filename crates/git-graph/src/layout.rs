@@ -1,4 +1,9 @@
 //! Lane layout: per-row graph geometry (see `docs/ARCHITECTURE.md` → "Graph layout").
+//!
+//! Wide histories keep hundreds of lanes open, so storing a `Through`
+//! segment per lane and row would grow with rows × lanes. The layout
+//! therefore stores vertical runs ([`Span`]) and the curve segments per row,
+//! and rebuilds full [`Row`]s on demand.
 
 use crate::{check_ids, Error, GraphCommit, Id};
 
@@ -13,13 +18,111 @@ pub struct Wip {
     pub head: Option<Id>,
 }
 
-/// Geometry of all rows.
+/// Rows between two checkpoints of the span index.
+const BUCKET: usize = 64;
+
+/// Geometry of all rows: the WIP row first (if requested), then one row per
+/// commit in the given order. Use [`Layout::row`] to get a row's segments.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Layout {
-    /// The WIP row first (if requested), then one row per commit in the given order.
-    pub rows: Vec<Row>,
+    /// Node lane, node color and width per row.
+    nodes: Vec<(u16, ColorId, u16)>,
+    /// `IntoNode` and `FromNode` segments of all rows, row by row.
+    curves: Vec<Segment>,
+    /// `curves[curve_start[r]..curve_start[r + 1]]` belong to row `r`.
+    curve_start: Vec<u32>,
+    /// Vertical runs of `Through` segments, sorted by first row.
+    spans: Vec<Span>,
+    /// Spans covering row `b * BUCKET`, for every bucket `b`.
+    checkpoints: Vec<Vec<u32>>,
     /// Maximum [`Row::width`] over all rows.
     pub max_width: u16,
+}
+
+/// `Through` segments of one lane in rows `start..end`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Span {
+    start: u32,
+    end: u32,
+    lane: u16,
+    color: ColorId,
+    dashed: bool,
+}
+
+impl Layout {
+    /// Number of rows.
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Lane of the node in row `index` (cheaper than building the row).
+    pub fn node_lane(&self, index: usize) -> Option<u16> {
+        self.nodes.get(index).map(|n| n.0)
+    }
+
+    /// Geometry of row `index`.
+    pub fn row(&self, index: usize) -> Option<Row> {
+        let &(lane, color, width) = self.nodes.get(index)?;
+        let curves =
+            &self.curves[self.curve_start[index] as usize..self.curve_start[index + 1] as usize];
+
+        let mut segments: Vec<Segment> = self
+            .spans_at(index)
+            .map(|span| Segment::Through {
+                lane: span.lane,
+                color: span.color,
+                dashed: span.dashed,
+            })
+            .chain(
+                curves
+                    .iter()
+                    .copied()
+                    .filter(|s| matches!(s, Segment::IntoNode { .. })),
+            )
+            .collect();
+        // Every lane appears at most once in the upper half.
+        segments.sort_unstable_by_key(|s| s.lane());
+        segments.extend(
+            curves
+                .iter()
+                .copied()
+                .filter(|s| matches!(s, Segment::FromNode { .. })),
+        );
+        Some(Row {
+            lane,
+            color,
+            segments,
+            width,
+        })
+    }
+
+    /// All rows in order (built on demand).
+    pub fn rows(&self) -> impl Iterator<Item = Row> + '_ {
+        (0..self.len()).filter_map(|r| self.row(r))
+    }
+
+    /// Spans with `start <= row < end`.
+    fn spans_at(&self, row: usize) -> impl Iterator<Item = &Span> {
+        let bucket = row / BUCKET;
+        let base = (bucket * BUCKET) as u32;
+        let row = row as u32;
+        let from_checkpoint = self
+            .checkpoints
+            .get(bucket)
+            .into_iter()
+            .flatten()
+            .filter_map(|&i| self.spans.get(i as usize));
+        // Spans starting after the checkpoint row, up to `row`.
+        let lo = self.spans.partition_point(|s| s.start <= base);
+        let hi = self.spans.partition_point(|s| s.start <= row);
+        from_checkpoint
+            .chain(self.spans[lo..hi.max(lo)].iter())
+            .filter(move |s| s.start <= row && row < s.end)
+    }
 }
 
 /// Geometry of one row.
@@ -93,17 +196,48 @@ pub fn layout(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>) -> Result
         }
     }
 
+    let rows = order.len() + usize::from(wip.is_some());
+    if u32::try_from(rows).is_err() {
+        return Err(Error::TooManyCommits(rows));
+    }
     let mut lanes = Lanes::default();
-    let mut rows = Vec::with_capacity(order.len() + usize::from(wip.is_some()));
+    let mut out = Layout {
+        nodes: Vec::with_capacity(rows),
+        curve_start: Vec::with_capacity(rows + 1),
+        ..Layout::default()
+    };
+    out.curve_start.push(0);
     if let Some(wip) = wip {
         let head: Vec<Id> = wip.head.into_iter().collect();
-        rows.push(lanes.row(WIP_ID, &head, true)?);
+        lanes.row(&mut out, WIP_ID, &head, true)?;
     }
     for id in order {
-        rows.push(lanes.row(*id, &commits[id.index()].parents, false)?);
+        lanes.row(&mut out, *id, &commits[id.index()].parents, false)?;
     }
-    let max_width = rows.iter().map(|row| row.width).max().unwrap_or(0);
-    Ok(Layout { rows, max_width })
+    // Lanes still open run to the bottom.
+    let end = out.nodes.len() as u32;
+    for (lane, slot) in lanes.slots.iter().enumerate() {
+        if let Some(slot) = slot {
+            lanes.spans.push(slot.span(lane_u16(lane)?, end));
+        }
+    }
+
+    let mut spans = std::mem::take(&mut lanes.spans);
+    spans.retain(|s| s.start < s.end);
+    spans.sort_unstable_by_key(|s| (s.start, s.lane));
+    out.checkpoints = vec![Vec::new(); rows.div_ceil(BUCKET)];
+    for (i, span) in spans.iter().enumerate() {
+        let first = (span.start as usize).div_ceil(BUCKET);
+        let last = (span.end as usize - 1) / BUCKET;
+        for bucket in first..=last {
+            if let Some(list) = out.checkpoints.get_mut(bucket) {
+                list.push(i as u32);
+            }
+        }
+    }
+    out.spans = spans;
+    out.max_width = out.nodes.iter().map(|n| n.2).max().unwrap_or(0);
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -111,44 +245,54 @@ struct Slot {
     waiting_for: Id,
     color: ColorId,
     dashed: bool,
+    /// First row in which this lane is drawn as `Through`.
+    since: u32,
+}
+
+impl Slot {
+    fn span(&self, lane: u16, end: u32) -> Span {
+        Span {
+            start: self.since,
+            end,
+            lane,
+            color: self.color,
+            dashed: self.dashed,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 struct Lanes {
     slots: Vec<Option<Slot>>,
     next_color: u32,
+    /// Finished `Through` runs.
+    spans: Vec<Span>,
 }
 
 impl Lanes {
-    /// Emits the row of commit `id` and updates the lane state.
+    /// Lays out the row of commit `id` into `out` and updates the lane state.
     /// `dashed` marks the edges to `parents` (WIP row only).
-    fn row(&mut self, id: Id, parents: &[Id], dashed: bool) -> Result<Row, Error> {
-        let mut segments = Vec::with_capacity(self.slots.len() + parents.len());
+    fn row(&mut self, out: &mut Layout, id: Id, parents: &[Id], dashed: bool) -> Result<(), Error> {
+        let row = out.nodes.len() as u32;
+        // Slots are trimmed after each row, so the last one is occupied.
+        let mut highest = self.slots.len().checked_sub(1);
 
-        // Upper half: lanes waiting for this commit end in the node, all others pass by.
+        // Upper half: lanes waiting for this commit end in the node; all
+        // others pass by (recorded as spans).
         let mut node = None;
-        for (lane, slot) in self.slots.iter().enumerate() {
-            let Some(slot) = slot else { continue };
-            let (lane_id, color, dashed) = (lane_u16(lane)?, slot.color, slot.dashed);
-            if slot.waiting_for == id {
-                node.get_or_insert((lane, color));
-                segments.push(Segment::IntoNode {
-                    from: lane_id,
-                    color,
-                    dashed,
-                });
-            } else {
-                segments.push(Segment::Through {
-                    lane: lane_id,
-                    color,
-                    dashed,
-                });
+        for (lane, slot) in self.slots.iter_mut().enumerate() {
+            let Some(waiting) = slot else { continue };
+            if waiting.waiting_for != id {
+                continue;
             }
-        }
-        for slot in &mut self.slots {
-            if matches!(slot, Some(s) if s.waiting_for == id) {
-                *slot = None;
-            }
+            node.get_or_insert((lane, waiting.color));
+            out.curves.push(Segment::IntoNode {
+                from: lane_u16(lane)?,
+                color: waiting.color,
+                dashed: waiting.dashed,
+            });
+            self.spans.push(waiting.span(lane_u16(lane)?, row));
+            *slot = None;
         }
 
         // Branch tips start in the lowest free lane with a new color.
@@ -167,9 +311,10 @@ impl Lanes {
                     waiting_for: first,
                     color,
                     dashed,
+                    since: row + 1,
                 },
             );
-            segments.push(Segment::FromNode {
+            out.curves.push(Segment::FromNode {
                 to: lane_u16(lane)?,
                 color,
                 dashed,
@@ -186,7 +331,11 @@ impl Lanes {
                 });
             let (to, to_color) = match waiting {
                 Some((to, slot)) => {
-                    // A solid edge sharing the lane makes it solid.
+                    // A solid edge sharing the lane makes it solid from the next row on.
+                    if slot.dashed && !dashed && slot.since <= row {
+                        self.spans.push(slot.span(lane_u16(to)?, row + 1));
+                        slot.since = row + 1;
+                    }
                     slot.dashed &= dashed;
                     (to, slot.color)
                 }
@@ -198,12 +347,14 @@ impl Lanes {
                             waiting_for: parent,
                             color: to_color,
                             dashed,
+                            since: row + 1,
                         },
                     );
                     (to, to_color)
                 }
             };
-            segments.push(Segment::FromNode {
+            highest = highest.max(Some(to));
+            out.curves.push(Segment::FromNode {
                 to: lane_u16(to)?,
                 color: to_color,
                 dashed,
@@ -214,15 +365,11 @@ impl Lanes {
             self.slots.pop();
         }
 
-        let lane = lane_u16(lane)?;
-        let highest = segments.iter().map(|s| s.lane()).fold(lane, u16::max);
-        let width = highest.checked_add(1).ok_or(Error::TooManyLanes)?;
-        Ok(Row {
-            lane,
-            color,
-            segments,
-            width,
-        })
+        let width = highest.map_or(lane, |h| h.max(lane)) + 1;
+        let width = u16::try_from(width).map_err(|_| Error::TooManyLanes)?;
+        out.nodes.push((lane_u16(lane)?, color, width));
+        out.curve_start.push(out.curves.len() as u32);
+        Ok(())
     }
 
     fn free_lane(&self) -> usize {
@@ -468,6 +615,23 @@ mod tests {
                     head: Some(Id(rng.below(u64::from(count)) as u32)),
                 }),
             };
+            let layout = layout(&commits, &order, wip).unwrap();
+            verify(&commits, &order, wip, &layout);
+        }
+    }
+
+    #[test]
+    fn long_wide_histories_keep_every_edge() {
+        // Spans the span index over many buckets and with dozens of open lanes.
+        let mut rng = Rng::new(0xbead);
+        for round in 0..12 {
+            let count = 500 + rng.below(1500) as u32;
+            let spread = 5 + rng.below(60);
+            let commits = random_history(&mut rng, count, spread, round % 2 == 0);
+            let order = topo_order(&commits).unwrap().order;
+            let wip = Some(Wip {
+                head: Some(order[rng.below(u64::from(count)) as usize]),
+            });
             let layout = layout(&commits, &order, wip).unwrap();
             verify(&commits, &order, wip, &layout);
         }

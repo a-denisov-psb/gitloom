@@ -62,7 +62,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
 
         // Only the visible rows (plus overscan) exist; spacers keep the scrollbar exact.
         // A truncated history ends with a note row.
-        let graph_rows = repo.snapshot.layout.rows.len();
+        let graph_rows = repo.snapshot.layout.len();
         let total = graph_rows + usize::from(repo.snapshot.truncated);
         let (first, last) = visible_range(repo.scroll.offset, repo.scroll.height, total);
         let mut rows = Column::with_capacity(last - first + 2)
@@ -176,7 +176,7 @@ pub fn graph_row(
     columns: Columns,
 ) -> Element<'_, Message> {
     let snapshot = &repo.snapshot;
-    let Some(layout_row) = snapshot.layout.rows.get(row_index) else {
+    let Some(layout_row) = snapshot.layout.row(row_index) else {
         return container(text("")).height(ROW_HEIGHT).into();
     };
     let color = theme::lane_color(layout_row.color.0);
@@ -417,14 +417,11 @@ struct GraphCell {
     node: Node,
 }
 
-fn graph_cell<'a>(row: &Row, node: Node) -> Element<'a, Message> {
-    canvas::Canvas::new(GraphCell {
-        row: row.clone(),
-        node,
-    })
-    .width(Fill)
-    .height(Fill)
-    .into()
+fn graph_cell<'a>(row: Row, node: Node) -> Element<'a, Message> {
+    canvas::Canvas::new(GraphCell { row, node })
+        .width(Fill)
+        .height(Fill)
+        .into()
 }
 
 fn lane_x(lane: u16) -> f32 {

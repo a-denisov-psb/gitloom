@@ -84,10 +84,9 @@ pub fn random_history(rng: &mut Rng, count: u32, spread: u64, missing: bool) -> 
 pub fn render(layout: &Layout, has_wip: bool) -> String {
     let cell_width = usize::from(layout.max_width) * 2;
     layout
-        .rows
-        .iter()
+        .rows()
         .enumerate()
-        .map(|(i, row)| render_row(row, has_wip && i == 0, cell_width))
+        .map(|(i, row)| render_row(&row, has_wip && i == 0, cell_width))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -138,7 +137,8 @@ struct LaneState {
 /// appears exactly once as a connection in the output.
 pub fn verify(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>, layout: &Layout) {
     let offset = usize::from(wip.is_some());
-    assert_eq!(layout.rows.len(), order.len() + offset);
+    assert_eq!(layout.len(), order.len() + offset);
+    let rows: Vec<Row> = layout.rows().collect();
 
     let mut row_of = vec![usize::MAX; commits.len()];
     for (i, id) in order.iter().enumerate() {
@@ -158,7 +158,7 @@ pub fn verify(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>, layout: &
 
     let mut lanes: BTreeMap<u16, LaneState> = BTreeMap::new();
     let mut actual: Vec<Edge> = Vec::new();
-    for (r, row) in layout.rows.iter().enumerate() {
+    for (r, row) in rows.iter().enumerate() {
         // Upper half must continue exactly the lanes left open by the rows above.
         let mut upper = Vec::new();
         let mut into = Vec::new();
@@ -252,6 +252,6 @@ pub fn verify(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>, layout: &
     assert_eq!(actual, expected, "edges differ");
     assert_eq!(
         layout.max_width,
-        layout.rows.iter().map(|r| r.width).max().unwrap_or(0)
+        rows.iter().map(|r| r.width).max().unwrap_or(0)
     );
 }
