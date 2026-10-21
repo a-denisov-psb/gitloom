@@ -153,7 +153,9 @@ Acceptance:
 - Tests: modified, added (staged), deleted (staged and unstaged), renamed (staged), untracked, ignored file not listed, file both staged and modified again (appears in both lists), conflict after failed merge.
 - Large repo status (rust-lang/rust, clean worktree) < 1 s in release mode (manual check).
 
-### [ ] M1-06 `GixBackend`: commit changes and file diffs
+### [x] M1-06 `GixBackend`: commit changes and file diffs
+
+> Done: `DiffRequest { kind: DiffKind::{Commit, Staged, Unstaged, Untracked}, path, old_path }`; hunks use the histogram algorithm and match `git diff --histogram` in the tests. Lines carry `missing_newline`. Working tree files are read as-is (no CRLF/LFS filters) in M1.
 
 Goal: file lists and diff data for commits and the working tree.
 

@@ -5,6 +5,7 @@
 //! - `MockBackend`: static sample data, only for tests and the `mock` feature
 //! - `CliBackend` (planned, M2): write operations via the `git` executable
 
+mod diff;
 mod gix_backend;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
@@ -173,6 +174,74 @@ impl WorkingTree {
     }
 }
 
+/// Which two versions of a file to compare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffKind {
+    /// Commit against its first parent (root commits against the empty tree).
+    Commit(Oid),
+    /// HEAD against the index.
+    Staged,
+    /// Index against the working tree.
+    Unstaged,
+    /// Nothing against the working tree.
+    Untracked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffRequest {
+    pub kind: DiffKind,
+    /// Path relative to the repository root (new path for renames).
+    pub path: String,
+    /// Previous path of a renamed file.
+    pub old_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileDiff {
+    /// Path on the old side, `None` if the file was added.
+    pub old_path: Option<String>,
+    /// Path on the new side, `None` if the file was deleted.
+    pub new_path: Option<String>,
+    /// At least one side contains binary data; `hunks` is empty.
+    pub binary: bool,
+    /// At least one side exceeds 2 MB; `hunks` is empty.
+    pub too_large: bool,
+    pub hunks: Vec<DiffHunk>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffHunk {
+    /// Unified diff header, e.g. `@@ -1,4 +1,5 @@`.
+    pub header: String,
+    /// First old line (1-based, 0 for an empty range).
+    pub old_start: u32,
+    pub old_count: u32,
+    /// First new line (1-based, 0 for an empty range).
+    pub new_start: u32,
+    pub new_count: u32,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    /// 1-based line number in the old version (`None` for added lines).
+    pub old_line: Option<u32>,
+    /// 1-based line number in the new version (`None` for removed lines).
+    pub new_line: Option<u32>,
+    /// Line text without the line terminator.
+    pub content: String,
+    /// Last line of its version without a trailing newline.
+    pub missing_newline: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Error {
     NotARepository(String),
@@ -220,6 +289,9 @@ pub trait GitBackend: Send + Sync {
 
     fn working_tree(&self) -> Result<WorkingTree>;
 
-    /// Files changed by a commit compared to its first parent.
+    /// Files changed by a commit compared to its first parent, sorted by path.
     fn commit_changes(&self, id: &str) -> Result<Vec<FileChange>>;
+
+    /// Line diff of one file.
+    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;
 }
