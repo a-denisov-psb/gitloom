@@ -32,3 +32,17 @@ fn open_and_log_100k() {
         log.truncated
     );
 }
+
+#[test]
+#[ignore = "manual timing, needs GITLOOM_PERF_REPO"]
+fn status() {
+    let Some(backend) = repo() else { return };
+    let start = Instant::now();
+    let tree = backend.working_tree().unwrap();
+    eprintln!(
+        "status: {} unstaged, {} staged in {:?}",
+        tree.unstaged.len(),
+        tree.staged.len(),
+        start.elapsed()
+    );
+}

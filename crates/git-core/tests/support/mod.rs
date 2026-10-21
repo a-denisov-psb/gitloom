@@ -11,7 +11,7 @@
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
@@ -61,8 +61,25 @@ impl TestRepo {
 
     /// Runs `git` in `dir` with the deterministic environment.
     pub fn git_in(&self, dir: &Path, args: &[&str]) -> String {
+        let output = self.run_git(dir, args);
+        assert!(
+            output.status.success(),
+            "git {} failed:\n{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    /// Runs `git` in the repository root and returns whether it succeeded,
+    /// for commands that are expected to fail (e.g. conflicting merges).
+    pub fn try_git(&self, args: &[&str]) -> bool {
+        self.run_git(&self.root, args).status.success()
+    }
+
+    fn run_git(&self, dir: &Path, args: &[&str]) -> Output {
         let date = format!("{} +0000", self.clock.get());
-        let output = Command::new("git")
+        Command::new("git")
             .args(args)
             .current_dir(dir)
             .env_remove("GIT_DIR")
@@ -80,14 +97,7 @@ impl TestRepo {
             .env("GIT_COMMITTER_EMAIL", "committer@example.com")
             .env("GIT_COMMITTER_DATE", &date)
             .output()
-            .expect("run git (is it installed?)");
-        assert!(
-            output.status.success(),
-            "git {} failed:\n{}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+            .expect("run git (is it installed?)")
     }
 
     /// Writes `content` to `rel` (parent directories are created).

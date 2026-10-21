@@ -142,17 +142,24 @@ pub enum ChangeKind {
     Deleted,
     Renamed,
     Untracked,
+    /// Unmerged entry after a failed merge (display only in M1).
+    Conflicted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileChange {
+    /// Path relative to the repository root (new path for renames).
     pub path: String,
     pub kind: ChangeKind,
+    /// Previous path of a renamed file.
+    pub old_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkingTree {
+    /// Index ↔ working tree changes, untracked files and conflicts, sorted by path.
     pub unstaged: Vec<FileChange>,
+    /// HEAD ↔ index changes, sorted by path.
     pub staged: Vec<FileChange>,
 }
 

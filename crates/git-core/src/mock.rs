@@ -156,6 +156,7 @@ impl GitBackend for MockBackend {
         let change = |path: &str, kind| FileChange {
             path: path.into(),
             kind,
+            old_path: None,
         };
         Ok(WorkingTree {
             unstaged: vec![
@@ -183,6 +184,7 @@ impl GitBackend for MockBackend {
                 } else {
                     ChangeKind::Modified
                 },
+                old_path: None,
             })
             .collect())
     }
