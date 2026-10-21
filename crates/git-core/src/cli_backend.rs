@@ -206,6 +206,19 @@ pub trait GitWriter: Send + Sync {
             .stdout)
     }
 
+    /// Makes object `id` available locally. In a partial clone Git fetches
+    /// a missing object from the promisor remote (network access).
+    fn fetch_object(&self, id: &str) -> Result<()> {
+        self.run(
+            &["cat-file", "blob", id],
+            RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            },
+        )
+        .map(drop)
+    }
+
     /// Resets the working tree files `paths` to their index content.
     fn restore_worktree(&self, paths: &[String]) -> Result<()> {
         with_pathspecs(self, &["restore", "--worktree"], paths)

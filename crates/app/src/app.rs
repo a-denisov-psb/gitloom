@@ -138,7 +138,13 @@ pub enum Message {
     DiffLoaded {
         tab: TabId,
         request: DiffRequest,
-        result: Result<git_core::FileDiff, String>,
+        result: Result<git_core::FileDiff, git_core::Error>,
+    },
+    /// Fetching a blob missing from a partial clone finished.
+    ObjectFetched {
+        tab: TabId,
+        request: DiffRequest,
+        result: Result<(), String>,
     },
     DiffScrolled {
         offset: f32,
@@ -1012,16 +1018,7 @@ impl App {
         {
             diff.request.kind = git_core::DiffKind::Unstaged;
         }
-        let request = diff.request.clone();
-        let load = request.clone();
-        Task::perform(
-            blocking(move || backend.file_diff(&load).map_err(|e| e.to_string())),
-            move |result| Message::DiffLoaded {
-                tab,
-                request: request.clone(),
-                result,
-            },
-        )
+        load_diff(tab, backend, diff.request.clone())
     }
 
     /// File whose diff is open in the active tab, with the list it belongs to.
@@ -1560,27 +1557,70 @@ impl App {
                 };
                 view.center =
                     CenterView::Diff(Box::new(crate::repo_view::DiffView::new(request.clone())));
-                let backend = Arc::clone(&view.backend);
-                let load = request.clone();
-                return Task::perform(
-                    blocking(move || backend.file_diff(&load).map_err(|e| e.to_string())),
-                    move |result| Message::DiffLoaded {
-                        tab: tab_id,
-                        request: request.clone(),
-                        result,
-                    },
-                );
+                return load_diff(tab_id, Arc::clone(&view.backend), request);
             }
             Message::DiffLoaded {
                 tab,
                 request,
                 result,
             } => {
-                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
-                    if let CenterView::Diff(diff) = &mut view.center {
-                        if diff.request == request {
-                            diff.set_diff(result);
+                let can_fetch = self.write_block().is_none();
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let writer = Arc::clone(&view.writer);
+                let CenterView::Diff(diff) = &mut view.center else {
+                    return Task::none();
+                };
+                if diff.request != request {
+                    return Task::none();
+                }
+                match result {
+                    // A blob of a partial clone: Git fetches it, then reload.
+                    // Each object is fetched once, so a repeated miss fails.
+                    Err(git_core::Error::MissingObject {
+                        id,
+                        partial_clone: true,
+                    }) if can_fetch && !diff.fetched.contains(&id) => {
+                        diff.fetched.push(id.clone());
+                        diff.fetching = true;
+                        return Task::perform(
+                            blocking(move || writer.fetch_object(&id).map_err(|e| e.to_string())),
+                            move |result| Message::ObjectFetched {
+                                tab,
+                                request: request.clone(),
+                                result,
+                            },
+                        );
+                    }
+                    result => diff.set_diff(result.map_err(|e| e.to_string())),
+                }
+            }
+            Message::ObjectFetched {
+                tab,
+                request,
+                result,
+            } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let backend = Arc::clone(&view.backend);
+                let CenterView::Diff(diff) = &mut view.center else {
+                    return Task::none();
+                };
+                if diff.request != request {
+                    return Task::none();
+                }
+                diff.fetching = false;
+                match result {
+                    Ok(()) => return load_diff(tab, backend, request),
+                    Err(error) => {
+                        diff.set_diff(Err(git_core::Error::MissingObject {
+                            id: String::new(),
+                            partial_clone: true,
                         }
+                        .to_string()));
+                        self.modal = Some(Modal::error("Fetching missing content failed", error));
                     }
                 }
             }
@@ -1866,6 +1906,19 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
         iced::widget::operation::AbsoluteOffset {
             x: None,
             y: Some(offset),
+        },
+    )
+}
+
+/// Loads the diff of `request` in the background.
+fn load_diff(tab: TabId, backend: Arc<dyn GitBackend>, request: DiffRequest) -> Task<Message> {
+    let load = request.clone();
+    Task::perform(
+        blocking(move || Ok(backend.file_diff(&load))),
+        move |result: Result<_, String>| Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            result: result.unwrap_or_else(|e| Err(git_core::Error::Backend(e))),
         },
     )
 }
@@ -2573,12 +2626,98 @@ mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request,
-            result: Err("boom".into()),
+            result: Err(git_core::Error::Backend("boom".into())),
         });
         assert!(matches!(
             &app.tabs[0].view().unwrap().center,
-            CenterView::Diff(diff) if diff.diff == Loadable::Failed("boom".into())
+            CenterView::Diff(diff) if diff.diff == Loadable::Failed("Git error: boom".into())
         ));
+    }
+
+    fn missing(id: &str) -> Result<git_core::FileDiff, git_core::Error> {
+        Err(git_core::Error::MissingObject {
+            id: id.into(),
+            partial_clone: true,
+        })
+    }
+
+    fn shown_diff_view(app: &App) -> &crate::repo_view::DiffView {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Diff(diff) => diff,
+            CenterView::Graph => panic!("diff closed"),
+        }
+    }
+
+    #[test]
+    fn missing_partial_clone_content_is_fetched_once() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Staged);
+        let tab = app.tabs[0].id;
+        let request = shown_diff_view(&app).request.clone();
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            result: missing("abc"),
+        });
+        let diff = shown_diff_view(&app);
+        assert!(diff.fetching, "shows 'Fetching missing content…'");
+        assert_eq!(diff.diff, Loadable::Loading);
+
+        let _ = app.update(Message::ObjectFetched {
+            tab,
+            request: request.clone(),
+            result: Ok(()),
+        });
+        assert!(!shown_diff_view(&app).fetching);
+        // Still missing after the fetch: no endless loop.
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            result: missing("abc"),
+        });
+        assert_eq!(
+            shown_diff_view(&app).diff,
+            Loadable::Failed("Content not available locally (partial clone)".into())
+        );
+    }
+
+    #[test]
+    fn failed_fetch_shows_the_git_error() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Staged);
+        let tab = app.tabs[0].id;
+        let request = shown_diff_view(&app).request.clone();
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            result: missing("abc"),
+        });
+        let _ = app.update(Message::ObjectFetched {
+            tab,
+            request,
+            result: Err("fatal: unable to access remote".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Fetching missing content failed");
+        assert!(matches!(shown_diff_view(&app).diff, Loadable::Failed(_)));
+    }
+
+    #[test]
+    fn without_git_missing_content_is_explained() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Staged);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Missing));
+        let tab = app.tabs[0].id;
+        let request = shown_diff_view(&app).request.clone();
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            result: missing("abc"),
+        });
+        assert_eq!(
+            shown_diff_view(&app).diff,
+            Loadable::Failed("Content not available locally (partial clone)".into())
+        );
     }
 
     #[test]

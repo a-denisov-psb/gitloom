@@ -23,6 +23,8 @@ pub struct GixBackend {
     repo: gix::ThreadSafeRepository,
     root: PathBuf,
     name: String,
+    /// Objects may be missing locally and fetched on demand (blobless clone).
+    partial_clone: bool,
 }
 
 impl GixBackend {
@@ -43,7 +45,19 @@ impl GixBackend {
             || root.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        Ok(Self { repo, root, name })
+        let partial_clone = is_partial_clone(&repo.to_thread_local());
+        Ok(Self {
+            repo,
+            root,
+            name,
+            partial_clone,
+        })
+    }
+
+    /// The repository is a partial clone (`extensions.partialClone` or a
+    /// promisor remote); missing blobs can be fetched with `git`.
+    pub fn is_partial_clone(&self) -> bool {
+        self.partial_clone
     }
 
     /// What a batch of changed absolute paths (from a file watcher) requires.
@@ -303,9 +317,19 @@ impl GitBackend for GixBackend {
             None => repo.empty_tree(),
         };
         let options = gix::diff::Options::default().with_rewrites(Some(Default::default()));
-        let changes = repo
-            .diff_tree_to_tree(&old_tree, &new_tree, options)
-            .map_err(backend)?;
+        let changes = match repo.diff_tree_to_tree(&old_tree, &new_tree, options) {
+            Ok(changes) => changes,
+            // Similarity rename detection reads blob contents, which a partial
+            // clone may not have; renames then show as deletion plus addition.
+            Err(_) if self.partial_clone => repo
+                .diff_tree_to_tree(
+                    &old_tree,
+                    &new_tree,
+                    gix::diff::Options::default().with_rewrites(None),
+                )
+                .map_err(backend)?,
+            Err(error) => return Err(backend(error)),
+        };
 
         let mut files: Vec<FileChange> = changes
             .iter()
@@ -549,6 +573,12 @@ fn object_blob(
     if mode.is_commit() {
         return Ok(Blob::Data(format!("Subproject commit {id}\n").into_bytes()));
     }
+    if !repo.has_object(id) {
+        return Err(Error::MissingObject {
+            id: id.to_string(),
+            partial_clone: is_partial_clone(repo),
+        });
+    }
     let header = repo.find_header(id).map_err(backend)?;
     if header.size() > diff::MAX_DIFF_BYTES as u64 {
         return Ok(Blob::TooLarge);
@@ -651,6 +681,24 @@ fn index_change(change: &gix::diff::index::Change) -> FileChange {
         kind,
         old_path,
     }
+}
+
+fn is_partial_clone(repo: &gix::Repository) -> bool {
+    let config = repo.config_snapshot();
+    if config.string("extensions.partialClone").is_some() {
+        return true;
+    }
+    let truthy = |v: &[u8]| {
+        let v = String::from_utf8_lossy(v).to_ascii_lowercase();
+        matches!(v.as_str(), "true" | "yes" | "on" | "1")
+    };
+    let promisor = config
+        .plumbing()
+        .sections_by_name("remote")
+        .into_iter()
+        .flatten()
+        .any(|section| section.value("promisor").is_some_and(|v| truthy(&v)));
+    promisor
 }
 
 fn backend(error: impl Display) -> Error {

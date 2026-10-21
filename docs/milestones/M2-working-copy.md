@@ -259,7 +259,9 @@ Acceptance:
 Acceptance:
 - Integration tests for state detection.
 
-### [ ] M2-14 Partial clone fallback
+### [x] M2-14 Partial clone fallback
+
+> Done: `GixBackend::is_partial_clone` (`extensions.partialClone` or `remote.*.promisor`); a blob missing from the object database yields `Error::MissingObject { id, partial_clone }` ("Content not available locally (partial clone)"). The app fetches it with `GitWriter::fetch_object` (`git cat-file blob <id>`) outside the write lock and reloads the diff; each object is tried once per diff, so a repeated miss shows the message instead of looping. Additional: commit file lists in partial clones fall back to diffs without rename detection when blobs are missing (UX-PARITY deviation). Checked by hand on a `--filter=blob:none` clone: diff of "Third" fetched the old blob (missing objects 2 → 1) and showed `-two +three`; with the source repo moved away, the next diff showed the error dialog with Git's output and the message in the diff view. Integration tests also pass on Windows.
 
 - Detect partial clones (`extensions.partialClone` / promisor remotes).
 - When a blob is missing in gix, fetch it through `git cat-file blob <id>` via `CliBackend` (Git fetches it lazily); show "Fetching missing content…" while it runs; network errors show the error dialog.

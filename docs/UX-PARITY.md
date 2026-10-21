@@ -117,4 +117,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
 | While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
+| In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
