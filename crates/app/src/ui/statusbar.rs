@@ -12,14 +12,26 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .spacing(16)
         .padding([3, 12]);
 
-    if let Some(repo) = app.repo() {
-        let branch = repo.head().map_or("(detached)", |r| r.name.as_str());
+    if let Some(view) = app.active_tab().and_then(|t| t.view()) {
+        let snapshot = &view.snapshot;
+        if view.refreshing {
+            content = content.push(muted("Refreshing…").size(12));
+        }
+        let branch = snapshot.head.branch().unwrap_or("(detached)");
         content = content
             .push(muted(format!("branch: {branch}")).size(12))
-            .push(muted(format!("{} commits", repo.commits.len())).size(12));
+            .push(muted(commit_count(snapshot.commits.len(), snapshot.truncated)).size(12));
     }
 
     content = content.push(muted(concat!("v", env!("CARGO_PKG_VERSION"))).size(12));
 
     container(content).width(Fill).style(theme::chrome).into()
+}
+
+fn commit_count(count: usize, truncated: bool) -> String {
+    if truncated {
+        format!("{count} commits (history truncated)")
+    } else {
+        format!("{count} commits")
+    }
 }

@@ -186,3 +186,22 @@ pub fn change_color(kind: ChangeKind) -> Color {
 pub fn lane_color(lane: usize) -> Color {
     LANE_COLORS[lane % LANE_COLORS.len()]
 }
+
+/// In-tab error banner.
+pub fn error_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(DANGER.scale_alpha(0.18))),
+        border: Border::default().width(1).color(DANGER.scale_alpha(0.6)),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn tooltip(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_CHROME)),
+        border: Border::default().rounded(3).width(1).color(BORDER),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}

@@ -168,7 +168,9 @@ Goal: file lists and diff data for commits and the working tree.
 Acceptance:
 - Tests for each request kind, rename, binary file, deleted file, empty file, file without trailing newline.
 
-### [ ] M1-07 App: async loading, tab state, errors, refresh
+### [x] M1-07 App: async loading, tab state, errors, refresh
+
+> Done: `RepoSnapshot` (app crate) + `RepoView`, tabs routed by `TabId` with a generation counter; commit details also load in the background. Already included from later tasks to keep the app consistent: CLI paths (M1-08), read-only staging panel without the in-memory staging code and no `MockBackend` dependency in the app (M1-14). Checked by hand (X11 via XWayland): this repo opens, selection loads details, F5 and window focus refresh the WIP row (16 → 17 → 18 changes). Large-repo responsiveness is checked after M1-11 (virtualized list).
 
 Goal: the app works with the real backend without blocking the UI.
 

@@ -1,13 +1,21 @@
 mod app;
 mod format;
+mod repo_view;
+mod snapshot;
 mod theme;
 mod ui;
+
+use std::path::PathBuf;
 
 use app::App;
 
 fn main() -> iced::Result {
-    iced::application(App::new, App::update, App::view)
+    // `gitloom [PATH]...` opens each path in its own tab.
+    let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+
+    iced::application(move || App::new(paths.clone()), App::update, App::view)
         .title(App::title)
+        .subscription(App::subscription)
         .theme(theme::app_theme())
         .settings(iced::Settings {
             default_text_size: 13.into(),

@@ -10,8 +10,9 @@ use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
 use iced::widget::{button, column, container, row, scrollable, text, Column};
 use iced::{alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme};
 
-use crate::app::{Message, Repo, Selection};
+use crate::app::Message;
 use crate::format;
+use crate::repo_view::{RepoView, Selection};
 use crate::theme;
 use crate::ui::muted;
 
@@ -24,7 +25,7 @@ const COL_SHA: f32 = 70.0;
 const LANE_WIDTH: f32 = 22.0;
 const NODE_RADIUS: f32 = 10.0;
 
-pub fn view(repo: &Repo) -> Element<'_, Message> {
+pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let header = container(
         row![
             cell(muted("BRANCH / TAG").size(11), COL_REFS),
@@ -41,9 +42,10 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
     .align_y(alignment::Vertical::Center)
     .style(theme::column_header);
 
-    let has_wip = !repo.working_tree.is_empty();
+    let has_wip = repo.snapshot.has_wip;
     let wip = has_wip.then(|| wip_row(repo));
     let commits = repo
+        .snapshot
         .commits
         .iter()
         .enumerate()
@@ -58,8 +60,8 @@ pub fn view(repo: &Repo) -> Element<'_, Message> {
         .into()
 }
 
-fn wip_row(repo: &Repo) -> Element<'_, Message> {
-    let tree = &repo.working_tree;
+fn wip_row(repo: &RepoView) -> Element<'_, Message> {
+    let tree = &repo.snapshot.working_tree;
     let summary = row![
         muted("// WIP"),
         muted(format!("✎ {}", tree.unstaged.len())),
@@ -69,19 +71,22 @@ fn wip_row(repo: &Repo) -> Element<'_, Message> {
 
     let content = row![
         cell(text(""), COL_REFS),
-        cell(graph_cell(Node::Wip, false, true, String::new()), COL_GRAPH),
+        cell(
+            graph_cell(Node::Wip, 0, false, true, String::new()),
+            COL_GRAPH
+        ),
         cell(summary, Fill),
     ];
 
     row_button(
         content,
-        repo.selection == Selection::Wip,
+        repo.selection == Some(Selection::Wip),
         Message::WipSelected,
     )
 }
 
 fn commit_row<'a>(
-    repo: &'a Repo,
+    repo: &'a RepoView,
     index: usize,
     commit: &'a Commit,
     line_up: bool,
@@ -100,9 +105,19 @@ fn commit_row<'a>(
     };
 
     let content = row![
-        cell(ref_labels(repo, commit), COL_REFS),
+        cell(ref_labels(repo, index), COL_REFS),
         cell(
-            graph_cell(node, line_up, line_down, format::initials(&commit.author)),
+            graph_cell(
+                node,
+                repo.snapshot
+                    .layout
+                    .rows
+                    .get(repo.snapshot.row_of(index))
+                    .map_or(0, |row| usize::from(row.lane)),
+                line_up,
+                line_down,
+                format::initials(&commit.author)
+            ),
             COL_GRAPH
         ),
         cell(summary.wrapping(text::Wrapping::None), Fill),
@@ -115,21 +130,21 @@ fn commit_row<'a>(
             COL_DATE
         ),
         cell(
-            muted(commit.short_id()).font(iced::Font::MONOSPACE),
+            muted(&commit.id[..commit.id.len().min(7)]).font(iced::Font::MONOSPACE),
             COL_SHA
         ),
     ];
 
     row_button(
         content,
-        repo.selection == Selection::Commit(index),
-        Message::CommitSelected(index),
+        repo.selected_commit() == Some(commit.id.as_str()),
+        Message::CommitSelected(commit.id.clone()),
     )
 }
 
 /// First reference as pill, the rest collapsed into "+N".
-fn ref_labels<'a>(repo: &'a Repo, commit: &'a Commit) -> Element<'a, Message> {
-    let mut refs: Vec<&Reference> = repo.refs_at(&commit.id).collect();
+fn ref_labels(repo: &RepoView, index: usize) -> Element<'_, Message> {
+    let mut refs: Vec<&Reference> = repo.snapshot.refs_at(index).collect();
     refs.sort_by_key(|r| {
         (
             !r.is_head,
@@ -204,6 +219,7 @@ struct GraphCell {
 
 fn graph_cell<'a>(
     node: Node,
+    lane: usize,
     line_up: bool,
     line_down: bool,
     initials: String,
@@ -212,7 +228,7 @@ fn graph_cell<'a>(
         node,
         line_up,
         line_down,
-        lane: 0,
+        lane,
         initials,
     })
     .width(Fill)
