@@ -22,53 +22,6 @@ pub const START_PATH_INPUT: &str = "start-path";
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolbarAction {
-    Undo,
-    Redo,
-    Pull,
-    Push,
-    Branch,
-    Stash,
-    Pop,
-    Terminal,
-}
-
-impl ToolbarAction {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Undo => "Undo",
-            Self::Redo => "Redo",
-            Self::Pull => "Pull",
-            Self::Push => "Push",
-            Self::Branch => "Branch",
-            Self::Stash => "Stash",
-            Self::Pop => "Pop",
-            Self::Terminal => "Terminal",
-        }
-    }
-
-    /// Placeholder glyphs until a proper icon set is added.
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Self::Undo => "↶",
-            Self::Redo => "↷",
-            Self::Pull => "↓",
-            Self::Push => "↑",
-            Self::Branch => "⑂",
-            Self::Stash => "⊕",
-            Self::Pop => "⊖",
-            Self::Terminal => "›_",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Picker {
-    Repository,
-    Branch,
-}
-
 /// Stable tab identity; async results are routed by it, not by position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
@@ -145,8 +98,6 @@ pub enum Message {
     TabSelected(TabId),
     TabClosed(TabId),
     TabOpened,
-    Toolbar(ToolbarAction),
-    PickerOpened(Picker),
     PaneResized(pane_grid::ResizeEvent),
     FilterChanged(String),
     SectionToggled(Section),
@@ -599,12 +550,6 @@ impl App {
             Message::TabClosed(id) => self.close_tab(id),
             Message::TabOpened => {
                 self.add_tab(TabState::Start);
-            }
-            Message::Toolbar(action) => {
-                self.status = format!("{}: not implemented yet", action.label());
-            }
-            Message::PickerOpened(picker) => {
-                self.status = format!("{picker:?} picker: not implemented yet");
             }
             Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
             Message::SessionLoaded(loaded) => return self.restore(loaded),

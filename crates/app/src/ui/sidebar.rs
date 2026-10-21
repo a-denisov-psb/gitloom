@@ -62,7 +62,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         section(repo, Section::Remote, "REMOTE", remote_count, remote),
         section(repo, Section::Tags, "TAGS", tags.len(), tags),
         section(repo, Section::Stashes, "STASHES", stashes.len(), stashes),
-        section(repo, Section::Submodules, "SUBMODULES", 0, Vec::new()),
+        submodules(),
     ]
     .spacing(6);
 
@@ -114,15 +114,53 @@ fn section<'a>(
     }
 }
 
+/// Submodules are listed from M2 on; the header stays visible but inactive.
+fn submodules<'a>() -> Element<'a, Message> {
+    crate::ui::panel::with_tooltip(
+        container(
+            row![
+                text("▸").width(INDENT),
+                text("SUBMODULES").size(11),
+                space::horizontal(),
+            ]
+            .align_y(iced::Center),
+        )
+        .padding([4, 6])
+        .width(Fill)
+        .style(|_| container::Style {
+            text_color: Some(theme::TEXT_MUTED.scale_alpha(0.6)),
+            ..container::Style::default()
+        })
+        .into(),
+    )
+}
+
 fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element<'a, Message> {
     let marker = if reference.is_head { "✓" } else { "" };
-    let content = row![
+    let mut content = row![
         text(marker).width(INDENT).color(theme::ACCENT),
         text(label).wrapping(text::Wrapping::None),
+        space::horizontal(),
     ]
-    .into();
+    .align_y(iced::Center);
+    // Like GitKraken: commits ahead/behind the upstream as small badges.
+    if let Some(badge) = ahead_behind_badge(reference.ahead_behind) {
+        content = content.push(muted(badge).size(11));
+    }
+    let content = content.into();
 
     list_button(content, depth, Message::RefClicked(reference.name.clone()))
+}
+
+/// `↑2 ↓1` style badge; nothing when in sync or without upstream.
+pub fn ahead_behind_badge(ahead_behind: Option<(usize, usize)>) -> Option<String> {
+    let (ahead, behind) = ahead_behind?;
+    let parts: Vec<String> = [(ahead, '↑'), (behind, '↓')]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, arrow)| format!("{arrow}{n}"))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
 }
 
 fn group_label<'a>(name: &'a str) -> Element<'a, Message> {
@@ -151,4 +189,18 @@ fn list_button<'a>(
         .clip(true)
         .style(theme::list_item(false))
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ahead_behind_badges() {
+        assert_eq!(ahead_behind_badge(None), None);
+        assert_eq!(ahead_behind_badge(Some((0, 0))), None);
+        assert_eq!(ahead_behind_badge(Some((2, 0))).as_deref(), Some("↑2"));
+        assert_eq!(ahead_behind_badge(Some((0, 5))).as_deref(), Some("↓5"));
+        assert_eq!(ahead_behind_badge(Some((3, 1))).as_deref(), Some("↑3 ↓1"));
+    }
 }

@@ -122,6 +122,14 @@ impl RepoSnapshot {
         index + usize::from(self.has_wip)
     }
 
+    /// Checked-out branch name, or `HEAD (abc1234)` when detached.
+    pub fn branch_label(&self) -> String {
+        match &self.head {
+            Head::Branch { name, .. } | Head::Unborn { name } => name.clone(),
+            Head::Detached { target } => format!("HEAD ({})", &target[..target.len().min(7)]),
+        }
+    }
+
     pub fn commit(&self, id: &str) -> Option<&Commit> {
         self.index.get(id).and_then(|&i| self.commits.get(i))
     }
@@ -248,6 +256,21 @@ mod tests {
         // Two separate open lanes, not one merged lane.
         assert_eq!(snapshot.layout.rows[0].width, 2);
         assert!(snapshot.truncated);
+    }
+
+    #[test]
+    fn branch_label_shows_detached_head() {
+        let snapshot = RepoSnapshot::build(
+            Log::default(),
+            Head::Detached {
+                target: "0123456789abcdef".into(),
+            },
+            Vec::new(),
+            Vec::new(),
+            WorkingTree::default(),
+        )
+        .unwrap();
+        assert_eq!(snapshot.branch_label(), "HEAD (0123456)");
     }
 
     #[test]

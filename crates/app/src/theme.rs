@@ -244,3 +244,11 @@ pub fn diff_line(kind: git_core::DiffLineKind) -> impl Fn(&Theme) -> container::
 pub fn mode_active(_: &Theme, _: button::Status) -> button::Style {
     button_style(Some(BG_SELECTED), TEXT)
 }
+
+/// Toolbar pickers: readable text even while they cannot be opened yet.
+pub fn picker(_: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Hovered | button::Status::Pressed => button_style(Some(BG_HOVER), TEXT),
+        _ => button_style(None, TEXT),
+    }
+}
