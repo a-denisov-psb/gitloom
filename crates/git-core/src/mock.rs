@@ -189,6 +189,10 @@ impl GitBackend for MockBackend {
             .collect())
     }
 
+    fn worktree_content(&self, _path: &str) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
         Ok(Self::sample_diff(request))
     }

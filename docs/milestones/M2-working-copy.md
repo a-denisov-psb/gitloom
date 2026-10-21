@@ -182,7 +182,9 @@ Acceptance:
 - Property-style tests: for random hunks and selections, `git apply --check --cached` succeeds and the resulting index matches the expected content.
 - Works on files without trailing newline, new files, deleted files.
 
-### [ ] M2-08 Discard changes
+### [x] M2-08 Discard changes
+
+> Done: `git_core::discard_files/discard_all/discard_lines` with `DiscardSnapshot` (blobs via `git hash-object -w --stdin-paths`, executable bit). Line/hunk discards compute the reverted content in Git form and write it back via `git cat-file --filters --path`, so CRLF/smudge filters keep working (a reversed patch on the worktree would fail there). Snapshots go to the tab's undo stack (`UndoAction::Discard`, used in M2-12). Decision: "Discard all" keeps staged changes (HANDOVER question 8, UX-PARITY). Checked by hand: discard hunk with confirmation, hover discard of an untracked file deletes it; the Unstaged header wraps its buttons in a narrow panel.
 
 - Discard file (hover trash button + context menu), discard hunk, discard selected lines, "Discard all changes".
 - Confirmation dialog when discarding a file, a hunk, selected lines and all changes. GitKraken asks only for file and all; asking for hunks and lines is an intentional deviation (see UX-PARITY).

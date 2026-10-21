@@ -213,6 +213,10 @@ pub struct RepoView {
     pub status_refreshing: bool,
     /// Reload the shown diff once the refresh after a write completes.
     pub reload_diff: bool,
+    /// Undoable actions, most recent last.
+    pub undo: Vec<crate::undo::UndoAction>,
+    /// Undone actions that can be redone, most recent last.
+    pub redo: Vec<crate::undo::UndoAction>,
     /// Identifies this tab's graph scrollable for programmatic scrolling.
     pub graph_scroll_id: iced::widget::Id,
     pub scroll: Scroll,
@@ -241,6 +245,8 @@ impl RepoView {
             suppress_watch: false,
             status_refreshing: false,
             reload_diff: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
             graph_scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
         }

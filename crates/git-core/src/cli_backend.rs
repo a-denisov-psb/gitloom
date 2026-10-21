@@ -163,6 +163,54 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Writes `data` as a blob without filters and returns its id.
+    fn write_blob(&self, data: &[u8]) -> Result<String> {
+        let output = self.run(
+            &["hash-object", "-w", "--no-filters", "--stdin"],
+            RunOptions {
+                stdin: Some(data),
+                read_only: false,
+            },
+        )?;
+        Ok(output.stdout_text().trim().to_owned())
+    }
+
+    /// Writes the working tree files `paths` as blobs (filters applied like
+    /// `git add`) and returns their ids in order.
+    fn write_worktree_blobs(&self, paths: &[String]) -> Result<Vec<String>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let input: String = paths.iter().map(|p| format!("{p}\n")).collect();
+        let output = self.run(
+            &["hash-object", "-w", "--stdin-paths"],
+            RunOptions {
+                stdin: Some(input.as_bytes()),
+                read_only: false,
+            },
+        )?;
+        Ok(output.stdout_text().lines().map(str::to_owned).collect())
+    }
+
+    /// Blob `id` converted to working tree form for `path` (eol, smudge filters).
+    fn blob_for_worktree(&self, path: &str, id: &str) -> Result<Vec<u8>> {
+        let path_arg = format!("--path={path}");
+        Ok(self
+            .run(
+                &["cat-file", "--filters", &path_arg, id],
+                RunOptions {
+                    read_only: true,
+                    ..RunOptions::default()
+                },
+            )?
+            .stdout)
+    }
+
+    /// Resets the working tree files `paths` to their index content.
+    fn restore_worktree(&self, paths: &[String]) -> Result<()> {
+        with_pathspecs(self, &["restore", "--worktree"], paths)
+    }
+
     fn stage_all(&self) -> Result<()> {
         self.run(&["add", "--all"], RunOptions::default()).map(drop)
     }

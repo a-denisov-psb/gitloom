@@ -339,6 +339,15 @@ impl GitBackend for GixBackend {
         Ok(files)
     }
 
+    fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        let repo = self.local();
+        match worktree_file(&repo, &self.root, path)? {
+            Some(Blob::Data(data)) => Ok(Some(data)),
+            Some(Blob::TooLarge) => Err(Error::Backend(format!("{path} is too large"))),
+            None => Ok(None),
+        }
+    }
+
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
         let repo = self.local();
         let old_path = request.old_path.as_deref().unwrap_or(&request.path);

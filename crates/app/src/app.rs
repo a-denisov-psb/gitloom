@@ -15,6 +15,7 @@ use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
 use crate::snapshot::RepoSnapshot;
 use crate::ui;
+use crate::undo::UndoAction;
 
 /// Window focus events closer together than this trigger one refresh.
 const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -27,6 +28,18 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// What a discard affects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscardTarget {
+    File(git_core::FileChange),
+    /// All unstaged changes and untracked files.
+    All,
+    /// Hunk `index` of the shown diff.
+    Hunk(usize),
+    /// Selected lines of the shown diff.
+    Lines,
+}
 
 /// Which list a file row belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,8 +231,18 @@ pub enum Message {
     WriteFinished {
         tab: TabId,
         label: String,
-        result: Result<(), String>,
+        result: Result<Option<UndoAction>, String>,
     },
+    /// Ask before discarding (file, all, hunk or selected lines).
+    Discard(DiscardTarget),
+    /// Confirmed in the dialog.
+    DiscardConfirmed(DiscardTarget),
+    /// Append the file to `.gitignore`.
+    IgnoreFile(String),
+    /// Show the file in the system file manager.
+    OpenFileLocation(String),
+    /// Transient message for the status bar.
+    StatusText(String),
     SaveDue(u64),
     Saved(Result<(), String>),
     OpenRecent(PathBuf),
@@ -320,6 +343,18 @@ impl App {
         tab: TabId,
         label: impl Into<String>,
         op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<()> + Send + 'static,
+    ) -> Task<Message> {
+        self.run_undoable(tab, label, move |git| op(git).map(|()| None))
+    }
+
+    /// Like [`Self::run_write`]; the operation may return an undo entry.
+    fn run_undoable(
+        &mut self,
+        tab: TabId,
+        label: impl Into<String>,
+        op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<Option<UndoAction>>
+            + Send
+            + 'static,
     ) -> Task<Message> {
         let label = label.into();
         if let Some(reason) = self.write_block() {
@@ -697,6 +732,102 @@ impl App {
         task
     }
 
+    /// Runs a confirmed discard in the active tab and records it for undo.
+    fn discard(&mut self, target: DiscardTarget) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let root = view.backend.path().to_path_buf();
+        match target {
+            DiscardTarget::File(file) => {
+                let label = format!("Discard {}", file.path);
+                let undo_label = label.clone();
+                // A discarded file whose diff is open closes the diff.
+                if matches!(&view.center, CenterView::Diff(d) if d.request.path == file.path) {
+                    view.center = CenterView::Graph;
+                }
+                self.run_undoable(tab, label, move |git| {
+                    let snapshot = git_core::discard_files(git, &root, &[file])?;
+                    Ok(Some(UndoAction::Discard {
+                        label: undo_label,
+                        snapshot,
+                    }))
+                })
+            }
+            DiscardTarget::All => {
+                let unstaged = view.snapshot.working_tree.unstaged.clone();
+                if matches!(&view.center, CenterView::Diff(d) if d.staged() == Some(false)) {
+                    view.center = CenterView::Graph;
+                }
+                self.run_undoable(tab, "Discard all changes", move |git| {
+                    let snapshot = git_core::discard_all(git, &root, &unstaged)?;
+                    Ok(Some(UndoAction::Discard {
+                        label: "Discard all changes".into(),
+                        snapshot,
+                    }))
+                })
+            }
+            DiscardTarget::Hunk(index) => self.discard_diff_lines(tab, move |_, h, _| h == index),
+            DiscardTarget::Lines => self.discard_diff_lines(tab, |diff, h, l| {
+                diff.selection.contains(&(h as u32, l as u32))
+            }),
+        }
+    }
+
+    /// Reverts lines of the shown unstaged diff in the working tree.
+    fn discard_diff_lines(
+        &mut self,
+        tab: TabId,
+        pick: impl Fn(&crate::repo_view::DiffView, usize, usize) -> bool,
+    ) -> Task<Message> {
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let CenterView::Diff(diff) = &view.center else {
+            return Task::none();
+        };
+        let (Some(false), Loadable::Ready(file)) = (diff.staged(), &diff.diff) else {
+            return Task::none();
+        };
+        let selected: std::collections::HashSet<(usize, usize)> = file
+            .hunks
+            .iter()
+            .enumerate()
+            .flat_map(|(h, hunk)| (0..hunk.lines.len()).map(move |l| (h, l)))
+            .filter(|&(h, l)| pick(diff, h, l))
+            .collect();
+        if selected.is_empty() {
+            return Task::none();
+        }
+        let file = file.clone();
+        let path = diff.request.path.clone();
+        let root = view.backend.path().to_path_buf();
+        let backend = Arc::clone(&view.backend);
+        let label = format!("Discard lines of {path}");
+        let undo_label = label.clone();
+        let task = self.run_undoable(tab, label, move |git| {
+            let content = backend
+                .worktree_content(&path)?
+                .ok_or_else(|| git_core::Error::Backend(format!("{path} no longer exists")))?;
+            let snapshot = git_core::discard_lines(git, &root, &file, &content, |h, l| {
+                selected.contains(&(h, l))
+            })?;
+            Ok(Some(UndoAction::Discard {
+                label: undo_label,
+                snapshot,
+            }))
+        });
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                view.reload_diff = true;
+            }
+        }
+        task
+    }
+
     /// Reloads the shown diff after a write, keeping its scroll position.
     fn reload_diff(&mut self, tab: TabId) -> Task<Message> {
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
@@ -906,6 +1037,7 @@ impl App {
                 self.git = Some(git);
             }
             Message::DismissNotice => self.notice = None,
+            Message::StatusText(text) => self.status = text,
             Message::ModalAction(index) => {
                 let action = self.modal.take().and_then(|m| m.action(index));
                 if let Some(message) = action {
@@ -926,20 +1058,44 @@ impl App {
                 position,
             } => {
                 let writable = self.write_block().is_none();
-                let mut entries = Vec::new();
-                let stage = match area {
-                    FileArea::Unstaged => Some(("Stage", "S", Message::Stage(file.clone()))),
-                    FileArea::Staged => Some(("Unstage", "U", Message::Unstage(file.clone()))),
-                    FileArea::Commit => None,
-                };
-                if let Some((label, key, message)) = stage {
-                    entries.push(MenuEntry::Item {
+                let write_item =
+                    |label: &str, shortcut: Option<&str>, message: Message| MenuEntry::Item {
                         label: label.into(),
-                        shortcut: Some(key.into()),
+                        shortcut: shortcut.map(str::to_owned),
                         enabled: writable,
                         message: Box::new(message),
-                    });
-                    entries.push(MenuEntry::Separator);
+                    };
+                let mut entries = Vec::new();
+                match area {
+                    FileArea::Unstaged => {
+                        entries.push(write_item("Stage", Some("S"), Message::Stage(file.clone())));
+                        entries.push(write_item(
+                            "Discard changes",
+                            None,
+                            Message::Discard(DiscardTarget::File(file.clone())),
+                        ));
+                        entries.push(MenuEntry::Separator);
+                        entries.push(write_item(
+                            "Ignore",
+                            None,
+                            Message::IgnoreFile(file.path.clone()),
+                        ));
+                    }
+                    FileArea::Staged => {
+                        entries.push(write_item(
+                            "Unstage",
+                            Some("U"),
+                            Message::Unstage(file.clone()),
+                        ));
+                        entries.push(MenuEntry::Separator);
+                    }
+                    FileArea::Commit => {}
+                }
+                if area != FileArea::Commit {
+                    entries.push(MenuEntry::item(
+                        "Open file location",
+                        Message::OpenFileLocation(file.path.clone()),
+                    ));
                 }
                 entries.push(MenuEntry::item(
                     "Copy file path",
@@ -987,11 +1143,70 @@ impl App {
             Message::WriteFinished { tab, label, result } => {
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
+                    if let Ok(Some(action)) = &result {
+                        view.undo.push(action.clone());
+                        view.redo.clear();
+                    }
                 }
                 if let Err(error) = result {
                     self.modal = Some(Modal::error(format!("{label} failed"), error));
                 }
                 return self.refresh(tab);
+            }
+            Message::Discard(target) => {
+                let (title, text) = match &target {
+                    DiscardTarget::File(file) => (
+                        "Discard changes".to_string(),
+                        format!("Discard all changes to {}? This cannot be undone outside Gitloom.", file.path),
+                    ),
+                    DiscardTarget::All => (
+                        "Discard all changes".to_string(),
+                        "Discard all unstaged changes and delete all untracked files? Staged changes are kept.".to_string(),
+                    ),
+                    DiscardTarget::Hunk(_) => (
+                        "Discard hunk".to_string(),
+                        "Discard the changes of this hunk?".to_string(),
+                    ),
+                    DiscardTarget::Lines => (
+                        "Discard lines".to_string(),
+                        "Discard the selected lines?".to_string(),
+                    ),
+                };
+                self.modal = Some(Modal::confirm(
+                    title,
+                    text,
+                    "Discard",
+                    true,
+                    Message::DiscardConfirmed(target),
+                ));
+            }
+            Message::DiscardConfirmed(target) => return self.discard(target),
+            Message::IgnoreFile(path) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::path)
+                    .map(|p| p.to_path_buf())
+                else {
+                    return Task::none();
+                };
+                return self.run_write(tab, format!("Ignore {path}"), move |_| {
+                    append_to_gitignore(&root, &path)
+                });
+            }
+            Message::OpenFileLocation(path) => {
+                if let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::path)
+                    .map(|p| p.to_path_buf())
+                {
+                    return Task::perform(
+                        blocking(move || reveal_in_file_manager(&root.join(&path))),
+                        |result| Message::StatusText(result.err().unwrap_or_default()),
+                    );
+                }
             }
             Message::SaveDue(seq) => {
                 if seq == self.save_seq {
@@ -1485,6 +1700,66 @@ fn watch_repository(data: &(u64, PathBuf)) -> impl iced::futures::Stream<Item = 
     )
 }
 
+/// Appends `path` (anchored at the repository root, special characters
+/// escaped) to the root `.gitignore`.
+fn append_to_gitignore(root: &std::path::Path, path: &str) -> git_core::Result<()> {
+    use std::io::Write as _;
+    let file = root.join(".gitignore");
+    let existing = std::fs::read(&file).unwrap_or_default();
+    let mut entry = String::new();
+    if !existing.is_empty() && !existing.ends_with(b"\n") {
+        entry.push('\n');
+    }
+    entry.push_str(&gitignore_pattern(path));
+    entry.push('\n');
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .and_then(|mut f| f.write_all(entry.as_bytes()))
+        .map_err(|e| git_core::Error::Backend(format!("could not update .gitignore: {e}")))
+}
+
+/// Pattern matching exactly `path` relative to the repository root.
+fn gitignore_pattern(path: &str) -> String {
+    let mut pattern = String::from("/");
+    for c in path.chars() {
+        if matches!(c, '\\' | '*' | '?' | '[' | '!' | '#') {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    // Trailing spaces are ignored by Git unless escaped.
+    if pattern.ends_with(' ') {
+        let trimmed = pattern.trim_end_matches(' ').len();
+        let spaces = pattern.len() - trimmed;
+        pattern.truncate(trimmed);
+        pattern.push_str(&"\\ ".repeat(spaces));
+    }
+    pattern
+}
+
+/// Opens the system file manager at `path` (selecting it where supported).
+fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(format!("/select,{}", path.display()));
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(path);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(path.parent().unwrap_or(path));
+        c
+    };
+    command
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Could not open the file manager: {e}"))
+}
+
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1945,7 +2220,7 @@ mod tests {
         let _ = app.update(Message::WriteFinished {
             tab,
             label: "Stage lines of a".into(),
-            result: Ok(()),
+            result: Ok(None),
         });
         let generation = app.tabs[0].generation;
         let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
@@ -2148,7 +2423,7 @@ mod tests {
         let _ = app.update(Message::WriteFinished {
             tab: app.tabs[0].id,
             label: "Unstage y".into(),
-            result: Ok(()),
+            result: Ok(None),
         });
         let _ = app.update(checked(Shortcut::StageSelected, false));
         assert!(app.tabs[0].view().unwrap().busy.is_none());
@@ -2164,9 +2439,112 @@ mod tests {
         });
         let menu = app.context_menu.clone().unwrap();
         assert!(matches!(menu.select(0), Some(Message::Stage(f)) if f.path == "a"));
-        assert!(menu.select(1).is_none(), "separator");
+        assert!(menu.select(2).is_none(), "separator");
         let _ = app.update(Message::MenuSelected(0));
         assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stage a"));
+    }
+
+    #[test]
+    fn every_discard_asks_first() {
+        for target in [
+            DiscardTarget::File(file("a")),
+            DiscardTarget::All,
+            DiscardTarget::Hunk(0),
+            DiscardTarget::Lines,
+        ] {
+            let mut app = staging_app(&["a"], &[]);
+            let _ = app.update(Message::Discard(target.clone()));
+            let modal = app.modal.as_ref().expect("confirmation");
+            assert_eq!(modal.buttons[1].kind, crate::overlay::ButtonKind::Danger);
+            assert!(
+                app.tabs[0].view().unwrap().busy.is_none(),
+                "nothing runs yet"
+            );
+            assert!(
+                matches!(modal.default_action(), Some(Message::DiscardConfirmed(t)) if t == target)
+            );
+        }
+    }
+
+    #[test]
+    fn confirmed_file_discard_runs_and_records_undo() {
+        let mut app = staging_app(&["a", "b"], &[]);
+        let _ = app.update(Message::DiffOpened(crate::repo_view::diff_request(
+            &file("a"),
+            false,
+        )));
+        let _ = app.update(Message::Discard(DiscardTarget::File(file("a"))));
+        let _ = app.update(Message::Shortcut(Shortcut::Confirm));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Discard a"));
+        assert!(
+            matches!(view.center, CenterView::Graph),
+            "diff of the discarded file closes"
+        );
+
+        let tab = app.tabs[0].id;
+        let undo = UndoAction::Discard {
+            label: "Discard a".into(),
+            snapshot: git_core::DiscardSnapshot::default(),
+        };
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Discard a".into(),
+            result: Ok(Some(undo.clone())),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.undo, [undo]);
+        assert!(view.redo.is_empty());
+    }
+
+    #[test]
+    fn unstaged_menu_has_discard_ignore_and_location() {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::FileContextMenu {
+            file: file("a"),
+            area: FileArea::Unstaged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        let labels: Vec<_> = menu
+            .entries
+            .iter()
+            .map(|e| match e {
+                MenuEntry::Item { label, .. } => label.as_str(),
+                MenuEntry::Separator => "-",
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Stage",
+                "Discard changes",
+                "-",
+                "Ignore",
+                "Open file location",
+                "Copy file path"
+            ]
+        );
+    }
+
+    #[test]
+    fn gitignore_patterns_are_anchored_and_escaped() {
+        assert_eq!(gitignore_pattern("build/out.log"), "/build/out.log");
+        assert_eq!(gitignore_pattern("a*b?[c]"), "/a\\*b\\?\\[c]");
+        assert_eq!(gitignore_pattern("#note!"), "/\\#note\\!");
+        assert_eq!(gitignore_pattern("trail  "), "/trail\\ \\ ");
+    }
+
+    #[test]
+    fn appending_to_gitignore_keeps_existing_lines() {
+        let dir = std::env::temp_dir().join(format!("gitloom-ignore-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".gitignore"), "target/").unwrap();
+        append_to_gitignore(&dir, "notes.txt").unwrap();
+        append_to_gitignore(&dir, "x*.tmp").unwrap();
+        let content = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert_eq!(content, "target/\n/notes.txt\n/x\\*.tmp\n");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

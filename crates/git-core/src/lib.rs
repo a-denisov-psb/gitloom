@@ -7,6 +7,7 @@
 
 mod cli_backend;
 mod diff;
+mod discard;
 mod gix_backend;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
@@ -16,6 +17,9 @@ mod watch;
 pub use cli_backend::{
     detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter, RunOptions,
     MIN_GIT_VERSION,
+};
+pub use discard::{
+    discard_all, discard_files, discard_lines, revert_lines, DiscardSnapshot, FileSnapshot,
 };
 pub use gix_backend::GixBackend;
 #[cfg(any(test, feature = "mock"))]
@@ -325,4 +329,8 @@ pub trait GitBackend: Send + Sync {
 
     /// Line diff of one file.
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;
+
+    /// Working tree content of `path` as Git stores it (filters applied);
+    /// `None` if the file does not exist.
+    fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>>;
 }

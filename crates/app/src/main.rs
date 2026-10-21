@@ -9,6 +9,7 @@ mod shortcuts;
 mod snapshot;
 mod theme;
 mod ui;
+mod undo;
 
 use std::path::PathBuf;
 
