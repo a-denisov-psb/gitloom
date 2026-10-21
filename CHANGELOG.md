@@ -11,6 +11,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Added
 
 - Commit from the commit panel: summary with a 72-character counter, description, Ctrl+Enter (Ctrl+Shift+Enter stages everything first), Ctrl+Shift+M focuses the summary. Hooks run as usual; failures show the hook output and keep the message. The description is prefilled from `commit.template`, a merge in progress prefills its message and the commit concludes the merge.
+- A merge, rebase, cherry-pick or revert in progress shows a banner in the tab ("Merging topic into main", "Rebasing topic onto main (step 2 of 5)"); actions that would break it are disabled with the reason in the tooltip. Committing concludes a merge, cherry-pick or revert with Git's prepared message.
+- When another Git process holds a lock (`index.lock`), the failed operation offers "Retry"; Gitloom never deletes the lock.
 - Undo and redo for commit, amend and discard (toolbar with the action named in the tooltip, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z). Undoing a commit keeps its changes staged; nothing is undone if the repository changed in the meantime.
 - Stashes: toolbar Stash (includes untracked files) and Pop; stashes appear in the graph attached to their base commit; right click on a stash (sidebar or graph) offers Apply, Pop and Delete.
 - "Amend previous commit" checkbox: fills the message from HEAD, allows message-only amends and warns when HEAD is already pushed.
