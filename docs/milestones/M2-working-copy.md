@@ -167,7 +167,9 @@ Acceptance:
 - Integration tests for each file kind incl. repository without commits.
 - Unit test for the selection rule.
 
-### [ ] M2-07 Patch builder and hunk/line staging
+### [x] M2-07 Patch builder and hunk/line staging
+
+> Done: `git_core::build_patch` + `GitWriter::apply_cached`. Correction to the plan: for unstaging, unselected `+` lines become context and unselected `-` lines are dropped (mirror of staging), otherwise the reversed patch would not match the index. `DiffLine` got `crlf` to rebuild exact patches. Property tests: 40 random cases per direction in CI (800 passed in a one-off run), plus multi-hunk, partial new file, deleted file (whole/partial), CRLF without conversion. New files are staged with mode 100644. Checked by hand: selecting one added line without final newline stages exactly that line; the diff reloads with the rest.
 
 - Pure patch builder in `git-core` from `FileDiff`: full hunk or a line selection.
   - Staging lines: unselected `+` lines are dropped, unselected `-` lines become context; hunk headers recomputed.
