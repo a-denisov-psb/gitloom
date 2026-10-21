@@ -1,6 +1,7 @@
 //! Immutable view of a repository at one point in time, built off the UI thread.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use git_core::{Commit, GitBackend, Head, Log, Reference, Stash, WorkingTree};
 use git_graph::{GraphCommit, Id, Layout, Wip};
@@ -8,14 +9,26 @@ use git_graph::{GraphCommit, Id, Layout, Wip};
 /// Maximum number of commits loaded per repository.
 pub const LOG_LIMIT: usize = 100_000;
 
+/// Input of the lane layout, kept to recompute it when the WIP row appears
+/// or disappears without reloading the history.
 #[derive(Debug)]
+struct GraphInput {
+    commits: Vec<GraphCommit>,
+    order: Vec<Id>,
+    head: Option<Id>,
+}
+
+/// History parts are shared between snapshots, so a status-only refresh
+/// does not copy the commits.
+#[derive(Debug, Clone)]
 pub struct RepoSnapshot {
     /// Commits in display order (topological, newest first).
-    pub commits: Vec<Commit>,
+    pub commits: Arc<Vec<Commit>>,
     /// Commit id → index into `commits`.
-    pub index: HashMap<String, usize>,
+    pub index: Arc<HashMap<String, usize>>,
+    graph: Arc<GraphInput>,
     /// Graph rows; row 0 is the WIP row if `has_wip`.
-    pub layout: Layout,
+    pub layout: Arc<Layout>,
     /// The working tree has changes; a WIP row is shown above the commits.
     pub has_wip: bool,
     pub refs: Vec<Reference>,
@@ -104,9 +117,14 @@ impl RepoSnapshot {
         }
 
         Ok(Self {
-            commits,
-            index,
-            layout,
+            commits: Arc::new(commits),
+            index: Arc::new(index),
+            graph: Arc::new(GraphInput {
+                commits: graph,
+                order,
+                head: head_id,
+            }),
+            layout: Arc::new(layout),
             has_wip,
             refs,
             refs_by_commit,
@@ -114,6 +132,29 @@ impl RepoSnapshot {
             working_tree,
             head,
             truncated: log.truncated,
+        })
+    }
+
+    /// Same history with a new working tree status; the layout is only
+    /// recomputed when the WIP row appears or disappears.
+    pub fn with_working_tree(&self, working_tree: WorkingTree) -> Result<Self, String> {
+        let has_wip = !working_tree.is_empty();
+        let layout = if has_wip == self.has_wip {
+            Arc::clone(&self.layout)
+        } else {
+            let wip = has_wip.then_some(Wip {
+                head: self.graph.head,
+            });
+            Arc::new(
+                git_graph::layout(&self.graph.commits, &self.graph.order, wip)
+                    .map_err(|e| e.to_string())?,
+            )
+        };
+        Ok(Self {
+            layout,
+            has_wip,
+            working_tree,
+            ..self.clone()
         })
     }
 
@@ -271,6 +312,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(snapshot.branch_label(), "HEAD (0123456)");
+    }
+
+    #[test]
+    fn status_refresh_reuses_history_and_toggles_the_wip_row() {
+        let log = Log {
+            commits: vec![commit("b", &["a"], 2), commit("a", &[], 1)],
+            truncated: false,
+        };
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "b".into(),
+        };
+        let clean =
+            RepoSnapshot::build(log, head, Vec::new(), Vec::new(), WorkingTree::default()).unwrap();
+        assert!(!clean.has_wip);
+
+        let dirty = clean.with_working_tree(dirty()).unwrap();
+        assert!(dirty.has_wip);
+        assert_eq!(dirty.layout.len(), 3);
+        assert!(Arc::ptr_eq(&clean.commits, &dirty.commits));
+        // WIP row is connected to HEAD (dashed edge into row 1).
+        let wip = dirty.layout.row(0).unwrap();
+        assert!(wip
+            .segments
+            .iter()
+            .any(|s| matches!(s, git_graph::Segment::FromNode { dashed: true, .. })));
+
+        let still_dirty = dirty.with_working_tree(dirty.working_tree.clone()).unwrap();
+        assert!(Arc::ptr_eq(&dirty.layout, &still_dirty.layout));
+
+        let clean_again = dirty.with_working_tree(WorkingTree::default()).unwrap();
+        assert_eq!(clean_again.layout.len(), 2);
     }
 
     #[test]
