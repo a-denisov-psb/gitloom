@@ -13,7 +13,7 @@
 
 mod diff;
 mod graph;
-mod panel;
+pub(crate) mod panel;
 mod sidebar;
 mod start;
 mod statusbar;
@@ -118,6 +118,22 @@ fn centered<'a>(content: iced::widget::Column<'a, Message>) -> Element<'a, Messa
         .center(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// Rows `first..last` of a fixed-height list intersecting the viewport,
+/// extended by `overscan` rows on both sides.
+pub fn rows_in_view(
+    offset: f32,
+    height: f32,
+    total: usize,
+    row_height: f32,
+    overscan: usize,
+) -> (usize, usize) {
+    let top = (offset.max(0.0) / row_height).floor() as usize;
+    let bottom = ((offset.max(0.0) + height.max(0.0)) / row_height).ceil() as usize;
+    let first = top.saturating_sub(overscan).min(total);
+    let last = (bottom + overscan).min(total);
+    (first, last.max(first))
 }
 
 /// Muted secondary text.

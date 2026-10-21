@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use git_core::{DiffRequest, FileChange, GitBackend};
+use git_core::{DiffRequest, FileChange, FileDiff, GitBackend};
 
 use crate::snapshot::RepoSnapshot;
 
@@ -41,6 +41,42 @@ pub struct CommitDetails {
 #[derive(Debug, Clone)]
 pub struct DiffView {
     pub request: DiffRequest,
+    pub diff: Loadable<FileDiff>,
+    /// Display rows `(hunk, line)`; `line == u32::MAX` is the hunk header.
+    pub rows: Vec<(u32, u32)>,
+    pub scroll_id: iced::widget::Id,
+    pub scroll: Scroll,
+}
+
+/// Marks a hunk header row in [`DiffView::rows`].
+pub const HUNK_HEADER: u32 = u32::MAX;
+
+impl DiffView {
+    pub fn new(request: DiffRequest) -> Self {
+        Self {
+            request,
+            diff: Loadable::Loading,
+            rows: Vec::new(),
+            scroll_id: iced::widget::Id::unique(),
+            scroll: Scroll::default(),
+        }
+    }
+
+    /// Stores the loaded diff and flattens its hunks into display rows.
+    pub fn set_diff(&mut self, diff: Result<FileDiff, String>) {
+        self.rows.clear();
+        match diff {
+            Ok(diff) => {
+                for (h, hunk) in diff.hunks.iter().enumerate() {
+                    self.rows.push((h as u32, HUNK_HEADER));
+                    self.rows
+                        .extend((0..hunk.lines.len()).map(|l| (h as u32, l as u32)));
+                }
+                self.diff = Loadable::Ready(diff);
+            }
+            Err(error) => self.diff = Loadable::Failed(error),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

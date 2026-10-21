@@ -225,3 +225,22 @@ pub fn tooltip(_: &Theme) -> container::Style {
         ..container::Style::default()
     }
 }
+
+/// Hunk header row in the diff view.
+pub fn diff_hunk_header(_: &Theme) -> container::Style {
+    filled(BG_PANEL)
+}
+
+/// Diff line background by kind.
+pub fn diff_line(kind: git_core::DiffLineKind) -> impl Fn(&Theme) -> container::Style {
+    move |_| match kind {
+        git_core::DiffLineKind::Context => container::Style::default(),
+        git_core::DiffLineKind::Added => filled(SUCCESS.scale_alpha(0.16)),
+        git_core::DiffLineKind::Removed => filled(DANGER.scale_alpha(0.16)),
+    }
+}
+
+/// Selected segment of a segmented control (diff modes).
+pub fn mode_active(_: &Theme, _: button::Status) -> button::Style {
+    button_style(Some(BG_SELECTED), TEXT)
+}

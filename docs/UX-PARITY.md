@@ -15,7 +15,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts | done (M0), real data M1 |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M1) |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
-| Diff | Replaces the graph in the center; close returns to graph | placeholder M0, real M1 |
+| Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view; inline/split later) |
 | Status bar | Bottom line | done |
 | Resizable panes | All splits draggable | done |
 
@@ -25,7 +25,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 |---|---|---|
 | Click commit | Select, show details right | done |
 | Click WIP | Staging area right | done |
-| Click file in panel | Diff in center | done (placeholder), M1 real |
+| Click file in panel | Diff in center | done (M1) |
 | Click branch in left panel | Jump to and select its commit | done |
 | Double click local branch | Checkout | M3 |
 | Double click remote branch | Create tracking branch and checkout | M3 |
