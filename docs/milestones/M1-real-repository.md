@@ -300,7 +300,9 @@ Acceptance:
 - Grep for "not implemented", `MockBackend` usage in `crates/app/src` → no hits outside tests.
 - Manual walkthrough of every visible control: either works or is disabled with tooltip.
 
-### [ ] M1-15 Performance verification
+### [x] M1-15 Performance verification
+
+> Done: results in `docs/PERFORMANCE.md`. All targets met except total RSS (396 MB incl. 208 MB mapped pack files; private memory ≈ 190 MB) → follow-up proposals there. Changed on the way: layout stored as runs (ADR-011, heap −127 MB) and gix object cache 64 → 16 MB (heap −64 MB).
 
 Goal: measured, documented performance.
 

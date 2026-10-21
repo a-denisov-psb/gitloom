@@ -25,7 +25,7 @@ pub fn navigate(
     current: Option<&Selection>,
     step: Move,
 ) -> Option<Selection> {
-    let rows = snapshot.layout.rows.len();
+    let rows = snapshot.layout.len();
     if rows == 0 {
         return None;
     }
@@ -74,14 +74,14 @@ fn first_parent_row(snapshot: &RepoSnapshot, row: usize) -> Option<usize> {
 fn child_row(snapshot: &RepoSnapshot, row: usize) -> Option<usize> {
     let index = commit_at(snapshot, row)?;
     let id = &snapshot.commits.get(index)?.id;
-    let lane = snapshot.layout.rows.get(row).map(|r| r.lane);
+    let lane = snapshot.layout.node_lane(row);
 
     let mut nearest = None;
     for child in (0..index).rev() {
         let commit = &snapshot.commits[child];
         if commit.parents.first() == Some(id) {
             let child_row = snapshot.row_of(child);
-            if snapshot.layout.rows.get(child_row).map(|r| r.lane) == lane {
+            if snapshot.layout.node_lane(child_row) == lane {
                 return Some(child_row);
             }
             nearest.get_or_insert(child_row);

@@ -115,7 +115,7 @@ Properties:
 - Missing parents (truncated history) keep their lane open to the bottom of the list.
 - WIP is a virtual first row with HEAD as its only parent; its edges are `dashed`, including `Through` segments while the dashed lane passes newer commits. A solid edge joining a dashed lane makes it solid.
 
-API: `layout(&commits, &order, wip: Option<Wip>) -> Result<Layout, git_graph::Error>` with `Wip { head: Option<Id> }` and `Layout { rows, max_width }`. The WIP row (if any) is `rows[0]`. `order` must be a permutation of the commits (`Error::InvalidOrder`); more than `u16::MAX` lanes give `Error::TooManyLanes`.
+API: `layout(&commits, &order, wip: Option<Wip>) -> Result<Layout, git_graph::Error>` with `Wip { head: Option<Id> }`. `Layout::row(i)` returns the `Row` below, `len()` the number of rows and `max_width` the widest row; the WIP row (if any) is row 0. Internally the layout stores vertical runs instead of one `Through` segment per row (ADR-011). `order` must be a permutation of the commits (`Error::InvalidOrder`); more than `u16::MAX` lanes give `Error::TooManyLanes`.
 
 Output per row:
 
