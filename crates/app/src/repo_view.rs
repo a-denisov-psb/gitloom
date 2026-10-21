@@ -49,6 +49,23 @@ pub enum CenterView {
     Diff(Box<DiffView>),
 }
 
+/// Vertical scroll state of the graph list (pixels).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scroll {
+    pub offset: f32,
+    /// Viewport height; a guess until the first scroll event arrives.
+    pub height: f32,
+}
+
+impl Default for Scroll {
+    fn default() -> Self {
+        Self {
+            offset: 0.0,
+            height: 1200.0,
+        }
+    }
+}
+
 pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
@@ -63,6 +80,9 @@ pub struct RepoView {
     pub error: Option<String>,
     /// Empty, read-only commit description until committing arrives (M2).
     pub description: iced::widget::text_editor::Content,
+    /// Identifies this tab's graph scrollable for programmatic scrolling.
+    pub graph_scroll_id: iced::widget::Id,
+    pub scroll: Scroll,
 }
 
 impl RepoView {
@@ -79,6 +99,8 @@ impl RepoView {
             refreshing: false,
             error: None,
             description: iced::widget::text_editor::Content::new(),
+            graph_scroll_id: iced::widget::Id::unique(),
+            scroll: Scroll::default(),
         }
     }
 

@@ -150,6 +150,10 @@ pub enum Message {
     WipSelected,
     CommitSelected(String),
     DiffOpened(DiffRequest),
+    GraphScrolled {
+        offset: f32,
+        height: f32,
+    },
     DiffClosed,
     Retry(TabId),
     Refresh,
@@ -204,6 +208,9 @@ pub struct App {
     save_seq: u64,
     next_tab: u64,
     focus_seq: u64,
+    /// Tab whose graph was visible after the last update; a change means the
+    /// scrollable was recreated and needs its offset restored.
+    shown_graph: Option<TabId>,
 }
 
 impl App {
@@ -222,6 +229,7 @@ impl App {
             save_seq: 0,
             next_tab: 0,
             focus_seq: 0,
+            shown_graph: None,
         };
         app.add_tab(TabState::Start);
         let task = match session_path {
@@ -502,7 +510,41 @@ impl App {
         let task = self.handle(message);
         // The active tab may have changed or finished loading; details load lazily.
         let details = self.load_details();
-        Task::batch([task, details, self.persist()])
+        let scroll = self.restore_scroll();
+        Task::batch([task, details, scroll, self.persist()])
+    }
+
+    /// Re-applies the stored offset when a different graph became visible.
+    fn restore_scroll(&mut self) -> Task<Message> {
+        let shown = self.active_tab().and_then(|tab| {
+            let view = tab.view()?;
+            let task = (view.scroll.offset > 0.0).then(|| scroll_to(view, view.scroll.offset));
+            matches!(view.center, CenterView::Graph).then_some((tab.id, task))
+        });
+        let id = shown.as_ref().map(|(id, _)| *id);
+        if id == self.shown_graph {
+            return Task::none();
+        }
+        self.shown_graph = id;
+        shown.and_then(|(_, task)| task).unwrap_or_else(Task::none)
+    }
+
+    /// Scrolls the graph so the selected row is visible.
+    fn reveal_selection(&mut self) -> Task<Message> {
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(row) = crate::repo_view::selection_row(view.selection.as_ref(), &view.snapshot)
+        else {
+            return Task::none();
+        };
+        match crate::ui::reveal_offset(row, view.scroll.offset, view.scroll.height) {
+            Some(offset) => {
+                view.scroll.offset = offset;
+                scroll_to(view, offset)
+            }
+            None => Task::none(),
+        }
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
@@ -573,7 +615,8 @@ impl App {
                         .map(|r| r.target.clone())
                 });
                 if let Some(target) = target {
-                    return self.select(Selection::Commit(target));
+                    let task = self.select(Selection::Commit(target));
+                    return Task::batch([task, self.reveal_selection()]);
                 }
             }
             Message::WipSelected => return self.select(Selection::Wip),
@@ -582,6 +625,11 @@ impl App {
                 if let Some(view) = self.active_view_mut() {
                     view.center =
                         CenterView::Diff(Box::new(crate::repo_view::DiffView { request }));
+                }
+            }
+            Message::GraphScrolled { offset, height } => {
+                if let Some(view) = self.active_view_mut() {
+                    view.scroll = crate::repo_view::Scroll { offset, height };
                 }
             }
             Message::DiffClosed => {
@@ -738,6 +786,16 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         ui::view(self)
     }
+}
+
+fn scroll_to(view: &RepoView, offset: f32) -> Task<Message> {
+    iced::widget::operation::scroll_to(
+        view.graph_scroll_id.clone(),
+        iced::widget::operation::AbsoluteOffset {
+            x: None,
+            y: Some(offset),
+        },
+    )
 }
 
 /// Maps window events and keyboard shortcuts no widget handled.
