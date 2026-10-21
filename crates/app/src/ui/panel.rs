@@ -42,7 +42,7 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 
     let unstaged = file_section(
         format!("Unstaged Files ({})", tree.unstaged.len()),
-        disabled_button("Stage all changes", button::success),
+        disabled_button(view, "Stage all changes", button::success),
         tree.unstaged.iter().map(|file| {
             let kind = if file.kind == git_core::ChangeKind::Untracked {
                 DiffKind::Untracked
@@ -55,7 +55,7 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 
     let staged = file_section(
         format!("Staged Files ({})", tree.staged.len()),
-        disabled_button("Unstage all changes", button::danger),
+        disabled_button(view, "Unstage all changes", button::danger),
         tree.staged
             .iter()
             .map(|file| file_row(view, file, DiffKind::Staged)),
@@ -86,7 +86,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         muted("Commit"),
         summary,
         description,
-        with_tooltip(commit.into()),
+        write_tooltip(commit.into(), view),
         muted("Committing is available from version 0.3.").size(11),
     ]
     .spacing(8)
@@ -198,22 +198,44 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
 }
 
 fn disabled_button<'a>(
+    view: &RepoView,
     label: &'a str,
     style: fn(&iced::Theme, button::Status) -> button::Style,
 ) -> Element<'a, Message> {
-    with_tooltip(
+    write_tooltip(
         button(text(label).size(12))
             .padding([3, 8])
             .style(style)
             .into(),
+        view,
     )
 }
 
 /// Wraps a disabled control in the standard "Not available yet" tooltip.
 pub(crate) fn with_tooltip(content: Element<'_, Message>) -> Element<'_, Message> {
+    with_tooltip_text(content, NOT_AVAILABLE.to_owned())
+}
+
+/// Tooltip for a disabled write action: why writing is blocked, if it is.
+pub(crate) fn write_tooltip<'a>(
+    content: Element<'a, Message>,
+    view: &RepoView,
+) -> Element<'a, Message> {
+    let reason = view
+        .write_block
+        .clone()
+        .unwrap_or_else(|| NOT_AVAILABLE.to_owned());
+    with_tooltip_text(content, reason)
+}
+
+/// Wraps a control in a tooltip with `message`.
+pub(crate) fn with_tooltip_text(
+    content: Element<'_, Message>,
+    message: String,
+) -> Element<'_, Message> {
     tooltip(
         content,
-        container(text(NOT_AVAILABLE).size(12))
+        container(text(message).size(12))
             .padding([4, 8])
             .style(theme::tooltip),
         tooltip::Position::Bottom,

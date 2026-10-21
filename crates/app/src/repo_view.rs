@@ -116,6 +116,12 @@ pub struct RepoView {
     pub error: Option<String>,
     /// Empty, read-only commit description until committing arrives (M2).
     pub description: iced::widget::text_editor::Content,
+    /// Runs write operations through the `git` executable.
+    pub writer: Arc<dyn git_core::GitWriter>,
+    /// Label of the running write operation; one at a time per tab.
+    pub busy: Option<String>,
+    /// Why write actions are disabled (Git missing or too old), if they are.
+    pub write_block: Option<String>,
     /// Identifies this tab's graph scrollable for programmatic scrolling.
     pub graph_scroll_id: iced::widget::Id,
     pub scroll: Scroll,
@@ -124,6 +130,8 @@ pub struct RepoView {
 impl RepoView {
     pub fn new(backend: Arc<dyn GitBackend>, snapshot: Arc<RepoSnapshot>) -> Self {
         let selection = restore_selection(None, &snapshot);
+        let writer: Arc<dyn git_core::GitWriter> =
+            Arc::new(git_core::CliBackend::new(backend.path()));
         Self {
             backend,
             snapshot,
@@ -135,6 +143,9 @@ impl RepoView {
             refreshing: false,
             error: None,
             description: iced::widget::text_editor::Content::new(),
+            writer,
+            busy: None,
+            write_block: None,
             graph_scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
         }

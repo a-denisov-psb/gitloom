@@ -32,6 +32,9 @@ use crate::theme;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let mut layout = column![tabs::view(app)].spacing(1);
+    if let Some(notice) = &app.notice {
+        layout = layout.push(notice_banner(notice));
+    }
     layout = match app.active_tab() {
         Some(tab) => layout.push(tab_body(app, tab)),
         None => layout.push(space::vertical()),
@@ -90,6 +93,26 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     .min_size(160)
     .on_resize(6, Message::PaneResized)
     .style(theme::panes)
+    .into()
+}
+
+/// App-wide one-time notice with a dismiss button.
+fn notice_banner(notice: &str) -> Element<'_, Message> {
+    container(
+        row![
+            text(notice).color(theme::TEXT),
+            space::horizontal(),
+            button(text("Dismiss").size(12))
+                .on_press(Message::DismissNotice)
+                .padding([3, 10])
+                .style(button::secondary),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([8, 12])
+    .width(Fill)
+    .style(theme::notice_banner)
     .into()
 }
 

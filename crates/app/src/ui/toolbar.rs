@@ -7,7 +7,7 @@ use crate::app::Message;
 use crate::repo_view::RepoView;
 use crate::theme;
 use crate::ui::muted;
-use crate::ui::panel::with_tooltip;
+use crate::ui::panel::{with_tooltip, write_tooltip};
 
 /// Toolbar actions; all write operations arrive in later milestones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,15 +59,15 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
     .spacing(20);
 
     let actions = row![
-        action(ToolbarAction::Undo),
-        action(ToolbarAction::Redo),
+        action(view, ToolbarAction::Undo),
+        action(view, ToolbarAction::Redo),
         divider(),
-        action(ToolbarAction::Pull),
-        action(ToolbarAction::Push),
+        action(view, ToolbarAction::Pull),
+        action(view, ToolbarAction::Push),
         divider(),
-        action(ToolbarAction::Branch),
-        action(ToolbarAction::Stash),
-        action(ToolbarAction::Pop),
+        action(view, ToolbarAction::Branch),
+        action(view, ToolbarAction::Stash),
+        action(view, ToolbarAction::Pop),
     ]
     .spacing(2)
     .align_y(iced::Center);
@@ -77,7 +77,7 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
         space::horizontal(),
         actions,
         space::horizontal(),
-        action(ToolbarAction::Terminal),
+        action(view, ToolbarAction::Terminal),
     ]
     .padding([4, 12])
     .align_y(iced::Center);
@@ -95,18 +95,21 @@ fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
     )
 }
 
-fn action<'a>(action: ToolbarAction) -> Element<'a, Message> {
+fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
     let content = column![text(action.glyph()).size(16), text(action.label()).size(11)]
         .spacing(1)
         .align_x(iced::Center);
 
-    with_tooltip(
-        button(content)
-            .padding([3, 10])
-            .width(64)
-            .style(theme::flat)
-            .into(),
-    )
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat)
+        .into();
+    if action == ToolbarAction::Terminal {
+        with_tooltip(button)
+    } else {
+        write_tooltip(button, view)
+    }
 }
 
 fn divider<'a>() -> Element<'a, Message> {
