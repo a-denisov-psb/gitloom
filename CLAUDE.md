@@ -47,6 +47,7 @@ Details: `docs/ARCHITECTURE.md`.
 - Everything in the repo is English: code, comments, docs, commit messages.
 - Do not guess library APIs. iced 0.14 and gix 0.88 changed a lot compared to older versions: read the source in `~/.cargo/registry/src/` or docs.rs for the exact pinned version.
 - New dependencies: latest stable version that is at least 14 days old, pinned to minor (`"0.88"`). Significant ones get an entry in `docs/DECISIONS.md`.
+- Platform-specific code (`#[cfg(unix)]`, `#[cfg(windows)]`) keeps its imports and helpers inside the same cfg scope. Before pushing, run clippy for the Windows target if available.
 - Do not change milestone scope on your own. If something in the plan is wrong or unclear, stop and ask; record open points in `docs/HANDOVER.md` → "Open questions".
 
 ## Git workflow (git flow)
