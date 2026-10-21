@@ -73,3 +73,48 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Context: with rust-lang/rust loaded, total RSS was 396 MB, of which 208 MB were pack files memory-mapped by gix. These pages are file-backed page cache that the OS can drop at any time.
 - Decision: memory targets apply to private memory (heap and anonymous mappings, i.e. `RssAnon` on Linux). Memory-mapped pack files are reported separately and not counted.
 - Consequences: M1 meets its 300 MB target (146 MB private). `docs/PERFORMANCE.md` lists both numbers.
+
+## ADR-013 CliBackend for writes
+
+- Status: accepted (M2 plan)
+- Decision: all write operations run the `git` executable through `CliBackend`
+  (argument lists, no shell, `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, no interactive editor,
+  messages via stdin, no console window on Windows). Minimum Git version 2.34.
+  One write operation at a time per repository; reads continue in parallel.
+- Why: exact Git behavior for hooks, signing, config and credential helpers.
+- Consequences: without a suitable `git`, the app stays read-only with a clear reason.
+
+## ADR-014 Undo model
+
+- Status: accepted (M2 plan)
+- Decision: per-tab in-memory undo/redo stacks. Commit and amend are undone with
+  `git reset --soft` to the recorded previous HEAD, only if HEAD still equals the
+  recorded value. Discards are made undoable by writing the affected worktree files
+  as blobs (`git hash-object -w`) before discarding and restoring them on undo.
+- Why: no extra storage, works for tracked and untracked files, safe preconditions.
+- Consequences: undo history is lost on restart; snapshot blobs are unreferenced and
+  pruned by `git gc` after the usual grace period.
+
+## ADR-015 Context menus and modals in M2
+
+- Status: accepted (M2 plan)
+- Decision: build context menu and modal infrastructure in M2 instead of M3,
+  because discard, stash and file actions need them.
+
+## ADR-016 Release builds
+
+- Status: accepted (planned for M6)
+- Decision: release binaries are built and published by CI only from M6 on, signed
+  from the start. Every version tag triggers a build, including hotfixes.
+  Targets: Linux AppImage + tar.gz, macOS universal dmg, Windows x64 zip + msi,
+  Windows x86 zip + msi as best effort (allowed to fail without blocking the release).
+- Why: unsigned builds cause Gatekeeper/SmartScreen warnings; the maintainer prefers
+  to ship installers only once they are signed.
+
+## ADR-017 Autonomous task merges
+
+- Status: accepted (M2)
+- Decision: Claude Code merges finished feature branches into `develop` itself when
+  all acceptance criteria are met and `./scripts/check.sh` is green, then pushes
+  `develop`. The maintainer is asked only for plan deviations, scope questions,
+  maintainer-only actions and releases.
