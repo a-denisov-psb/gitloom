@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M1 – Real repository and lane graph** → [`milestones/M1-real-repository.md`](milestones/M1-real-repository.md)
+**M2 – Working copy** → milestone file to be planned with the maintainer (M1 finished with v0.2.0, see [`milestones/M1-real-repository.md`](milestones/M1-real-repository.md)).
 
 ## Vision
 
@@ -13,8 +13,8 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | ID | Version | Name | Status |
 |---|---|---|---|
 | M0 | 0.1.0 | Layout shell | Done |
-| M1 | 0.2.0 | Real repository (read-only) and lane graph | Next |
-| M2 | 0.3.0 | Working copy: stage, commit, stash | Planned |
+| M1 | 0.2.0 | Real repository (read-only) and lane graph | Done |
+| M2 | 0.3.0 | Working copy: stage, commit, stash | Next |
 | M3 | 0.4.0 | Branches and remotes | Planned |
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Planned |
 | M5 | 0.6.0 | Productivity parity | Planned |
@@ -26,7 +26,7 @@ Only the current milestone is planned in task-level detail. The next one is deta
 
 iced shell with tabs, toolbar, sidebar, graph table, staging and detail panel, diff placeholder, status bar. Sample data only.
 
-### M1 – Real repository (read-only) and lane graph
+### M1 – Real repository (read-only) and lane graph (done)
 
 Open any local non-bare repository and see real history with a correct lane graph, refs, working tree status, commit details and read-only diffs. Session restore. No demo data left in the app.
 

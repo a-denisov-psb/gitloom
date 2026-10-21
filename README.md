@@ -4,17 +4,17 @@ A fast, open-source Git client with the workflow GitKraken users already know. N
 
 > Working title. Not affiliated with GitKraken or Axosoft.
 
-![Gitloom layout shell](docs/screenshot.png)
+![Gitloom showing a repository with its lane graph](docs/screenshots/m1-graph.png)
 
 ## Status
 
-Early development. The layout shell (M0) is done with sample data; M1 brings real repositories and the lane graph. See [docs/ROADMAP.md](docs/ROADMAP.md).
+Early development. Version 0.2.0 (M1) opens real repositories read-only: history with lane graph, branches, tags, stashes, working tree status, commit details and diffs. Writing (stage, commit, checkout, ...) follows from M2. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 | Milestone | Version | State |
 |---|---|---|
 | M0 Layout shell | 0.1.0 | Done |
-| M1 Real repository (read-only) + lane graph | 0.2.0 | In progress |
-| M2 Working copy | 0.3.0 | Planned |
+| M1 Real repository (read-only) + lane graph | 0.2.0 | Done |
+| M2 Working copy | 0.3.0 | Next |
 | M3 Branches and remotes | 0.4.0 | Planned |
 | M4 Merge, rebase, conflicts | 0.5.0 | Planned |
 | M5 Productivity parity | 0.6.0 | Planned |
@@ -26,6 +26,7 @@ Requires Rust 1.88+ (rustup picks the toolchain from `rust-toolchain.toml`).
 
 ```sh
 cargo run -p gitloom
+cargo run -p gitloom -- <path-to-repository>
 ```
 
 Linux needs X11/Wayland libraries and `libxkbcommon`. Without a GPU, use the software renderer:
@@ -39,7 +40,8 @@ ICED_BACKEND=tiny-skia cargo run -p gitloom
 | Document | Content |
 |---|---|
 | [ROADMAP](docs/ROADMAP.md) | Milestones, non-goals, ideas |
-| [M1 plan](docs/milestones/M1-real-repository.md) | Current milestone, task by task |
+| [M1 plan](docs/milestones/M1-real-repository.md) | M1 tasks and notes (done) |
+| [PERFORMANCE](docs/PERFORMANCE.md) | Measurements |
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | Crates, threading, graph layout |
 | [DECISIONS](docs/DECISIONS.md) | Architecture decision records |
 | [UX-PARITY](docs/UX-PARITY.md) | GitKraken layout, interactions, shortcuts |

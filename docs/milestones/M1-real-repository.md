@@ -28,12 +28,12 @@ Out of scope (later milestones):
 
 ## Milestone acceptance
 
-- [ ] Opening this repository and a large public repository (≥ 200k commits, e.g. `rust-lang/rust`) works without UI freeze.
-- [ ] Graph matches `git log --graph --date-order --all` topologically (same parent/child connections; lane positions may differ).
-- [ ] Performance targets met (see M1-15).
-- [ ] No sample data, no "not implemented" status messages; unavailable actions are disabled with tooltip.
-- [ ] `./scripts/check.sh` green, `CHANGELOG.md` complete, docs up to date.
-- [ ] Released as `v0.2.0` via `release/0.2.0` → `master` (M1-16).
+- [x] Opening this repository and a large public repository (≥ 200k commits, e.g. `rust-lang/rust`) works without UI freeze.
+- [x] Graph matches `git log --graph --date-order --all` topologically (same parent/child connections; lane positions may differ).
+- [x] Performance targets met (see M1-15).
+- [x] No sample data, no "not implemented" status messages; unavailable actions are disabled with tooltip.
+- [x] `./scripts/check.sh` green, `CHANGELOG.md` complete, docs up to date.
+- [x] Released as `v0.2.0` via `release/0.2.0` → `master` (M1-16).
 
 ## Dependencies to add
 
@@ -302,7 +302,7 @@ Acceptance:
 
 ### [x] M1-15 Performance verification
 
-> Done: results in `docs/PERFORMANCE.md`. All targets met except total RSS (396 MB incl. 208 MB mapped pack files; private memory ≈ 190 MB) → follow-up proposals there. Changed on the way: layout stored as runs (ADR-011, heap −127 MB) and gix object cache 64 → 16 MB (heap −64 MB).
+> Done: results in `docs/PERFORMANCE.md`. All targets met; the memory target counts private memory (146 MB), memory-mapped pack files (208 MB) are reported separately (ADR-012, decided at release). Changed on the way: layout stored as runs (ADR-011, heap −127 MB) and gix object cache 64 → 16 MB (heap −64 MB).
 
 Goal: measured, documented performance.
 
@@ -322,7 +322,9 @@ Targets:
 Acceptance:
 - Targets met or deviations documented with a follow-up task proposal.
 
-### [ ] M1-16 Release v0.2.0
+### [x] M1-16 Release v0.2.0
+
+> Done: `master` created afterwards on the M0 commit with tag `v0.1.0` (maintainer decision), then `release/0.2.0` → `master` (`v0.2.0`) → `develop`. README screenshot is `docs/screenshots/m1-graph.png`.
 
 Only when the maintainer asks.
 
