@@ -272,6 +272,12 @@ pub enum Error {
     /// Bare repositories are not supported yet.
     BareRepository(String),
     NotFound(String),
+    /// An object the repository refers to is not in the object database;
+    /// in a partial clone `git` can fetch it from the promisor remote.
+    MissingObject {
+        id: Oid,
+        partial_clone: bool,
+    },
     Backend(String),
     /// A `git` command failed.
     Command {
@@ -289,6 +295,13 @@ impl fmt::Display for Error {
                 write!(f, "Bare repositories are not supported yet: {path}")
             }
             Error::NotFound(what) => write!(f, "Not found: {what}"),
+            Error::MissingObject {
+                partial_clone: true,
+                ..
+            } => write!(f, "Content not available locally (partial clone)"),
+            Error::MissingObject { id, .. } => {
+                write!(f, "Object {id} is missing from the repository")
+            }
             Error::Backend(msg) => write!(f, "Git error: {msg}"),
             Error::Command {
                 command,
