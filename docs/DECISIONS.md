@@ -118,3 +118,10 @@ Architecture decision records in short form. New entries at the bottom. Change a
   all acceptance criteria are met and `./scripts/check.sh` is green, then pushes
   `develop`. The maintainer is asked only for plan deviations, scope questions,
   maintainer-only actions and releases.
+
+## ADR-018 Working tree diffs use Git's filter pipeline
+
+- Status: accepted (M2-04)
+- Decision: before diffing against the index, working tree content runs through gix's `convert_to_git` pipeline: eol conversion (`core.autocrlf`, `.gitattributes` `text`/`eol`), `ident`, and configured external `filter.<name>.clean`/`process` drivers (e.g. Git LFS). If the pipeline fails (driver missing or failing), the diff view shows "Filtered file – diff not available" with the reason.
+- Why: the diff then equals `git diff`, so patches built from it (hunk/line staging, M2-07) apply cleanly; running the configured drivers is what Git itself does.
+- Consequences: external filter programs run in the background when such a file's diff is opened.
