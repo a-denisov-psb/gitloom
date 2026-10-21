@@ -201,6 +201,28 @@ pub struct LayoutOptions<'a> {
     pub wip: Option<Wip>,
     /// Commits whose edges to their parents are drawn dashed (e.g. stashes).
     pub dashed: &'a [Id],
+    /// Lane groups, e.g. for a Git flow layout.
+    pub hints: Option<LaneHints<'a>>,
+}
+
+/// Lane group and color of one commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaneHint {
+    /// Groups are placed from left to right in index order.
+    pub group: u16,
+    /// Color of lanes started for this commit.
+    pub color: ColorId,
+}
+
+/// Assigns commits to ordered lane groups (e.g. Git flow: master, hotfix,
+/// release, develop, feature). Every group reserves a lane range as wide as
+/// it needs at most anywhere in the history, so groups keep their columns.
+/// Commits without a hint form an implicit last group. Inside a group the
+/// default allocation applies.
+#[derive(Debug, Clone, Copy)]
+pub struct LaneHints<'a> {
+    /// Hint per commit, indexed by [`Id`]; missing entries mean no hint.
+    pub commits: &'a [Option<LaneHint>],
 }
 
 /// Like [`layout`], with additional options.
@@ -209,7 +231,6 @@ pub fn layout_with(
     order: &[Id],
     options: &LayoutOptions<'_>,
 ) -> Result<Layout, Error> {
-    let wip = options.wip;
     check_ids(commits)?;
     if order.len() != commits.len() {
         return Err(Error::InvalidOrder);
@@ -221,12 +242,47 @@ pub fn layout_with(
             _ => return Err(Error::InvalidOrder),
         }
     }
-
-    let rows = order.len() + usize::from(wip.is_some());
+    let rows = order.len() + usize::from(options.wip.is_some());
     if u32::try_from(rows).is_err() {
         return Err(Error::TooManyCommits(rows));
     }
-    let mut lanes = Lanes::default();
+
+    let hints = options.hints.map_or(&[][..], |h| h.commits);
+    let groups = hints
+        .iter()
+        .flatten()
+        .map(|h| usize::from(h.group) + 1)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    if groups == 1 {
+        return run(commits, order, options, hints, vec![0]).map(|(layout, _)| layout);
+    }
+    // Allocation inside a group never depends on where the group starts:
+    // the first pass grows the group ranges as needed, the second lays out
+    // with the final ranges so every group keeps its columns.
+    let (_, starts) = run(commits, order, options, hints, vec![0; groups])?;
+    run(commits, order, options, hints, starts).map(|(layout, _)| layout)
+}
+
+/// One layout pass with groups starting at `starts`; also returns the group
+/// starts after the pass (ranges grow when a group needs more lanes).
+fn run(
+    commits: &[GraphCommit],
+    order: &[Id],
+    options: &LayoutOptions<'_>,
+    hints: &[Option<LaneHint>],
+    starts: Vec<usize>,
+) -> Result<(Layout, Vec<usize>), Error> {
+    let wip = options.wip;
+    let rows = order.len() + usize::from(wip.is_some());
+    let mut lanes = Lanes {
+        slots: Vec::new(),
+        starts,
+        hints,
+        next_color: 0,
+        spans: Vec::new(),
+    };
     let mut out = Layout {
         nodes: Vec::with_capacity(rows),
         curve_start: Vec::with_capacity(rows + 1),
@@ -235,7 +291,9 @@ pub fn layout_with(
     out.curve_start.push(0);
     if let Some(wip) = wip {
         let head: Vec<Id> = wip.head.into_iter().collect();
-        lanes.row(&mut out, WIP_ID, &head, true)?;
+        // The WIP row belongs to HEAD's group.
+        let group = wip.head.unwrap_or(WIP_ID);
+        lanes.row(&mut out, WIP_ID, group, &head, true)?;
     }
     let mut dashed = vec![false; commits.len()];
     for id in options.dashed {
@@ -246,6 +304,7 @@ pub fn layout_with(
     for id in order {
         lanes.row(
             &mut out,
+            *id,
             *id,
             &commits[id.index()].parents,
             dashed[id.index()],
@@ -274,7 +333,7 @@ pub fn layout_with(
     }
     out.spans = spans;
     out.max_width = out.nodes.iter().map(|n| n.2).max().unwrap_or(0);
-    Ok(out)
+    Ok((out, lanes.starts))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -298,31 +357,62 @@ impl Slot {
     }
 }
 
-#[derive(Debug, Default)]
-struct Lanes {
+#[derive(Debug)]
+struct Lanes<'a> {
     slots: Vec<Option<Slot>>,
+    /// First lane of every group; groups lie side by side in index order,
+    /// the last one is unbounded.
+    starts: Vec<usize>,
+    hints: &'a [Option<LaneHint>],
     next_color: u32,
     /// Finished `Through` runs.
     spans: Vec<Span>,
 }
 
-impl Lanes {
+impl Lanes<'_> {
+    /// Group and hinted color of commit `id`; unhinted commits use the last group.
+    fn group_of(&self, id: Id) -> (usize, Option<ColorId>) {
+        match self.hints.get(id.index()) {
+            Some(Some(hint)) => (usize::from(hint.group), Some(hint.color)),
+            _ => (self.starts.len() - 1, None),
+        }
+    }
+
+    /// Lanes `start..end` of `group`.
+    fn range(&self, group: usize) -> (usize, usize) {
+        let end = self.starts.get(group + 1).copied().unwrap_or(usize::MAX);
+        (self.starts[group], end)
+    }
+
     /// Lays out the row of commit `id` into `out` and updates the lane state.
-    /// `dashed` marks the edges to `parents` (WIP row only).
-    fn row(&mut self, out: &mut Layout, id: Id, parents: &[Id], dashed: bool) -> Result<(), Error> {
+    /// `group_id` selects the lane group (HEAD for the WIP row); `dashed`
+    /// marks the edges to `parents`.
+    fn row(
+        &mut self,
+        out: &mut Layout,
+        id: Id,
+        group_id: Id,
+        parents: &[Id],
+        dashed: bool,
+    ) -> Result<(), Error> {
         let row = out.nodes.len() as u32;
+        let (group, hint_color) = self.group_of(group_id);
+        let (start, end) = self.range(group);
         // Slots are trimmed after each row, so the last one is occupied.
         let mut highest = self.slots.len().checked_sub(1);
 
         // Upper half: lanes waiting for this commit end in the node; all
-        // others pass by (recorded as spans).
+        // others pass by (recorded as spans). The node takes the first
+        // waiting lane of its own group.
         let mut node = None;
         for (lane, slot) in self.slots.iter_mut().enumerate() {
             let Some(waiting) = slot else { continue };
             if waiting.waiting_for != id {
                 continue;
             }
-            node.get_or_insert((lane, waiting.color));
+            if (start..end).contains(&lane) {
+                node.get_or_insert((lane, waiting.color));
+            }
             out.curves.push(Segment::IntoNode {
                 from: lane_u16(lane)?,
                 color: waiting.color,
@@ -332,14 +422,17 @@ impl Lanes {
             *slot = None;
         }
 
-        // Branch tips start in the lowest free lane with a new color.
+        // Branch tips start in the lowest free lane of their group with a new color.
         let (lane, color) = match node {
             Some(node) => node,
-            None => (self.free_lane(), self.new_color()),
+            None => (
+                self.free_lane(group),
+                hint_color.unwrap_or_else(|| self.new_color()),
+            ),
         };
 
         // Lower half: the first parent continues in the node lane, the others
-        // join a lane already waiting for them or open a new one.
+        // join a lane already waiting for them or open one in their group.
         let mut parents = parents.iter().copied();
         if let Some(first) = parents.next() {
             self.set(
@@ -377,7 +470,9 @@ impl Lanes {
                     (to, slot.color)
                 }
                 None => {
-                    let (to, to_color) = (self.free_lane(), self.new_color());
+                    let (parent_group, parent_color) = self.group_of(parent);
+                    let to = self.free_lane(parent_group);
+                    let to_color = parent_color.unwrap_or_else(|| self.new_color());
                     self.set(
                         to,
                         Slot {
@@ -409,19 +504,37 @@ impl Lanes {
         Ok(())
     }
 
-    fn free_lane(&self) -> usize {
-        self.slots
-            .iter()
-            .position(Option::is_none)
-            .unwrap_or(self.slots.len())
+    /// Lowest free lane of `group`. A full group grows by one lane at its
+    /// end and shifts the following groups (first layout pass only).
+    fn free_lane(&mut self, group: usize) -> usize {
+        let (start, end) = self.range(group);
+        let limit = end.min(self.slots.len());
+        if let Some(free) = self
+            .slots
+            .get(start..limit)
+            .and_then(|slots| slots.iter().position(Option::is_none))
+        {
+            return start + free;
+        }
+        let next = start.max(limit);
+        if next < end {
+            return next;
+        }
+        if end < self.slots.len() {
+            self.slots.insert(end, None);
+        }
+        for later in &mut self.starts[group + 1..] {
+            *later += 1;
+        }
+        end
     }
 
-    /// Occupies `lane`, which is at most one past the last slot.
+    /// Occupies `lane`, which may lie past the last slot.
     fn set(&mut self, lane: usize, slot: Slot) {
-        match self.slots.get_mut(lane) {
-            Some(existing) => *existing = Some(slot),
-            None => self.slots.push(Some(slot)),
+        if lane >= self.slots.len() {
+            self.slots.resize(lane + 1, None);
         }
+        self.slots[lane] = Some(slot);
     }
 
     fn new_color(&mut self) -> ColorId {
@@ -438,7 +551,7 @@ fn lane_u16(lane: usize) -> Result<u16, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{history, random_history, render, verify, Rng};
+    use crate::test_support::{history, random_history, render, verify, verify_hinted, Rng};
     use crate::topo_order;
 
     /// Lays out `spec`, checks all invariants and renders the result.
@@ -621,12 +734,132 @@ mod tests {
         let options = LayoutOptions {
             wip: None,
             dashed: &[Id(2)],
+            hints: None,
         };
         let layout = layout_with(&commits, &order, &options).unwrap();
         assert_eq!(
             render(&layout, false),
             ["*   c0 v0.", ": * c1 v1", "*   c0 ^0. ^1c1 v0", "*   c0 ^0"].join("\n")
         );
+    }
+
+    /// Lays out `spec` with `hints` given as `(group, color)` per commit.
+    fn snapshot_hinted(spec: &[(&[u32], i64)], hints: &[Option<(u16, u32)>]) -> String {
+        let commits = history(spec);
+        let order = topo_order(&commits).unwrap().order;
+        let hints: Vec<Option<LaneHint>> = hints
+            .iter()
+            .map(|h| {
+                h.map(|(group, color)| LaneHint {
+                    group,
+                    color: ColorId(color),
+                })
+            })
+            .collect();
+        let options = LayoutOptions {
+            hints: Some(LaneHints { commits: &hints }),
+            ..LayoutOptions::default()
+        };
+        let layout = layout_with(&commits, &order, &options).unwrap();
+        verify_hinted(&commits, &order, &layout);
+        render(&layout, false)
+    }
+
+    #[test]
+    fn two_groups_keep_their_columns() {
+        // 0 main (group 0); 1 and 2 develop (group 1), develop tip newest.
+        let spec: &[(&[u32], i64)] = &[(&[], 1), (&[0], 2), (&[1], 3)];
+        assert_snapshot(snapshot(spec, None), &["* c0 v0", "* c0 ^0 v0", "* c0 ^0"]);
+        assert_snapshot(
+            snapshot_hinted(spec, &[Some((0, 10)), Some((1, 20)), Some((1, 20))]),
+            &["  * c20 v1", "  * c20 ^1 v1", "*   c10 ^1c20"],
+        );
+    }
+
+    #[test]
+    fn four_groups_and_unhinted_commits() {
+        // Git flow: master 0, release 1, develop 2, feature 3; 6 has no hint.
+        let spec: &[(&[u32], i64)] = &[
+            (&[], 1),     // 0 master root
+            (&[0], 2),    // 1 develop
+            (&[1], 3),    // 2 feature
+            (&[1, 2], 4), // 3 develop: merge feature
+            (&[3], 5),    // 4 release
+            (&[0, 4], 6), // 5 master: merge release
+            (&[3], 7),    // 6 unhinted
+        ];
+        let hints = [
+            Some((0, 10)),
+            Some((2, 12)),
+            Some((3, 13)),
+            Some((2, 12)),
+            Some((1, 11)),
+            Some((0, 10)),
+            None,
+        ];
+        // Columns: master 0, release 1, develop 2, feature 3, unhinted 4.
+        assert_snapshot(
+            snapshot_hinted(spec, &hints),
+            &[
+                "        * c0 v4",
+                "*       | c10 v0 v1c11",
+                "| *     | c11 ^1 v1",
+                "|   *     c12 ^1c11 ^4c0 v2 v3c13",
+                "|   | *   c13 ^3 v3",
+                "|   *     c12 ^2 ^3c13 v2",
+                "*         c10 ^0 ^2c12",
+            ],
+        );
+    }
+
+    #[test]
+    fn random_histories_with_hints_keep_every_edge() {
+        let mut rng = Rng::new(0x41a7);
+        for _ in 0..500 {
+            let count = 1 + rng.below(60) as u32;
+            let spread = 1 + rng.below(10);
+            let commits = random_history(&mut rng, count, spread, true);
+            let order = topo_order(&commits).unwrap().order;
+            let groups = 1 + rng.below(4);
+            let hints: Vec<Option<LaneHint>> = (0..count)
+                .map(|_| {
+                    let group = rng.below(groups + 1);
+                    (group < groups).then(|| LaneHint {
+                        group: group as u16,
+                        color: ColorId(100 + group as u32),
+                    })
+                })
+                .collect();
+            let options = LayoutOptions {
+                hints: Some(LaneHints { commits: &hints }),
+                ..LayoutOptions::default()
+            };
+            let layout = layout_with(&commits, &order, &options).unwrap();
+            verify_hinted(&commits, &order, &layout);
+            // Hinted nodes sit inside their group's range, ranges in group order.
+            let mut ranges = vec![(u16::MAX, 0u16); groups as usize + 1];
+            for (row, id) in order.iter().enumerate() {
+                let group = hints[id.index()].map_or(groups as usize, |h| usize::from(h.group));
+                let lane = layout.node_lane(row).unwrap();
+                ranges[group].0 = ranges[group].0.min(lane);
+                ranges[group].1 = ranges[group].1.max(lane);
+            }
+            let used: Vec<_> = ranges.iter().filter(|r| r.0 != u16::MAX).collect();
+            assert!(used.windows(2).all(|w| w[0].1 < w[1].0), "{used:?}");
+        }
+    }
+
+    #[test]
+    fn empty_hints_change_nothing() {
+        let mut rng = Rng::new(7);
+        let commits = random_history(&mut rng, 300, 8, true);
+        let order = topo_order(&commits).unwrap().order;
+        let plain = layout(&commits, &order, None).unwrap();
+        let options = LayoutOptions {
+            hints: Some(LaneHints { commits: &[] }),
+            ..LayoutOptions::default()
+        };
+        assert_eq!(layout_with(&commits, &order, &options).unwrap(), plain);
     }
 
     #[test]
