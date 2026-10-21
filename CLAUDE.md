@@ -60,8 +60,10 @@ Details: `docs/ARCHITECTURE.md`.
 | `hotfix/X.Y.Z` | Fixes on `master`, only when the maintainer asks |
 
 - Commits: Conventional Commits with the crate as scope, e.g. `feat(git-graph): assign lanes to merge parents`, `fix(app): keep selection after refresh`. Small, focused commits.
-- Merging a feature: only after the maintainer approves. `git switch develop && git merge --no-ff feature/...`, then delete the feature branch.
-- Never commit directly to `master` or `develop`. Never rewrite published history. Never push (no remote yet).
+- Merging a feature: when all acceptance criteria are met and `./scripts/check.sh` is green, merge it yourself (`git switch develop && git merge --no-ff feature/...`), push `develop`, delete the feature branch. Ask first only for plan deviations, scope changes or open decisions (ADR-017).
+- Tasks blocked by the maintainer: do everything else, record the open items under "Maintainer to-dos" in `docs/HANDOVER.md`, continue with the next unblocked task.
+- Never commit directly to `master` or `develop`. Never rewrite published history.
+- Push feature branches (`git push -u origin feature/...`) and `develop`. Never push `master` or tags; the maintainer does that. Never force-push.
 
 ## Definition of done (per task)
 
@@ -83,4 +85,5 @@ Details: `docs/ARCHITECTURE.md`.
 ## Communication
 
 - Report in short German summaries to the maintainer (bullets, tables where useful). Code and repo content stay English.
-- When a task is done: what changed, what was checked, anything deviating, then ask for merge approval.
+- When a task is done: what changed, what was checked, anything deviating.
+- Per task: short German summary after merging. At milestone end: summary report with maintainer to-dos.
