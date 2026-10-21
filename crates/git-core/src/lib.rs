@@ -9,6 +9,7 @@ mod cli_backend;
 mod diff;
 mod discard;
 mod gix_backend;
+mod history;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
 mod patch;
@@ -22,6 +23,7 @@ pub use discard::{
     discard_all, discard_files, discard_lines, revert_lines, DiscardSnapshot, FileSnapshot,
 };
 pub use gix_backend::GixBackend;
+pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use patch::{build_patch, PatchDirection};
