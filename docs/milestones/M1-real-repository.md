@@ -218,7 +218,9 @@ Acceptance:
 - Unit tests for (de)serialization, version handling and recent list ordering/capping.
 - Manual: close app with 3 tabs, reopen → same tabs, same active tab, same pane sizes.
 
-### [ ] M1-10 App: lane graph rendering
+### [x] M1-10 App: lane graph rendering
+
+> Done: per-row canvas from `git_graph::Row` (lines + cubic Bézier curves, dashed WIP edges), pill grouping in `ui::graph::ref_labels` (unit tested), selected row tinted with its lane color, graph width 2–12 lanes. Detached HEAD gets a `HEAD` pill (planned for M1-14). Remote markers are text (`main · origin`) until the icon set (M5). Checked by hand against `git log --graph --all` on a test repo with 5 parallel branches, an octopus merge, tags and a fake remote, and on this repo. Screenshot: `docs/screenshots/m1-graph.png`.
 
 Goal: draw the real graph from `git-graph` output.
 
