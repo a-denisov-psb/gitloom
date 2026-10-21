@@ -262,3 +262,52 @@ pub fn notice_banner(_: &Theme) -> container::Style {
         ..container::Style::default()
     }
 }
+
+/// Dimmed backdrop behind a modal dialog.
+pub fn backdrop(_: &Theme) -> container::Style {
+    filled(Color::BLACK.scale_alpha(0.55))
+}
+
+pub fn dialog(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_PANEL)),
+        border: Border::default().rounded(6).width(1).color(BORDER),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn dialog_details(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_CHROME)),
+        border: Border::default().rounded(3).width(1).color(BORDER),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn menu(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_PANEL)),
+        border: Border::default().rounded(4).width(1).color(BORDER),
+        shadow: iced::Shadow {
+            color: Color::BLACK.scale_alpha(0.4),
+            offset: iced::Vector::new(0.0, 3.0),
+            blur_radius: 10.0,
+        },
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn menu_separator(_: &Theme) -> container::Style {
+    filled(BORDER)
+}
+
+pub fn menu_item(_: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Hovered | button::Status::Pressed => button_style(Some(BG_SELECTED), TEXT),
+        button::Status::Disabled => button_style(None, TEXT_MUTED.scale_alpha(0.6)),
+        button::Status::Active => button_style(None, TEXT),
+    }
+}

@@ -18,14 +18,17 @@ pub enum Shortcut {
     TogglePanel,
     Navigate(Move),
     FocusFilter,
-    /// Esc: close the diff view.
+    /// Esc: close the dialog, the menu or the diff view (in that order).
     Close,
+    /// Enter: confirm the default button of an open dialog.
+    Confirm,
 }
 
 impl Shortcut {
-    /// Shortcuts that still work while a text input has focus.
+    /// Shortcuts that still work while a text input has focus
+    /// (Enter only acts while a dialog is open).
     pub fn works_in_text_input(self) -> bool {
-        matches!(self, Self::Close)
+        matches!(self, Self::Close | Self::Confirm)
     }
 }
 
@@ -40,6 +43,7 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
     match key.as_ref() {
         Key::Named(Named::F5) if !command && !alt => Some(Shortcut::Refresh),
         Key::Named(Named::Escape) if plain && !shift => Some(Shortcut::Close),
+        Key::Named(Named::Enter) if plain && !shift => Some(Shortcut::Confirm),
         Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
@@ -180,6 +184,10 @@ mod tests {
             Some(Shortcut::Close)
         );
         assert!(Shortcut::Close.works_in_text_input());
+        assert_eq!(
+            shortcut(&Key::Named(Named::Enter), Modifiers::empty()),
+            Some(Shortcut::Confirm)
+        );
         assert!(!Shortcut::Navigate(Move::Next).works_in_text_input());
     }
 
