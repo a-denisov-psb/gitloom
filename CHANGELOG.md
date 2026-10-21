@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- Gitloom looks for `git` (2.34 or newer) at startup; without it the app stays read-only, shows a one-time notice and explains the reason on disabled write actions.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
