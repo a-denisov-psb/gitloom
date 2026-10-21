@@ -45,6 +45,10 @@ impl TestRepo {
             clock: Cell::new(START_TIME),
         };
         repo.git(&["init", "--quiet", "--initial-branch=main"]);
+        // The code under test runs `git` with the real system configuration;
+        // Git for Windows enables autocrlf there. Tests that need line ending
+        // conversion configure it themselves.
+        repo.git(&["config", "core.autocrlf", "false"]);
         repo
     }
 

@@ -139,12 +139,14 @@ fn stage_all_and_unstage_all() {
 #[test]
 fn file_names_are_not_glob_patterns() {
     let repo = base();
-    repo.write("star*.txt", "glob\n");
-    repo.write("starX.txt", "other\n");
-    writer(&repo).stage(&paths(&["star*.txt"])).unwrap();
+    // As a glob, `file[1].txt` would match `file1.txt`; both names are
+    // valid on every platform (unlike `*` and `?` on Windows).
+    repo.write("file[1].txt", "glob\n");
+    repo.write("file1.txt", "other\n");
+    writer(&repo).stage(&paths(&["file[1].txt"])).unwrap();
     assert_eq!(
         kinds(&status(&repo).staged),
-        [("star*.txt", ChangeKind::Added)]
+        [("file[1].txt", ChangeKind::Added)]
     );
 }
 
