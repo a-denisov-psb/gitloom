@@ -2821,6 +2821,103 @@ mod tests {
         assert!(commit_blocker(view, false).is_none());
     }
 
+    /// Staging app with `state` in progress and a staged file "a".
+    fn app_in_state(state: git_core::RepoState) -> App {
+        let mut app = staging_app(&[], &["a"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        if state.concluded_by_commit() {
+            snapshot.merge_message = Some("Merge branch 'x'\n".into());
+        }
+        snapshot.state = state;
+        view.apply_snapshot(Arc::new(snapshot));
+        view.summary = "Summary".into();
+        app
+    }
+
+    fn merging() -> git_core::RepoState {
+        git_core::RepoState::Merging {
+            merge_head: "x".into(),
+        }
+    }
+
+    #[test]
+    fn merge_in_progress_allows_commit_but_blocks_amend_and_stash() {
+        let mut app = app_in_state(merging());
+        let view = app.tabs[0].view().unwrap();
+        assert!(commit_blocker(view, false).is_none(), "commit concludes it");
+        assert!(view.state_block(Guarded::Amend).is_some());
+
+        let _ = app.update(Message::StashPush);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Cannot stash while a merge is in progress");
+        let _ = app.update(Message::AmendToggled(true));
+        assert!(!app.tabs[0].view().unwrap().amend);
+        let _ = app.update(Message::StashDropConfirmed("s".into()));
+        assert!(
+            app.tabs[0].view().unwrap().busy.is_some(),
+            "deleting a stash is harmless"
+        );
+    }
+
+    #[test]
+    fn rebase_in_progress_blocks_committing() {
+        let app = app_in_state(git_core::RepoState::Rebasing {
+            branch: Some("topic".into()),
+            onto: None,
+            step: None,
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            commit_blocker(view, false).as_deref(),
+            Some("Cannot commit while a rebase is in progress")
+        );
+    }
+
+    #[test]
+    fn undoing_a_commit_is_blocked_but_a_discard_is_not() {
+        let mut app = app_in_state(merging());
+        app.tabs[0].view_mut().unwrap().undo.push(commit_action());
+        let _ = app.update(Message::Undo);
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none());
+        assert_eq!(view.undo.len(), 1, "entry is kept");
+
+        let view = app.tabs[0].view_mut().unwrap();
+        view.undo.push(UndoAction::Discard {
+            label: "Discard a".into(),
+            snapshot: git_core::DiscardSnapshot::default(),
+        });
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[0].view().unwrap().busy.is_some());
+    }
+
+    #[test]
+    fn lock_errors_offer_retry_of_the_same_operation() {
+        let mut app = staging_app(&[], &["a"]);
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().summary = "Summary".into();
+        let _ = app.update(Message::CommitRequested);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Commit".into(),
+            result: Err(
+                "git commit failed (exit code 128): fatal: Unable to create \
+                         '/r/.git/index.lock': File exists."
+                    .into(),
+            ),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.details.as_deref(), Some("/r/.git/index.lock"));
+        assert!(matches!(modal.default_action(), Some(Message::RetryWrite(t)) if t == tab));
+        assert_eq!(app.tabs[0].view().unwrap().summary, "Summary", "kept");
+
+        let _ = app.update(Message::RetryWrite(tab));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Commit"));
+        assert!(view.clear_message_after_write, "a successful retry clears");
+    }
+
     #[test]
     fn template_fills_an_empty_description() {
         let mut app = staging_app(&[], &["a"]);
