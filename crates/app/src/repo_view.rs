@@ -50,9 +50,12 @@ pub struct DiffView {
     pub selection: std::collections::BTreeSet<(u32, u32)>,
     /// Row index of the last plain or Ctrl click (start of a Shift range).
     pub anchor: Option<usize>,
+    /// A missing object of a partial clone is being fetched.
+    pub fetching: bool,
+    /// Objects already fetched for this diff (each is tried once).
+    pub fetched: Vec<String>,
 }
 
-/// How a line click changes the selection.
 /// Write actions that would break an operation in progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Guarded {
@@ -64,6 +67,7 @@ pub enum Guarded {
     MoveHead,
 }
 
+/// How a line click changes the selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClickMode {
     /// Plain click: select only this line.
@@ -87,6 +91,8 @@ impl DiffView {
             scroll: Scroll::default(),
             selection: std::collections::BTreeSet::new(),
             anchor: None,
+            fetching: false,
+            fetched: Vec::new(),
         }
     }
 

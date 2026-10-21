@@ -93,6 +93,7 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
     .style(theme::column_header);
 
     let body: Element<'a, Message> = match &diff.diff {
+        Loadable::Loading if diff.fetching => centered(muted("Fetching missing content…")),
         Loadable::Loading => centered(muted("Loading diff…")),
         Loadable::Failed(error) => centered(text(error).color(theme::DANGER)),
         Loadable::Ready(file) => content(repo, diff, file),
