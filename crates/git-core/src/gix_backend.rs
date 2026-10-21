@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Object cache per call; avoids decoding commits twice during date-ordered walks.
-const OBJECT_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const OBJECT_CACHE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Repository opened with gitoxide. Cheap to share between threads; every
 /// call works on its own thread-local [`gix::Repository`].
