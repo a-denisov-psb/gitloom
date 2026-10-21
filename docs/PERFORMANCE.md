@@ -21,7 +21,7 @@ Measurements for M1 (task M1-15). Release builds, numbers are medians of 3 runs 
 | Full snapshot (log, refs, status, topo, layout; 254 lanes max) | – | **0.96 s** | `GITLOOM_PERF_REPO=<path> cargo test -p gitloom --release snapshot_memory -- --ignored --nocapture` |
 | Open large repo → first graph paint | < 2 s | **1.21 s** (process start to painted rows) | screenshot polling via X11 |
 | Status on large clean repo | < 1 s | **65 ms** | perf test `status` |
-| Memory with 100k commits loaded | < 300 MB | **146 MB private heap** (+42 MB shared GPU buffers); **396 MB RSS** including 208 MB of memory-mapped pack files | `/proc/<pid>/status` after the graph is shown |
+| Memory with 100k commits loaded (private memory, ADR-012) | < 300 MB | **146 MB** private (`RssAnon`); reported separately: 208 MB memory-mapped pack files, 42 MB shared GPU buffers, 396 MB total RSS | `/proc/<pid>/status` after the graph is shown |
 | Scrolling 100k rows | fluid | Only visible rows (+10 overscan) are built per frame; wheel and scrollbar dragging work without visible delay in WSLg | by hand |
 
 ## Memory breakdown (rust-lang/rust)
@@ -33,7 +33,7 @@ Measurements for M1 (task M1-15). Release builds, numbers are medians of 3 runs 
 | Lane layout | ≈ 5 MB (runs + per-row curves; was 142 MB as one segment per lane and row, see ADR-011) |
 | gix pack files mapped by the object database | 208 MB file-backed RSS (page cache, reclaimable by the OS) |
 
-The 300 MB target is met for private memory (heap + shared ≈ 190 MB) but not for total RSS, which counts the mapped pack files. After a refresh the heap can stay higher (up to ≈ 250 MB observed) because the allocator keeps memory of the previous snapshot.
+The memory target counts private memory (heap and anonymous mappings, ADR-012): 146 MB, target met. Memory-mapped pack files (208 MB, file-backed page cache) are listed separately and not counted. After a refresh the heap can stay higher (up to ≈ 250 MB observed, still within the target) because the allocator keeps memory of the previous snapshot.
 
 ## Changes made in M1-15
 
@@ -42,6 +42,6 @@ The 300 MB target is met for private memory (heap + shared ≈ 190 MB) but not f
 
 ## Follow-up proposals
 
-1. **Pack mappings**: check whether gix can release or limit mapped pack data after loading (e.g. dropping the object database handle between operations, or gix's pack cache settings). Would bring RSS below 300 MB.
+1. **Pack mappings** (optional, not part of the target): check whether gix can release or limit mapped pack data after loading.
 2. **Allocator retention after refresh**: evaluate returning memory after a snapshot swap (e.g. a different global allocator); needs a decision because it adds a dependency.
 3. **Incremental refresh** (with the file watcher in M2): reuse the commit list when only the working tree changed, instead of rebuilding the full snapshot on every window focus.

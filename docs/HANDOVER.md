@@ -20,14 +20,15 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (M1 implemented on `develop`, not released)
+## Current state (end of M1, version 0.2.0)
 
-Done (M1-01 … M1-15, see the notes in `docs/milestones/M1-real-repository.md`):
+Done (M1-01 … M1-16, see the notes in `docs/milestones/M1-real-repository.md`):
 
 - `git-core`: `GixBackend` (gix 0.88) for log, refs with upstream ahead/behind, HEAD, stashes, working tree status, commit changes and file diffs; `MockBackend` only behind the `mock` feature.
 - `git-graph`: topological order and stable lane layout, stored as vertical runs (ADR-011); criterion benchmark.
-- `app`: background loading per tab, refresh (F5, window focus), open flow (start screen, folder dialog, typed path, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
-- Measurements: `docs/PERFORMANCE.md`.
+- `app`: background loading per tab, refresh (F5, window focus), open flow (start screen with native folder dialog as the default way, typed path as fallback, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
+- Measurements: `docs/PERFORMANCE.md` (memory target counts private memory, ADR-012).
+- Branches: `master` with `v0.1.0` (M0) and `v0.2.0` (M1), `develop`.
 
 Verified:
 
@@ -36,12 +37,20 @@ Verified:
 
 Not done / known limitations:
 
-- M1-16 (release v0.2.0) is waiting for the maintainer. There is no `master` branch and no `v0.1.0` tag yet (the repository started with an initial commit on `develop`).
 - CI has never run (no remote yet); Windows and macOS are untested.
-- Total RSS with rust-lang/rust is 396 MB (target 300 MB) because of memory-mapped pack files; private memory ≈ 190 MB. Follow-ups in `docs/PERFORMANCE.md`.
-- Partial (blobless) clones: diffs of blobs that were never fetched show "object could not be found" (gix does not fetch lazily).
+- Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0.
+- Keyboard shortcuts and the J/K direction still need a check on a real display.
 - Working tree files are diffed as-is (no CRLF/LFS filters).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
+
+## Follow-up tasks (for M2 planning)
+
+| Task | Origin |
+|---|---|
+| Blobless/partial clones: fall back to `CliBackend` (which fetches missing blobs like plain Git) for diffs; until then show an understandable message instead of "object could not be found" | M1 release |
+| LaneHints preparation for a Git-flow aware graph layout (backlog "Git flow graph layout") — not implemented in M1-03 and not part of the M1 plan in this repo; add the backlog entry and plan it | M1 release |
+| Incremental refresh with the file watcher instead of rebuilding the full snapshot on every window focus | M1-15 |
+| Optional: release or limit gix pack mappings; allocator retention after refresh | M1-15 |
 
 ## Environment notes
 
@@ -77,6 +86,6 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
 | 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | M1-12 implements the natural direction (↓/J older, ↑/K newer); maintainer please verify in GitKraken |
-| 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | open |
-| 6 | Memory target: accept "private memory < 300 MB" or require total RSS (needs the pack-mapping follow-up) | M1-15 | open |
-| 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | open |
+| 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |
+| 6 | Memory target: accept "private memory < 300 MB" or require total RSS | M1-15 | done: private memory counts (ADR-012) |
+| 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | done: native dialog is the default on all platforms, path input stays as fallback |
