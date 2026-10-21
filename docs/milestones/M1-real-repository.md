@@ -120,7 +120,9 @@ Acceptance:
 - Property test or loop test: every parent edge in the input appears exactly once as a connection in the output.
 - Layout of 100k commits in release mode < 100 ms (benchmark added in M1-15, quick timing check here).
 
-### [ ] M1-04 `GixBackend`: open, log, refs, stashes
+### [x] M1-04 `GixBackend`: open, log, refs, stashes
+
+> Done: `log` returns `Log { commits, truncated }` (newest commit time first), new `head()` returns `Head::{Branch, Detached, Unborn}`, `Reference` also carries `upstream` and `ahead_behind` (used in M1-14), `Stash` carries its commit id. Timing (release, rust-lang/rust blobless clone, 349k commits): open + log(100 000) + 176 refs ≈ 0.75 s. Manual check: `GITLOOM_PERF_REPO=<path> cargo test -p git-core --release --test perf -- --ignored --nocapture`.
 
 Goal: real read access for history and refs in `git-core`.
 
