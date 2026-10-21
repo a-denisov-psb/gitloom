@@ -83,8 +83,8 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|---|
 | Fullscreen | F11 | M5 |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | M5 |
-| Toggle left panel | Ctrl+J | M1 |
-| Toggle commit detail panel | Ctrl+K | M1 |
+| Toggle left panel | Ctrl+J | done (M1) |
+| Toggle commit detail panel | Ctrl+K | done (M1) |
 | Close current panel | Esc | M1 (diff view) |
 | Keyboard shortcut list | Ctrl+/ | M5 |
 

@@ -23,7 +23,8 @@ mod toolbar;
 use iced::widget::{button, column, container, pane_grid, row, space, text};
 use iced::{Element, Fill};
 
-use crate::app::{App, Message, PaneKind, Tab, TabState};
+use crate::app::{App, Message, Tab, TabState};
+use crate::panes::PaneKind;
 use crate::repo_view::{CenterView, RepoView};
 use crate::theme;
 
@@ -49,10 +50,18 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
             text("Loading repository…").size(16),
             muted(path.display().to_string()),
         ]),
-        TabState::Failed { path, error } => centered(column![
-            banner(error, tab.id),
-            muted(path.display().to_string()),
-        ]),
+        TabState::Failed { path, error } => {
+            let mut content = column![banner(error, tab.id), muted(path.display().to_string())];
+            if app.session.is_recent(path) {
+                content = content.push(
+                    button(text("Remove from recent").size(12))
+                        .on_press(Message::RemoveRecent(tab.id))
+                        .padding([3, 10])
+                        .style(button::secondary),
+                );
+            }
+            centered(content)
+        }
         TabState::Ready(view) => {
             let mut content = column![toolbar::view(view)].spacing(1);
             if let Some(error) = &view.error {
@@ -64,7 +73,7 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
 }
 
 fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
-    pane_grid(&app.panes, move |_pane, kind, _maximized| {
+    pane_grid(&app.panes.state, move |_pane, kind, _maximized| {
         let content = match kind {
             PaneKind::Sidebar => sidebar::view(view),
             PaneKind::Center => match &view.center {

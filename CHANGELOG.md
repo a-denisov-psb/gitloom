@@ -10,6 +10,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Refresh with F5 and automatically when the window regains focus; load errors are shown in the tab with a "Retry" button.
 - Open repositories from the start screen (native folder dialog, Ctrl+O, or a typed path) or the command line (`gitloom <path>...`); a subfolder opens its repository, an already open repository switches to its tab.
 - Tab shortcuts: Ctrl+T, Ctrl+W, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+1…9 (Cmd on macOS).
+- Session restore: open tabs, active tab and pane sizes come back on the next start; the start screen lists up to 20 recent repositories. A missing repository can be removed from the recent list.
+- Ctrl+J / Ctrl+K toggle the left panel and the commit detail panel.
 
 - Project documentation: roadmap, M1 plan, architecture, decisions, UX parity reference, handover.
 - Tooling: workspace lints, rustfmt and clippy config, check scripts, CI workflow, Claude Code setup.
