@@ -7,7 +7,7 @@ use crate::app::Message;
 use crate::repo_view::RepoView;
 use crate::theme;
 use crate::ui::muted;
-use crate::ui::panel::{with_tooltip, write_tooltip};
+use crate::ui::panel::{with_tooltip, with_tooltip_text, write_tooltip};
 
 /// Toolbar actions; all write operations arrive in later milestones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +105,26 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         .width(64)
         .style(theme::flat);
     let writable = view.write_block.is_none() && view.busy.is_none();
+    // Undo/Redo name the action in their tooltip.
+    if matches!(action, ToolbarAction::Undo | ToolbarAction::Redo) {
+        let (stack, message, verb) = if action == ToolbarAction::Undo {
+            (&view.undo, Message::Undo, "Undo")
+        } else {
+            (&view.redo, Message::Redo, "Redo")
+        };
+        if view.write_block.is_some() {
+            return write_tooltip(button.into(), view);
+        }
+        return match stack.last() {
+            Some(last) => with_tooltip_text(
+                button
+                    .on_press_maybe(view.busy.is_none().then_some(message))
+                    .into(),
+                format!("{verb}: {}", last.label()),
+            ),
+            None => with_tooltip_text(button.into(), format!("Nothing to {}", verb.to_lowercase())),
+        };
+    }
     let message = match action {
         ToolbarAction::Stash if !view.snapshot.working_tree.is_empty() => Some(Message::StashPush),
         ToolbarAction::Pop => view
