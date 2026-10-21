@@ -22,7 +22,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         }
         content = content
             .push(muted(format!("branch: {}", snapshot.branch_label())).size(12))
-            .push(muted(commit_count(snapshot.commits.len(), snapshot.truncated)).size(12));
+            .push(muted(commit_count(snapshot.commit_count(), snapshot.truncated)).size(12));
     }
 
     content = content.push(muted(concat!("v", env!("CARGO_PKG_VERSION"))).size(12));

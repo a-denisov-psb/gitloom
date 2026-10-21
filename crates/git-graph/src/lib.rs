@@ -9,7 +9,7 @@ mod topo;
 #[cfg(test)]
 mod test_support;
 
-pub use layout::{layout, ColorId, Layout, Row, Segment, Wip};
+pub use layout::{layout, layout_with, ColorId, Layout, LayoutOptions, Row, Segment, Wip};
 pub use topo::{topo_order, TopoOrder};
 
 use std::fmt;

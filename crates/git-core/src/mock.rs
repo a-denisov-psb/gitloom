@@ -149,6 +149,9 @@ impl GitBackend for MockBackend {
             index: 0,
             message: "WIP on main: try icon font".into(),
             id: fake_oid(HISTORY.len()),
+            base: Some(self.commits[1].id.clone()),
+            time: BASE_TIME,
+            author: "Alice Meyer".into(),
         }])
     }
 

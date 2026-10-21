@@ -103,12 +103,27 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
     let button = button(content)
         .padding([3, 10])
         .width(64)
-        .style(theme::flat)
-        .into();
-    if action == ToolbarAction::Terminal {
-        with_tooltip(button)
-    } else {
-        write_tooltip(button, view)
+        .style(theme::flat);
+    let writable = view.write_block.is_none() && view.busy.is_none();
+    let message = match action {
+        ToolbarAction::Stash if !view.snapshot.working_tree.is_empty() => Some(Message::StashPush),
+        ToolbarAction::Pop => view
+            .snapshot
+            .stashes
+            .first()
+            .map(|s| Message::StashPop(s.id.clone())),
+        _ => None,
+    };
+    match (action, message) {
+        (ToolbarAction::Stash | ToolbarAction::Pop, Some(message)) if writable => {
+            button.on_press(message).into()
+        }
+        // Nothing to stash or pop: plain disabled button.
+        (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => {
+            button.into()
+        }
+        (ToolbarAction::Terminal, _) => with_tooltip(button.into()),
+        _ => write_tooltip(button.into(), view),
     }
 }
 

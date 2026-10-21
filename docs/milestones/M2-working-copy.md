@@ -222,7 +222,9 @@ Acceptance:
 Acceptance:
 - Integration tests for message-only amend and amend with changes.
 
-### [ ] M2-11 Stash
+### [x] M2-11 Stash
+
+> Done: `GitWriter::stash_push/pop/apply/drop` (index resolved from the commit id via `git stash list --format=%H`); `Stash` carries base, time, author. Stash rows via `git_graph::layout_with` + `LayoutOptions::dashed`; square node. Found and fixed: `GIT_LITERAL_PATHSPECS=1` in the environment broke `git stash -u` (Git's own pathspec magic) — literal pathspecs are now passed only to commands we give paths to. Stash details list the changes against the base commit; untracked files of a stash (third parent) are not listed yet. Checked by hand: toolbar Stash with an untracked file → square stash row with dashed edge, right-click menu in graph and sidebar, toolbar Pop restored both files.
 
 - Toolbar "Stash": stashes all changes. Includes untracked files (`git stash push -u`), like GitKraken. Default message as Git creates it.
 - Toolbar "Pop": pops the latest stash; conflicts → error dialog, stash kept.

@@ -184,6 +184,32 @@ const WIP_ID: Id = Id(u32::MAX);
 /// (as returned by [`crate::topo_order`]); edges to parents shown above their
 /// child stay open to the bottom.
 pub fn layout(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>) -> Result<Layout, Error> {
+    layout_with(
+        commits,
+        order,
+        &LayoutOptions {
+            wip,
+            ..LayoutOptions::default()
+        },
+    )
+}
+
+/// Optional inputs of [`layout_with`].
+#[derive(Debug, Clone, Default)]
+pub struct LayoutOptions<'a> {
+    /// Virtual WIP row above all commits.
+    pub wip: Option<Wip>,
+    /// Commits whose edges to their parents are drawn dashed (e.g. stashes).
+    pub dashed: &'a [Id],
+}
+
+/// Like [`layout`], with additional options.
+pub fn layout_with(
+    commits: &[GraphCommit],
+    order: &[Id],
+    options: &LayoutOptions<'_>,
+) -> Result<Layout, Error> {
+    let wip = options.wip;
     check_ids(commits)?;
     if order.len() != commits.len() {
         return Err(Error::InvalidOrder);
@@ -211,8 +237,19 @@ pub fn layout(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>) -> Result
         let head: Vec<Id> = wip.head.into_iter().collect();
         lanes.row(&mut out, WIP_ID, &head, true)?;
     }
+    let mut dashed = vec![false; commits.len()];
+    for id in options.dashed {
+        if let Some(flag) = dashed.get_mut(id.index()) {
+            *flag = true;
+        }
+    }
     for id in order {
-        lanes.row(&mut out, *id, &commits[id.index()].parents, false)?;
+        lanes.row(
+            &mut out,
+            *id,
+            &commits[id.index()].parents,
+            dashed[id.index()],
+        )?;
     }
     // Lanes still open run to the bottom.
     let end = out.nodes.len() as u32;
@@ -573,6 +610,22 @@ mod tests {
         assert_snapshot(
             snapshot(&[(&[], 1), (&[0], 2)], wip(0)),
             &["o   c0 v0.", ": * c1 v1", "*   c0 ^0. ^1c1"],
+        );
+    }
+
+    #[test]
+    fn dashed_commits_draw_dashed_edges() {
+        // 2 is a stash on top of 1 (newer than the main tip 3); 1 → 0.
+        let commits = history(&[(&[], 1), (&[0], 2), (&[1], 4), (&[1], 3)]);
+        let order = topo_order(&commits).unwrap().order;
+        let options = LayoutOptions {
+            wip: None,
+            dashed: &[Id(2)],
+        };
+        let layout = layout_with(&commits, &order, &options).unwrap();
+        assert_eq!(
+            render(&layout, false),
+            ["*   c0 v0.", ": * c1 v1", "*   c0 ^0. ^1c1 v0", "*   c0 ^0"].join("\n")
         );
     }
 
