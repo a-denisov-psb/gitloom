@@ -151,6 +151,14 @@ pub enum Message {
         result: Result<Vec<FileChange>, String>,
     },
     SessionLoaded(session::Loaded),
+    GitDetected(git_core::GitAvailability),
+    DismissNotice,
+    /// A write operation finished (success or Git error).
+    WriteFinished {
+        tab: TabId,
+        label: String,
+        result: Result<(), String>,
+    },
     SaveDue(u64),
     Saved(Result<(), String>),
     OpenRecent(PathBuf),
@@ -168,6 +176,10 @@ pub struct App {
     pub start_path: String,
     /// Recent repositories and the last persisted state.
     pub session: Session,
+    /// Result of looking for `git`; `None` until detected.
+    pub git: Option<git_core::GitAvailability>,
+    /// App-wide one-time notice (e.g. Git missing), dismissible.
+    pub notice: Option<String>,
     /// Where the session is stored; `None` disables persistence (tests).
     session_path: Option<PathBuf>,
     /// The session file was read; before that nothing is written.
@@ -192,6 +204,8 @@ impl App {
             status: String::new(),
             start_path: String::new(),
             session: Session::default(),
+            git: None,
+            notice: None,
             session_path: session_path.clone(),
             session_loaded: false,
             pending_paths: paths,
@@ -213,7 +227,53 @@ impl App {
                 notice: None,
             })),
         };
-        (app, task)
+        let detect = Task::perform(blocking(|| Ok(git_core::detect_git())), |result| {
+            Message::GitDetected(result.unwrap_or(git_core::GitAvailability::Missing))
+        });
+        (app, Task::batch([task, detect]))
+    }
+
+    /// Why write actions are blocked, if they are (unknown counts as blocked).
+    fn write_block(&self) -> Option<String> {
+        match &self.git {
+            Some(git) => git.reason(),
+            None => Some("Checking for Git…".into()),
+        }
+    }
+
+    /// Runs a write operation in the background, one at a time per tab, and
+    /// refreshes the tab afterwards.
+    // First used by staging (M2-06).
+    #[allow(dead_code)]
+    fn run_write(
+        &mut self,
+        tab: TabId,
+        label: impl Into<String>,
+        op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<()> + Send + 'static,
+    ) -> Task<Message> {
+        let label = label.into();
+        if let Some(reason) = self.write_block() {
+            self.status = reason;
+            return Task::none();
+        }
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        if let Some(running) = &view.busy {
+            let message = format!("Please wait: {running} is still running");
+            self.status = message;
+            return Task::none();
+        }
+        view.busy = Some(label.clone());
+        let writer = Arc::clone(&view.writer);
+        Task::perform(
+            blocking(move || op(writer.as_ref()).map_err(|e| e.to_string())),
+            move |result| Message::WriteFinished {
+                tab,
+                label: label.clone(),
+                result,
+            },
+        )
     }
 
     /// Applies the loaded session: restores tabs and panes, then opens pending paths.
@@ -497,6 +557,15 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
+        // Keep each tab's reason for disabled write actions current.
+        let block = self.write_block();
+        for tab in &mut self.tabs {
+            if let Some(view) = tab.view_mut() {
+                if view.write_block != block {
+                    view.write_block.clone_from(&block);
+                }
+            }
+        }
         // The active tab may have changed or finished loading; details load lazily.
         let details = self.load_details();
         let scroll = self.restore_scroll();
@@ -553,6 +622,21 @@ impl App {
             }
             Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
             Message::SessionLoaded(loaded) => return self.restore(loaded),
+            Message::GitDetected(git) => {
+                self.notice = git.reason();
+                self.git = Some(git);
+            }
+            Message::DismissNotice => self.notice = None,
+            Message::WriteFinished { tab, label, result } => {
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    view.busy = None;
+                }
+                if let Err(error) = result {
+                    // Replaced by the operation error dialog (M2-03).
+                    self.status = format!("{label} failed: {error}");
+                }
+                return self.refresh(tab);
+            }
             Message::SaveDue(seq) => {
                 if seq == self.save_seq {
                     return self.save_task();
@@ -1295,6 +1379,65 @@ mod tests {
         assert!(!app.panes.panel_visible);
         let _ = app.update(checked(Shortcut::FocusFilter, false));
         assert!(app.panes.sidebar_visible);
+    }
+
+    fn git_available() -> Message {
+        Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        ))
+    }
+
+    #[test]
+    fn missing_git_shows_notice_and_blocks_writes() {
+        let mut app = ready_app(&["c"]);
+        // Any update syncs the reason into the tabs.
+        let _ = app.update(Message::DismissNotice);
+        assert!(
+            app.tabs[0].view().unwrap().write_block.is_some(),
+            "unknown until detected"
+        );
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Missing));
+        let reason = app.tabs[0].view().unwrap().write_block.clone().unwrap();
+        assert!(reason.contains("not found"));
+        assert_eq!(app.notice.as_deref(), Some(reason.as_str()));
+        let _ = app.update(Message::DismissNotice);
+        assert!(app.notice.is_none());
+
+        let tab = app.tabs[0].id;
+        let _ = app.run_write(tab, "Stage", |_| Ok(()));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert!(app.status.contains("not found"));
+    }
+
+    #[test]
+    fn one_write_at_a_time_per_tab() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(git_available());
+        assert!(app.notice.is_none());
+        assert!(app.tabs[0].view().unwrap().write_block.is_none());
+
+        let tab = app.tabs[0].id;
+        let _ = app.run_write(tab, "Stage file", |_| Ok(()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Stage file")
+        );
+        let _ = app.run_write(tab, "Commit", |_| Ok(()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Stage file")
+        );
+        assert!(app.status.contains("Stage file is still running"));
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Stage file".into(),
+            result: Err("boom".into()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none());
+        assert!(view.refreshing, "a write is followed by a refresh");
+        assert!(app.status.contains("Stage file failed: boom"));
     }
 
     #[test]

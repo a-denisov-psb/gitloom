@@ -252,3 +252,13 @@ pub fn picker(_: &Theme, status: button::Status) -> button::Style {
         _ => button_style(None, TEXT),
     }
 }
+
+/// App-wide informational banner.
+pub fn notice_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(WARNING.scale_alpha(0.16))),
+        border: Border::default().width(1).color(WARNING.scale_alpha(0.5)),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}

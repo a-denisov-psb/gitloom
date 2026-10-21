@@ -91,7 +91,9 @@ Acceptance:
 - CI green on `develop` for all three OS.
 - Shortcut check documented in the task note (may be completed later by the maintainer).
 
-### [ ] M2-02 `CliBackend` foundation
+### [x] M2-02 `CliBackend` foundation
+
+> Done: `cli_backend.rs` with `GitWriter::run(args, RunOptions { stdin, read_only })`, `detect_git`, `Error::Command { command, code, stderr }`; environment sets `GIT_EDITOR=:` (no-op), `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, `CREATE_NO_WINDOW` on Windows. App: Git detected at startup, dismissible notice, reason on disabled write actions, `run_write` (one per tab, busy indicator, refresh afterwards; errors go to the status bar until the dialog of M2-03). Checked by hand: started without `git` on PATH → notice shown. Console window check on Windows is a maintainer to-do.
 
 Goal: safe, uniform execution of `git` commands.
 

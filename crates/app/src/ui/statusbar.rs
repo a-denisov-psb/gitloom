@@ -14,6 +14,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
     if let Some(view) = app.active_tab().and_then(|t| t.view()) {
         let snapshot = &view.snapshot;
+        if let Some(busy) = &view.busy {
+            content = content.push(muted(format!("⟳ {busy}…")).size(12));
+        }
         if view.refreshing {
             content = content.push(muted("Refreshing…").size(12));
         }
