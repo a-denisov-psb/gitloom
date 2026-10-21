@@ -189,6 +189,14 @@ impl GitBackend for MockBackend {
             .collect())
     }
 
+    fn commit_template(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    fn merge_message(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     fn worktree_content(&self, _path: &str) -> Result<Option<Vec<u8>>> {
         Ok(None)
     }

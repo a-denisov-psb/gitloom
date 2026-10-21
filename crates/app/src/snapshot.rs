@@ -39,6 +39,10 @@ pub struct RepoSnapshot {
     pub head: Head,
     /// More commits exist than [`LOG_LIMIT`].
     pub truncated: bool,
+    /// Prepared message of a merge in progress (`MERGE_MSG`).
+    pub merge_message: Option<String>,
+    /// Configured `commit.template` content.
+    pub commit_template: Option<String>,
 }
 
 impl RepoSnapshot {
@@ -49,7 +53,10 @@ impl RepoSnapshot {
         let refs = backend.references().map_err(|e| e.to_string())?;
         let stashes = backend.stashes().map_err(|e| e.to_string())?;
         let working_tree = backend.working_tree().map_err(|e| e.to_string())?;
-        Self::build(log, head, refs, stashes, working_tree)
+        let mut snapshot = Self::build(log, head, refs, stashes, working_tree)?;
+        snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
+        snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
+        Ok(snapshot)
     }
 
     /// Orders the commits, computes the graph layout and the lookup tables.
@@ -132,6 +139,8 @@ impl RepoSnapshot {
             working_tree,
             head,
             truncated: log.truncated,
+            merge_message: None,
+            commit_template: None,
         })
     }
 

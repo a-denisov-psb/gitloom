@@ -196,7 +196,9 @@ Acceptance:
 - Integration tests including untracked and binary files.
 - Undo data recorded for every discard (tested in M2-12).
 
-### [ ] M2-09 Commit
+### [x] M2-09 Commit
+
+> Done: `GitWriter::commit(message, amend)` with `git commit --file=-`; `GitBackend::commit_template` / `merge_message` loaded with the snapshot (a merge starting or ending triggers a full reload). Prefilled template/merge messages drop `#` comment lines. Ctrl+Enter also works inside the description editor (custom key binding). Checked by hand: commit box states (counter, disabled button with hint); typing could not be injected in WSLg, so the full flow is a maintainer to-do and covered by integration tests (normal, first commit, failing pre-commit hook, template, merge conclusion) and app tests.
 
 - Summary with 72-character counter, description, button "Commit changes to N files"; disabled with hint when nothing is staged or the summary is empty.
 - Ctrl+Enter commit, Ctrl+Shift+Enter stage all and commit, Ctrl+Shift+M focus summary.

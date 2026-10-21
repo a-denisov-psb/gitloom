@@ -22,6 +22,7 @@ const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Text inputs; keyboard shortcuts pause while one of them has focus.
 pub const FILTER_INPUT: &str = "sidebar-filter";
 pub const START_PATH_INPUT: &str = "start-path";
+pub const COMMIT_SUMMARY_INPUT: &str = "commit-summary";
 
 /// File system events are collected for this long before they are classified.
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -233,6 +234,10 @@ pub enum Message {
         label: String,
         result: Result<Option<UndoAction>, String>,
     },
+    SummaryChanged(String),
+    DescriptionEdited(iced::widget::text_editor::Action),
+    /// Commit the staged changes with the entered message.
+    CommitRequested,
     /// Ask before discarding (file, all, hunk or selected lines).
     Discard(DiscardTarget),
     /// Confirmed in the dialog.
@@ -574,6 +579,18 @@ impl App {
                     return self.stage_file(file, false);
                 }
             }
+            Shortcut::Commit => return self.commit(false),
+            Shortcut::StageAllAndCommit => return self.commit(true),
+            Shortcut::FocusSummary => {
+                // The commit box belongs to the WIP row.
+                if let Some(view) = self.active_view_mut() {
+                    if view.snapshot.has_wip {
+                        view.selection = Some(Selection::Wip);
+                        view.center = CenterView::Graph;
+                    }
+                }
+                return iced::widget::operation::focus(COMMIT_SUMMARY_INPUT);
+            }
             Shortcut::StageAll => return self.update(Message::StageAll),
             Shortcut::UnstageAll => return self.update(Message::UnstageAll),
             Shortcut::FocusFilter => {
@@ -727,6 +744,33 @@ impl App {
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
                 view.reload_diff = true;
+            }
+        }
+        task
+    }
+
+    /// Commits the staged changes (optionally staging everything first).
+    fn commit(&mut self, stage_all: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        if let Some(reason) = commit_blocker(view, stage_all) {
+            self.status = reason.into();
+            return Task::none();
+        }
+        let message = view.commit_message();
+        let task = self.run_write(tab, "Commit", move |git| {
+            if stage_all {
+                git.stage_all()?;
+            }
+            git.commit(&message, false)
+        });
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                view.clear_message_after_write = true;
             }
         }
         task
@@ -920,7 +964,9 @@ impl App {
                 let head = backend.head().map_err(|e| e.to_string())?;
                 let refs = backend.references().map_err(|e| e.to_string())?;
                 let stashes = backend.stashes().map_err(|e| e.to_string())?;
-                Ok(refs_changed(&snapshot, &head, &refs, &stashes))
+                let merge = backend.merge_message().map_err(|e| e.to_string())?;
+                Ok(refs_changed(&snapshot, &head, &refs, &stashes)
+                    || merge.is_some() != snapshot.merge_message.is_some())
             }),
             move |changed| Message::RefsChecked { tab: id, changed },
         )
@@ -1147,6 +1193,11 @@ impl App {
                         view.undo.push(action.clone());
                         view.redo.clear();
                     }
+                    // The message stays after a failed commit so nothing is lost.
+                    if std::mem::take(&mut view.clear_message_after_write) && result.is_ok() {
+                        view.summary.clear();
+                        view.description = iced::widget::text_editor::Content::new();
+                    }
                 }
                 if let Err(error) = result {
                     self.modal = Some(Modal::error(format!("{label} failed"), error));
@@ -1181,6 +1232,17 @@ impl App {
                 ));
             }
             Message::DiscardConfirmed(target) => return self.discard(target),
+            Message::SummaryChanged(summary) => {
+                if let Some(view) = self.active_view_mut() {
+                    view.summary = summary;
+                }
+            }
+            Message::DescriptionEdited(action) => {
+                if let Some(view) = self.active_view_mut() {
+                    view.description.perform(action);
+                }
+            }
+            Message::CommitRequested => return self.commit(false),
             Message::IgnoreFile(path) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -1335,9 +1397,13 @@ impl App {
                 // Typing in the filter must not move the selection.
                 use iced::widget::operation::is_focused;
                 return is_focused(FILTER_INPUT).then(move |filter| {
-                    is_focused(START_PATH_INPUT).map(move |path| Message::ShortcutChecked {
-                        shortcut,
-                        text_input_focused: filter || path,
+                    is_focused(START_PATH_INPUT).then(move |path| {
+                        is_focused(COMMIT_SUMMARY_INPUT).map(move |summary| {
+                            Message::ShortcutChecked {
+                                shortcut,
+                                text_input_focused: filter || path || summary,
+                            }
+                        })
                     })
                 });
             }
@@ -1593,6 +1659,20 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
             shortcuts::shortcut(&key, modifiers).map(Message::Shortcut)
         }
         _ => None,
+    }
+}
+
+/// Why committing is not possible right now, if it is not.
+pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<&'static str> {
+    let tree = &view.snapshot.working_tree;
+    let merging = view.snapshot.merge_message.is_some();
+    let has_changes = !tree.staged.is_empty() || (stage_all && !tree.unstaged.is_empty());
+    if !has_changes && !merging {
+        Some("Stage files to commit")
+    } else if view.summary.trim().is_empty() {
+        Some("Enter a commit summary")
+    } else {
+        None
     }
 }
 
@@ -2442,6 +2522,79 @@ mod tests {
         assert!(menu.select(2).is_none(), "separator");
         let _ = app.update(Message::MenuSelected(0));
         assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stage a"));
+    }
+
+    #[test]
+    fn commit_needs_staged_changes_and_a_summary() {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::SummaryChanged("Fix".into()));
+        let _ = app.update(Message::CommitRequested);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Stage files to commit");
+
+        // Ctrl+Shift+Enter stages everything first.
+        let _ = app.update(Message::Shortcut(Shortcut::StageAllAndCommit));
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Commit"));
+
+        let mut app = staging_app(&[], &["a"]);
+        let _ = app.update(Message::CommitRequested);
+        assert_eq!(app.status, "Enter a commit summary");
+    }
+
+    #[test]
+    fn commit_message_is_kept_on_failure_and_cleared_on_success() {
+        let mut app = staging_app(&[], &["a"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SummaryChanged("Add feature".into()));
+        let _ = app.update(Message::DescriptionEdited(
+            iced::widget::text_editor::Action::Edit(iced::widget::text_editor::Edit::Paste(
+                Arc::new("Details".into()),
+            )),
+        ));
+        assert_eq!(
+            app.tabs[0].view().unwrap().commit_message(),
+            "Add feature\n\nDetails"
+        );
+        let _ = app.update(Message::Shortcut(Shortcut::Commit));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Commit".into(),
+            result: Err("pre-commit hook failed".into()),
+        });
+        assert_eq!(app.tabs[0].view().unwrap().summary, "Add feature");
+        assert!(app.modal.is_some());
+        app.modal = None;
+
+        let _ = app.update(Message::Shortcut(Shortcut::Commit));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Commit".into(),
+            result: Ok(None),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.summary.is_empty());
+        assert!(view.description.text().trim().is_empty());
+    }
+
+    #[test]
+    fn merge_message_prefills_and_allows_committing_without_staged_files() {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.merge_message = Some("Merge branch 'x'\n\n# Conflicts:\n#\ta.txt\n".into());
+        view.apply_snapshot(Arc::new(snapshot));
+        assert_eq!(view.summary, "Merge branch 'x'");
+        assert!(commit_blocker(view, false).is_none());
+    }
+
+    #[test]
+    fn template_fills_an_empty_description() {
+        let mut app = staging_app(&[], &["a"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.commit_template = Some("Ticket: \n# help text\n".into());
+        view.apply_snapshot(Arc::new(snapshot));
+        assert_eq!(view.description.text().trim(), "Ticket:");
     }
 
     #[test]

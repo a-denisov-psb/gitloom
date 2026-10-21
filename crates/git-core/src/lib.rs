@@ -330,6 +330,12 @@ pub trait GitBackend: Send + Sync {
     /// Line diff of one file.
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;
 
+    /// Content of the configured `commit.template`, if any.
+    fn commit_template(&self) -> Result<Option<String>>;
+
+    /// Prepared message of a merge in progress (`MERGE_MSG`), if one is running.
+    fn merge_message(&self) -> Result<Option<String>>;
+
     /// Working tree content of `path` as Git stores it (filters applied);
     /// `None` if the file does not exist.
     fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>>;

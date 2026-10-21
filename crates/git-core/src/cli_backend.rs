@@ -211,6 +211,23 @@ pub trait GitWriter: Send + Sync {
         with_pathspecs(self, &["restore", "--worktree"], paths)
     }
 
+    /// Commits the index with `message` (passed via stdin, hooks run as usual).
+    /// `amend` replaces the HEAD commit.
+    fn commit(&self, message: &str, amend: bool) -> Result<()> {
+        let mut args = vec!["commit", "--file=-"];
+        if amend {
+            args.push("--amend");
+        }
+        self.run(
+            &args,
+            RunOptions {
+                stdin: Some(message.as_bytes()),
+                read_only: false,
+            },
+        )
+        .map(drop)
+    }
+
     fn stage_all(&self) -> Result<()> {
         self.run(&["add", "--all"], RunOptions::default()).map(drop)
     }
