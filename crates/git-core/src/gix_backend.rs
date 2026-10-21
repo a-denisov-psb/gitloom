@@ -37,6 +37,8 @@ impl GixBackend {
         let Some(root) = repo.work_dir().map(Path::to_path_buf) else {
             return Err(Error::BareRepository(repo.git_dir().display().to_string()));
         };
+        // Absolute (not canonical) so paths compare well and stay readable on Windows.
+        let root = std::path::absolute(&root).unwrap_or(root);
         let name = root.file_name().map_or_else(
             || root.display().to_string(),
             |n| n.to_string_lossy().into_owned(),

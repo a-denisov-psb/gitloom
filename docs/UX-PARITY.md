@@ -10,7 +10,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 
 | Area | GitKraken behavior | Status |
 |---|---|---|
-| Repo tabs | Top row, one tab per repo, `+` opens a new tab | done (M0 layout) |
+| Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | layout done, actions M2–M4 |
 | Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts | done (M0), real data M1 |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M0), real M1 |
@@ -75,7 +75,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Open repo in terminal | Alt+T | M5 |
 | Open repo in file manager | Alt+O | M5 |
 | Open diff/merge tool | Ctrl+D | M5 |
-| Close current repo | Ctrl+W | M1 |
+| Close current repo | Ctrl+W | done (M1) |
 
 ### Interface
 
@@ -92,10 +92,10 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| New tab | Ctrl+T | M1 |
-| Close tab | Ctrl+W | M1 |
-| Switch to tab 1–9 | Ctrl+1…9 | M1 |
-| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | M1 |
+| New tab | Ctrl+T | done (M1) |
+| Close tab | Ctrl+W | done (M1) |
+| Switch to tab 1–9 | Ctrl+1…9 | done (M1) |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | done (M1) |
 
 ## Intentional deviations
 
@@ -103,4 +103,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|
 | Ctrl+O opens a folder dialog directly | Quick access before the command palette exists (M5); does not collide with a GitKraken shortcut |
 | F5 refreshes the repository | No file watcher until M2 |
+| Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

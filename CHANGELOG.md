@@ -8,6 +8,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - Real repositories are read with gitoxide in the background: history, branches, tags, stashes, working tree status and commit details. The UI stays responsive while loading.
 - Refresh with F5 and automatically when the window regains focus; load errors are shown in the tab with a "Retry" button.
+- Open repositories from the start screen (native folder dialog, Ctrl+O, or a typed path) or the command line (`gitloom <path>...`); a subfolder opens its repository, an already open repository switches to its tab.
+- Tab shortcuts: Ctrl+T, Ctrl+W, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+1…9 (Cmd on macOS).
 
 - Project documentation: roadmap, M1 plan, architecture, decisions, UX parity reference, handover.
 - Tooling: workspace lints, rustfmt and clippy config, check scripts, CI workflow, Claude Code setup.
