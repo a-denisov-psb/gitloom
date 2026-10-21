@@ -6,6 +6,7 @@ use git_core::{DiffRequest, FileChange, GitBackend, GixBackend};
 use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
+use crate::overlay::{ContextMenu, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{CenterView, CommitDetails, Loadable, RepoView, Section, Selection};
 use crate::session::{self, Session};
@@ -151,6 +152,19 @@ pub enum Message {
         result: Result<Vec<FileChange>, String>,
     },
     SessionLoaded(session::Loaded),
+    /// Button `index` of the open dialog was pressed.
+    ModalAction(usize),
+    ModalClosed,
+    /// Entry `index` of the open context menu was chosen.
+    MenuSelected(usize),
+    MenuClosed,
+    /// Right click on a file row.
+    FileContextMenu {
+        path: String,
+        position: iced::Point,
+    },
+    CopyToClipboard(String),
+    WindowResized(iced::Size),
     GitDetected(git_core::GitAvailability),
     DismissNotice,
     /// A write operation finished (success or Git error).
@@ -180,6 +194,11 @@ pub struct App {
     pub git: Option<git_core::GitAvailability>,
     /// App-wide one-time notice (e.g. Git missing), dismissible.
     pub notice: Option<String>,
+    /// Open modal dialog; blocks the rest of the window.
+    pub modal: Option<Modal>,
+    pub context_menu: Option<ContextMenu>,
+    /// Current window size, used to keep menus inside the window.
+    pub window_size: iced::Size,
     /// Where the session is stored; `None` disables persistence (tests).
     session_path: Option<PathBuf>,
     /// The session file was read; before that nothing is written.
@@ -206,6 +225,9 @@ impl App {
             session: Session::default(),
             git: None,
             notice: None,
+            modal: None,
+            context_menu: None,
+            window_size: iced::Size::new(1400.0, 860.0),
             session_path: session_path.clone(),
             session_loaded: false,
             pending_paths: paths,
@@ -423,6 +445,11 @@ impl App {
     }
 
     fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
+        // An open dialog or menu only reacts to Esc and Enter.
+        let overlay_open = self.modal.is_some() || self.context_menu.is_some();
+        if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
+            return Task::none();
+        }
         let count = self.tabs.len();
         match shortcut {
             Shortcut::NewTab => {
@@ -460,8 +487,18 @@ impl App {
                 return iced::widget::operation::focus(FILTER_INPUT);
             }
             Shortcut::Close => {
+                if self.modal.take().is_some() || self.context_menu.take().is_some() {
+                    return Task::none();
+                }
                 if let Some(view) = self.active_view_mut() {
                     view.center = CenterView::Graph;
+                }
+            }
+            Shortcut::Confirm => {
+                if let Some(modal) = self.modal.take() {
+                    if let Some(message) = modal.default_action() {
+                        return self.update(message);
+                    }
                 }
             }
         }
@@ -627,13 +664,40 @@ impl App {
                 self.git = Some(git);
             }
             Message::DismissNotice => self.notice = None,
+            Message::ModalAction(index) => {
+                let action = self.modal.take().and_then(|m| m.action(index));
+                if let Some(message) = action {
+                    return self.update(message);
+                }
+            }
+            Message::ModalClosed => self.modal = None,
+            Message::MenuSelected(index) => {
+                let action = self.context_menu.take().and_then(|m| m.select(index));
+                if let Some(message) = action {
+                    return self.update(message);
+                }
+            }
+            Message::MenuClosed => self.context_menu = None,
+            Message::FileContextMenu { path, position } => {
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![MenuEntry::item(
+                        "Copy file path",
+                        Message::CopyToClipboard(path),
+                    )],
+                ));
+            }
+            Message::CopyToClipboard(text) => {
+                self.status = "Copied to the clipboard".into();
+                return iced::clipboard::write(text);
+            }
+            Message::WindowResized(size) => self.window_size = size,
             Message::WriteFinished { tab, label, result } => {
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                 }
                 if let Err(error) = result {
-                    // Replaced by the operation error dialog (M2-03).
-                    self.status = format!("{label} failed: {error}");
+                    self.modal = Some(Modal::error(format!("{label} failed"), error));
                 }
                 return self.refresh(tab);
             }
@@ -932,6 +996,7 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
 fn global_event(event: Event, status: event::Status, _window: window::Id) -> Option<Message> {
     match event {
         Event::Window(window::Event::Focused) => Some(Message::WindowFocused),
+        Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
             if status == event::Status::Ignored =>
         {
@@ -1437,7 +1502,74 @@ mod tests {
         let view = app.tabs[0].view().unwrap();
         assert!(view.busy.is_none());
         assert!(view.refreshing, "a write is followed by a refresh");
-        assert!(app.status.contains("Stage file failed: boom"));
+        let modal = app.modal.as_ref().expect("error dialog");
+        assert_eq!(modal.title, "Stage file failed");
+        assert_eq!(modal.details.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn file_context_menu_copies_the_path() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::FileContextMenu {
+            path: "src/main.rs".into(),
+            position: iced::Point::new(10.0, 20.0),
+        });
+        assert!(app.context_menu.is_some());
+        // Other shortcuts are ignored while the menu is open.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(Message::MenuSelected(0));
+        assert!(app.context_menu.is_none());
+        assert_eq!(app.status, "Copied to the clipboard");
+    }
+
+    #[test]
+    fn escape_closes_menu_then_dialog_then_diff() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::DiffOpened(DiffRequest {
+            kind: git_core::DiffKind::Staged,
+            path: "f".into(),
+            old_path: None,
+        }));
+        app.modal = Some(Modal::error("Failed", "details"));
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.modal.is_none());
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Diff(_)
+        ));
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Graph
+        ));
+    }
+
+    #[test]
+    fn enter_confirms_the_default_button() {
+        let mut app = ready_app(&["c"]);
+        app.modal = Some(Modal::confirm(
+            "Toggle?",
+            "Hide the sidebar?",
+            "Hide",
+            false,
+            checked(Shortcut::ToggleSidebar, false),
+        ));
+        let _ = app.update(Message::Shortcut(Shortcut::Confirm));
+        assert!(app.modal.is_none());
+        assert!(!app.panes.sidebar_visible);
+
+        // Cancel only closes.
+        app.modal = Some(Modal::confirm(
+            "Toggle?",
+            "Show it again?",
+            "Show",
+            false,
+            checked(Shortcut::ToggleSidebar, false),
+        ));
+        let _ = app.update(Message::ModalAction(0));
+        assert!(app.modal.is_none());
+        assert!(!app.panes.sidebar_visible);
     }
 
     #[test]

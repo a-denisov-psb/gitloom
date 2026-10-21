@@ -11,6 +11,7 @@ use crate::app::Message;
 use crate::format;
 use crate::repo_view::{CenterView, Loadable, RepoView, Selection};
 use crate::theme;
+use crate::ui::context_area::context_area;
 use crate::ui::{change_badge, muted};
 
 const NOT_AVAILABLE: &str = "Not available yet";
@@ -182,7 +183,7 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         None => file.path.clone(),
     };
 
-    button(
+    let row = button(
         row![
             change_badge(file.kind),
             text(label).wrapping(text::Wrapping::None),
@@ -193,8 +194,12 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
     .padding([3, 12])
     .width(Fill)
     .clip(true)
-    .style(theme::list_item(selected))
-    .into()
+    .style(theme::list_item(selected));
+    let path = file.path.clone();
+    context_area(row, move |position| Message::FileContextMenu {
+        path: path.clone(),
+        position,
+    })
 }
 
 fn disabled_button<'a>(

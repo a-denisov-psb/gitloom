@@ -110,7 +110,9 @@ Acceptance:
 - Unit tests for version parsing; integration tests run real commands on temp repos.
 - No console window flashes on Windows (maintainer check, see Maintainer to-dos).
 
-### [ ] M2-03 UI infrastructure: modal, context menu, operation errors
+### [x] M2-03 UI infrastructure: modal, context menu, operation errors
+
+> Done: `overlay.rs` (state, unit tested) + `ui/overlays.rs` (stack layers: opaque backdrop for dialogs, menu kept inside the window). Right clicks come from a small `context_area` widget that reports the absolute cursor position (`mouse_area` has no position for right clicks, and `on_move` would emit a message on every mouse move). First real uses: file row menu "Copy file path", operation error dialog for `run_write`. Enter/Esc work while a text input has focus. Checked by hand: right click on a staging row opens the menu at the cursor, choosing the item copies the path.
 
 - Modal dialog over the whole window (`stack` + `opaque`): title, text, optional details (monospace, scrollable), buttons. Esc cancels, Enter confirms the default button. Destructive buttons in danger style.
 - Context menu at the cursor position, opened with right click (`mouse_area::on_right_press`; buttons do not capture right clicks), closed by Esc, outside click or selection. Items: label, shortcut hint, enabled flag, separators.

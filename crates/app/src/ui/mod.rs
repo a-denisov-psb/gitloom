@@ -11,8 +11,10 @@
 //! +--------------------------------------------------------------+
 //! ```
 
+pub mod context_area;
 mod diff;
 mod graph;
+mod overlays;
 pub(crate) mod panel;
 mod sidebar;
 mod start;
@@ -41,10 +43,24 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     layout = layout.push(statusbar::view(app));
 
-    container(layout)
+    let base: Element<'_, Message> = container(layout)
         .width(Fill)
         .height(Fill)
         .style(theme::root)
+        .into();
+    let mut layers = vec![base];
+    if let Some(menu) = &app.context_menu {
+        layers.push(overlays::context_menu(menu, app.window_size));
+    }
+    if let Some(modal) = &app.modal {
+        layers.push(overlays::modal(modal));
+    }
+    if layers.len() == 1 {
+        return layers.remove(0);
+    }
+    iced::widget::Stack::with_children(layers)
+        .width(Fill)
+        .height(Fill)
         .into()
 }
 

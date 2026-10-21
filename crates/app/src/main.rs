@@ -1,6 +1,7 @@
 mod app;
 mod format;
 mod nav;
+mod overlay;
 mod panes;
 mod repo_view;
 mod session;
