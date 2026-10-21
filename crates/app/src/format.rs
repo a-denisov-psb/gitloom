@@ -12,6 +12,19 @@ pub fn date_time(timestamp: i64) -> String {
     )
 }
 
+/// Groups digits by thousands with a space: `100000` → `100 000`.
+pub fn thousands(value: usize) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Initials for the avatar placeholder in the graph ("Alice Meyer" -> "AM").
 pub fn initials(name: &str) -> String {
     name.split_whitespace()
@@ -43,6 +56,15 @@ mod tests {
     fn formats_known_timestamps() {
         assert_eq!(date_time(0), "1970-01-01 00:00");
         assert_eq!(date_time(1_700_000_000), "2023-11-14 22:13");
+    }
+
+    #[test]
+    fn groups_thousands() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1000), "1 000");
+        assert_eq!(thousands(100_000), "100 000");
+        assert_eq!(thousands(1_234_567), "1 234 567");
     }
 
     #[test]

@@ -20,6 +20,11 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Project documentation: roadmap, M1 plan, architecture, decisions, UX parity reference, handover.
 - Tooling: workspace lints, rustfmt and clippy config, check scripts, CI workflow, Claude Code setup.
 
+### Changed
+
+- No sample data anymore: actions that are not available yet (Undo, Redo, Pull, Push, Branch, Stash, Pop, Terminal, pickers, staging and committing) are disabled and explain "Not available yet".
+- Detached HEAD shows as `HEAD (abc1234)` in the branch picker and as a HEAD pill in the graph; local branches show commits ahead/behind their upstream (↑/↓); a truncated history ends with "History truncated at 100 000 commits".
+
 ## [0.1.0] - 2026-10-20
 
 ### Added

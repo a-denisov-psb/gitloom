@@ -281,7 +281,9 @@ Goal: real diffs in the center pane.
 Acceptance:
 - Diffs for commit files, staged, unstaged and untracked files are correct (compare with `git diff`).
 
-### [ ] M1-14 App: remove demo, read-only states, data polish
+### [x] M1-14 App: remove demo, read-only states, data polish
+
+> Done: toolbar actions, pickers, Terminal, stage/unstage buttons and the commit box are disabled with the "Not available yet" tooltip; stash rows are plain labels; the Submodules section is inactive with tooltip (it would otherwise show a wrong count). `HEAD (abc1234)` in picker, status bar and staging header; ahead/behind badges from `Reference::ahead_behind`; truncated-history row at the end of the virtual list. Greps: no "not implemented" in `crates/app/src`, `MockBackend` only in `#[cfg(test)]` (dev-dependency with the `mock` feature). Walkthrough by hand on the lanes test repo and rust-lang/rust: tabs, `+`/×, tooltips on toolbar and pickers, section collapse, ref click, row selection, file → diff → ×, truncated row after dragging the scrollbar to the end.
 
 Goal: no fake behavior left; real data shown precisely.
 

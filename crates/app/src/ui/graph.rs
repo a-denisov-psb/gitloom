@@ -61,12 +61,18 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             .style(theme::column_header);
 
         // Only the visible rows (plus overscan) exist; spacers keep the scrollbar exact.
-        let total = repo.snapshot.layout.rows.len();
+        // A truncated history ends with a note row.
+        let graph_rows = repo.snapshot.layout.rows.len();
+        let total = graph_rows + usize::from(repo.snapshot.truncated);
         let (first, last) = visible_range(repo.scroll.offset, repo.scroll.height, total);
         let mut rows = Column::with_capacity(last - first + 2)
             .push(space::vertical().height(first as f32 * ROW_HEIGHT));
         for row_index in first..last {
-            rows = rows.push(graph_row(repo, row_index, graph_width, columns));
+            rows = rows.push(if row_index < graph_rows {
+                graph_row(repo, row_index, graph_width, columns)
+            } else {
+                truncated_row()
+            });
         }
         rows = rows.push(space::vertical().height((total - last) as f32 * ROW_HEIGHT));
 
@@ -86,6 +92,18 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+fn truncated_row<'a>() -> Element<'a, Message> {
+    container(muted(format!(
+        "History truncated at {} commits",
+        format::thousands(crate::snapshot::LOG_LIMIT)
+    )))
+    .height(ROW_HEIGHT)
+    .width(Fill)
+    .padding([0, 16])
+    .align_y(alignment::Vertical::Center)
+    .into()
 }
 
 /// Optional columns shown next to the commit message.

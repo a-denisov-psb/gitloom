@@ -34,10 +34,11 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
 
 fn staging(view: &RepoView) -> Element<'_, Message> {
     let tree = &view.snapshot.working_tree;
-    let header = match view.snapshot.head.branch() {
-        Some(branch) => format!("{} file changes on {branch}", tree.len()),
-        None => format!("{} file changes (detached HEAD)", tree.len()),
-    };
+    let header = format!(
+        "{} file changes on {}",
+        tree.len(),
+        view.snapshot.branch_label()
+    );
 
     let unstaged = file_section(
         format!("Unstaged Files ({})", tree.unstaged.len()),
