@@ -132,6 +132,7 @@ impl RepoSnapshot {
         let options = git_graph::LayoutOptions {
             wip,
             dashed: &dashed,
+            hints: None,
         };
         let layout = git_graph::layout_with(&graph, &order, &options).map_err(|e| e.to_string())?;
 
@@ -190,6 +191,7 @@ impl RepoSnapshot {
             let options = git_graph::LayoutOptions {
                 wip,
                 dashed: &self.graph.dashed,
+                hints: None,
             };
             Arc::new(
                 git_graph::layout_with(&self.graph.commits, &self.graph.order, &options)

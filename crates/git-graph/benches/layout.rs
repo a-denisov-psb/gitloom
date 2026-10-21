@@ -6,7 +6,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use git_graph::{layout, topo_order, GraphCommit, Id, Wip};
+use git_graph::{
+    layout, layout_with, topo_order, ColorId, GraphCommit, Id, LaneHint, LaneHints, LayoutOptions,
+    Wip,
+};
 
 /// Deterministic xorshift64.
 struct Rng(u64);
@@ -60,6 +63,25 @@ fn bench(c: &mut Criterion) {
     group.bench_function("topo_order", |b| b.iter(|| topo_order(&commits).unwrap()));
     group.bench_function("layout", |b| {
         b.iter(|| layout(&commits, &order, wip).unwrap())
+    });
+    // Four groups plus unhinted commits, like a Git flow layout.
+    let mut rng = Rng(0x41a7);
+    let hints: Vec<Option<LaneHint>> = (0..commits.len())
+        .map(|_| {
+            let group = rng.below(5) as u16;
+            (group < 4).then_some(LaneHint {
+                group,
+                color: ColorId(u32::from(group)),
+            })
+        })
+        .collect();
+    let options = LayoutOptions {
+        wip,
+        hints: Some(LaneHints { commits: &hints }),
+        ..LayoutOptions::default()
+    };
+    group.bench_function("layout with 4 lane groups", |b| {
+        b.iter(|| layout_with(&commits, &order, &options).unwrap())
     });
     group.bench_function("topo_order + layout", |b| {
         b.iter(|| {
