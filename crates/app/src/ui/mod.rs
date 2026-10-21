@@ -20,6 +20,8 @@ mod statusbar;
 mod tabs;
 mod toolbar;
 
+pub use graph::reveal_offset;
+
 use iced::widget::{button, column, container, pane_grid, row, space, text};
 use iced::{Element, Fill};
 

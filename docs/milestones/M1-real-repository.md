@@ -235,7 +235,9 @@ Acceptance:
 - Visually checked against `git log --graph --all` on this repo and a repo with many parallel branches.
 - Screenshot of the graph added to the task note (`docs/screenshots/m1-graph.png`).
 
-### [ ] M1-11 App: virtualized graph list
+### [x] M1-11 App: virtualized graph list
+
+> Done: `visible_range` (10 rows overscan) + spacers, per-view scrollable `Id`, offset restored when a graph becomes visible again (tab switch, diff closed), `reveal_offset` scrolls the selection into view. Added: responsive optional columns (author/date/SHA) so wide graphs keep the message readable (UX-PARITY). Checked by hand (release, rust-lang/rust, 100 000 commits): first graph paint ≈ 1.25 s after start, wheel scrolling fluid, clicking `origin/beta` in the sidebar scrolls ~2 500 rows down and selects it, tabs switch while the large repo is still loading (M1-07 acceptance). RSS ≈ 590 MB → analysed in M1-15.
 
 Goal: smooth scrolling with 100k+ rows.
 

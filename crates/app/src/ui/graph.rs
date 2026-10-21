@@ -7,7 +7,9 @@ use git_core::{Commit, Head, RefKind, Reference};
 use git_graph::{Row, Segment};
 use iced::mouse;
 use iced::widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke};
-use iced::widget::{button, column, container, row, scrollable, text, tooltip, Column};
+use iced::widget::{
+    button, column, container, responsive, row, scrollable, space, text, tooltip, Column,
+};
 use iced::{alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme};
 
 use crate::app::Message;
@@ -23,40 +25,127 @@ const COL_DATE: f32 = 135.0;
 const COL_SHA: f32 = 70.0;
 const LANE_WIDTH: f32 = 18.0;
 const GRAPH_PADDING: f32 = 6.0;
+const ROW_PADDING: u16 = 8;
+const SCROLLBAR_WIDTH: f32 = 12.0;
+const MIN_MESSAGE_WIDTH: f32 = 200.0;
 const MIN_LANES: u16 = 2;
 const MAX_LANES: u16 = 12;
 const NODE_RADIUS: f32 = 9.0;
 const MERGE_RADIUS: f32 = 4.5;
 const DASH: [f32; 2] = [4.0, 3.0];
+/// Rows rendered above and below the viewport.
+const OVERSCAN: usize = 10;
 
 pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let graph_width = graph_width(repo.snapshot.layout.max_width);
-    let header = container(
-        row![
+    // The available width decides which optional columns fit.
+    let table = responsive(move |size| {
+        let columns = Columns::fitting(size.width, graph_width);
+        let mut header = row![
             cell(muted("BRANCH / TAG").size(11), COL_REFS),
             cell(muted("GRAPH").size(11), graph_width),
             cell(muted("COMMIT MESSAGE").size(11), Fill),
-            cell(muted("AUTHOR").size(11), COL_AUTHOR),
-            cell(muted("DATE").size(11), COL_DATE),
-            cell(muted("SHA").size(11), COL_SHA),
-        ]
-        .padding([0, 8])
-        .align_y(iced::Center),
-    )
-    .height(24)
-    .align_y(alignment::Vertical::Center)
-    .style(theme::column_header);
+        ];
+        if columns.author {
+            header = header.push(cell(muted("AUTHOR").size(11), COL_AUTHOR));
+        }
+        if columns.date {
+            header = header.push(cell(muted("DATE").size(11), COL_DATE));
+        }
+        if columns.sha {
+            header = header.push(cell(muted("SHA").size(11), COL_SHA));
+        }
+        let header = container(header.padding([0, ROW_PADDING]).align_y(iced::Center))
+            .height(24)
+            .align_y(alignment::Vertical::Center)
+            .style(theme::column_header);
 
-    let rows = (0..repo.snapshot.layout.rows.len()).map(|r| graph_row(repo, r, graph_width));
+        // Only the visible rows (plus overscan) exist; spacers keep the scrollbar exact.
+        let total = repo.snapshot.layout.rows.len();
+        let (first, last) = visible_range(repo.scroll.offset, repo.scroll.height, total);
+        let mut rows = Column::with_capacity(last - first + 2)
+            .push(space::vertical().height(first as f32 * ROW_HEIGHT));
+        for row_index in first..last {
+            rows = rows.push(graph_row(repo, row_index, graph_width, columns));
+        }
+        rows = rows.push(space::vertical().height((total - last) as f32 * ROW_HEIGHT));
 
-    container(column![
-        header,
-        scrollable(Column::with_children(rows)).height(Fill)
-    ])
-    .width(Fill)
-    .height(Fill)
-    .style(theme::graph)
-    .into()
+        let list = scrollable(rows)
+            .id(repo.graph_scroll_id.clone())
+            .on_scroll(|viewport| Message::GraphScrolled {
+                offset: viewport.absolute_offset().y,
+                height: viewport.bounds().height,
+            })
+            .height(Fill);
+
+        column![header, list].into()
+    });
+
+    container(table)
+        .width(Fill)
+        .height(Fill)
+        .style(theme::graph)
+        .into()
+}
+
+/// Optional columns shown next to the commit message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Columns {
+    pub author: bool,
+    pub date: bool,
+    pub sha: bool,
+}
+
+impl Columns {
+    /// Drops SHA, then date, then author until the message column gets
+    /// at least [`MIN_MESSAGE_WIDTH`] pixels in a table `width` wide.
+    pub fn fitting(width: f32, graph_width: f32) -> Self {
+        let mut columns = Self {
+            author: true,
+            date: true,
+            sha: true,
+        };
+        let fixed = 2.0 * ROW_PADDING as f32 + COL_REFS + graph_width + SCROLLBAR_WIDTH;
+        let message = |c: &Self| {
+            width
+                - fixed
+                - if c.author { COL_AUTHOR } else { 0.0 }
+                - if c.date { COL_DATE } else { 0.0 }
+                - if c.sha { COL_SHA } else { 0.0 }
+        };
+        if message(&columns) < MIN_MESSAGE_WIDTH {
+            columns.sha = false;
+        }
+        if message(&columns) < MIN_MESSAGE_WIDTH {
+            columns.date = false;
+        }
+        if message(&columns) < MIN_MESSAGE_WIDTH {
+            columns.author = false;
+        }
+        columns
+    }
+}
+
+/// Rows `first..last` intersecting the viewport, extended by [`OVERSCAN`].
+pub fn visible_range(offset: f32, height: f32, total: usize) -> (usize, usize) {
+    let top = (offset.max(0.0) / ROW_HEIGHT).floor() as usize;
+    let bottom = ((offset.max(0.0) + height.max(0.0)) / ROW_HEIGHT).ceil() as usize;
+    let first = top.saturating_sub(OVERSCAN).min(total);
+    let last = (bottom + OVERSCAN).min(total);
+    (first, last.max(first))
+}
+
+/// New scroll offset that brings `row` fully into view, if it is not visible.
+pub fn reveal_offset(row: usize, offset: f32, height: f32) -> Option<f32> {
+    let top = row as f32 * ROW_HEIGHT;
+    let bottom = top + ROW_HEIGHT;
+    if top < offset {
+        Some(top)
+    } else if bottom > offset + height {
+        Some((bottom - height).max(0.0))
+    } else {
+        None
+    }
 }
 
 /// Width of the graph column for `lanes` lanes (clamped to 2..=12).
@@ -66,7 +155,12 @@ pub fn graph_width(lanes: u16) -> f32 {
 }
 
 /// One table row: the WIP row or a commit row.
-pub fn graph_row(repo: &RepoView, row_index: usize, graph_width: f32) -> Element<'_, Message> {
+pub fn graph_row(
+    repo: &RepoView,
+    row_index: usize,
+    graph_width: f32,
+    columns: Columns,
+) -> Element<'_, Message> {
     let snapshot = &repo.snapshot;
     let Some(layout_row) = snapshot.layout.rows.get(row_index) else {
         return container(text("")).height(ROW_HEIGHT).into();
@@ -110,26 +204,32 @@ pub fn graph_row(repo: &RepoView, row_index: usize, graph_width: f32) -> Element
     };
 
     let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
-    let content = row![
+    let mut content = row![
         cell(
             ref_pills(ref_labels(&refs, &snapshot.head, commit)),
             COL_REFS
         ),
         cell(graph_cell(layout_row, node), graph_width),
         cell(summary.wrapping(text::Wrapping::None), Fill),
-        cell(
-            muted(&commit.author).wrapping(text::Wrapping::None),
-            COL_AUTHOR
-        ),
-        cell(
-            muted(format::date_time(commit.author_time)).wrapping(text::Wrapping::None),
-            COL_DATE
-        ),
-        cell(
-            muted(&commit.id[..commit.id.len().min(7)]).font(iced::Font::MONOSPACE),
-            COL_SHA
-        ),
     ];
+    if columns.author {
+        content = content.push(cell(
+            muted(&commit.author).wrapping(text::Wrapping::None),
+            COL_AUTHOR,
+        ));
+    }
+    if columns.date {
+        content = content.push(cell(
+            muted(format::date_time(commit.author_time)).wrapping(text::Wrapping::None),
+            COL_DATE,
+        ));
+    }
+    if columns.sha {
+        content = content.push(cell(
+            muted(&commit.id[..commit.id.len().min(7)]).font(iced::Font::MONOSPACE),
+            COL_SHA,
+        ));
+    }
 
     row_button(
         content,
@@ -280,7 +380,7 @@ fn row_button<'a>(
     lane_color: Color,
     on_press: Message,
 ) -> Element<'a, Message> {
-    button(content.padding([0, 8]).height(Fill))
+    button(content.padding([0, ROW_PADDING]).height(Fill))
         .on_press(on_press)
         .padding(0)
         .width(Fill)
@@ -493,6 +593,53 @@ mod tests {
     #[test]
     fn no_refs_no_labels() {
         assert!(ref_labels(&[], &on_branch(), &commit()).is_empty());
+    }
+
+    #[test]
+    fn visible_range_with_overscan() {
+        // 100 px viewport at the top: rows 0..4 visible, plus overscan below.
+        assert_eq!(visible_range(0.0, 100.0, 1000), (0, 4 + OVERSCAN));
+        // Scrolled to row 50.
+        let (first, last) = visible_range(50.0 * ROW_HEIGHT, 300.0, 1000);
+        assert_eq!((first, last), (50 - OVERSCAN, 60 + OVERSCAN));
+        // Clamped at the end and for tiny lists.
+        // Scrolled to the very end: 1000 rows, 600 px viewport.
+        assert_eq!(visible_range(29_400.0, 600.0, 1000), (970, 1000));
+        assert_eq!(visible_range(0.0, 600.0, 3), (0, 3));
+        assert_eq!(visible_range(0.0, 600.0, 0), (0, 0));
+        // Offset beyond the content (list shrank after a refresh).
+        assert_eq!(visible_range(1e6, 600.0, 5), (5, 5));
+    }
+
+    #[test]
+    fn reveal_scrolls_only_when_needed() {
+        let height = 10.0 * ROW_HEIGHT;
+        assert_eq!(reveal_offset(5, 0.0, height), None);
+        assert_eq!(reveal_offset(9, 0.0, height), None);
+        assert_eq!(reveal_offset(10, 0.0, height), Some(ROW_HEIGHT));
+        assert_eq!(reveal_offset(100, 0.0, height), Some(91.0 * ROW_HEIGHT));
+        assert_eq!(
+            reveal_offset(3, 50.0 * ROW_HEIGHT, height),
+            Some(3.0 * ROW_HEIGHT)
+        );
+    }
+
+    #[test]
+    fn optional_columns_drop_in_order() {
+        let graph = graph_width(4);
+        let fixed = 2.0 * ROW_PADDING as f32 + COL_REFS + graph + SCROLLBAR_WIDTH;
+        let all = fixed + MIN_MESSAGE_WIDTH + COL_AUTHOR + COL_DATE + COL_SHA;
+        let columns = |author, date, sha| Columns { author, date, sha };
+        assert_eq!(Columns::fitting(all, graph), columns(true, true, true));
+        assert_eq!(
+            Columns::fitting(all - 1.0, graph),
+            columns(true, true, false)
+        );
+        assert_eq!(
+            Columns::fitting(all - COL_SHA - 1.0, graph),
+            columns(true, false, false)
+        );
+        assert_eq!(Columns::fitting(300.0, graph), columns(false, false, false));
     }
 
     #[test]
