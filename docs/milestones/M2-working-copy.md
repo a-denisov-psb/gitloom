@@ -78,6 +78,8 @@ Patch building is our own code; process spawning via `std::process`.
 
 ### [ ] M2-01 Platform baseline: CI and Windows check
 
+> In progress: MSRV job added; dependencies pinned to stay compatible with Rust 1.88 (`ordered-float` 5.4, `uuid` 1.26, resolver 3). No extra Linux packages needed for `rfd` (portal via pure-Rust D-Bus, Wayland loaded at runtime). Waiting for CI read access and the Windows check (Maintainer to-dos).
+
 Precondition: GitHub repository with `develop` pushed (done in the planning step). The maintainer pushes `master` and tags himself.
 
 - Make CI green on all three OS (fix platform issues, add missing Linux packages for `rfd`).
