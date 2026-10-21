@@ -2948,6 +2948,9 @@ mod tests {
             index: 0,
             message: "WIP".into(),
             id: "s".into(),
+            base: Some("c".into()),
+            time: 0,
+            author: String::new(),
         };
         assert!(refs_changed(snapshot, &head, &[], &[stash]));
     }

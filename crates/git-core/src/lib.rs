@@ -147,6 +147,11 @@ pub struct Stash {
     pub message: String,
     /// Commit of the stash entry.
     pub id: Oid,
+    /// Commit the stash was created on (first parent of the stash commit).
+    pub base: Option<Oid>,
+    /// Creation time as Unix timestamp in seconds.
+    pub time: i64,
+    pub author: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

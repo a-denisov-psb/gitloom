@@ -215,10 +215,18 @@ impl GitBackend for GixBackend {
             .enumerate()
             .map(|(index, line)| {
                 let line = line.map_err(backend)?;
+                let commit = repo.find_commit(line.new_oid).map_err(backend)?;
+                let decoded = commit.decode().map_err(backend)?;
+                let base = decoded.parents().next().map(|id| id.to_string());
+                let committer = decoded.committer().map_err(backend)?;
+                let author = decoded.author().map_err(backend)?;
                 Ok(Stash {
                     index,
                     message: line.message.to_str_lossy().into_owned(),
                     id: line.new_oid.to_string(),
+                    base,
+                    time: committer.seconds(),
+                    author: author.name.to_str_lossy().into_owned(),
                 })
             })
             .collect()

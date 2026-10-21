@@ -228,6 +228,51 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Stashes all changes including untracked files (`git stash push -u`).
+    fn stash_push(&self, message: Option<&str>) -> Result<()> {
+        let mut args = vec!["stash", "push", "--include-untracked", "--quiet"];
+        if let Some(message) = message {
+            args.extend(["--message", message]);
+        }
+        self.run(&args, RunOptions::default()).map(drop)
+    }
+
+    /// Current `stash@{n}` name of the stash with commit `id`.
+    fn stash_name(&self, id: &str) -> Result<String> {
+        let output = self.run(
+            &["stash", "list", "--format=%H"],
+            RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            },
+        )?;
+        output
+            .stdout_text()
+            .lines()
+            .position(|line| line.trim() == id)
+            .map(|index| format!("stash@{{{index}}}"))
+            .ok_or_else(|| Error::NotFound(format!("stash {id}")))
+    }
+
+    /// Applies and removes the stash `id`; on conflicts Git keeps the stash.
+    fn stash_pop(&self, id: &str) -> Result<()> {
+        let name = self.stash_name(id)?;
+        self.run(&["stash", "pop", "--quiet", &name], RunOptions::default())
+            .map(drop)
+    }
+
+    fn stash_apply(&self, id: &str) -> Result<()> {
+        let name = self.stash_name(id)?;
+        self.run(&["stash", "apply", "--quiet", &name], RunOptions::default())
+            .map(drop)
+    }
+
+    fn stash_drop(&self, id: &str) -> Result<()> {
+        let name = self.stash_name(id)?;
+        self.run(&["stash", "drop", "--quiet", &name], RunOptions::default())
+            .map(drop)
+    }
+
     fn stage_all(&self) -> Result<()> {
         self.run(&["add", "--all"], RunOptions::default()).map(drop)
     }
@@ -260,7 +305,10 @@ fn with_pathspecs<W: GitWriter + ?Sized>(
         input.extend_from_slice(path.as_bytes());
         input.push(0);
     }
-    let mut full = args.to_vec();
+    // Paths we pass are file names, never glob patterns. Only for these
+    // commands: Git itself relies on pathspec magic internally (e.g. stash -u).
+    let mut full = vec!["--literal-pathspecs"];
+    full.extend_from_slice(args);
     full.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
     writer
         .run(
@@ -360,9 +408,7 @@ fn command(git: &Path) -> Command {
         // Never open an editor; messages are always passed via `-F -`.
         .env("GIT_EDITOR", ":")
         .env("GIT_SEQUENCE_EDITOR", ":")
-        .env("GIT_MERGE_AUTOEDIT", "no")
-        // Paths we pass are file names, never glob patterns.
-        .env("GIT_LITERAL_PATHSPECS", "1");
+        .env("GIT_MERGE_AUTOEDIT", "no");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
