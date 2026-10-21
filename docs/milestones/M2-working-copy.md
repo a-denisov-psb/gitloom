@@ -270,7 +270,9 @@ Acceptance:
 Acceptance:
 - Integration test with a local blobless clone (`git clone --filter=blob:none file://…`).
 
-### [ ] M2-15 `LaneHints` preparation
+### [x] M2-15 `LaneHints` preparation
+
+> Done: `LayoutOptions::hints: Option<LaneHints>` (`LaneHint { group, color }` per commit, unhinted commits form an implicit last group); slots stay one flat vector, groups are ranges that grow during a measuring pass, a second pass lays out with the final ranges (ARCHITECTURE → "Lane groups"). All existing snapshots unchanged; new tests for two and four groups plus 500 random hinted histories (edges verified, group ranges ordered). Benchmark without hints (100k commits, alternating runs because WSL timings are noisy): old 7.46–7.93 ms, new 7.89–8.07 ms, within run-to-run variance; with 4 random groups 30.6 ms (two passes, worst case). A first version with one slot vector per group was 6–7 % slower without hints and was replaced.
 
 - `git-graph` takes an optional `LaneHints` input mapping commits to an ordered lane group (group index + color id). Groups reserve lane ranges in their order; inside a group the default allocation applies.
 - Without hints the output is identical to today (snapshot tests unchanged).

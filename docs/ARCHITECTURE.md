@@ -117,6 +117,15 @@ Properties:
 
 API: `layout(&commits, &order, wip: Option<Wip>) -> Result<Layout, git_graph::Error>` with `Wip { head: Option<Id> }`. `Layout::row(i)` returns the `Row` below, `len()` the number of rows and `max_width` the widest row; the WIP row (if any) is row 0. Internally the layout stores vertical runs instead of one `Through` segment per row (ADR-011). `order` must be a permutation of the commits (`Error::InvalidOrder`); more than `u16::MAX` lanes give `Error::TooManyLanes`.
 
+#### Lane groups (`LaneHints`, M2-15)
+
+`layout_with(&commits, &order, &LayoutOptions { wip, dashed, hints })` accepts optional `LaneHints { commits: &[Option<LaneHint>] }` with `LaneHint { group: u16, color: ColorId }` per commit (prepared for the Git flow layout, ROADMAP backlog). Groups occupy side-by-side lane ranges in group order; commits without a hint form an implicit last group.
+
+- The node takes the lowest incoming lane of its own group; if none belongs to it, the lowest free lane of its group (incoming lanes of other groups still end in the node).
+- A further parent without a waiting lane opens one in the parent's group. New lanes of hinted commits use the hint color.
+- Two passes: the first grows each group's range whenever the group needs another lane (inserting a free lane at the range end and shifting later groups); the second lays out with the final ranges. Allocation inside a group does not depend on where the group starts, so both passes allocate identically and every group keeps its columns over the whole history.
+- Without hints there is one unbounded group starting at lane 0 and a single pass: output and performance are unchanged.
+
 Output per row:
 
 ```rust
