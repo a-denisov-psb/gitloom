@@ -179,7 +179,7 @@ pub fn change_color(kind: ChangeKind) -> Color {
     match kind {
         ChangeKind::Added | ChangeKind::Untracked => SUCCESS,
         ChangeKind::Modified | ChangeKind::Renamed => WARNING,
-        ChangeKind::Deleted => DANGER,
+        ChangeKind::Deleted | ChangeKind::Conflicted => DANGER,
     }
 }
 

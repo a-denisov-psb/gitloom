@@ -10,8 +10,8 @@ use gix::traverse::commit::simple::CommitTimeOrder;
 use gix::ObjectId;
 
 use crate::{
-    Commit, Error, FileChange, GitBackend, Head, Log, RefKind, Reference, Result, Stash,
-    WorkingTree,
+    ChangeKind, Commit, Error, FileChange, GitBackend, Head, Log, RefKind, Reference, Result,
+    Stash, WorkingTree,
 };
 
 /// Object cache per call; avoids decoding commits twice during date-ordered walks.
@@ -172,9 +172,59 @@ impl GitBackend for GixBackend {
     }
 
     fn working_tree(&self) -> Result<WorkingTree> {
-        Err(Error::Backend(
-            "working tree status is not available yet".into(),
-        ))
+        use gix::status::index_worktree::Item as WorktreeItem;
+        use gix::status::plumbing::index_as_worktree_with_renames::Summary;
+        use gix::status::Item;
+
+        let repo = self.local();
+        let items = repo
+            .status(gix::progress::Discard)
+            .map_err(backend)?
+            .untracked_files(gix::status::UntrackedFiles::Files)
+            .into_iter(None)
+            .map_err(backend)?;
+
+        let mut tree = WorkingTree::default();
+        let mut conflicted = HashSet::new();
+        for item in items {
+            match item.map_err(backend)? {
+                Item::IndexWorktree(item) => {
+                    let Some(summary) = item.summary() else {
+                        continue;
+                    };
+                    let path = item.rela_path().to_str_lossy().into_owned();
+                    let kind = match summary {
+                        Summary::Removed => ChangeKind::Deleted,
+                        Summary::Added => ChangeKind::Untracked,
+                        Summary::Modified | Summary::TypeChange => ChangeKind::Modified,
+                        Summary::Renamed => ChangeKind::Renamed,
+                        Summary::Copied | Summary::IntentToAdd => ChangeKind::Added,
+                        Summary::Conflict => ChangeKind::Conflicted,
+                    };
+                    // Conflicts are reported once per stage; list the path once.
+                    if kind == ChangeKind::Conflicted && !conflicted.insert(path.clone()) {
+                        continue;
+                    }
+                    let old_path = match &item {
+                        WorktreeItem::Rewrite { source, .. } => {
+                            Some(source.rela_path().to_str_lossy().into_owned())
+                        }
+                        _ => None,
+                    };
+                    tree.unstaged.push(FileChange {
+                        path,
+                        kind,
+                        old_path,
+                    });
+                }
+                Item::TreeIndex(change) => tree.staged.push(index_change(&change)),
+            }
+        }
+        // Unmerged paths only show up as conflicts, not as staged changes.
+        tree.staged.retain(|f| !conflicted.contains(&f.path));
+        tree.unstaged.sort_by(|a, b| a.path.cmp(&b.path));
+        tree.staged.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(tree)
     }
 
     fn commit_changes(&self, _id: &str) -> Result<Vec<FileChange>> {
@@ -262,6 +312,28 @@ fn to_commit(commit: &gix::Commit<'_>, mailmap: &gix::mailmap::Snapshot) -> Resu
         author_time: author.seconds(),
         commit_time: committer.seconds(),
     })
+}
+
+fn index_change(change: &gix::diff::index::Change) -> FileChange {
+    use gix::diff::index::ChangeRef;
+
+    let (kind, old_path) = match change {
+        ChangeRef::Addition { .. } => (ChangeKind::Added, None),
+        ChangeRef::Deletion { .. } => (ChangeKind::Deleted, None),
+        ChangeRef::Modification { .. } => (ChangeKind::Modified, None),
+        ChangeRef::Rewrite { copy: true, .. } => (ChangeKind::Added, None),
+        ChangeRef::Rewrite {
+            source_location, ..
+        } => (
+            ChangeKind::Renamed,
+            Some(source_location.to_str_lossy().into_owned()),
+        ),
+    };
+    FileChange {
+        path: change.location().to_str_lossy().into_owned(),
+        kind,
+        old_path,
+    }
 }
 
 fn backend(error: impl Display) -> Error {

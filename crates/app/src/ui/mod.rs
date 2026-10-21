@@ -87,6 +87,7 @@ pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> text::Text<'a> {
         ChangeKind::Deleted => "D",
         ChangeKind::Renamed => "R",
         ChangeKind::Untracked => "?",
+        ChangeKind::Conflicted => "!",
     };
     text(letter)
         .color(theme::change_color(kind))
