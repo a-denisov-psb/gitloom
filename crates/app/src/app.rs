@@ -8,7 +8,9 @@ use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
 use crate::overlay::{ContextMenu, MenuEntry, Modal};
 use crate::panes::Panes;
-use crate::repo_view::{CenterView, CommitDetails, Loadable, RepoView, Section, Selection};
+use crate::repo_view::{
+    CenterView, CommitDetails, Loadable, RepoView, Section, Selection, WatchState,
+};
 use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
 use crate::snapshot::RepoSnapshot;
@@ -19,6 +21,9 @@ const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Text inputs; keyboard shortcuts pause while one of them has focus.
 pub const FILTER_INPUT: &str = "sidebar-filter";
 pub const START_PATH_INPUT: &str = "start-path";
+
+/// File system events are collected for this long before they are classified.
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -152,6 +157,27 @@ pub enum Message {
         result: Result<Vec<FileChange>, String>,
     },
     SessionLoaded(session::Loaded),
+    WatcherStarted(TabId),
+    WatcherFailed {
+        tab: TabId,
+        error: String,
+    },
+    /// Classified file system events of a tab.
+    FsChanged {
+        tab: TabId,
+        status: bool,
+        refs: bool,
+    },
+    /// Result of comparing refs and HEAD with the snapshot.
+    RefsChecked {
+        tab: TabId,
+        changed: Result<bool, String>,
+    },
+    StatusLoaded {
+        tab: TabId,
+        generation: u64,
+        result: Result<git_core::WorkingTree, String>,
+    },
     /// Button `index` of the open dialog was pressed.
     ModalAction(usize),
     ModalClosed,
@@ -287,6 +313,7 @@ impl App {
             return Task::none();
         }
         view.busy = Some(label.clone());
+        view.suppress_watch = true;
         let writer = Arc::clone(&view.writer);
         Task::perform(
             blocking(move || op(writer.as_ref()).map_err(|e| e.to_string())),
@@ -550,6 +577,50 @@ impl App {
                 generation,
                 result,
             },
+        )
+    }
+
+    /// Reloads only the working tree status of tab `id` (watcher, window focus).
+    fn refresh_status(&mut self, id: TabId) -> Task<Message> {
+        let Some(tab) = self.tab_mut(id) else {
+            return Task::none();
+        };
+        let TabState::Ready(view) = &mut tab.state else {
+            return Task::none();
+        };
+        if view.refreshing || view.status_refreshing {
+            return Task::none();
+        }
+        view.status_refreshing = true;
+        tab.generation += 1;
+        let generation = tab.generation;
+        let backend = Arc::clone(&view.backend);
+        Task::perform(
+            blocking(move || backend.working_tree().map_err(|e| e.to_string())),
+            move |result| Message::StatusLoaded {
+                tab: id,
+                generation,
+                result,
+            },
+        )
+    }
+
+    /// Compares HEAD, refs and stashes with the snapshot; a full reload follows
+    /// only if something moved.
+    fn check_refs(&mut self, id: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(id).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let backend = Arc::clone(&view.backend);
+        let snapshot = Arc::clone(&view.snapshot);
+        Task::perform(
+            blocking(move || {
+                let head = backend.head().map_err(|e| e.to_string())?;
+                let refs = backend.references().map_err(|e| e.to_string())?;
+                let stashes = backend.stashes().map_err(|e| e.to_string())?;
+                Ok(refs_changed(&snapshot, &head, &refs, &stashes))
+            }),
+            move |changed| Message::RefsChecked { tab: id, changed },
         )
     }
 
@@ -876,7 +947,69 @@ impl App {
             }
             Message::FocusRefreshDue(seq) => {
                 if seq == self.focus_seq {
-                    return self.update(Message::Refresh);
+                    // With a healthy watcher only the status can be stale.
+                    let target = self
+                        .active_tab()
+                        .and_then(|t| t.view().map(|v| (t.id, v.watcher)));
+                    return match target {
+                        Some((id, WatchState::Running)) => self.refresh_status(id),
+                        _ => self.update(Message::Refresh),
+                    };
+                }
+            }
+            Message::WatcherStarted(tab) => {
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    view.watcher = WatchState::Running;
+                }
+            }
+            Message::WatcherFailed { tab, error } => {
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    if view.watcher != WatchState::Failed {
+                        view.watcher = WatchState::Failed;
+                        self.notice = Some(format!(
+                            "Automatic refresh is unavailable for {} ({error}). Changes appear when the window regains focus or with F5.",
+                            view.name()
+                        ));
+                    }
+                }
+            }
+            Message::FsChanged { tab, status, refs } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                if view.suppress_watch || view.busy.is_some() {
+                    return Task::none();
+                }
+                if refs {
+                    return self.check_refs(tab);
+                }
+                if status {
+                    return self.refresh_status(tab);
+                }
+            }
+            Message::RefsChecked { tab, changed } => match changed {
+                Ok(true) => return self.refresh(tab),
+                // Index changes often come with ref events (commit, checkout).
+                Ok(false) => return self.refresh_status(tab),
+                Err(_) => return self.refresh(tab),
+            },
+            Message::StatusLoaded {
+                tab,
+                generation,
+                result,
+            } => {
+                let Some(tab) = self.tab_mut(tab) else {
+                    return Task::none();
+                };
+                let current = tab.generation == generation;
+                if let Some(view) = tab.view_mut() {
+                    view.status_refreshing = false;
+                    if current {
+                        match result.and_then(|tree| view.snapshot.with_working_tree(tree)) {
+                            Ok(snapshot) => view.apply_snapshot(Arc::new(snapshot)),
+                            Err(error) => view.error = Some(error),
+                        }
+                    }
                 }
             }
             Message::RepoOpened {
@@ -967,10 +1100,22 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            event::listen_with(global_event),
-            window::close_requests().map(Message::CloseRequested),
-        ])
+        // One file watcher per loaded repository, keyed by tab and root.
+        let watchers = self.tabs.iter().filter_map(|tab| {
+            let view = tab.view()?;
+            Some(Subscription::run_with(
+                (tab.id.0, view.backend.path().to_path_buf()),
+                watch_repository,
+            ))
+        });
+        Subscription::batch(
+            [
+                event::listen_with(global_event),
+                window::close_requests().map(Message::CloseRequested),
+            ]
+            .into_iter()
+            .chain(watchers),
+        )
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -1004,6 +1149,110 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
         }
         _ => None,
     }
+}
+
+/// True if HEAD, any ref target or the stash list differ from `snapshot`.
+fn refs_changed(
+    snapshot: &RepoSnapshot,
+    head: &git_core::Head,
+    refs: &[git_core::Reference],
+    stashes: &[git_core::Stash],
+) -> bool {
+    let key = |r: &git_core::Reference| (r.name.clone(), r.kind, r.target.clone());
+    let old: std::collections::HashSet<_> = snapshot.refs.iter().map(key).collect();
+    let new: std::collections::HashSet<_> = refs.iter().map(key).collect();
+    let stash_ids = |s: &[git_core::Stash]| s.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+    snapshot.head != *head || old != new || stash_ids(&snapshot.stashes) != stash_ids(stashes)
+}
+
+/// False for pure access events: reading files (our own status and refs
+/// loads included) must not trigger a refresh, or refreshes would loop.
+fn changes_content(kind: &notify::EventKind) -> bool {
+    !matches!(kind, notify::EventKind::Access(_))
+}
+
+/// Watches one repository and emits classified, debounced change messages.
+fn watch_repository(data: &(u64, PathBuf)) -> impl iced::futures::Stream<Item = Message> {
+    let (tab, root) = (TabId(data.0), data.1.clone());
+    iced::stream::channel(
+        16,
+        async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            use iced::futures::{SinkExt as _, StreamExt as _};
+            use notify::Watcher as _;
+
+            let (sender, mut events) = iced::futures::channel::mpsc::unbounded();
+            let watcher = notify::recommended_watcher(move |event| {
+                let _ = sender.unbounded_send(event);
+            });
+            let mut watcher = match watcher {
+                Ok(watcher) => watcher,
+                Err(error) => {
+                    let error = error.to_string();
+                    let _ = output.send(Message::WatcherFailed { tab, error }).await;
+                    return;
+                }
+            };
+            if let Err(error) = watcher.watch(&root, notify::RecursiveMode::Recursive) {
+                let error = error.to_string();
+                let _ = output.send(Message::WatcherFailed { tab, error }).await;
+                return;
+            }
+            let discover_root = root.clone();
+            let backend = match blocking(move || {
+                GixBackend::discover(&discover_root).map_err(|e| e.to_string())
+            })
+            .await
+            {
+                Ok(backend) => Arc::new(backend),
+                Err(error) => {
+                    let _ = output.send(Message::WatcherFailed { tab, error }).await;
+                    return;
+                }
+            };
+            let _ = output.send(Message::WatcherStarted(tab)).await;
+
+            while let Some(first) = events.next().await {
+                let mut paths = Vec::new();
+                let mut overflow = false;
+                let mut collect = |event: notify::Result<notify::Event>| match event {
+                    Ok(event) if changes_content(&event.kind) => paths.extend(event.paths),
+                    Ok(_) => {}
+                    // Lost events (e.g. queue overflow): treat everything as changed.
+                    Err(_) => overflow = true,
+                };
+                collect(first);
+                tokio::time::sleep(WATCH_DEBOUNCE).await;
+                while let Ok(event) = events.try_recv() {
+                    collect(event);
+                }
+                let changes = if overflow {
+                    git_core::ChangeSet {
+                        status: true,
+                        refs: true,
+                    }
+                } else {
+                    let backend = Arc::clone(&backend);
+                    blocking(move || Ok(backend.classify_changes(&paths)))
+                        .await
+                        .unwrap_or(git_core::ChangeSet {
+                            status: true,
+                            refs: true,
+                        })
+                };
+                if !changes.is_empty() {
+                    let message = Message::FsChanged {
+                        tab,
+                        status: changes.status,
+                        refs: changes.refs,
+                    };
+                    if output.send(message).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            drop(watcher);
+        },
+    )
 }
 
 fn unix_now() -> i64 {
@@ -1570,6 +1819,154 @@ mod tests {
         let _ = app.update(Message::ModalAction(0));
         assert!(app.modal.is_none());
         assert!(!app.panes.sidebar_visible);
+    }
+
+    fn dirty_tree() -> git_core::WorkingTree {
+        git_core::WorkingTree {
+            unstaged: vec![git_core::FileChange {
+                path: "f".into(),
+                kind: git_core::ChangeKind::Modified,
+                old_path: None,
+            }],
+            staged: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn watcher_status_change_updates_the_wip_row() {
+        let mut app = ready_app(&["c", "b"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WatcherStarted(tab));
+        let _ = app.update(Message::FsChanged {
+            tab,
+            status: true,
+            refs: false,
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.status_refreshing);
+        assert!(!view.refreshing, "no full reload for a status change");
+        let generation = app.tabs[0].generation;
+
+        let _ = app.update(Message::StatusLoaded {
+            tab,
+            generation,
+            result: Ok(dirty_tree()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(!view.status_refreshing);
+        assert!(view.snapshot.has_wip);
+        assert_eq!(view.snapshot.layout.len(), 3);
+    }
+
+    #[test]
+    fn stale_status_results_are_dropped() {
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FsChanged {
+            tab,
+            status: true,
+            refs: false,
+        });
+        let _ = app.update(Message::StatusLoaded {
+            tab,
+            generation: 0,
+            result: Ok(dirty_tree()),
+        });
+        assert!(!app.tabs[0].view().unwrap().snapshot.has_wip);
+    }
+
+    #[test]
+    fn watcher_events_are_ignored_during_own_writes() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(git_available());
+        let tab = app.tabs[0].id;
+        let _ = app.run_write(tab, "Stage", |_| Ok(()));
+        let _ = app.update(Message::FsChanged {
+            tab,
+            status: true,
+            refs: true,
+        });
+        assert!(!app.tabs[0].view().unwrap().status_refreshing);
+    }
+
+    #[test]
+    fn unchanged_refs_only_refresh_the_status() {
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RefsChecked {
+            tab,
+            changed: Ok(false),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.status_refreshing && !view.refreshing);
+
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RefsChecked {
+            tab,
+            changed: Ok(true),
+        });
+        assert!(app.tabs[0].view().unwrap().refreshing);
+    }
+
+    #[test]
+    fn refs_comparison() {
+        let app = ready_app(&["c", "b"]);
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        let head = snapshot.head.clone();
+        assert!(!refs_changed(snapshot, &head, &[], &[]));
+        let moved = git_core::Head::Detached { target: "b".into() };
+        assert!(refs_changed(snapshot, &moved, &[], &[]));
+        let new_ref = git_core::Reference {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        assert!(refs_changed(snapshot, &head, &[new_ref], &[]));
+        let stash = git_core::Stash {
+            index: 0,
+            message: "WIP".into(),
+            id: "s".into(),
+        };
+        assert!(refs_changed(snapshot, &head, &[], &[stash]));
+    }
+
+    #[test]
+    fn focus_refresh_depends_on_the_watcher() {
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WatcherStarted(tab));
+        let _ = app.update(Message::FocusRefreshDue(app.focus_seq));
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.status_refreshing && !view.refreshing);
+
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WatcherFailed {
+            tab,
+            error: "inotify limit".into(),
+        });
+        assert!(app.notice.as_deref().unwrap().contains("inotify limit"));
+        let _ = app.update(Message::FocusRefreshDue(app.focus_seq));
+        assert!(app.tabs[0].view().unwrap().refreshing);
+    }
+
+    #[test]
+    fn access_events_do_not_trigger_refreshes() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind};
+        use notify::EventKind;
+        assert!(!changes_content(&EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!changes_content(&EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
+        assert!(changes_content(&EventKind::Create(CreateKind::File)));
+        assert!(changes_content(&EventKind::Modify(ModifyKind::Any)));
+        assert!(changes_content(&EventKind::Any));
     }
 
     #[test]

@@ -134,7 +134,9 @@ Goal: unstaged diffs match `git diff` in repositories with eol conversion, so pa
 Acceptance:
 - Tests with `core.autocrlf=true` and `.gitattributes eol=crlf`: diff equals `git diff` output (CI covers all OS).
 
-### [ ] M2-05 File watcher and incremental refresh
+### [x] M2-05 File watcher and incremental refresh
+
+> Done: `notify` 8.2 watcher per tab (`Subscription::run_with`), 300 ms debounce, classification in `git-core` (`GixBackend::classify_changes`, ignored paths checked including parent directories). Status-only refresh shares the history (`RepoSnapshot::with_working_tree`); ref events reload only if HEAD, a ref target or the stash list moved. Found and fixed: inotify reports read access (`Access(Open)`), so our own status loads re-triggered the watcher (≈ 50 % idle CPU) — access events are ignored now (regression test). Checked by hand (release): new file visible after 368 ms, 3000 writes in ignored `target/` cost 0.02 s CPU, idle CPU 0.
 
 - `notify` watcher per open repository (subscription keyed by tab id), recursive on the worktree.
 - Classify events after a 300 ms debounce:

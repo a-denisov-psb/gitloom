@@ -102,6 +102,15 @@ impl Default for Scroll {
     }
 }
 
+/// State of the file watcher of a tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchState {
+    Starting,
+    Running,
+    /// Not available; refreshes happen on window focus and F5.
+    Failed,
+}
+
 pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
@@ -122,6 +131,11 @@ pub struct RepoView {
     pub busy: Option<String>,
     /// Why write actions are disabled (Git missing or too old), if they are.
     pub write_block: Option<String>,
+    pub watcher: WatchState,
+    /// Own write running or its refresh pending: watcher events are ignored.
+    pub suppress_watch: bool,
+    /// A status-only refresh is running.
+    pub status_refreshing: bool,
     /// Identifies this tab's graph scrollable for programmatic scrolling.
     pub graph_scroll_id: iced::widget::Id,
     pub scroll: Scroll,
@@ -146,6 +160,9 @@ impl RepoView {
             writer,
             busy: None,
             write_block: None,
+            watcher: WatchState::Starting,
+            suppress_watch: false,
+            status_refreshing: false,
             graph_scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
         }
@@ -165,6 +182,7 @@ impl RepoView {
         }
         self.snapshot = snapshot;
         self.refreshing = false;
+        self.suppress_watch = false;
         self.error = None;
     }
 
