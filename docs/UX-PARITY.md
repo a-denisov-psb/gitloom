@@ -39,7 +39,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
-| Merge in progress | Banner in the tab, commit concludes the merge | commit with prefilled MERGE_MSG done (M2-09), banner M2-13 |
+| Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 
@@ -115,4 +115,6 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | "Discard all" only discards unstaged changes and untracked files; staged changes stay | Safer default chosen in M2-08; GitKraken's exact behavior to be confirmed by the maintainer (HANDOVER open question 8) |
 | Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
+| While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
+| A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

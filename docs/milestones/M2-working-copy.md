@@ -249,7 +249,9 @@ Acceptance:
 Acceptance:
 - Integration tests for undo/redo of commit, root commit, amend, discard of tracked and untracked files.
 
-### [ ] M2-13 Repository states
+### [x] M2-13 Repository states
+
+> Done: `git_core::RepoState` from the marker files (`rebase-merge`/`rebase-apply` without `applying`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `sequencer/todo`); `MERGE_MSG` prefill now also for cherry-pick and revert. Disabled while an operation runs: Amend, Stash/Pop/Apply, undo/redo of commits; during a rebase also Commit. Discard, staging and deleting stashes stay enabled (needed for conflict resolution). Banner with disabled Abort (and Continue for rebase), "Not available yet". Lock errors (`Unable to create '….lock': File exists`) show a dialog with "Retry", which reruns the same operation; write operations are now repeatable `Fn` closures. Checked by hand: conflicting merge → banner "Merging topic into main", Stash tooltip "Cannot stash while a merge is in progress"; `index.lock` → Stage all → lock dialog, lock kept, removed → Retry staged; commit concluded the merge, banner gone; external cherry-pick → banner "Cherry-picking dcb29b3 \"Topic change\"", abort → gone. Rebase only covered by integration tests (both backends; `git rebase` is blocked in my sandbox).
 
 - Detect merge, rebase, cherry-pick and revert in progress; banner in the tab like GitKraken ("Merging X into Y"); write actions that would break the state are disabled. Abort/continue UI comes in M4.
 - `index.lock` present: operations fail with a clear message and a "Retry" option; never delete the lock automatically.

@@ -56,6 +56,32 @@ impl Modal {
         }
     }
 
+    /// Operation failed because another process holds a Git lock. The lock
+    /// is never removed automatically; the user retries or deletes it.
+    pub fn locked(label: &str, lock: &str, retry: Message) -> Self {
+        Self {
+            title: format!("{label} failed"),
+            text: "Another Git process seems to be running in this repository. Wait until it \
+                   has finished, then retry. If no Git process is running, a crashed process \
+                   left the lock file behind; delete it manually."
+                .into(),
+            details: Some(lock.to_owned()),
+            buttons: vec![
+                DialogButton {
+                    label: "Close".into(),
+                    kind: ButtonKind::Secondary,
+                    message: None,
+                },
+                DialogButton {
+                    label: "Retry".into(),
+                    kind: ButtonKind::Primary,
+                    message: Some(retry),
+                },
+            ],
+            default: Some(1),
+        }
+    }
+
     /// Asks before an action; destructive actions get the danger style.
     pub fn confirm(
         title: impl Into<String>,

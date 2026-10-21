@@ -4,7 +4,7 @@ use iced::widget::{button, column, container, row, space, text};
 use iced::{Element, Fill};
 
 use crate::app::Message;
-use crate::repo_view::RepoView;
+use crate::repo_view::{Guarded, RepoView};
 use crate::theme;
 use crate::ui::muted;
 use crate::ui::panel::{with_tooltip, with_tooltip_text, write_tooltip};
@@ -115,6 +115,13 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         if view.write_block.is_some() {
             return write_tooltip(button.into(), view);
         }
+        if let Some(reason) = stack
+            .last()
+            .filter(|a| matches!(a, crate::undo::UndoAction::Commit { .. }))
+            .and_then(|_| view.state_block(Guarded::MoveHead))
+        {
+            return with_tooltip_text(button.into(), reason);
+        }
         return match stack.last() {
             Some(last) => with_tooltip_text(
                 button
@@ -134,6 +141,13 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
             .map(|s| Message::StashPop(s.id.clone())),
         _ => None,
     };
+    if let Some(reason) = view
+        .state_block(Guarded::Stash)
+        .filter(|_| matches!(action, ToolbarAction::Stash | ToolbarAction::Pop))
+        .filter(|_| view.write_block.is_none())
+    {
+        return with_tooltip_text(button.into(), reason);
+    }
     match (action, message) {
         (ToolbarAction::Stash | ToolbarAction::Pop, Some(message)) if writable => {
             button.on_press(message).into()

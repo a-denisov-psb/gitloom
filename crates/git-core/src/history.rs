@@ -48,8 +48,9 @@ pub fn move_head(
         ),
     };
     // A race between the check and the update still fails safely.
+    // A lock held by another process is reported as is, so it can be retried.
     result.map(drop).map_err(|error| match error {
-        Error::Command { .. } => changed(),
+        Error::Command { ref stderr, .. } if crate::locked_file(stderr).is_none() => changed(),
         other => other,
     })
 }
