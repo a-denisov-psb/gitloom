@@ -15,7 +15,7 @@ use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
 use crate::snapshot::RepoSnapshot;
 use crate::ui;
-use crate::undo::UndoAction;
+use crate::undo::{History, UndoAction};
 
 /// Window focus events closer together than this trigger one refresh.
 const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -232,8 +232,10 @@ pub enum Message {
     WriteFinished {
         tab: TabId,
         label: String,
-        result: Result<Option<UndoAction>, String>,
+        result: Result<Option<History>, String>,
     },
+    Undo,
+    Redo,
     /// Toolbar "Stash": stash all changes including untracked files.
     StashPush,
     StashPop(String),
@@ -369,9 +371,7 @@ impl App {
         &mut self,
         tab: TabId,
         label: impl Into<String>,
-        op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<Option<UndoAction>>
-            + Send
-            + 'static,
+        op: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<Option<History>> + Send + 'static,
     ) -> Task<Message> {
         let label = label.into();
         if let Some(reason) = self.write_block() {
@@ -591,6 +591,8 @@ impl App {
                     return self.stage_file(file, false);
                 }
             }
+            Shortcut::Undo => return self.undo_redo(true),
+            Shortcut::Redo => return self.undo_redo(false),
             Shortcut::Commit => return self.commit(false),
             Shortcut::StageAllAndCommit => return self.commit(true),
             Shortcut::FocusSummary => {
@@ -776,11 +778,19 @@ impl App {
         let message = view.commit_message();
         let amend = view.amend;
         let label = if amend { "Amend" } else { "Commit" };
-        let task = self.run_write(tab, label, move |git| {
+        let task = self.run_undoable(tab, label, move |git| {
             if stage_all {
                 git.stage_all()?;
             }
-            git.commit(&message, amend)
+            let before = git_core::head_commit(git)?;
+            git.commit(&message, amend)?;
+            let after = git_core::head_commit(git)?
+                .ok_or_else(|| git_core::Error::Backend("HEAD missing after commit".into()))?;
+            Ok(Some(History::Push(UndoAction::Commit {
+                amend,
+                before,
+                after,
+            })))
         });
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
@@ -788,6 +798,63 @@ impl App {
             }
         }
         task
+    }
+
+    /// Undoes (or redoes) the most recent action of the active tab. A failed
+    /// attempt drops the entry and explains why.
+    fn undo_redo(&mut self, undo: bool) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            self.status = reason;
+            return Task::none();
+        }
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        if view.busy.is_some() {
+            return Task::none();
+        }
+        let stack = if undo { &mut view.undo } else { &mut view.redo };
+        let Some(action) = stack.pop() else {
+            return Task::none();
+        };
+        let root = view.backend.path().to_path_buf();
+        let label = format!("{} {}", if undo { "Undo" } else { "Redo" }, action.label());
+        self.run_undoable(tab, label, move |git| {
+            let next = match action {
+                UndoAction::Commit {
+                    amend,
+                    before,
+                    after,
+                } => {
+                    if undo {
+                        git_core::move_head(git, Some(&after), before.as_deref(), "gitloom: undo")?;
+                    } else {
+                        git_core::move_head(git, before.as_deref(), Some(&after), "gitloom: redo")?;
+                    }
+                    UndoAction::Commit {
+                        amend,
+                        before,
+                        after,
+                    }
+                }
+                UndoAction::Discard { label, snapshot } => {
+                    // Restoring returns the replaced state, which reverts the restore.
+                    let replaced = git_core::restore_snapshot(git, &root, &snapshot)?;
+                    UndoAction::Discard {
+                        label,
+                        snapshot: replaced,
+                    }
+                }
+            };
+            Ok(Some(if undo {
+                History::Undone(next)
+            } else {
+                History::Redone(next)
+            }))
+        })
     }
 
     /// Runs a confirmed discard in the active tab and records it for undo.
@@ -809,10 +876,10 @@ impl App {
                 }
                 self.run_undoable(tab, label, move |git| {
                     let snapshot = git_core::discard_files(git, &root, &[file])?;
-                    Ok(Some(UndoAction::Discard {
+                    Ok(Some(History::Push(UndoAction::Discard {
                         label: undo_label,
                         snapshot,
-                    }))
+                    })))
                 })
             }
             DiscardTarget::All => {
@@ -822,10 +889,10 @@ impl App {
                 }
                 self.run_undoable(tab, "Discard all changes", move |git| {
                     let snapshot = git_core::discard_all(git, &root, &unstaged)?;
-                    Ok(Some(UndoAction::Discard {
+                    Ok(Some(History::Push(UndoAction::Discard {
                         label: "Discard all changes".into(),
                         snapshot,
-                    }))
+                    })))
                 })
             }
             DiscardTarget::Hunk(index) => self.discard_diff_lines(tab, move |_, h, _| h == index),
@@ -873,10 +940,10 @@ impl App {
             let snapshot = git_core::discard_lines(git, &root, &file, &content, |h, l| {
                 selected.contains(&(h, l))
             })?;
-            Ok(Some(UndoAction::Discard {
+            Ok(Some(History::Push(UndoAction::Discard {
                 label: undo_label,
                 snapshot,
-            }))
+            })))
         });
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
@@ -1203,9 +1270,14 @@ impl App {
             Message::WriteFinished { tab, label, result } => {
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
-                    if let Ok(Some(action)) = &result {
-                        view.undo.push(action.clone());
-                        view.redo.clear();
+                    match &result {
+                        Ok(Some(History::Push(action))) => {
+                            view.undo.push(action.clone());
+                            view.redo.clear();
+                        }
+                        Ok(Some(History::Undone(action))) => view.redo.push(action.clone()),
+                        Ok(Some(History::Redone(action))) => view.undo.push(action.clone()),
+                        Ok(None) | Err(_) => {}
                     }
                     // The message stays after a failed commit so nothing is lost.
                     if std::mem::take(&mut view.clear_message_after_write) && result.is_ok() {
@@ -1247,6 +1319,8 @@ impl App {
                 ));
             }
             Message::DiscardConfirmed(target) => return self.discard(target),
+            Message::Undo => return self.undo_redo(true),
+            Message::Redo => return self.undo_redo(false),
             Message::StashPush => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     return self.run_write(tab, "Stash", |git| git.stash_push(None));
@@ -2768,6 +2842,89 @@ mod tests {
         assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stash"));
     }
 
+    fn commit_action() -> UndoAction {
+        UndoAction::Commit {
+            amend: false,
+            before: Some("c".into()),
+            after: "d123456789".into(),
+        }
+    }
+
+    #[test]
+    fn undo_moves_the_action_to_redo() {
+        let mut app = staging_app(&[], &[]);
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().undo.push(commit_action());
+        let _ = app.update(checked(Shortcut::Undo, false));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Undo Commit d123456"));
+        assert!(view.undo.is_empty(), "popped while running");
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Undo Commit d123456".into(),
+            result: Ok(Some(History::Undone(commit_action()))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.redo, [commit_action()]);
+
+        // Redo puts it back without clearing other redo entries.
+        let _ = app.update(checked(Shortcut::Redo, false));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Redo Commit d123456".into(),
+            result: Ok(Some(History::Redone(commit_action()))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.undo, [commit_action()]);
+        assert!(view.redo.is_empty());
+    }
+
+    #[test]
+    fn failed_undo_drops_the_entry_and_explains() {
+        let mut app = staging_app(&[], &[]);
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().undo.push(commit_action());
+        let _ = app.update(Message::Undo);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Undo Commit d123456".into(),
+            result: Err("Git error: Cannot undo: the repository changed".into()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.undo.is_empty() && view.redo.is_empty());
+        let modal = app.modal.as_ref().unwrap();
+        assert!(modal
+            .details
+            .as_deref()
+            .unwrap()
+            .contains("the repository changed"));
+    }
+
+    #[test]
+    fn new_actions_clear_the_redo_stack() {
+        let mut app = staging_app(&[], &[]);
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().redo.push(commit_action());
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Commit".into(),
+            result: Ok(Some(History::Push(commit_action()))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.undo.len(), 1);
+        assert!(view.redo.is_empty());
+    }
+
+    #[test]
+    fn undo_while_busy_keeps_the_entry() {
+        let mut app = staging_app(&["a"], &[]);
+        app.tabs[0].view_mut().unwrap().undo.push(commit_action());
+        let _ = app.update(Message::StashPush);
+        let _ = app.update(Message::Undo);
+        assert_eq!(app.tabs[0].view().unwrap().undo.len(), 1);
+    }
+
     #[test]
     fn every_discard_asks_first() {
         for target in [
@@ -2814,7 +2971,7 @@ mod tests {
         let _ = app.update(Message::WriteFinished {
             tab,
             label: "Discard a".into(),
-            result: Ok(Some(undo.clone())),
+            result: Ok(Some(History::Push(undo.clone()))),
         });
         let view = app.tabs[0].view().unwrap();
         assert_eq!(view.undo, [undo]);

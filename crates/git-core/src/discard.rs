@@ -23,7 +23,11 @@ pub struct DiscardSnapshot {
 }
 
 /// Records the current content of `paths` as blobs.
-fn snapshot(writer: &dyn GitWriter, root: &Path, paths: &[String]) -> Result<DiscardSnapshot> {
+pub(crate) fn snapshot(
+    writer: &dyn GitWriter,
+    root: &Path,
+    paths: &[String],
+) -> Result<DiscardSnapshot> {
     let existing: Vec<String> = paths
         .iter()
         .filter(|p| root.join(p).is_file())

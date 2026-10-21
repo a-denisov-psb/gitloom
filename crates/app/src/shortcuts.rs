@@ -23,6 +23,10 @@ pub enum Shortcut {
     UnstageSelected,
     StageAll,
     UnstageAll,
+    /// Ctrl+Z.
+    Undo,
+    /// Ctrl+Y or Ctrl+Shift+Z.
+    Redo,
     /// Ctrl+Enter: commit staged changes.
     Commit,
     /// Ctrl+Shift+Enter: stage everything and commit.
@@ -68,6 +72,12 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             Shortcut::Commit
         }),
         Key::Character("m" | "M") if command && shift && !alt => Some(Shortcut::FocusSummary),
+        Key::Character("z" | "Z") if command && !alt => Some(if shift {
+            Shortcut::Redo
+        } else {
+            Shortcut::Undo
+        }),
+        Key::Character("y" | "Y") if command && !alt && !shift => Some(Shortcut::Redo),
         Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
@@ -247,6 +257,17 @@ mod tests {
             Some(Shortcut::FocusSummary)
         );
         assert!(Shortcut::Commit.works_in_text_input());
+    }
+
+    #[test]
+    fn undo_redo_shortcuts() {
+        assert_eq!(shortcut(&ch("z"), Modifiers::COMMAND), Some(Shortcut::Undo));
+        assert_eq!(shortcut(&ch("y"), Modifiers::COMMAND), Some(Shortcut::Redo));
+        assert_eq!(
+            shortcut(&ch("Z"), Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Shortcut::Redo)
+        );
+        assert!(!Shortcut::Undo.works_in_text_input());
     }
 
     #[test]

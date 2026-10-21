@@ -236,7 +236,9 @@ Acceptance:
 - Integration tests for push (with untracked), pop, apply, drop, pop with conflict.
 - Graph snapshot test with stash rows.
 
-### [ ] M2-12 Undo and redo
+### [x] M2-12 Undo and redo
+
+> Done: `git_core::move_head` uses `git update-ref HEAD <new> <expected old>` (atomic precondition, unborn HEAD via the null id / `-d`) instead of `git reset --soft`, same effect on index and worktree. `restore_snapshot` returns the replaced state, so undo and redo of a discard are the same operation. Stack entries are popped before running; a failed attempt is dropped and shown ("Cannot undo: the repository changed"). Discard undo has no precondition (ADR-014). Checked by hand: amend → Undo (tooltip "Undo: Amend 2aadfca") → HEAD back to 7e45398 → Redo → 2aadfca; discard of `multi.txt` → Undo restored the identical diff.
 
 - Per-tab in-memory stack of undoable actions; redo stack cleared on new actions.
 - Commit / amend: record branch, HEAD before and after. Undo = `git reset --soft <before>` (root commit: `git update-ref -d HEAD`); redo = `git reset --soft <after>`. Only allowed while HEAD still equals the expected value.
