@@ -69,7 +69,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | M2 (commit, amend, discard), rest M4 |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), rest M4 |
 
 ### Command palette and search
 
