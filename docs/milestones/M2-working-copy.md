@@ -76,7 +76,9 @@ Patch building is our own code; process spawning via `std::process`.
 
 ## Tasks
 
-### [ ] M2-01 Platform baseline: CI and Windows check
+### [x] M2-01 Platform baseline: CI and Windows check
+
+> Done (2026-10-23): CI green on Windows, macOS, Linux and MSRV (confirmed by the maintainer after the Windows fix `fix/ci-windows`); no console window on Windows; keyboard commit works; all shortcuts of the checklist work on Windows after the two fixes below.
 
 > Shortcut check by the maintainer on Windows (2026-10-23): only Esc, Ctrl+Shift+M, Ctrl+Enter and Ctrl+Shift+Enter worked. Cause on all platforms: the focus check chained `operation::is_focused` for three text fields, and `is_focused` yields nothing when its widget is not in the view, so the shortcut message never arrived (unit tests sent `ShortcutChecked` directly and missed it). Fixed with an operation that always answers whether any focusable widget has focus (regression test `focus_check_always_answers`); checked in WSLg: Ctrl+J/K, J, Shift+K, Ctrl+End, Ctrl+T, Ctrl+1, Ctrl+Tab work, typing in the filter does not move the selection. Re-check on Windows (2026-10-23): all shortcuts work except Shift+J/K, which acted like J/K because iced reports the key without modifiers (`j` + Shift, winit `key_without_modifiers`) while the mapping expected `J`; fixed and checked in WSLg (Shift+J on a merge jumps to its first parent, Shift+K back).
 >
