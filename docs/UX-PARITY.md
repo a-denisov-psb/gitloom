@@ -30,7 +30,12 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click local branch | Checkout | M3 |
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
-| Drag branch onto branch | Merge/rebase menu | M3 |
+| Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
+| Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | M3 |
+| Push without upstream | Dialog to choose remote and branch name, sets upstream | M3 |
+| Push rejected | Offer Pull or Force push (with lease) | M3 |
+| Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | M3 |
+| Auto-fetch | Periodic fetch in the background | M3 |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
@@ -118,4 +123,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
+| Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
