@@ -743,8 +743,14 @@ impl App {
                 background: false,
             });
         let (old, new) = (rename.old.clone(), rename.name.clone());
-        let task = self.run_write(tab, format!("Rename branch {old}"), move |git| {
-            git.rename_branch(&old, &new)
+        let task = self.run_undoable(tab, format!("Rename branch {old}"), move |git| {
+            git.rename_branch(&old, &new)?;
+            Ok(Some(History::Push(UndoAction::Ref(
+                git_core::RefChange::RenameBranch {
+                    old: old.clone(),
+                    new: new.clone(),
+                },
+            ))))
         });
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
@@ -776,7 +782,17 @@ impl App {
         }
         let start = input.start.clone();
         let label = format!("Create branch {name}");
-        let task = self.run_write(tab, label, move |git| git.create_branch(&name, &start));
+        let task = self.run_undoable(tab, label, move |git| {
+            let from = git_core::head_position(git)?;
+            git.create_branch(&name, &start)?;
+            Ok(from.map(|from| {
+                History::Push(UndoAction::Ref(git_core::RefChange::CreateBranch {
+                    name: name.clone(),
+                    target: start.clone(),
+                    from,
+                }))
+            }))
+        });
         if let Some(view) = self.active_view_mut() {
             let running = view.busy.is_some();
             if let Some(input) = view.new_branch.as_mut() {
@@ -840,16 +856,22 @@ impl App {
             ),
         };
         let stash_message = format!("Gitloom: before {}", label.to_lowercase());
-        let task = self.run_write(tab, label, move |git| {
+        let task = self.run_undoable(tab, label, move |git| {
             if stash_first {
                 git.stash_push(Some(&stash_message))?;
             }
+            let from = git_core::head_position(git)?;
             match (&switch, &track, &detach) {
-                (Some(branch), _, _) => git.switch_branch(branch),
-                (_, Some((local, remote)), _) => git.switch_tracking(local, remote),
-                (_, _, Some(id)) => git.switch_detached(id),
-                _ => Ok(()),
+                (Some(branch), _, _) => git.switch_branch(branch)?,
+                (_, Some((local, remote)), _) => git.switch_tracking(local, remote)?,
+                (_, _, Some(id)) => git.switch_detached(id)?,
+                _ => {}
             }
+            // A new tracking branch stays when the checkout is undone.
+            let to = git_core::head_position(git)?;
+            Ok(from.zip(to).map(|(from, to)| {
+                History::Push(UndoAction::Ref(git_core::RefChange::Checkout { from, to }))
+            }))
         });
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
             if view.busy.is_some() {
@@ -1144,9 +1166,16 @@ impl App {
                     return Task::none();
                 }
                 self.form = None;
-                self.run_write(tab, format!("Create tag {name}"), move |git| {
-                    let message = (!message.is_empty()).then_some(message.as_str());
-                    git.create_tag(&name, &target, message)
+                self.run_undoable(tab, format!("Create tag {name}"), move |git| {
+                    let message = (!message.is_empty()).then(|| message.clone());
+                    git.create_tag(&name, &target, message.as_deref())?;
+                    Ok(Some(History::Push(UndoAction::Ref(
+                        git_core::RefChange::CreateTag {
+                            name: name.clone(),
+                            target: target.clone(),
+                            message,
+                        },
+                    ))))
                 })
             }
             FormAction::PushTag { tab, tag } => {
@@ -1694,7 +1723,7 @@ impl App {
             return Task::none();
         }
         let stack = if undo { &view.undo } else { &view.redo };
-        if let Some(UndoAction::Commit { .. }) = stack.last() {
+        if stack.last().is_some_and(UndoAction::moves_head) {
             if let Some(reason) = view.state_block(Guarded::MoveHead) {
                 self.status = reason;
                 return Task::none();
@@ -1723,6 +1752,10 @@ impl App {
                         before,
                         after,
                     }
+                }
+                UndoAction::Ref(change) => {
+                    change.apply(git, undo)?;
+                    UndoAction::Ref(change)
                 }
                 UndoAction::Discard { label, snapshot } => {
                     // Restoring returns the replaced state, which reverts the restore.
@@ -2182,6 +2215,11 @@ impl App {
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
+                        // Network operations are not undoable; what was undone
+                        // before them cannot be redone safely.
+                        if !op.background && result.is_ok() {
+                            view.redo.clear();
+                        }
                         if op.background {
                             background = Some(result.is_err() && !view.fetch_error_shown);
                             view.fetch_error_shown = result.is_err();
@@ -2458,8 +2496,17 @@ impl App {
                     return Task::none();
                 };
                 let branch = name.clone();
-                let task = self.run_write(tab, format!("Delete branch {name}"), move |git| {
-                    git.delete_branch(&branch, force)
+                let task = self.run_undoable(tab, format!("Delete branch {name}"), move |git| {
+                    let target = git_core::ref_commit(git, &format!("refs/heads/{branch}"))?;
+                    let upstream = git_core::branch_upstream(git, &branch)?;
+                    git.delete_branch(&branch, force)?;
+                    Ok(target.map(|target| {
+                        History::Push(UndoAction::Ref(git_core::RefChange::DeleteBranch {
+                            name: branch.clone(),
+                            target,
+                            upstream,
+                        }))
+                    }))
                 });
                 if let Some(view) = self.active_view_mut() {
                     if view.busy.is_some() && !force {
@@ -2623,8 +2670,17 @@ impl App {
             Message::DeleteTagConfirmed(tag) => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     let name = tag.clone();
-                    return self.run_write(tab, format!("Delete tag {tag}"), move |git| {
-                        git.delete_tag(&name)
+                    return self.run_undoable(tab, format!("Delete tag {tag}"), move |git| {
+                        let target = git_core::ref_commit(git, &format!("refs/tags/{name}"))?;
+                        let message = git_core::tag_message(git, &name)?;
+                        git.delete_tag(&name)?;
+                        Ok(target.map(|target| {
+                            History::Push(UndoAction::Ref(git_core::RefChange::DeleteTag {
+                                name: name.clone(),
+                                target,
+                                message,
+                            }))
+                        }))
                     });
                 }
             }
@@ -6259,6 +6315,50 @@ mod tests {
         let mut app = tag_app(&["origin"]);
         let _ = app.update(Message::PushBranch("topic".into()));
         assert!(app.form.is_some(), "no upstream: push form");
+    }
+
+    fn checkout_change() -> UndoAction {
+        UndoAction::Ref(git_core::RefChange::Checkout {
+            from: git_core::HeadPosition::Branch("main".into()),
+            to: git_core::HeadPosition::Branch("topic".into()),
+        })
+    }
+
+    #[test]
+    fn ref_changes_are_undoable() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Checkout topic".into(),
+            result: Ok(Some(History::Push(checkout_change()))),
+        });
+        assert_eq!(app.tabs[0].view().unwrap().undo, [checkout_change()]);
+        let _ = app.update(Message::Undo);
+        assert_eq!(running_args(&app), ["Undo Checkout topic"]);
+    }
+
+    #[test]
+    fn checkout_undo_is_blocked_during_a_merge() {
+        let mut app = app_in_state(merging());
+        app.tabs[0].view_mut().unwrap().undo.push(checkout_change());
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert!(app.status.contains("merge"));
+    }
+
+    #[test]
+    fn network_operations_clear_the_redo_stack() {
+        let mut app = app_with_upstream();
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().redo.push(checkout_change());
+        let _ = app.update(Message::Push { force: false });
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Push".into(),
+            result: Ok(None),
+        });
+        assert!(app.tabs[0].view().unwrap().redo.is_empty());
     }
 
     #[test]
