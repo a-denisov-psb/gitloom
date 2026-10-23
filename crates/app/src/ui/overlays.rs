@@ -19,6 +19,8 @@ const DIALOG_WIDTH: f32 = 520.0;
 pub fn modal(modal: &Modal) -> Element<'_, Message> {
     let mut content = column![text(&modal.title).size(17), text(&modal.text)].spacing(12);
     if let Some(details) = &modal.details {
+        // Git indents file lists with tabs, which the font has no glyph for.
+        let details = details.replace('\t', "    ");
         content = content.push(
             container(
                 scrollable(

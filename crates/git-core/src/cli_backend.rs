@@ -303,6 +303,31 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Switches to local branch `branch`.
+    fn switch_branch(&self, branch: &str) -> Result<()> {
+        self.run(
+            &["switch", "--no-guess", branch, "--"],
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
+    /// Creates local branch `local` tracking remote branch `remote_ref`
+    /// (e.g. `origin/topic`) and switches to it.
+    fn switch_tracking(&self, local: &str, remote_ref: &str) -> Result<()> {
+        self.run(
+            &["switch", "--create", local, "--track", remote_ref, "--"],
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
+    /// Checks out commit `id` as detached HEAD.
+    fn switch_detached(&self, id: &str) -> Result<()> {
+        self.run(&["switch", "--detach", id, "--"], RunOptions::default())
+            .map(drop)
+    }
+
     /// Aborts a merge in progress (`git merge --abort`).
     fn abort_merge(&self) -> Result<()> {
         self.run(&["merge", "--abort"], RunOptions::default())
@@ -428,6 +453,14 @@ fn with_pathspecs<W: GitWriter + ?Sized>(
             },
         )
         .map(drop)
+}
+
+/// True if a checkout failed because local changes would be overwritten
+/// (they can be stashed first).
+pub fn checkout_blocked(stderr: &str) -> bool {
+    stderr.contains("would be overwritten by checkout")
+        || stderr.contains("untracked working tree files would be overwritten")
+        || stderr.contains("Please commit your changes or stash them")
 }
 
 /// Environment variable that tells a program started as `GIT_ASKPASS` /

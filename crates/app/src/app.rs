@@ -45,6 +45,17 @@ pub enum DiscardTarget {
     Lines,
 }
 
+/// What to check out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckoutTarget {
+    /// Local branch by name.
+    Local(String),
+    /// Remote branch by full name (`origin/topic`): its local tracking branch.
+    Remote(String),
+    /// Commit id (detached HEAD).
+    Commit(String),
+}
+
 /// Which list a file row belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileArea {
@@ -261,6 +272,16 @@ pub enum Message {
     Pull(Option<git_core::PullMode>),
     /// Abort the merge or rebase a failed pull left behind.
     AbortOperation,
+    /// Double click on a branch, or "Checkout this commit" (asks first).
+    Checkout(CheckoutTarget),
+    CheckoutConfirmed(CheckoutTarget),
+    /// Local changes blocked the checkout: stash them, then check out.
+    StashAndCheckout(CheckoutTarget),
+    /// Right click on a commit row.
+    CommitContextMenu {
+        id: String,
+        position: iced::Point,
+    },
     /// Toolbar Push; `force` uses `--force-with-lease` (after confirmation).
     Push {
         force: bool,
@@ -528,6 +549,79 @@ impl App {
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
             if view.network.is_some() || view.queued.is_some() {
                 view.last_fetch = std::time::Instant::now();
+            }
+        }
+        task
+    }
+
+    /// Checks out `target` in the active tab; `stash_first` stashes local
+    /// changes (including untracked files) before, and leaves the stash.
+    fn checkout(&mut self, target: CheckoutTarget, stash_first: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let snapshot = &view.snapshot;
+        let local_exists = |name: &str| {
+            snapshot
+                .refs
+                .iter()
+                .any(|r| r.kind == git_core::RefKind::LocalBranch && r.name == name)
+        };
+        // (label, local branch to switch to, remote ref to track, commit to detach at)
+        let (label, switch, track, detach) = match &target {
+            CheckoutTarget::Local(name) => {
+                if snapshot.head.branch() == Some(name.as_str()) {
+                    self.status = format!("Already on {name}");
+                    return Task::none();
+                }
+                (format!("Checkout {name}"), Some(name.clone()), None, None)
+            }
+            CheckoutTarget::Remote(full) => {
+                let local = full
+                    .split_once('/')
+                    .map_or(full.as_str(), |(_, branch)| branch)
+                    .to_owned();
+                if snapshot.head.branch() == Some(local.as_str()) {
+                    self.status = format!("Already on {local}");
+                    return Task::none();
+                }
+                // An existing branch with the same name is reused (GitKraken).
+                if local_exists(&local) {
+                    (format!("Checkout {local}"), Some(local), None, None)
+                } else {
+                    (
+                        format!("Checkout {full}"),
+                        None,
+                        Some((local, full.clone())),
+                        None,
+                    )
+                }
+            }
+            CheckoutTarget::Commit(id) => (
+                format!("Checkout {}", &id[..id.len().min(7)]),
+                None,
+                None,
+                Some(id.clone()),
+            ),
+        };
+        let stash_message = format!("Gitloom: before {}", label.to_lowercase());
+        let task = self.run_write(tab, label, move |git| {
+            if stash_first {
+                git.stash_push(Some(&stash_message))?;
+            }
+            match (&switch, &track, &detach) {
+                (Some(branch), _, _) => git.switch_branch(branch),
+                (_, Some((local, remote)), _) => git.switch_tracking(local, remote),
+                (_, _, Some(id)) => git.switch_detached(id),
+                _ => Ok(()),
+            }
+        });
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.busy.is_some() {
+                view.pending_checkout = Some(target);
             }
         }
         task
@@ -1568,6 +1662,7 @@ impl App {
                 let mut background = None;
                 let mut pull = false;
                 let mut push = false;
+                let mut blocked_checkout = None;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
@@ -1579,6 +1674,12 @@ impl App {
                         push = op.kind == NetworkKind::Push;
                     }
                     queued = view.queued.take();
+                    let checkout = view.pending_checkout.take();
+                    if let Err(error) = &result {
+                        if git_core::checkout_blocked(error) {
+                            blocked_checkout = checkout;
+                        }
+                    }
                     match &result {
                         Ok(Some(History::Push(action))) => {
                             view.undo.push(action.clone());
@@ -1606,6 +1707,11 @@ impl App {
                     Err(error) if error == git_core::Error::Cancelled.to_string() => {
                         if queued.is_none() {
                             self.status = format!("{label}: Cancelled");
+                        }
+                    }
+                    Err(error) if blocked_checkout.is_some() => {
+                        if let Some(target) = blocked_checkout {
+                            self.modal = Some(checkout_blocked_dialog(error, target));
                         }
                     }
                     Err(error) if push && git_core::push_rejection(&error).is_some() => {
@@ -1694,6 +1800,35 @@ impl App {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     return self.pull(tab);
                 }
+            }
+            Message::Checkout(CheckoutTarget::Commit(id)) => {
+                let short = id[..id.len().min(7)].to_owned();
+                self.modal = Some(Modal::confirm(
+                    "Checkout commit",
+                    format!(
+                        "Check out {short}? HEAD will be detached: new commits do not belong to \
+                         any branch until you create one."
+                    ),
+                    "Checkout",
+                    false,
+                    Message::CheckoutConfirmed(CheckoutTarget::Commit(id)),
+                ));
+            }
+            Message::Checkout(target) | Message::CheckoutConfirmed(target) => {
+                return self.checkout(target, false)
+            }
+            Message::StashAndCheckout(target) => return self.checkout(target, true),
+            Message::CommitContextMenu { id, position } => {
+                let enabled = self.write_block().is_none();
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![MenuEntry::Item {
+                        label: "Checkout this commit".into(),
+                        shortcut: None,
+                        enabled,
+                        message: Box::new(Message::Checkout(CheckoutTarget::Commit(id))),
+                    }],
+                ));
             }
             Message::Push { force } => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
@@ -2343,6 +2478,32 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
             y: Some(offset),
         },
     )
+}
+
+/// Local changes would be overwritten by the checkout: offer to stash them
+/// first (planning decision M3; the stash is not popped automatically).
+fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
+    Modal {
+        title: "Local changes block the checkout".into(),
+        text: "Your local changes would be overwritten by the checkout. Stash them \
+               (including untracked files) and check out? The stash stays in the list; \
+               apply or pop it later."
+            .into(),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Stash and checkout".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(Message::StashAndCheckout(target)),
+            },
+        ],
+        default: Some(1),
+    }
 }
 
 /// Dialog for a rejected push: the remote has commits we do not have
@@ -4651,6 +4812,93 @@ mod tests {
             result: Err(" ! [rejected]        main -> main (stale info)".into()),
         });
         assert_eq!(app.modal.unwrap().title, "Force push refused");
+    }
+
+    /// Upstream app with an extra local branch `topic` and remote branch `origin/feature`.
+    fn checkout_app() -> App {
+        let mut app = app_with_upstream();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for (name, kind) in [
+            ("topic", git_core::RefKind::LocalBranch),
+            ("origin/topic", git_core::RefKind::RemoteBranch),
+            ("origin/feature", git_core::RefKind::RemoteBranch),
+        ] {
+            snapshot.refs.push(git_core::Reference {
+                name: name.into(),
+                kind,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn checkout_targets() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::Checkout(CheckoutTarget::Local("main".into())));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Already on main");
+
+        let _ = app.update(Message::Checkout(CheckoutTarget::Local("topic".into())));
+        assert_eq!(running_args(&app), ["Checkout topic"]);
+
+        // A remote branch whose local branch exists switches to that branch.
+        let mut app = checkout_app();
+        let _ = app.update(Message::Checkout(CheckoutTarget::Remote(
+            "origin/topic".into(),
+        )));
+        assert_eq!(running_args(&app), ["Checkout topic"]);
+
+        let mut app = checkout_app();
+        let _ = app.update(Message::Checkout(CheckoutTarget::Remote(
+            "origin/feature".into(),
+        )));
+        assert_eq!(running_args(&app), ["Checkout origin/feature"]);
+    }
+
+    #[test]
+    fn commit_checkout_asks_first() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::CommitContextMenu {
+            id: "c".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        let _ = app.update(Message::MenuSelected(0));
+        assert!(matches!(
+            menu.select(0),
+            Some(Message::Checkout(CheckoutTarget::Commit(id))) if id == "c"
+        ));
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Checkout commit");
+        assert!(modal.text.contains("detached"));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Checkout c"]);
+    }
+
+    #[test]
+    fn blocked_checkout_offers_stash_and_checkout() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Checkout(CheckoutTarget::Local("topic".into())));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Checkout topic".into(),
+            result: Err("error: Your local changes to the following files would be overwritten by checkout:\n\ta.txt".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Local changes block the checkout");
+        assert!(matches!(
+            modal.default_action(),
+            Some(Message::StashAndCheckout(CheckoutTarget::Local(name))) if name == "topic"
+        ));
+        let _ = app.update(Message::Shortcut(Shortcut::Confirm));
+        assert_eq!(running_args(&app), ["Checkout topic"]);
     }
 
     #[test]

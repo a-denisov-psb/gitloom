@@ -27,8 +27,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Click WIP | Staging area right | done |
 | Click file in panel | Diff in center | done (M1) |
 | Click branch in left panel | Jump to and select its commit | done |
-| Double click local branch | Checkout | M3 |
-| Double click remote branch | Create tracking branch and checkout | M3 |
+| Double click local branch | Checkout | done (M3; sidebar and graph pill) |
+| Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |

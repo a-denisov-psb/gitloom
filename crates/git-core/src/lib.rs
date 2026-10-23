@@ -18,8 +18,8 @@ mod state;
 mod watch;
 
 pub use cli_backend::{
-    detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter, RunOptions,
-    ASKPASS_ENV, MIN_GIT_VERSION,
+    checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter,
+    RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
 };
 pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,

@@ -137,7 +137,9 @@ Acceptance:
 Acceptance:
 - Integration tests: normal, new branch with upstream, rejected → force-with-lease, force-with-lease refused when the remote moved.
 
-### [ ] M3-06 Checkout
+### [x] M3-06 Checkout
+
+> Done: `GitWriter::switch_branch` (`switch --no-guess`), `switch_tracking` (`switch --create <name> --track <remote>`), `switch_detached`, `checkout_blocked` (overwritten local or untracked files). Double click on sidebar branches and graph pills via a new `double_click_area` wrapper: iced 0.14's `mouse_area::on_double_click` captures every left press, which would break single-click selection inside buttons, so the wrapper sees presses before the button and does not capture them (there was no M2 double-click timer to replace). Remote branch: existing local branch with the same name is switched to, otherwise a tracking branch is created. Commit row right click: context menu with "Checkout this commit" (rest of the menu in M3-11) → confirmation explaining detached HEAD. Blocked checkout → "Stash and checkout" (stash incl. untracked files, message "Gitloom: before checkout …", not popped). Tests: all variants incl. blocked by tracked and untracked files + stash; app tests for targets, confirmation, blocked dialog. Checked by hand: local edit on main → double click `topic` in the sidebar → dialog → Stash and checkout → on topic, stash listed; double click the `main` pill → main; right click "Base" → Checkout this commit → confirm → `HEAD (a2fa7c1)` and HEAD pill. Fixed on the way: tabs in Git output showed as boxes in dialogs.
 
 - Double click local branch (sidebar and graph pill) → `git switch <branch>`.
 - Double click remote branch → create local tracking branch with the same name and switch; if a local branch with that name exists, switch to it (and show ahead/behind).
