@@ -108,6 +108,11 @@ pub fn push_args(
     args
 }
 
+/// Arguments to fetch one remote (remote context menu "Fetch").
+pub fn fetch_remote_args(remote: &str) -> Vec<String> {
+    ["fetch", "--progress", remote].map(str::to_owned).to_vec()
+}
+
 /// Arguments to push tag `name` to `remote`.
 pub fn push_tag_args(remote: &str, name: &str) -> Vec<String> {
     vec![

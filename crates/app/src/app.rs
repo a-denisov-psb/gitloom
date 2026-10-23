@@ -305,6 +305,22 @@ pub enum Message {
     /// Ask before deleting a remote branch (full name, e.g. `origin/topic`).
     DeleteRemoteBranch(String),
     DeleteRemoteBranchConfirmed(String),
+    /// Form to choose the upstream branch of a local branch.
+    SetUpstreamStart(String),
+    UnsetUpstream(String),
+    /// "+" in the remote section: form for name and URL.
+    AddRemoteStart,
+    /// Right click on a remote in the sidebar.
+    RemoteContextMenu {
+        name: String,
+        position: iced::Point,
+    },
+    FetchRemote(String),
+    EditRemoteUrl(String),
+    RenameRemoteStart(String),
+    /// Ask before removing a remote.
+    RemoveRemote(String),
+    RemoveRemoteConfirmed(String),
     /// Form for a new tag at commit `id`.
     CreateTagStart(String),
     /// Push a tag (asks for the remote if there are several).
@@ -897,6 +913,56 @@ impl App {
         }
     }
 
+    /// Form to choose the upstream of `local` among the remote branches.
+    fn set_upstream_form(&mut self, local: String) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let remote_branches: Vec<String> = view
+            .snapshot
+            .refs
+            .iter()
+            .filter(|r| r.kind == git_core::RefKind::RemoteBranch)
+            .map(|r| r.name.clone())
+            .collect();
+        if remote_branches.is_empty() {
+            self.modal = Some(Modal::info(
+                "No remote branches",
+                "There is no remote branch to track. Fetch a remote, or push the branch to \
+                 create it on the remote.",
+            ));
+            return Task::none();
+        }
+        let current = view
+            .snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == local)
+            .and_then(|r| r.upstream.clone());
+        let same_name = format!("origin/{local}");
+        // A gone upstream (deleted on the remote) is no valid choice.
+        let default = current
+            .filter(|c| remote_branches.contains(c))
+            .or_else(|| remote_branches.iter().find(|b| **b == same_name).cloned())
+            .unwrap_or_else(|| remote_branches[0].clone());
+        self.form = Some(Form {
+            title: format!("Set upstream of {local}"),
+            text: "Pull and push of this branch use the upstream branch.".into(),
+            fields: vec![FormField::choice(
+                "Upstream branch",
+                default,
+                remote_branches,
+            )],
+            submit: "Set upstream".into(),
+            action: FormAction::SetUpstream { tab, local },
+            error: None,
+        });
+        Task::none()
+    }
+
     /// Push (`delete == false`) or remote delete of tag `tag`: one remote
     /// runs directly (delete after a confirmation), several ask in a form.
     fn tag_remote_action(&mut self, tag: String, delete: bool) -> Task<Message> {
@@ -964,10 +1030,70 @@ impl App {
 
     /// Validates and runs the open form.
     fn submit_form(&mut self) -> Task<Message> {
+        let Some(action) = self.form.as_ref().map(|f| f.action.clone()) else {
+            return Task::none();
+        };
+        let remotes: Vec<String> = match &action {
+            FormAction::AddRemote { tab } | FormAction::RenameRemote { tab, .. } => self
+                .tab_mut(*tab)
+                .and_then(|t| t.view())
+                .map(|v| v.snapshot.remotes.clone())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
         let Some(form) = self.form.as_mut() else {
             return Task::none();
         };
         match form.action.clone() {
+            FormAction::SetUpstream { tab, local } => {
+                let upstream = form.value(0).to_owned();
+                self.form = None;
+                self.run_write(tab, format!("Set upstream of {local}"), move |git| {
+                    git.set_upstream(&local, &upstream)
+                })
+            }
+            FormAction::AddRemote { tab } => {
+                let (name, url) = (form.value(0).to_owned(), form.value(1).to_owned());
+                if let Some(problem) = remote_name_problem(&name, &remotes) {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                if url.is_empty() {
+                    form.error = Some("Enter the URL of the remote repository".into());
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Add remote {name}"), move |git| {
+                    git.add_remote(&name, &url)
+                })
+            }
+            FormAction::SetRemoteUrl { tab, name } => {
+                let url = form.value(0).to_owned();
+                if url.is_empty() {
+                    form.error = Some("Enter the URL of the remote repository".into());
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Edit URL of {name}"), move |git| {
+                    git.set_remote_url(&name, &url)
+                })
+            }
+            FormAction::RenameRemote { tab, old } => {
+                let new = form.value(0).to_owned();
+                if new == old {
+                    self.form = None;
+                    return Task::none();
+                }
+                let others: Vec<String> = remotes.into_iter().filter(|r| *r != old).collect();
+                if let Some(problem) = remote_name_problem(&new, &others) {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Rename remote {old}"), move |git| {
+                    git.rename_remote(&old, &new)
+                })
+            }
             FormAction::CreateTag { tab, target } => {
                 let name = form.value(0).to_owned();
                 let message = form.value(1).to_owned();
@@ -1040,6 +1166,31 @@ impl App {
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
             return Task::none();
         };
+        if let Some((local, None)) = view.snapshot.head_upstream() {
+            let local = local.to_owned();
+            self.modal = Some(Modal {
+                title: "Cannot pull".into(),
+                text: format!(
+                    "{local} has no upstream branch, so there is nothing to pull from. \
+                     Set an upstream branch, or push the branch first."
+                ),
+                details: None,
+                buttons: vec![
+                    crate::overlay::DialogButton {
+                        label: "Close".into(),
+                        kind: crate::overlay::ButtonKind::Secondary,
+                        message: None,
+                    },
+                    crate::overlay::DialogButton {
+                        label: "Set upstream".into(),
+                        kind: crate::overlay::ButtonKind::Primary,
+                        message: Some(Message::SetUpstreamStart(local)),
+                    },
+                ],
+                default: Some(1),
+            });
+            return Task::none();
+        }
         if let Some(problem) = pull_blocker(&view.snapshot) {
             self.modal = Some(Modal::info("Cannot pull", problem));
             return Task::none();
@@ -1753,7 +1904,10 @@ impl App {
                 let refs = backend.references().map_err(|e| e.to_string())?;
                 let stashes = backend.stashes().map_err(|e| e.to_string())?;
                 let state = backend.state().map_err(|e| e.to_string())?;
-                Ok(refs_changed(&snapshot, &head, &refs, &stashes) || state != snapshot.state)
+                let remotes = backend.remotes().map_err(|e| e.to_string())?;
+                Ok(refs_changed(&snapshot, &head, &refs, &stashes)
+                    || state != snapshot.state
+                    || remotes != snapshot.remotes)
             }),
             move |changed| Message::RefsChecked { tab: id, changed },
         )
@@ -2232,11 +2386,30 @@ impl App {
                 };
                 // Completed with checkout, pull, push, upstream, tags in M3-11.
                 let entries = match kind {
-                    git_core::RefKind::LocalBranch => vec![
-                        item("Rename…", writable, Message::RenameStart(name.clone())),
-                        // The checked-out branch cannot be deleted.
-                        item("Delete", writable && !is_head, Message::DeleteBranch(name)),
-                    ],
+                    git_core::RefKind::LocalBranch => {
+                        let has_upstream = self.active_tab().and_then(Tab::view).is_some_and(|v| {
+                            v.snapshot
+                                .refs
+                                .iter()
+                                .any(|r| r.name == name && r.kind == kind && r.upstream.is_some())
+                        });
+                        vec![
+                            item(
+                                "Set upstream…",
+                                writable,
+                                Message::SetUpstreamStart(name.clone()),
+                            ),
+                            item(
+                                "Unset upstream",
+                                writable && has_upstream,
+                                Message::UnsetUpstream(name.clone()),
+                            ),
+                            MenuEntry::Separator,
+                            item("Rename…", writable, Message::RenameStart(name.clone())),
+                            // The checked-out branch cannot be deleted.
+                            item("Delete", writable && !is_head, Message::DeleteBranch(name)),
+                        ]
+                    }
                     git_core::RefKind::RemoteBranch => vec![item(
                         "Delete on remote",
                         writable,
@@ -2327,6 +2500,118 @@ impl App {
                     background: false,
                 };
                 return self.run_network(tab, request);
+            }
+            Message::SetUpstreamStart(local) => return self.set_upstream_form(local),
+            Message::UnsetUpstream(local) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let branch = local.clone();
+                    return self.run_write(tab, format!("Unset upstream of {local}"), move |git| {
+                        git.unset_upstream(&branch)
+                    });
+                }
+            }
+            Message::AddRemoteStart => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: "Add remote".into(),
+                    text: "Nothing is fetched yet; use Fetch afterwards.".into(),
+                    fields: vec![FormField::text("Name", ""), FormField::text("URL", "")],
+                    submit: "Add remote".into(),
+                    action: FormAction::AddRemote { tab },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::RemoteContextMenu { name, position } => {
+                let writable = self.write_block().is_none();
+                let item = |label: &str, message: Message| MenuEntry::Item {
+                    label: label.into(),
+                    shortcut: None,
+                    enabled: writable,
+                    message: Box::new(message),
+                };
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![
+                        item("Fetch", Message::FetchRemote(name.clone())),
+                        MenuEntry::Separator,
+                        item("Edit URL…", Message::EditRemoteUrl(name.clone())),
+                        item("Rename…", Message::RenameRemoteStart(name.clone())),
+                        item("Remove", Message::RemoveRemote(name)),
+                    ],
+                ));
+            }
+            Message::FetchRemote(name) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let request = NetworkRequest {
+                        label: format!("Fetch {name}"),
+                        kind: NetworkKind::Fetch,
+                        args: git_core::fetch_remote_args(&name),
+                        background: false,
+                    };
+                    return self.run_network(tab, request);
+                }
+            }
+            Message::EditRemoteUrl(name) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let url = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| {
+                        v.snapshot
+                            .remote_urls
+                            .iter()
+                            .find(|(n, _)| *n == name)
+                            .map(|(_, u)| u.clone())
+                    })
+                    .unwrap_or_default();
+                self.form = Some(Form {
+                    title: format!("Edit URL of {name}"),
+                    text: String::new(),
+                    fields: vec![FormField::text("URL", url)],
+                    submit: "Save".into(),
+                    action: FormAction::SetRemoteUrl { tab, name },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::RenameRemoteStart(old) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: format!("Rename remote {old}"),
+                    text: "Remote-tracking branches and upstreams follow the new name.".into(),
+                    fields: vec![FormField::text("Name", old.clone())],
+                    submit: "Rename".into(),
+                    action: FormAction::RenameRemote { tab, old },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::RemoveRemote(name) => {
+                self.modal = Some(Modal::confirm(
+                    "Remove remote",
+                    format!(
+                        "Remove the remote {name}? Its remote-tracking branches are removed \
+                         too; nothing changes on the server."
+                    ),
+                    "Remove",
+                    true,
+                    Message::RemoveRemoteConfirmed(name),
+                ));
+            }
+            Message::RemoveRemoteConfirmed(name) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let remote = name.clone();
+                    return self.run_write(tab, format!("Remove remote {name}"), move |git| {
+                        git.remove_remote(&remote)
+                    });
+                }
             }
             Message::CreateTagStart(target) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
@@ -3033,6 +3318,24 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
     )
 }
 
+/// Why `name` cannot name a new remote: invalid or already used.
+fn remote_name_problem(name: &str, existing: &[String]) -> Option<String> {
+    if name.contains('/') {
+        return Some("Remote names cannot contain \"/\"".into());
+    }
+    if let Some(problem) = git_core::check_branch_name(name) {
+        return Some(
+            problem
+                .replace("Branch names", "Remote names")
+                .replace("a branch name", "a remote name"),
+        );
+    }
+    existing
+        .iter()
+        .any(|r| r == name)
+        .then(|| format!("A remote named \"{name}\" already exists"))
+}
+
 fn push_tag_request(remote: &str, tag: &str) -> NetworkRequest {
     NetworkRequest {
         label: format!("Push tag {tag}"),
@@ -3379,14 +3682,15 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     }
 }
 
-/// True if HEAD, any ref target or the stash list differ from `snapshot`.
+/// True if HEAD, any ref target or upstream, or the stash list differ from `snapshot`.
 fn refs_changed(
     snapshot: &RepoSnapshot,
     head: &git_core::Head,
     refs: &[git_core::Reference],
     stashes: &[git_core::Stash],
 ) -> bool {
-    let key = |r: &git_core::Reference| (r.name.clone(), r.kind, r.target.clone());
+    let key =
+        |r: &git_core::Reference| (r.name.clone(), r.kind, r.target.clone(), r.upstream.clone());
     let old: std::collections::HashSet<_> = snapshot.refs.iter().map(key).collect();
     let new: std::collections::HashSet<_> = refs.iter().map(key).collect();
     let stash_ids = |s: &[git_core::Stash]| s.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
@@ -5617,11 +5921,11 @@ mod tests {
         let mut app = checkout_app();
         let head = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
         assert!(
-            head.select(1).is_none(),
+            head.select(4).is_none(),
             "the checked-out branch cannot be deleted"
         );
         let other = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
-        assert!(matches!(other.select(1), Some(Message::DeleteBranch(n)) if n == "topic"));
+        assert!(matches!(other.select(4), Some(Message::DeleteBranch(n)) if n == "topic"));
         let remote = branch_menu(&mut app, "origin/feature", git_core::RefKind::RemoteBranch);
         assert!(
             matches!(remote.select(0), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
@@ -5789,6 +6093,134 @@ mod tests {
         });
         let _ = app.update(Message::FormSubmit);
         assert_eq!(running_args(&app), ["Push tag v1"]);
+    }
+
+    fn form_input(app: &mut App, field: usize, value: &str) {
+        let _ = app.update(Message::FormInput {
+            field,
+            value: value.into(),
+        });
+    }
+
+    #[test]
+    fn set_and_unset_upstream() {
+        let mut app = tag_app(&["origin"]);
+        let menu = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
+        assert!(menu.select(1).is_none(), "topic has no upstream to unset");
+        let main = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
+        assert!(matches!(main.select(1), Some(Message::UnsetUpstream(b)) if b == "main"));
+
+        let _ = app.update(Message::SetUpstreamStart("topic".into()));
+        let form = app.form.clone().unwrap();
+        assert_eq!(
+            form.value(0),
+            "origin/topic",
+            "same-named remote branch preferred"
+        );
+        let _ = app.update(Message::FormClosed);
+
+        // A gone upstream is not offered as default.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for r in &mut snapshot.refs {
+            if r.name == "main" {
+                r.upstream = Some("origin/gone".into());
+            }
+        }
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::SetUpstreamStart("main".into()));
+        assert_eq!(app.form.clone().unwrap().value(0), "origin/main");
+        let _ = app.update(Message::FormClosed);
+        let _ = app.update(Message::SetUpstreamStart("topic".into()));
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Set upstream of topic"]);
+    }
+
+    #[test]
+    fn pull_without_upstream_offers_set_upstream() {
+        let mut app = tag_app(&["origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "topic".into(),
+            target: "c".into(),
+        };
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::Pull(None));
+        let modal = app.modal.clone().unwrap();
+        assert!(
+            matches!(modal.default_action(), Some(Message::SetUpstreamStart(b)) if b == "topic")
+        );
+    }
+
+    #[test]
+    fn add_remote_validates_name_and_url() {
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::AddRemoteStart);
+        form_input(&mut app, 0, "origin");
+        form_input(&mut app, 1, "https://x/y.git");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+        form_input(&mut app, 0, "a/b");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("/"));
+        form_input(&mut app, 0, "backup");
+        form_input(&mut app, 1, " ");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("URL"));
+        form_input(&mut app, 1, "https://x/y.git");
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Add remote backup"]);
+    }
+
+    #[test]
+    fn remote_menu_actions() {
+        let mut app = tag_app(&["origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.remote_urls = vec![("origin".into(), "https://x/origin.git".into())];
+        view.snapshot = Arc::new(snapshot);
+
+        let _ = app.update(Message::RemoteContextMenu {
+            name: "origin".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::FetchRemote(r)) if r == "origin"));
+        assert!(matches!(menu.select(4), Some(Message::RemoveRemote(r)) if r == "origin"));
+
+        let _ = app.update(Message::EditRemoteUrl("origin".into()));
+        assert_eq!(app.form.as_ref().unwrap().value(0), "https://x/origin.git");
+        let _ = app.update(Message::FormClosed);
+
+        let _ = app.update(Message::RemoveRemote("origin".into()));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Remove remote origin"]);
+
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::FetchRemote("origin".into()));
+        assert_eq!(running_args(&app), ["Fetch origin"]);
     }
 
     #[test]

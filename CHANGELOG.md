@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Upstream and remotes: set or unset a branch's upstream from its context menu (also offered when Pull finds no upstream); add remotes with "+" in the REMOTE section; right click a remote to fetch it, edit its URL, rename or remove it. Remotes without fetched branches are listed too.
 - Tags: "Create tag here" in the commit menu (annotated when a message is given); right click a tag to push it, delete it locally or on a remote, or copy its name. With several remotes Gitloom asks which one.
 - Rename and delete branches from their context menu (sidebar and graph): rename inline, optionally renaming the upstream branch on the remote too; delete asks first and offers a force delete for unmerged branches; the checked-out branch cannot be deleted. Remote branches can be deleted on the remote.
 - Create branches like in GitKraken: toolbar Branch or Ctrl+B opens a name input at the selected commit (the WIP row means HEAD), also "Create branch here" in the commit menu; invalid or taken names are flagged while typing, Enter creates and checks out the branch, Esc cancels.
@@ -17,6 +18,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- Changes to `.git/config` made outside Gitloom (new remotes, upstreams) refresh the open repository.
 - Remotes added and upstream branches set outside Gitloom (or by a first push) now show up without reopening the repository.
 - The banner of a merge started by `git pull` named the local branch twice ("Merging main into main"); it now names the remote branch.
 - Context menu entries no longer wrap into the next entry when the label is long.

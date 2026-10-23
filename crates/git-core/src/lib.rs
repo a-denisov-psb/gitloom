@@ -31,8 +31,9 @@ pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use network::{
-    delete_remote_branch_args, delete_remote_tag_args, parse_progress, push_args, push_rejection,
-    push_tag_args, rename_remote_branch_args, CancelToken, Progress, PullMode, PushRejection,
+    delete_remote_branch_args, delete_remote_tag_args, fetch_remote_args, parse_progress,
+    push_args, push_rejection, push_tag_args, rename_remote_branch_args, CancelToken, Progress,
+    PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
 pub use refname::check_branch_name;
@@ -392,6 +393,9 @@ pub trait GitBackend: Send + Sync {
 
     /// Names of the configured remotes, sorted.
     fn remotes(&self) -> Result<Vec<String>>;
+
+    /// Fetch URL of remote `name`, if configured.
+    fn remote_url(&self, name: &str) -> Result<Option<String>>;
 
     fn stashes(&self) -> Result<Vec<Stash>>;
 

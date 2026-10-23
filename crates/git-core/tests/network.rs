@@ -435,3 +435,50 @@ fn tags_create_push_and_delete() {
     cli.delete_tag("v1").unwrap();
     assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "refs/tags/v1"]));
 }
+
+#[test]
+fn upstream_and_remote_management() {
+    use git_core::GitBackend as _;
+    let (_upstream, bare, local) = pull_setup();
+    let cli = CliBackend::new(local.path());
+    let backend = git_core::GixBackend::discover(local.path()).unwrap();
+    let upstream_of = |branch: &str| {
+        local
+            .try_git(&[
+                "rev-parse",
+                "--abbrev-ref",
+                &format!("{branch}@{{upstream}}"),
+            ])
+            .then(|| {
+                local.git(&[
+                    "rev-parse",
+                    "--abbrev-ref",
+                    &format!("{branch}@{{upstream}}"),
+                ])
+            })
+    };
+
+    cli.unset_upstream("main").unwrap();
+    assert_eq!(upstream_of("main"), None);
+    cli.set_upstream("main", "origin/main").unwrap();
+    assert_eq!(upstream_of("main").as_deref(), Some("origin/main"));
+
+    let url = bare.path().to_str().unwrap();
+    cli.add_remote("backup", url).unwrap();
+    assert_eq!(backend.remotes().unwrap(), ["backup", "origin"]);
+    assert_eq!(backend.remote_url("backup").unwrap().as_deref(), Some(url));
+    network(&local, git_core::fetch_remote_args("backup")).unwrap();
+    assert!(local.try_git(&["rev-parse", "--verify", "--quiet", "backup/main"]));
+
+    cli.set_remote_url("backup", "https://example.com/other.git")
+        .unwrap();
+    assert_eq!(
+        backend.remote_url("backup").unwrap().as_deref(),
+        Some("https://example.com/other.git")
+    );
+    cli.rename_remote("backup", "mirror").unwrap();
+    assert!(local.try_git(&["rev-parse", "--verify", "--quiet", "mirror/main"]));
+    cli.remove_remote("mirror").unwrap();
+    assert_eq!(backend.remotes().unwrap(), ["origin"]);
+    assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "mirror/main"]));
+}

@@ -37,8 +37,9 @@ pub fn classify_git_path(relative: &Path) -> ChangeSet {
             status: true,
             refs: false,
         },
+        // `config`: remotes and upstreams (e.g. `git remote add` in a terminal).
         "HEAD" | "packed-refs" | "refs" | "MERGE_HEAD" | "CHERRY_PICK_HEAD" | "REVERT_HEAD"
-        | "rebase-merge" | "rebase-apply" => ChangeSet {
+        | "rebase-merge" | "rebase-apply" | "config" => ChangeSet {
             status: false,
             refs: true,
         },
@@ -113,6 +114,7 @@ mod tests {
         assert_eq!(git("packed-refs"), REFS);
         assert_eq!(git("MERGE_HEAD"), REFS);
         assert_eq!(git("rebase-merge/done"), REFS);
+        assert_eq!(git("config"), REFS);
         assert!(git("objects/ab/cdef").is_empty());
         assert!(git("logs/HEAD").is_empty());
         assert!(git("index.lock").is_empty());

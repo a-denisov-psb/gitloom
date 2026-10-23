@@ -433,6 +433,16 @@ impl GitBackend for GixBackend {
             .collect())
     }
 
+    fn remote_url(&self, name: &str) -> Result<Option<String>> {
+        let repo = self.local();
+        let Ok(remote) = repo.find_remote(name) else {
+            return Ok(None);
+        };
+        Ok(remote
+            .url(gix::remote::Direction::Fetch)
+            .map(|url| url.to_bstring().to_string()))
+    }
+
     fn stash_changes(&self, id: &str) -> Result<StashChanges> {
         let repo = self.local();
         let stash = find_commit(&repo, id)?;
