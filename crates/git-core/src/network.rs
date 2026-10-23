@@ -108,6 +108,27 @@ pub fn push_args(
     args
 }
 
+/// Arguments to push tag `name` to `remote`.
+pub fn push_tag_args(remote: &str, name: &str) -> Vec<String> {
+    vec![
+        "push".into(),
+        "--progress".into(),
+        remote.into(),
+        format!("refs/tags/{name}:refs/tags/{name}"),
+    ]
+}
+
+/// Arguments to delete tag `name` on `remote`.
+pub fn delete_remote_tag_args(remote: &str, name: &str) -> Vec<String> {
+    vec![
+        "push".into(),
+        "--progress".into(),
+        remote.into(),
+        "--delete".into(),
+        format!("refs/tags/{name}"),
+    ]
+}
+
 /// Arguments to delete `branch` on `remote`.
 pub fn delete_remote_branch_args(remote: &str, branch: &str) -> Vec<String> {
     ["push", "--progress", remote, "--delete", branch]

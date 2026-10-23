@@ -31,8 +31,8 @@ pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use network::{
-    delete_remote_branch_args, parse_progress, push_args, push_rejection,
-    rename_remote_branch_args, CancelToken, Progress, PullMode, PushRejection,
+    delete_remote_branch_args, delete_remote_tag_args, parse_progress, push_args, push_rejection,
+    push_tag_args, rename_remote_branch_args, CancelToken, Progress, PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
 pub use refname::check_branch_name;
