@@ -20,7 +20,11 @@ const OBJECT_CACHE_BYTES: usize = 16 * 1024 * 1024;
 /// Repository opened with gitoxide. Cheap to share between threads; every
 /// call works on its own thread-local [`gix::Repository`].
 pub struct GixBackend {
-    repo: gix::ThreadSafeRepository,
+    /// Reopened when the repository config changes (gix reads it only on open).
+    repo: std::sync::RwLock<gix::ThreadSafeRepository>,
+    /// Config files of the repository and their last seen modification time.
+    config_files: Vec<PathBuf>,
+    config_stamp: std::sync::Mutex<Option<std::time::SystemTime>>,
     root: PathBuf,
     name: String,
     /// Objects may be missing locally and fetched on demand (blobless clone).
@@ -46,8 +50,16 @@ impl GixBackend {
             |n| n.to_string_lossy().into_owned(),
         );
         let partial_clone = is_partial_clone(&repo.to_thread_local());
+        let mut config_files = vec![repo.git_dir().join("config")];
+        let common = repo.to_thread_local().common_dir().join("config");
+        if common != config_files[0] {
+            config_files.push(common);
+        }
+        let config_stamp = std::sync::Mutex::new(config_stamp(&config_files));
         Ok(Self {
-            repo,
+            repo: std::sync::RwLock::new(repo),
+            config_files,
+            config_stamp,
             root,
             name,
             partial_clone,
@@ -176,10 +188,41 @@ impl GixBackend {
     }
 
     fn local(&self) -> gix::Repository {
-        let mut repo = self.repo.to_thread_local();
+        self.reload_if_config_changed();
+        let shared = self.repo.read().unwrap_or_else(|e| e.into_inner());
+        let mut repo = shared.to_thread_local();
         repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
         repo
     }
+
+    /// gix reads the config only when opening: reopen after `git` changed it
+    /// (new remote, upstream set by `push -u`, commit template, ...).
+    fn reload_if_config_changed(&self) {
+        let now = config_stamp(&self.config_files);
+        let mut stamp = self.config_stamp.lock().unwrap_or_else(|e| e.into_inner());
+        if *stamp == now {
+            return;
+        }
+        let git_dir = self
+            .repo
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .git_dir()
+            .to_path_buf();
+        // On failure (e.g. a half-written config) keep the old state and retry later.
+        if let Ok(fresh) = gix::ThreadSafeRepository::open(git_dir) {
+            *self.repo.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+            *stamp = now;
+        }
+    }
+}
+
+/// Latest modification time of the config files (`None` if none exists).
+fn config_stamp(files: &[PathBuf]) -> Option<std::time::SystemTime> {
+    files
+        .iter()
+        .filter_map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
+        .max()
 }
 
 impl GitBackend for GixBackend {
@@ -379,6 +422,15 @@ impl GitBackend for GixBackend {
             None => repo.empty_tree(),
         };
         self.tree_changes(&repo, &old_tree, &new_tree)
+    }
+
+    fn remotes(&self) -> Result<Vec<String>> {
+        Ok(self
+            .local()
+            .remote_names()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect())
     }
 
     fn stash_changes(&self, id: &str) -> Result<StashChanges> {

@@ -385,6 +385,9 @@ pub trait GitBackend: Send + Sync {
     /// Local branches, remote branches (without `*/HEAD`) and tags.
     fn references(&self) -> Result<Vec<Reference>>;
 
+    /// Names of the configured remotes, sorted.
+    fn remotes(&self) -> Result<Vec<String>>;
+
     fn stashes(&self) -> Result<Vec<Stash>>;
 
     fn working_tree(&self) -> Result<WorkingTree>;
