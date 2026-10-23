@@ -135,6 +135,11 @@ Architecture decision records in short form. New entries at the bottom. Change a
   `SSH_ASKPASS_REQUIRE=force`. Credential helpers and ssh-agent are used first, as
   configured by the user.
 - Why: works with every credential setup without security-sensitive storage in Gitloom.
+- Implementation note (M3-02): Git and SSH start the askpass program with the prompt as
+  the only argument (no extra flags possible), so Gitloom recognizes askpass mode by the
+  environment variable `GITLOOM_ASKPASS=1`, which `CliBackend` sets for its Git processes;
+  `gitloom --askpass "<prompt>"` works as well. Password/passphrase/PIN/token prompts are
+  masked, SSH host key questions get Yes/No buttons, failures get a hint in the error dialog.
 
 ## ADR-020 Network operations and auto-fetch
 

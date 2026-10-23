@@ -1410,7 +1410,12 @@ impl App {
                     Err(error) => {
                         self.modal = Some(match git_core::locked_file(&error) {
                             Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
-                            None => Modal::error(format!("{label} failed"), error),
+                            None => match auth_hint(&error) {
+                                Some(hint) => {
+                                    Modal::error(format!("{label} failed"), error).with_text(hint)
+                                }
+                                None => Modal::error(format!("{label} failed"), error),
+                            },
                         });
                     }
                     Ok(_) => {}
@@ -2036,6 +2041,24 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
             y: Some(offset),
         },
     )
+}
+
+/// Hint for authentication failures in Git's output (ADR-019).
+fn auth_hint(error: &str) -> Option<&'static str> {
+    let lower = error.to_lowercase();
+    if lower.contains("host key verification failed") {
+        Some("The server's SSH host key was not accepted. Check the host and confirm its key, then try again.")
+    } else if lower.contains("permission denied (publickey") {
+        Some("The server rejected your SSH key. Check that the key is added to your account and loaded in ssh-agent (or protected by a passphrase Gitloom can ask for).")
+    } else if lower.contains("authentication failed")
+        || lower.contains("could not read username")
+        || lower.contains("could not read password")
+        || lower.contains("invalid username or password")
+    {
+        Some("Authentication failed. Check your credentials or your Git credential helper (e.g. Git Credential Manager); Gitloom does not store passwords.")
+    } else {
+        None
+    }
 }
 
 /// Called while a write runs: a running background network operation is
@@ -3951,6 +3974,32 @@ mod tests {
         assert_eq!(
             details.changes,
             Loadable::Ready(DetailChanges::Stash(changes))
+        );
+    }
+
+    #[test]
+    fn authentication_errors_get_a_hint() {
+        assert!(
+            auth_hint("fatal: Authentication failed for 'https://github.com/a/b.git/'")
+                .is_some_and(|h| h.contains("credential helper"))
+        );
+        assert!(auth_hint("git@github.com: Permission denied (publickey).")
+            .is_some_and(|h| h.contains("SSH key")));
+        assert!(auth_hint("Host key verification failed.").is_some_and(|h| h.contains("host key")));
+        assert_eq!(auth_hint("fatal: couldn't find remote ref main"), None);
+
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Fetch".into(),
+            result: Err("fatal: Authentication failed for 'https://x/'".into()),
+        });
+        let modal = app.modal.unwrap();
+        assert!(modal.text.contains("credential helper"));
+        assert_eq!(
+            modal.details.as_deref(),
+            Some("fatal: Authentication failed for 'https://x/'")
         );
     }
 

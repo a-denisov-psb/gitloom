@@ -85,7 +85,9 @@ Acceptance:
 - Unit tests for progress parsing with recorded stderr samples (Git 2.34 and current).
 - Integration test: cancelling a fetch from a slow local remote (e.g. large generated repo) leaves no process behind.
 
-### [ ] M3-02 Authentication: askpass helper
+### [x] M3-02 Authentication: askpass helper
+
+> Done: `CliBackend::with_askpass` sets `GIT_ASKPASS`, `SSH_ASKPASS`, `SSH_ASKPASS_REQUIRE=force` and `GITLOOM_ASKPASS=1` for all Git commands; the app passes its own executable. Deviation in detail: Git/SSH pass only the prompt, so askpass mode is detected by `GITLOOM_ASKPASS` (plus `--askpass "<prompt>"` for manual use), recorded in ADR-019. Prompt window: masked for password/passphrase/PIN/token, Yes/No for host keys, height follows the prompt length; Enter submits, Esc/Cancel exit 1. Auth failures get a hint in the error dialog. Tests: `git credential fill` through a fake askpass (prompts and answers, cancel, no prompt without askpass); prompt kinds, argument detection, Esc. Checked by hand: `git credential fill` with the real binary → masked window → typed password reached Git; Cancel → exit 1; host key prompt → Yes → "yes". Esc could not be checked by hand (no keyboard in WSLg at that moment); the maintainer checks with GCM/SSH (Maintainer to-dos).
 
 - Gitloom acts as its own askpass program: `gitloom --askpass "<prompt>"` opens a small modal window (iced), prints the answer to stdout, exit code 1 on cancel. Password fields are masked.
 - Every Git network command gets `GIT_ASKPASS` and `SSH_ASKPASS` pointing to the running executable, `SSH_ASKPASS_REQUIRE=force` (OpenSSH ≥ 8.4), and keeps `GIT_TERMINAL_PROMPT=0`.

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- Gitloom answers Git's and SSH's credential and host key prompts with a small window (masked for passwords and passphrases, Yes/No for host keys) when no credential helper or ssh-agent can; Gitloom never stores credentials. Authentication errors explain what to check.
+
 ### Fixed
 
 - Stash details showed "0 changed files" for stashes with only untracked files (or only staged changes): they now list staged, unstaged and untracked files in separate sections, and each file opens its diff.
