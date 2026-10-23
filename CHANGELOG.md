@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Detached HEAD: the commit panel reminds you to create a branch, and leaving a detached HEAD with commits that are on no branch or tag asks first, offering "Create branch".
 - Undo and redo for checkout, creating, deleting and renaming branches, and creating and deleting tags (local). Nothing is undone if the branch or HEAD moved in the meantime; fetch, pull and push are not undoable.
 - Complete context menus on commits (checkout, create branch/tag, copy SHA/message), local branches (checkout, pull, push, upstream, rename, delete, tag, copy name), remote branches, tags, remotes and stashes, in the graph, on ref pills and in the sidebar. Merge, rebase, cherry-pick, revert and reset are shown disabled until a later version. Pull and push also work for branches that are not checked out (pull fast-forwards only).
 - Upstream and remotes: set or unset a branch's upstream from its context menu (also offered when Pull finds no upstream); add remotes with "+" in the REMOTE section; right click a remote to fetch it, edit its URL, rename or remove it. Remotes without fetched branches are listed too.

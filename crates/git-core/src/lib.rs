@@ -29,7 +29,7 @@ pub use discard::{
 pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
-    tag_message, HeadPosition, RefChange,
+    tag_message, unreachable_from_branches, HeadPosition, RefChange,
 };
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;

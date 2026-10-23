@@ -184,6 +184,13 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     ]
     .spacing(8)
     .padding(12);
+    if matches!(view.snapshot.head, git_core::Head::Detached { .. }) {
+        content = content.push(
+            text("You are in detached HEAD; create a branch to keep your commits.")
+                .size(11)
+                .color(theme::WARNING),
+        );
+    }
     if view.amend && view.head_pushed() {
         content = content.push(
             text("HEAD is already pushed; amending rewrites published history.")
