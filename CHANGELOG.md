@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Rename and delete branches from their context menu (sidebar and graph): rename inline, optionally renaming the upstream branch on the remote too; delete asks first and offers a force delete for unmerged branches; the checked-out branch cannot be deleted. Remote branches can be deleted on the remote.
 - Create branches like in GitKraken: toolbar Branch or Ctrl+B opens a name input at the selected commit (the WIP row means HEAD), also "Create branch here" in the commit menu; invalid or taken names are flagged while typing, Enter creates and checks out the branch, Esc cancels.
 - Checkout: double click a local branch (sidebar or graph) to switch to it, a remote branch to create and switch to its tracking branch, or right click a commit for "Checkout this commit" (detached HEAD, after a confirmation). If local changes are in the way, Gitloom offers "Stash and checkout".
 - Push from the toolbar: the current branch goes to its upstream; a branch without upstream opens a dialog for remote and branch name and sets the upstream. A rejected push offers Pull or a force push (with lease, after a confirmation); a force push is refused if the remote changed since the last fetch.

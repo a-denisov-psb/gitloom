@@ -421,11 +421,35 @@ fn pill<'a>(label: &RefLabel) -> Element<'a, Message> {
     .padding([1, 6])
     .clip(true)
     .style(theme::ref_pill(kind, label.head));
-    match &label.checkout {
+    let pill: Element<'_, Message> = match &label.checkout {
         Some(target) => {
             crate::ui::context_area::double_click_area(pill, Message::Checkout(target.clone()))
         }
         None => pill.into(),
+    };
+    // Right click on a branch pill opens the branch menu, not the commit menu.
+    match &label.checkout {
+        Some(crate::app::CheckoutTarget::Local(name)) => {
+            let name = name.clone();
+            crate::ui::context_area::context_area(pill, move |position| {
+                Message::BranchContextMenu {
+                    name: name.clone(),
+                    kind: RefKind::LocalBranch,
+                    position,
+                }
+            })
+        }
+        Some(crate::app::CheckoutTarget::Remote(name)) => {
+            let name = name.clone();
+            crate::ui::context_area::context_area(pill, move |position| {
+                Message::BranchContextMenu {
+                    name: name.clone(),
+                    kind: RefKind::RemoteBranch,
+                    position,
+                }
+            })
+        }
+        _ => pill,
     }
 }
 

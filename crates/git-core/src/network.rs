@@ -108,6 +108,27 @@ pub fn push_args(
     args
 }
 
+/// Arguments to delete `branch` on `remote`.
+pub fn delete_remote_branch_args(remote: &str, branch: &str) -> Vec<String> {
+    ["push", "--progress", remote, "--delete", branch]
+        .map(str::to_owned)
+        .to_vec()
+}
+
+/// Arguments to rename a branch on `remote` in one push: upload local
+/// branch `new` under its name (becoming its upstream) and delete
+/// `old_remote_branch`.
+pub fn rename_remote_branch_args(remote: &str, new: &str, old_remote_branch: &str) -> Vec<String> {
+    vec![
+        "push".into(),
+        "--progress".into(),
+        "--set-upstream".into(),
+        remote.into(),
+        format!("refs/heads/{new}:refs/heads/{new}"),
+        format!(":refs/heads/{old_remote_branch}"),
+    ]
+}
+
 /// Why Git rejected a push, from its error output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushRejection {

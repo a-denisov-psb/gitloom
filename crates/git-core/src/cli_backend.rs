@@ -319,6 +319,26 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Renames local branch `old` to `new` (config and upstream move along).
+    fn rename_branch(&self, old: &str, new: &str) -> Result<()> {
+        let read = RunOptions {
+            read_only: true,
+            ..RunOptions::default()
+        };
+        self.run(&["check-ref-format", "--branch", new], read)
+            .map_err(|_| Error::Backend(format!("\"{new}\" is not a valid branch name")))?;
+        self.run(&["branch", "--move", old, new], RunOptions::default())
+            .map(drop)
+    }
+
+    /// Deletes local branch `name`; without `force` Git refuses unmerged
+    /// branches (see [`branch_not_merged`]).
+    fn delete_branch(&self, name: &str, force: bool) -> Result<()> {
+        let flag = if force { "-D" } else { "-d" };
+        self.run(&["branch", flag, name], RunOptions::default())
+            .map(drop)
+    }
+
     /// Switches to local branch `branch`.
     fn switch_branch(&self, branch: &str) -> Result<()> {
         self.run(
@@ -477,6 +497,11 @@ pub fn checkout_blocked(stderr: &str) -> bool {
     stderr.contains("would be overwritten by checkout")
         || stderr.contains("untracked working tree files would be overwritten")
         || stderr.contains("Please commit your changes or stash them")
+}
+
+/// True if `git branch -d` refused because the branch is not merged.
+pub fn branch_not_merged(stderr: &str) -> bool {
+    stderr.contains("is not fully merged")
 }
 
 /// Environment variable that tells a program started as `GIT_ASKPASS` /

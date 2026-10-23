@@ -161,7 +161,9 @@ Acceptance:
 Acceptance:
 - Unit tests for validation; integration tests for create + checkout.
 
-### [ ] M3-08 Rename and delete branches
+### [x] M3-08 Rename and delete branches
+
+> Done: `GitWriter::rename_branch` (check-ref-format, `branch --move`), `delete_branch` (`-d`/`-D`), `branch_not_merged`; `rename_remote_branch_args` renames on the remote in one push (`-u <remote> new:new :old`), `delete_remote_branch_args`. Provisional branch context menu (sidebar entries and graph pills; completed in M3-11): local Rename… / Delete (disabled for the checked-out branch), remote Delete on remote. Rename is inline in the sidebar with instant validation; with an upstream a dialog offers "Local only" or "Rename remote too" (the push runs after the local rename succeeded, `RepoView::then_network`). Delete asks; Git's "not fully merged" leads to "Branch not merged" with "Force delete" (Enter only closes). Tests: rename local + remote, delete merged, unmerged + force, remote delete against a bare remote; app tests for menu rules, rename with/without upstream, force delete, remote delete. Checked by hand: menu, delete → not merged → force delete; remote delete; the rename input opens prefilled — typing could not be checked (no keyboard input in WSLg at that time), maintainer to-do.
 
 - Rename local branch (context menu, inline input); if it has an upstream, offer to rename the remote branch too (push new, delete old).
 - Delete local branch: confirmation; unmerged branch → second confirmation with "Force delete" (`-D`). The checked-out branch cannot be deleted (menu item disabled).

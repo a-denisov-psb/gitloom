@@ -282,6 +282,29 @@ pub enum Message {
     NewBranchStart(Option<String>),
     NewBranchInput(String),
     NewBranchSubmit,
+    /// Right click on a branch (sidebar entry or graph pill).
+    BranchContextMenu {
+        name: String,
+        kind: git_core::RefKind,
+        position: iced::Point,
+    },
+    /// Inline rename of a local branch.
+    RenameStart(String),
+    RenameInput(String),
+    RenameSubmit,
+    /// Run the rename; `remote` also renames the upstream branch.
+    RenameConfirmed {
+        remote: bool,
+    },
+    /// Ask before deleting a local branch.
+    DeleteBranch(String),
+    DeleteBranchConfirmed {
+        name: String,
+        force: bool,
+    },
+    /// Ask before deleting a remote branch (full name, e.g. `origin/topic`).
+    DeleteRemoteBranch(String),
+    DeleteRemoteBranchConfirmed(String),
     /// Right click on a commit row.
     CommitContextMenu {
         id: String,
@@ -594,6 +617,111 @@ impl App {
             submitted: false,
         });
         iced::widget::operation::focus(crate::ui::NEW_BRANCH_INPUT)
+    }
+
+    /// Validates the inline rename; a branch with an upstream asks whether
+    /// the remote branch is renamed too.
+    fn submit_rename(&mut self) -> Task<Message> {
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let names = local_branch_names(&view.snapshot);
+        let snapshot = Arc::clone(&view.snapshot);
+        let Some(rename) = view.rename.as_mut() else {
+            return Task::none();
+        };
+        let name = rename.name.trim().to_owned();
+        if name == rename.old {
+            view.rename = None;
+            return Task::none();
+        }
+        if let Some(problem) = rename_problem(&rename.old, &name, &names) {
+            rename.error = Some(problem);
+            return Task::none();
+        }
+        rename.name = name.clone();
+        let old = rename.old.clone();
+        let upstream = snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == old)
+            .and_then(|r| r.upstream.clone());
+        match upstream {
+            Some(upstream) => {
+                self.modal = Some(Modal {
+                    title: "Rename branch".into(),
+                    text: format!(
+                        "{old} tracks {upstream}. Rename the remote branch to {name} too? \
+                         Others using {upstream} would have to switch."
+                    ),
+                    details: None,
+                    buttons: vec![
+                        crate::overlay::DialogButton {
+                            label: "Cancel".into(),
+                            kind: crate::overlay::ButtonKind::Secondary,
+                            message: None,
+                        },
+                        crate::overlay::DialogButton {
+                            label: "Local only".into(),
+                            kind: crate::overlay::ButtonKind::Secondary,
+                            message: Some(Message::RenameConfirmed { remote: false }),
+                        },
+                        crate::overlay::DialogButton {
+                            label: "Rename remote too".into(),
+                            kind: crate::overlay::ButtonKind::Primary,
+                            message: Some(Message::RenameConfirmed { remote: true }),
+                        },
+                    ],
+                    default: Some(1),
+                });
+                Task::none()
+            }
+            None => self.rename_branch(false),
+        }
+    }
+
+    /// Runs the inline rename; `remote` renames the upstream branch afterwards.
+    fn rename_branch(&mut self, remote: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(rename) = view.rename.clone() else {
+            return Task::none();
+        };
+        let upstream = view
+            .snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == rename.old)
+            .and_then(|r| r.upstream.clone());
+        let follow_up = upstream
+            .filter(|_| remote)
+            .and_then(|up| {
+                up.split_once('/')
+                    .map(|(r, b)| (r.to_owned(), b.to_owned()))
+            })
+            .map(|(remote, old_branch)| NetworkRequest {
+                label: format!("Rename {remote}/{old_branch}"),
+                kind: NetworkKind::Push,
+                args: git_core::rename_remote_branch_args(&remote, &rename.name, &old_branch),
+                background: false,
+            });
+        let (old, new) = (rename.old.clone(), rename.name.clone());
+        let task = self.run_write(tab, format!("Rename branch {old}"), move |git| {
+            git.rename_branch(&old, &new)
+        });
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                if let Some(rename) = view.rename.as_mut() {
+                    rename.submitted = true;
+                }
+                view.then_network = follow_up;
+            }
+        }
+        task
     }
 
     /// Creates the branch typed in the inline input and checks it out.
@@ -1054,7 +1182,7 @@ impl App {
                     || self.form.take().is_some()
                     || self
                         .active_view_mut()
-                        .is_some_and(|v| v.new_branch.take().is_some())
+                        .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
                 {
                     return Task::none();
                 }
@@ -1739,6 +1867,8 @@ impl App {
                 let mut push = false;
                 let mut blocked_checkout = None;
                 let mut inline_error = false;
+                let mut not_merged = None;
+                let mut then_network = None;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
@@ -1750,6 +1880,24 @@ impl App {
                         push = op.kind == NetworkKind::Push;
                     }
                     queued = view.queued.take();
+                    // A rename: close the input, or show Git's error there.
+                    if let Some(rename) = view.rename.as_mut().filter(|r| r.submitted) {
+                        rename.submitted = false;
+                        match &result {
+                            Ok(_) => view.rename = None,
+                            Err(error) => {
+                                rename.error = Some(error.clone());
+                                inline_error = true;
+                            }
+                        }
+                    }
+                    // A plain delete refused because the branch is not merged.
+                    if let (Some(name), Err(error)) = (view.pending_delete.take(), &result) {
+                        if git_core::branch_not_merged(error) {
+                            not_merged = Some(name);
+                        }
+                    }
+                    then_network = view.then_network.take().filter(|_| result.is_ok());
                     // A new branch: close the input, or show Git's error there.
                     if let Some(input) = view.new_branch.as_mut().filter(|i| i.submitted) {
                         input.submitted = false;
@@ -1797,6 +1945,11 @@ impl App {
                         }
                     }
                     Err(_) if inline_error => {}
+                    Err(error) if not_merged.is_some() => {
+                        if let Some(name) = not_merged {
+                            self.modal = Some(not_merged_dialog(error, name));
+                        }
+                    }
                     Err(error) if blocked_checkout.is_some() => {
                         if let Some(target) = blocked_checkout {
                             self.modal = Some(checkout_blocked_dialog(error, target));
@@ -1831,6 +1984,9 @@ impl App {
                     Ok(_) => {}
                 }
                 let refresh = self.refresh(tab);
+                if let Some(request) = then_network {
+                    return Task::batch([refresh, self.run_network(tab, request)]);
+                }
                 let next = match queued {
                     Some(Queued::Write(write)) => {
                         let clears = write.clears_message;
@@ -1927,6 +2083,110 @@ impl App {
                         },
                     ],
                 ));
+            }
+            Message::BranchContextMenu {
+                name,
+                kind,
+                position,
+            } => {
+                let writable = self.write_block().is_none();
+                let is_head = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| v.snapshot.head.branch() == Some(name.as_str()));
+                let item = |label: &str, enabled: bool, message: Message| MenuEntry::Item {
+                    label: label.into(),
+                    shortcut: None,
+                    enabled,
+                    message: Box::new(message),
+                };
+                // Completed with checkout, pull, push, upstream, tags in M3-11.
+                let entries = match kind {
+                    git_core::RefKind::LocalBranch => vec![
+                        item("Rename…", writable, Message::RenameStart(name.clone())),
+                        // The checked-out branch cannot be deleted.
+                        item("Delete", writable && !is_head, Message::DeleteBranch(name)),
+                    ],
+                    git_core::RefKind::RemoteBranch => vec![item(
+                        "Delete on remote",
+                        writable,
+                        Message::DeleteRemoteBranch(name),
+                    )],
+                    git_core::RefKind::Tag => Vec::new(),
+                };
+                if !entries.is_empty() {
+                    self.context_menu = Some(ContextMenu::new(position, entries));
+                }
+            }
+            Message::RenameStart(old) => {
+                if let Some(view) = self.active_view_mut() {
+                    view.rename = Some(crate::repo_view::RenameBranch {
+                        name: old.clone(),
+                        old,
+                        error: None,
+                        submitted: false,
+                    });
+                    return iced::widget::operation::focus(crate::ui::RENAME_INPUT);
+                }
+            }
+            Message::RenameInput(name) => {
+                if let Some(view) = self.active_view_mut() {
+                    let names = local_branch_names(&view.snapshot);
+                    if let Some(rename) = view.rename.as_mut() {
+                        rename.error = rename_problem(&rename.old, &name, &names);
+                        rename.name = name;
+                    }
+                }
+            }
+            Message::RenameSubmit => return self.submit_rename(),
+            Message::RenameConfirmed { remote } => return self.rename_branch(remote),
+            Message::DeleteBranch(name) => {
+                self.modal = Some(Modal::confirm(
+                    "Delete branch",
+                    format!("Delete the local branch {name}?"),
+                    "Delete",
+                    true,
+                    Message::DeleteBranchConfirmed { name, force: false },
+                ));
+            }
+            Message::DeleteBranchConfirmed { name, force } => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let branch = name.clone();
+                let task = self.run_write(tab, format!("Delete branch {name}"), move |git| {
+                    git.delete_branch(&branch, force)
+                });
+                if let Some(view) = self.active_view_mut() {
+                    if view.busy.is_some() && !force {
+                        view.pending_delete = Some(name);
+                    }
+                }
+                return task;
+            }
+            Message::DeleteRemoteBranch(full) => {
+                self.modal = Some(Modal::confirm(
+                    "Delete remote branch",
+                    format!("Delete {full} on the remote? Others may still use it."),
+                    "Delete",
+                    true,
+                    Message::DeleteRemoteBranchConfirmed(full),
+                ));
+            }
+            Message::DeleteRemoteBranchConfirmed(full) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some((remote, branch)) = full.split_once('/') else {
+                    return Task::none();
+                };
+                let request = NetworkRequest {
+                    label: format!("Delete {full}"),
+                    kind: NetworkKind::Push,
+                    args: git_core::delete_remote_branch_args(remote, branch),
+                    background: false,
+                };
+                return self.run_network(tab, request);
             }
             Message::NewBranchStart(at) => return self.start_new_branch(at),
             Message::NewBranchInput(name) => {
@@ -2599,6 +2859,37 @@ fn local_branch_names(snapshot: &RepoSnapshot) -> Vec<String> {
         .filter(|r| r.kind == git_core::RefKind::LocalBranch)
         .map(|r| r.name.clone())
         .collect()
+}
+
+/// Why `old` cannot be renamed to `name`: invalid or taken by another branch.
+fn rename_problem(old: &str, name: &str, existing: &[String]) -> Option<String> {
+    let others: Vec<String> = existing.iter().filter(|b| *b != old).cloned().collect();
+    branch_name_problem(name.trim(), &others)
+}
+
+/// `git branch -d` refused: offer a force delete.
+fn not_merged_dialog(error: String, name: String) -> Modal {
+    Modal {
+        title: "Branch not merged".into(),
+        text: format!(
+            "{name} has commits that are not merged into the current branch or its \
+             upstream. Deleting it loses them (they can only be found in the reflog)."
+        ),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Force delete".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::DeleteBranchConfirmed { name, force: true }),
+            },
+        ],
+        default: Some(0),
+    }
 }
 
 /// Why `name` cannot be used for a new branch: invalid or already taken.
@@ -5111,6 +5402,111 @@ mod tests {
 
         let _ = app.update(Message::Shortcut(Shortcut::Close));
         assert!(app.tabs[0].view().unwrap().new_branch.is_none());
+    }
+
+    fn branch_menu(app: &mut App, name: &str, kind: git_core::RefKind) -> ContextMenu {
+        let _ = app.update(Message::BranchContextMenu {
+            name: name.into(),
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        app.context_menu.take().unwrap()
+    }
+
+    #[test]
+    fn branch_menu_rules() {
+        let mut app = checkout_app();
+        let head = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
+        assert!(
+            head.select(1).is_none(),
+            "the checked-out branch cannot be deleted"
+        );
+        let other = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
+        assert!(matches!(other.select(1), Some(Message::DeleteBranch(n)) if n == "topic"));
+        let remote = branch_menu(&mut app, "origin/feature", git_core::RefKind::RemoteBranch);
+        assert!(
+            matches!(remote.select(0), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
+        );
+    }
+
+    #[test]
+    fn rename_with_upstream_can_rename_the_remote_branch_too() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RenameStart("main".into()));
+        let _ = app.update(Message::RenameInput("topic".into()));
+        assert!(
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .rename
+                .as_ref()
+                .unwrap()
+                .error
+                .is_some(),
+            "taken"
+        );
+        let _ = app.update(Message::RenameInput("trunk".into()));
+        let _ = app.update(Message::RenameSubmit);
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Rename branch");
+        let _ = app.update(Message::ModalAction(2));
+        assert_eq!(running_args(&app), ["Rename branch main"]);
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Rename branch main".into(),
+            result: Ok(None),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.rename.is_none());
+        assert_eq!(
+            view.busy.as_deref(),
+            Some("Rename origin/main"),
+            "remote rename follows"
+        );
+    }
+
+    #[test]
+    fn rename_without_upstream_runs_directly() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::RenameStart("topic".into()));
+        let _ = app.update(Message::RenameInput("topic2".into()));
+        let _ = app.update(Message::RenameSubmit);
+        assert!(app.modal.is_none());
+        assert_eq!(running_args(&app), ["Rename branch topic"]);
+    }
+
+    #[test]
+    fn unmerged_delete_offers_force_delete() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DeleteBranch("topic".into()));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete branch topic"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Delete branch topic".into(),
+            result: Err("error: the branch 'topic' is not fully merged".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Branch not merged");
+        assert!(modal.default_action().is_none(), "Enter only closes");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete branch topic"]);
+        assert!(
+            app.tabs[0].view().unwrap().pending_delete.is_none(),
+            "forced"
+        );
+    }
+
+    #[test]
+    fn remote_branch_delete_asks_first() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::DeleteRemoteBranch("origin/feature".into()));
+        assert_eq!(app.modal.clone().unwrap().title, "Delete remote branch");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete origin/feature"]);
     }
 
     #[test]

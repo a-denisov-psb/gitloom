@@ -271,6 +271,16 @@ pub struct NewBranch {
     pub submitted: bool,
 }
 
+/// Inline rename of a local branch in the sidebar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameBranch {
+    pub old: String,
+    pub name: String,
+    pub error: Option<String>,
+    /// The rename is running; on failure the input stays open with the error.
+    pub submitted: bool,
+}
+
 /// Operation waiting for a cancelled background operation to end.
 #[derive(Clone)]
 pub enum Queued {
@@ -320,6 +330,14 @@ pub struct RepoView {
     pub fetch_error_shown: bool,
     /// Inline new-branch input, if open.
     pub new_branch: Option<NewBranch>,
+    /// Inline branch rename in the sidebar, if open.
+    pub rename: Option<RenameBranch>,
+    /// Network operation that follows the running write if it succeeds
+    /// (e.g. renaming the remote branch after the local rename).
+    pub then_network: Option<NetworkRequest>,
+    /// Branch of the running plain delete, to offer a force delete if Git
+    /// says it is not merged.
+    pub pending_delete: Option<String>,
     /// Target of the running checkout, to offer "Stash and checkout" if
     /// local changes block it.
     pub pending_checkout: Option<crate::app::CheckoutTarget>,
@@ -476,6 +494,9 @@ impl RepoView {
             last_fetch: std::time::Instant::now(),
             fetch_error_shown: false,
             new_branch: None,
+            rename: None,
+            then_network: None,
+            pending_delete: None,
             pending_checkout: None,
             pull_failure: None,
             network: None,

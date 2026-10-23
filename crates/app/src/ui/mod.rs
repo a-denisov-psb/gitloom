@@ -27,6 +27,9 @@ pub use graph::reveal_offset;
 /// Id of the inline new-branch input in the graph.
 pub const NEW_BRANCH_INPUT: &str = "new-branch-input";
 
+/// Id of the inline rename input in the sidebar.
+pub const RENAME_INPUT: &str = "rename-input";
+
 use iced::widget::{button, column, container, pane_grid, row, space, text};
 use iced::{Element, Fill};
 
