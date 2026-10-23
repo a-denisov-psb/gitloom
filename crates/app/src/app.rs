@@ -1694,18 +1694,13 @@ impl App {
                 return self.shortcut(shortcut)
             }
             Message::Shortcut(shortcut) => {
-                // Typing in the filter must not move the selection.
-                use iced::widget::operation::is_focused;
-                return is_focused(FILTER_INPUT).then(move |filter| {
-                    is_focused(START_PATH_INPUT).then(move |path| {
-                        is_focused(COMMIT_SUMMARY_INPUT).map(move |summary| {
-                            Message::ShortcutChecked {
-                                shortcut,
-                                text_input_focused: filter || path || summary,
-                            }
-                        })
-                    })
-                });
+                // Typing in a text field must not move the selection or stage files.
+                return iced::advanced::widget::operate(AnyFocused::default()).map(
+                    move |text_input_focused| Message::ShortcutChecked {
+                        shortcut,
+                        text_input_focused,
+                    },
+                );
             }
             Message::ShortcutChecked {
                 shortcut,
@@ -1956,6 +1951,35 @@ fn load_diff(tab: TabId, backend: Arc<dyn GitBackend>, request: DiffRequest) -> 
             result: result.unwrap_or_else(|e| Err(git_core::Error::Backend(e))),
         },
     )
+}
+
+/// Finds out whether any focusable widget (text input or editor) has the
+/// keyboard focus. Unlike `operation::is_focused`, which yields nothing when
+/// its widget is not in the current view (and would swallow the shortcut),
+/// this always produces an answer.
+#[derive(Debug, Default)]
+struct AnyFocused(bool);
+
+impl iced::advanced::widget::Operation<bool> for AnyFocused {
+    fn traverse(
+        &mut self,
+        operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<bool>),
+    ) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        _id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        state: &mut dyn iced::advanced::widget::operation::Focusable,
+    ) {
+        self.0 |= state.is_focused();
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<bool> {
+        iced::advanced::widget::operation::Outcome::Some(self.0)
+    }
 }
 
 /// Maps window events and keyboard shortcuts no widget handled.
@@ -3618,6 +3642,37 @@ mod tests {
         assert!(app.notice.as_deref().unwrap().contains("inotify limit"));
         let _ = app.update(Message::FocusRefreshDue(app.focus_seq));
         assert!(app.tabs[0].view().unwrap().refreshing);
+    }
+
+    /// Regression (M2-01): checking for a focused text field must always
+    /// answer, also when no text field is in the view; otherwise every
+    /// shortcut that is not allowed in text fields is swallowed.
+    #[test]
+    fn focus_check_always_answers() {
+        use iced::advanced::widget::operation::{Focusable, Outcome};
+        use iced::advanced::widget::Operation as _;
+
+        struct Field(bool);
+        impl Focusable for Field {
+            fn is_focused(&self) -> bool {
+                self.0
+            }
+            fn focus(&mut self) {}
+            fn unfocus(&mut self) {}
+        }
+
+        let answer = |op: &AnyFocused| match op.finish() {
+            Outcome::Some(focused) => Some(focused),
+            _ => None,
+        };
+        let empty = AnyFocused::default();
+        assert_eq!(answer(&empty), Some(false), "no text field in the view");
+
+        let mut op = AnyFocused::default();
+        op.focusable(None, iced::Rectangle::default(), &mut Field(false));
+        op.focusable(None, iced::Rectangle::default(), &mut Field(true));
+        op.focusable(None, iced::Rectangle::default(), &mut Field(false));
+        assert_eq!(answer(&op), Some(true));
     }
 
     #[test]

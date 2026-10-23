@@ -78,6 +78,8 @@ Patch building is our own code; process spawning via `std::process`.
 
 ### [ ] M2-01 Platform baseline: CI and Windows check
 
+> Shortcut check by the maintainer on Windows (2026-10-23): only Esc, Ctrl+Shift+M, Ctrl+Enter and Ctrl+Shift+Enter worked. Cause on all platforms: the focus check chained `operation::is_focused` for three text fields, and `is_focused` yields nothing when its widget is not in the view, so the shortcut message never arrived (unit tests sent `ShortcutChecked` directly and missed it). Fixed with an operation that always answers whether any focusable widget has focus (regression test `focus_check_always_answers`); checked in WSLg: Ctrl+J/K, J, Shift+K, Ctrl+End, Ctrl+T, Ctrl+1, Ctrl+Tab work, typing in the filter does not move the selection. Re-check on Windows pending.
+>
 > In progress: MSRV job added; dependencies pinned to stay compatible with Rust 1.88 (`ordered-float` 5.4, `uuid` 1.26, resolver 3). No extra Linux packages needed for `rfd` (portal via pure-Rust D-Bus, Wayland loaded at runtime). Waiting for CI read access and the Windows check (Maintainer to-dos).
 
 Precondition: GitHub repository with `develop` pushed (done in the planning step). The maintainer pushes `master` and tags himself.
