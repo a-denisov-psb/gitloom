@@ -189,8 +189,12 @@ pub fn graph_row(
             muted(format!("✓ {}", tree.staged.len())),
         ]
         .spacing(12);
+        let refs: Element<'_, Message> = match &repo.new_branch {
+            Some(input) if input.row.is_none() => new_branch_input(input),
+            _ => text("").into(),
+        };
         let content = row![
-            cell(text(""), COL_REFS),
+            cell(refs, COL_REFS),
             cell(graph_cell(layout_row, Node::Wip), graph_width),
             cell(summary, Fill),
         ];
@@ -221,11 +225,12 @@ pub fn graph_row(
     };
 
     let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
+    let refs_cell: Element<'_, Message> = match &repo.new_branch {
+        Some(input) if input.row.as_deref() == Some(commit.id.as_str()) => new_branch_input(input),
+        _ => ref_pills(ref_labels(&refs, &snapshot.head, commit)),
+    };
     let mut content = row![
-        cell(
-            ref_pills(ref_labels(&refs, &snapshot.head, commit)),
-            COL_REFS
-        ),
+        cell(refs_cell, COL_REFS),
         cell(graph_cell(layout_row, node), graph_width),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
@@ -265,6 +270,29 @@ pub fn graph_row(
             id: id.clone(),
             position,
         })
+    }
+}
+
+/// Inline input for a new branch (GitKraken); an error shows as red border
+/// and tooltip.
+fn new_branch_input(input: &crate::repo_view::NewBranch) -> Element<'_, Message> {
+    let field = iced::widget::text_input("New branch name", &input.name)
+        .id(crate::ui::NEW_BRANCH_INPUT)
+        .on_input(Message::NewBranchInput)
+        .on_submit(Message::NewBranchSubmit)
+        .size(12)
+        .padding([1, 4])
+        .style(theme::inline_input(input.error.is_some()));
+    match &input.error {
+        Some(error) => tooltip(
+            field,
+            container(text(error.clone()).size(12))
+                .padding([4, 8])
+                .style(theme::tooltip),
+            tooltip::Position::Bottom,
+        )
+        .into(),
+        None => field.into(),
     }
 }
 

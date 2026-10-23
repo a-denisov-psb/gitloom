@@ -257,6 +257,20 @@ pub struct NetworkRequest {
     pub background: bool,
 }
 
+/// Inline input for a new branch in the graph (toolbar Branch, Ctrl+B).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewBranch {
+    /// Commit the branch starts at.
+    pub start: String,
+    /// Graph row showing the input: a commit id, or `None` for the WIP row.
+    pub row: Option<String>,
+    pub name: String,
+    /// Shown at the input; from instant validation or from Git.
+    pub error: Option<String>,
+    /// Creation is running; on failure the input stays open with the error.
+    pub submitted: bool,
+}
+
 /// Operation waiting for a cancelled background operation to end.
 #[derive(Clone)]
 pub enum Queued {
@@ -304,6 +318,8 @@ pub struct RepoView {
     pub last_fetch: std::time::Instant,
     /// An auto-fetch error was shown; further ones stay quiet until a fetch works.
     pub fetch_error_shown: bool,
+    /// Inline new-branch input, if open.
+    pub new_branch: Option<NewBranch>,
     /// Target of the running checkout, to offer "Stash and checkout" if
     /// local changes block it.
     pub pending_checkout: Option<crate::app::CheckoutTarget>,
@@ -459,6 +475,7 @@ impl RepoView {
             last_write: None,
             last_fetch: std::time::Instant::now(),
             fetch_error_shown: false,
+            new_branch: None,
             pending_checkout: None,
             pull_failure: None,
             network: None,

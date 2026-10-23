@@ -25,6 +25,8 @@ pub enum Shortcut {
     UnstageAll,
     /// Ctrl+L: fetch all remotes.
     FetchAll,
+    /// Ctrl+B: new branch at the selected commit.
+    CreateBranch,
     /// Ctrl+Z.
     Undo,
     /// Ctrl+Y or Ctrl+Shift+Z.
@@ -118,6 +120,7 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             "w" | "W" => Some(Shortcut::CloseTab),
             "o" | "O" => Some(Shortcut::OpenRepository),
             "l" | "L" => Some(Shortcut::FetchAll),
+            "b" | "B" => Some(Shortcut::CreateBranch),
             "j" | "J" => Some(Shortcut::ToggleSidebar),
             "k" | "K" => Some(Shortcut::TogglePanel),
             digit => digit
@@ -145,6 +148,10 @@ mod tests {
             Some(Shortcut::FetchAll)
         );
         assert_eq!(shortcut(&ch("l"), Modifiers::empty()), None);
+        assert_eq!(
+            shortcut(&ch("b"), Modifiers::COMMAND),
+            Some(Shortcut::CreateBranch)
+        );
     }
 
     #[test]
