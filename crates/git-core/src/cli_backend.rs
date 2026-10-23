@@ -303,6 +303,18 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Aborts a merge in progress (`git merge --abort`).
+    fn abort_merge(&self) -> Result<()> {
+        self.run(&["merge", "--abort"], RunOptions::default())
+            .map(drop)
+    }
+
+    /// Aborts a rebase in progress (`git rebase --abort`).
+    fn abort_rebase(&self) -> Result<()> {
+        self.run(&["rebase", "--abort"], RunOptions::default())
+            .map(drop)
+    }
+
     /// Resets the working tree files `paths` to their index content.
     fn restore_worktree(&self, paths: &[String]) -> Result<()> {
         with_pathspecs(self, &["restore", "--worktree"], paths)
