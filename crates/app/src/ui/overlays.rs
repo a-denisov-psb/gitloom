@@ -76,7 +76,11 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
                 enabled,
                 ..
             } => {
-                let mut line = row![text(label).size(13), space::horizontal()];
+                // Items never wrap: a wrapped label would overlap the next item.
+                let mut line = row![
+                    text(label).size(13).wrapping(text::Wrapping::None),
+                    space::horizontal()
+                ];
                 if let Some(shortcut) = shortcut {
                     line = line.push(muted(shortcut).size(11));
                 }

@@ -56,6 +56,21 @@ impl Modal {
         }
     }
 
+    /// Plain message with a Close button.
+    pub fn info(title: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            text: text.into(),
+            details: None,
+            buttons: vec![DialogButton {
+                label: "Close".into(),
+                kind: ButtonKind::Primary,
+                message: None,
+            }],
+            default: Some(0),
+        }
+    }
+
     /// Replaces the summary line, e.g. with a hint how to fix the error.
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
         self.text = text.into();
@@ -192,7 +207,7 @@ pub struct ContextMenu {
 }
 
 /// Approximate menu size used to keep it inside the window.
-pub const MENU_WIDTH: f32 = 220.0;
+pub const MENU_WIDTH: f32 = 260.0;
 pub const MENU_ITEM_HEIGHT: f32 = 26.0;
 pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
 

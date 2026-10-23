@@ -310,7 +310,10 @@ fn merge_source(message: &str) -> Option<String> {
     ]
     .iter()
     .find_map(|prefix| first.strip_prefix(prefix))?;
-    rest.split_once('\'').map(|(name, _)| name.to_owned())
+    let (name, tail) = rest.split_once('\'')?;
+    // "Merge branch 'main' of <url>" (git pull) names the remote's branch;
+    // the remote-tracking ref at MERGE_HEAD is the better name then.
+    (!tail.starts_with(" of ")).then(|| name.to_owned())
 }
 
 #[cfg(test)]
@@ -445,6 +448,7 @@ mod tests {
         assert_eq!(merge_source("Merge branch 'x' into y"), Some("x".into()));
         assert_eq!(merge_source("Merge tag 'v1'"), Some("v1".into()));
         assert_eq!(merge_source("Custom message"), None);
+        assert_eq!(merge_source("Merge branch 'main' of https://x/y.git"), None);
     }
 
     #[test]

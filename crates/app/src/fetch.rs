@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::repo_view::NetworkRequest;
+use crate::repo_view::{NetworkKind, NetworkRequest};
 
 /// Default auto-fetch interval in minutes (planning decision M3).
 pub const DEFAULT_INTERVAL_MINUTES: u32 = 5;
@@ -14,8 +14,19 @@ pub const TICK: Duration = Duration::from_secs(30);
 pub fn fetch_all(background: bool) -> NetworkRequest {
     NetworkRequest {
         label: if background { "Auto-fetch" } else { "Fetch" }.into(),
+        kind: NetworkKind::Fetch,
         args: vec!["fetch".into(), "--all".into(), "--progress".into()],
         background,
+    }
+}
+
+/// `git pull` in `mode`.
+pub fn pull(mode: git_core::PullMode) -> NetworkRequest {
+    NetworkRequest {
+        label: "Pull".into(),
+        kind: NetworkKind::Pull,
+        args: mode.args().iter().map(|s| s.to_string()).collect(),
+        background: false,
     }
 }
 

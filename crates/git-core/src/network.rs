@@ -46,6 +46,45 @@ pub(crate) fn strip_progress(stderr: &str) -> String {
         .join("\n")
 }
 
+/// How `git pull` integrates the upstream branch (toolbar Pull dropdown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PullMode {
+    /// Fast-forward if possible, otherwise a merge commit (`--ff`).
+    #[default]
+    FastForwardIfPossible,
+    /// Only fast-forward; fails if the branches diverged (`--ff-only`).
+    FastForwardOnly,
+    /// Rebase local commits onto the upstream branch (`--rebase`).
+    Rebase,
+}
+
+impl PullMode {
+    pub const ALL: [PullMode; 3] = [
+        PullMode::FastForwardIfPossible,
+        PullMode::FastForwardOnly,
+        PullMode::Rebase,
+    ];
+
+    /// Menu label, as in GitKraken.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FastForwardIfPossible => "Pull (fast-forward if possible)",
+            Self::FastForwardOnly => "Pull (fast-forward only)",
+            Self::Rebase => "Pull (rebase)",
+        }
+    }
+
+    /// `git` arguments with progress output.
+    pub fn args(self) -> [&'static str; 3] {
+        let mode = match self {
+            Self::FastForwardIfPossible => "--ff",
+            Self::FastForwardOnly => "--ff-only",
+            Self::Rebase => "--rebase",
+        };
+        ["pull", mode, "--progress"]
+    }
+}
+
 /// Shared flag that asks a running command to stop.
 #[derive(Debug, Clone, Default)]
 pub struct CancelToken(Arc<AtomicBool>);

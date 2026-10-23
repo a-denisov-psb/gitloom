@@ -51,7 +51,7 @@ impl ToolbarAction {
     }
 }
 
-pub fn view(view: &RepoView) -> Element<'_, Message> {
+pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Message> {
     let pickers = row![
         picker("repository", view.name().to_owned()),
         picker("branch", view.snapshot.branch_label()),
@@ -62,7 +62,7 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
         action(view, ToolbarAction::Undo),
         action(view, ToolbarAction::Redo),
         divider(),
-        row![action(view, ToolbarAction::Pull), pull_dropdown()].align_y(iced::Center),
+        row![pull_button(view, pull_mode), pull_dropdown()].align_y(iced::Center),
         action(view, ToolbarAction::Push),
         divider(),
         action(view, ToolbarAction::Branch),
@@ -159,6 +159,29 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         (ToolbarAction::Terminal, _) => with_tooltip(button.into()),
         _ => write_tooltip(button.into(), view),
     }
+}
+
+/// Pull in the current mode; the tooltip names the mode.
+fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Message> {
+    let content = column![
+        text(ToolbarAction::Pull.glyph()).size(16),
+        text(ToolbarAction::Pull.label()).size(11)
+    ]
+    .spacing(1)
+    .align_x(iced::Center);
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    with_tooltip_text(
+        button
+            .on_press_maybe(view.busy.is_none().then_some(Message::Pull(None)))
+            .into(),
+        mode.label().to_owned(),
+    )
 }
 
 /// Arrow next to Pull that opens the Pull menu (Fetch all, pull modes).

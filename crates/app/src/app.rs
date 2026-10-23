@@ -9,7 +9,7 @@ use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 use crate::overlay::{ContextMenu, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkOp,
+    CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkKind, NetworkOp,
     NetworkRequest, Queued, RepoView, Section, Selection, WatchState, WriteOp,
 };
 use crate::session::{self, Session};
@@ -256,6 +256,11 @@ pub enum Message {
     FetchAll,
     /// Pull dropdown opened at the cursor.
     PullMenu(iced::Point),
+    /// Toolbar Pull (`None`: the current mode) or a mode from the dropdown,
+    /// which becomes the button's mode.
+    Pull(Option<git_core::PullMode>),
+    /// Abort the merge or rebase a failed pull left behind.
+    AbortOperation,
     /// Periodic check for due auto-fetches.
     AutoFetchTick(std::time::Instant),
     Undo,
@@ -312,6 +317,8 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
+    /// Mode of the toolbar Pull button (persisted in the session).
+    pub pull_mode: git_core::PullMode,
     /// Keyboard modifiers held right now (for Shift/Ctrl clicks).
     modifiers: keyboard::Modifiers,
     /// Where the session is stored; `None` disables persistence (tests).
@@ -343,6 +350,7 @@ impl App {
             modal: None,
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
+            pull_mode: git_core::PullMode::default(),
             modifiers: keyboard::Modifiers::default(),
             session_path: session_path.clone(),
             session_loaded: false,
@@ -487,6 +495,7 @@ impl App {
         view.suppress_watch = true;
         view.network = Some(NetworkOp {
             label: request.label.clone(),
+            kind: request.kind,
             progress: None,
             cancel: cancel.clone(),
             background: request.background,
@@ -502,6 +511,28 @@ impl App {
         let task = self.run_network(tab, crate::fetch::fetch_all(background));
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
             if view.network.is_some() || view.queued.is_some() {
+                view.last_fetch = std::time::Instant::now();
+            }
+        }
+        task
+    }
+
+    /// Pulls the current branch of tab `tab` in the current pull mode.
+    fn pull(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        if let Some(problem) = pull_blocker(&view.snapshot) {
+            self.modal = Some(Modal::info("Cannot pull", problem));
+            return Task::none();
+        }
+        let request = NetworkRequest {
+            label: self.pull_mode.label().into(),
+            ..crate::fetch::pull(self.pull_mode)
+        };
+        let task = self.run_network(tab, request);
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.network.is_some() {
                 view.last_fetch = std::time::Instant::now();
             }
         }
@@ -539,6 +570,7 @@ impl App {
         if let Some(notice) = notice {
             self.status = notice;
         }
+        self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
         let mut tasks = Vec::new();
         if !session.tabs.is_empty() {
@@ -577,6 +609,7 @@ impl App {
             active,
             panes: self.panes.ratios,
             auto_fetch_minutes: self.session.auto_fetch_minutes,
+            pull_mode: self.pull_mode.into(),
         }
     }
 
@@ -1427,11 +1460,15 @@ impl App {
                 // `Some(show_notice)` for an auto-fetch: its errors appear once
                 // in the status bar (until a fetch works again), never as a dialog.
                 let mut background = None;
+                let mut pull = false;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
-                    if view.network.take().is_some_and(|op| op.background) {
-                        background = Some(result.is_err() && !view.fetch_error_shown);
-                        view.fetch_error_shown = result.is_err();
+                    if let Some(op) = view.network.take() {
+                        if op.background {
+                            background = Some(result.is_err() && !view.fetch_error_shown);
+                            view.fetch_error_shown = result.is_err();
+                        }
+                        pull = op.kind == NetworkKind::Pull;
                     }
                     queued = view.queued.take();
                     match &result {
@@ -1461,6 +1498,12 @@ impl App {
                     Err(error) if error == git_core::Error::Cancelled.to_string() => {
                         if queued.is_none() {
                             self.status = format!("{label}: Cancelled");
+                        }
+                    }
+                    // Decided after the refresh: conflict dialog or error dialog.
+                    Err(error) if pull => {
+                        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                            view.pull_failure = Some(error);
                         }
                     }
                     Err(error) if background.is_some() => {
@@ -1513,27 +1556,51 @@ impl App {
             }
             Message::PullMenu(position) => {
                 let writable = self.write_block().is_none();
-                let disabled = |label: &str| MenuEntry::Item {
-                    label: label.into(),
-                    shortcut: None,
-                    enabled: false,
-                    message: Box::new(Message::Refresh),
+                let mut entries = vec![
+                    MenuEntry::Item {
+                        label: "Fetch all".into(),
+                        shortcut: Some("Ctrl+L".into()),
+                        enabled: writable,
+                        message: Box::new(Message::FetchAll),
+                    },
+                    MenuEntry::Separator,
+                ];
+                for mode in git_core::PullMode::ALL {
+                    let mark = if mode == self.pull_mode { "✓ " } else { "" };
+                    entries.push(MenuEntry::Item {
+                        label: format!("{mark}{}", mode.label()),
+                        shortcut: None,
+                        enabled: writable,
+                        message: Box::new(Message::Pull(Some(mode))),
+                    });
+                }
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::Pull(mode) => {
+                if let Some(mode) = mode {
+                    self.pull_mode = mode;
+                }
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.pull(tab);
+                }
+            }
+            Message::AbortOperation => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
                 };
-                self.context_menu = Some(ContextMenu::new(
-                    position,
-                    vec![
-                        MenuEntry::Item {
-                            label: "Fetch all".into(),
-                            shortcut: Some("Ctrl+L".into()),
-                            enabled: writable,
-                            message: Box::new(Message::FetchAll),
-                        },
-                        MenuEntry::Separator,
-                        disabled("Pull (fast-forward if possible)"),
-                        disabled("Pull (fast-forward only)"),
-                        disabled("Pull (rebase)"),
-                    ],
-                ));
+                let state = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|v| v.snapshot.state.clone());
+                return match state {
+                    Some(git_core::RepoState::Merging { .. }) => {
+                        self.run_write(tab, "Abort merge", |git| git.abort_merge())
+                    }
+                    Some(git_core::RepoState::Rebasing { .. }) => {
+                        self.run_write(tab, "Abort rebase", |git| git.abort_rebase())
+                    }
+                    _ => Task::none(),
+                };
             }
             Message::AutoFetchTick(now) => return self.auto_fetch(now),
             Message::CancelNetwork(tab) => {
@@ -2065,6 +2132,7 @@ impl App {
                 }
                 let id = tab.id;
                 let mut reload = false;
+                let mut pull_failure = None;
                 if let Some(view) = tab.view_mut() {
                     match result {
                         Ok(snapshot) => view.apply_snapshot(snapshot),
@@ -2074,6 +2142,13 @@ impl App {
                         }
                     }
                     reload = view.reload_diff;
+                    pull_failure = view
+                        .pull_failure
+                        .take()
+                        .map(|error| (error, view.snapshot.state.clone()));
+                }
+                if let Some((error, state)) = pull_failure {
+                    self.modal = Some(pull_failed_dialog(error, &state));
                 }
                 if reload {
                     return Task::batch([self.reload_diff(id), self.load_details()]);
@@ -2134,6 +2209,65 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
             y: Some(offset),
         },
     )
+}
+
+/// Why the current branch cannot be pulled, if it cannot.
+fn pull_blocker(snapshot: &RepoSnapshot) -> Option<&'static str> {
+    match &snapshot.head {
+        git_core::Head::Detached { .. } => {
+            Some("HEAD is detached. Check out a branch to pull its upstream branch.")
+        }
+        git_core::Head::Unborn { .. } => Some("The current branch has no commits yet."),
+        git_core::Head::Branch { name, .. } => {
+            let upstream = snapshot
+                .refs
+                .iter()
+                .find(|r| r.kind == git_core::RefKind::LocalBranch && &r.name == name)
+                .and_then(|r| r.upstream.as_ref());
+            // "Set upstream" follows with upstream management (M3-10).
+            upstream.is_none().then_some(
+                "The current branch has no upstream branch, so there is nothing to pull from. \
+                 Set an upstream branch first (e.g. by pushing the branch).",
+            )
+        }
+    }
+}
+
+/// Dialog after a failed pull: a conflict left a merge or rebase behind
+/// (resolution comes with M4, abort is offered), or a plain error.
+fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
+    let operation = match state {
+        git_core::RepoState::Merging { .. } => "merge",
+        git_core::RepoState::Rebasing { .. } => "rebase",
+        _ => {
+            return match auth_hint(&error) {
+                Some(hint) => Modal::error("Pull failed", error).with_text(hint),
+                None => Modal::error("Pull failed", error),
+            }
+        }
+    };
+    Modal {
+        title: "Pull stopped with conflicts".into(),
+        text: format!(
+            "The {operation} stopped because of conflicting changes. Resolving conflicts \
+             in Gitloom comes in a later version: resolve them in a terminal or editor, \
+             or abort the {operation} to get back to the state before the pull."
+        ),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Close".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: format!("Abort {operation}"),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::AbortOperation),
+            },
+        ],
+        default: Some(0),
+    }
 }
 
 /// Hint for authentication failures in Git's output (ADR-019).
@@ -3947,11 +4081,7 @@ mod tests {
     }
 
     fn fetch_request(background: bool) -> NetworkRequest {
-        NetworkRequest {
-            label: "Fetch".into(),
-            args: vec!["fetch".into(), "--all".into(), "--progress".into()],
-            background,
-        }
+        crate::fetch::fetch_all(background)
     }
 
     #[test]
@@ -4123,7 +4253,10 @@ mod tests {
         let _ = app.update(Message::PullMenu(iced::Point::ORIGIN));
         let menu = app.context_menu.clone().unwrap();
         assert!(matches!(menu.select(0), Some(Message::FetchAll)));
-        assert!(menu.select(2).is_none(), "pull modes follow in M3-04");
+        assert!(matches!(
+            menu.select(4),
+            Some(Message::Pull(Some(git_core::PullMode::Rebase)))
+        ));
     }
 
     #[test]
@@ -4173,6 +4306,98 @@ mod tests {
         app.status.clear();
         fail(&mut app);
         assert!(app.status.is_empty(), "the same failure stays quiet");
+    }
+
+    /// Remote app whose `main` tracks `origin/main`.
+    fn app_with_upstream() -> App {
+        let mut app = app_with_remote();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "main".into(),
+            target: "c".into(),
+        };
+        snapshot.refs.push(git_core::Reference {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "c".into(),
+            is_head: true,
+            upstream: Some("origin/main".into()),
+            ahead_behind: Some((0, 1)),
+        });
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn pull_uses_the_chosen_mode_and_remembers_it() {
+        let mut app = app_with_upstream();
+        let _ = app.update(Message::Pull(Some(git_core::PullMode::Rebase)));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Pull (rebase)"));
+        assert_eq!(app.pull_mode, git_core::PullMode::Rebase);
+        assert_eq!(
+            app.current_session().pull_mode,
+            crate::session::PullModeSetting::Rebase,
+            "persisted"
+        );
+    }
+
+    #[test]
+    fn pull_without_upstream_explains_why() {
+        let mut app = app_with_remote();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "topic".into(),
+            target: "c".into(),
+        };
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::Pull(None));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        let modal = app.modal.unwrap();
+        assert_eq!(modal.title, "Cannot pull");
+        assert!(modal.text.contains("no upstream"));
+    }
+
+    #[test]
+    fn failed_pull_shows_conflict_or_error_after_refresh() {
+        for (state, conflict) in [
+            (
+                git_core::RepoState::Merging {
+                    merge_head: "x".into(),
+                },
+                true,
+            ),
+            (git_core::RepoState::Clean, false),
+        ] {
+            let mut app = app_with_upstream();
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::Pull(None));
+            let _ = app.update(Message::WriteFinished {
+                tab,
+                label: "Pull (fast-forward if possible)".into(),
+                result: Err("git pull failed".into()),
+            });
+            assert!(app.modal.is_none(), "decided after the refresh");
+
+            let mut snapshot = (*app.tabs[0].view().unwrap().snapshot).clone();
+            snapshot.state = state;
+            let generation = app.tabs[0].generation;
+            let _ = app.update(Message::SnapshotLoaded {
+                tab,
+                generation,
+                result: Ok(Arc::new(snapshot)),
+            });
+            let modal = app.modal.clone().unwrap();
+            if conflict {
+                assert_eq!(modal.title, "Pull stopped with conflicts");
+                assert!(matches!(modal.action(1), Some(Message::AbortOperation)));
+                assert!(modal.default_action().is_none(), "Enter only closes");
+            } else {
+                assert_eq!(modal.title, "Pull failed");
+            }
+        }
     }
 
     #[test]

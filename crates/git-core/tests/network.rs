@@ -180,3 +180,91 @@ fn fetch_prunes_only_when_configured() {
     fetch_all(&local);
     assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "origin/gone"]));
 }
+
+/// Like [`clone_of_bare`], with an identity so pulls can create commits.
+fn pull_setup() -> (TestRepo, TestRepo, TestRepo) {
+    let (upstream, bare, local) = clone_of_bare();
+    local.git(&["config", "user.name", "Gitloom Test"]);
+    local.git(&["config", "user.email", "test@example.com"]);
+    local.git(&["config", "commit.gpgsign", "false"]);
+    (upstream, bare, local)
+}
+
+fn push_upstream(upstream: &TestRepo, bare: &TestRepo, file: &str, content: &str) {
+    upstream.commit(file, content, "Upstream change");
+    upstream.git(&["push", "--quiet", bare.path().to_str().unwrap(), "main"]);
+}
+
+fn pull(local: &TestRepo, mode: git_core::PullMode) -> git_core::Result<()> {
+    CliBackend::new(local.path())
+        .run_network(&mode.args(), &CancelToken::new(), &mut |_| {})
+        .map(drop)
+}
+
+fn state(repo: &TestRepo) -> git_core::RepoState {
+    use git_core::GitBackend as _;
+    git_core::GixBackend::discover(repo.path())
+        .unwrap()
+        .state()
+        .unwrap()
+}
+
+#[test]
+fn pull_fast_forwards_in_every_mode() {
+    for mode in git_core::PullMode::ALL {
+        let (upstream, bare, local) = pull_setup();
+        push_upstream(&upstream, &bare, "b.txt", "b\n");
+        pull(&local, mode).unwrap();
+        assert_eq!(local.head(), upstream.head(), "{mode:?}");
+    }
+}
+
+#[test]
+fn diverged_branches_per_mode() {
+    use git_core::PullMode;
+    // ff if possible: merge commit with both parents.
+    let (upstream, bare, local) = pull_setup();
+    push_upstream(&upstream, &bare, "b.txt", "b\n");
+    local.commit("c.txt", "c\n", "Local change");
+    pull(&local, PullMode::FastForwardIfPossible).unwrap();
+    assert_eq!(local.parents("HEAD").len(), 2);
+
+    // ff only: fails and changes nothing.
+    let (upstream, bare, local) = pull_setup();
+    push_upstream(&upstream, &bare, "b.txt", "b\n");
+    let before = local.commit("c.txt", "c\n", "Local change");
+    match pull(&local, PullMode::FastForwardOnly) {
+        Err(Error::Command { stderr, .. }) => {
+            assert!(stderr.contains("Not possible to fast-forward"), "{stderr}")
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(local.head(), before);
+
+    // rebase: local commit replayed on top of the upstream commit.
+    let (upstream, bare, local) = pull_setup();
+    push_upstream(&upstream, &bare, "b.txt", "b\n");
+    local.commit("c.txt", "c\n", "Local change");
+    pull(&local, PullMode::Rebase).unwrap();
+    assert_eq!(local.parents("HEAD"), [upstream.head()]);
+}
+
+#[test]
+fn conflicting_pull_can_be_aborted() {
+    use git_core::{PullMode, RepoState};
+    for mode in [PullMode::FastForwardIfPossible, PullMode::Rebase] {
+        let (upstream, bare, local) = pull_setup();
+        push_upstream(&upstream, &bare, "a.txt", "upstream\n");
+        let before = local.commit("a.txt", "local\n", "Local change");
+        assert!(pull(&local, mode).is_err(), "{mode:?}");
+
+        let cli = CliBackend::new(local.path());
+        match state(&local) {
+            RepoState::Merging { .. } => cli.abort_merge().unwrap(),
+            RepoState::Rebasing { .. } => cli.abort_rebase().unwrap(),
+            other => panic!("{mode:?}: unexpected state {other:?}"),
+        }
+        assert_eq!(state(&local), RepoState::Clean);
+        assert_eq!(local.head(), before, "{mode:?}");
+    }
+}

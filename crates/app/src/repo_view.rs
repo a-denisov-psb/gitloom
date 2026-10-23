@@ -228,10 +228,18 @@ pub struct LastWrite {
     pub clears_message: bool,
 }
 
+/// What a network operation does (decides how its result is handled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkKind {
+    Fetch,
+    Pull,
+}
+
 /// A running network operation (fetch, pull, push) of a tab.
 #[derive(Debug, Clone)]
 pub struct NetworkOp {
     pub label: String,
+    pub kind: NetworkKind,
     /// Latest progress update, if Git reported one.
     pub progress: Option<git_core::Progress>,
     pub cancel: git_core::CancelToken,
@@ -243,6 +251,7 @@ pub struct NetworkOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkRequest {
     pub label: String,
+    pub kind: NetworkKind,
     pub args: Vec<String>,
     pub background: bool,
 }
@@ -294,6 +303,9 @@ pub struct RepoView {
     pub last_fetch: std::time::Instant,
     /// An auto-fetch error was shown; further ones stay quiet until a fetch works.
     pub fetch_error_shown: bool,
+    /// Error of a failed pull, shown once the refresh tells whether it
+    /// stopped in a conflict (Git reports merge conflicts on stdout).
+    pub pull_failure: Option<String>,
     /// Running network operation, shown in the status bar with Cancel.
     pub network: Option<NetworkOp>,
     /// Starts once the running (cancelled) background operation finished.
@@ -443,6 +455,7 @@ impl RepoView {
             last_write: None,
             last_fetch: std::time::Instant::now(),
             fetch_error_shown: false,
+            pull_failure: None,
             network: None,
             queued: None,
             undo: Vec::new(),
