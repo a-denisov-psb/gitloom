@@ -174,6 +174,32 @@ pub fn ref_commit(writer: &dyn GitWriter, reference: &str) -> Result<Option<Stri
     }
 }
 
+/// Commits reachable from HEAD but from no branch, remote branch or tag
+/// (newest first, at most 100): leaving a detached HEAD would lose track of them.
+pub fn unreachable_from_branches(writer: &dyn GitWriter) -> Result<Vec<String>> {
+    if head_commit(writer)?.is_none() {
+        return Ok(Vec::new());
+    }
+    let output = writer.run(
+        &[
+            "rev-list",
+            "--max-count=100",
+            "HEAD",
+            "--not",
+            "--branches",
+            "--remotes",
+            "--tags",
+        ],
+        read_only(),
+    )?;
+    Ok(output
+        .stdout_text()
+        .lines()
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty())
+        .collect())
+}
+
 /// Upstream of local branch `branch` (e.g. `origin/main`), if set.
 pub fn branch_upstream(writer: &dyn GitWriter, branch: &str) -> Result<Option<String>> {
     let spec = format!("{branch}@{{upstream}}");

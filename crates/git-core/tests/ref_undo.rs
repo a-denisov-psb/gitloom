@@ -153,3 +153,25 @@ fn tag_undo_and_redo_keep_the_message() {
     create.apply(&cli, false).unwrap();
     assert!(exists(&repo, "refs/tags/v2"));
 }
+
+#[test]
+fn commits_only_reachable_from_a_detached_head() {
+    let (repo, cli) = repo();
+    let base = repo.head();
+    cli.switch_detached(&base).unwrap();
+    assert!(git_core::unreachable_from_branches(&cli)
+        .unwrap()
+        .is_empty());
+
+    let first = repo.commit("d1.txt", "1\n", "Detached 1");
+    let second = repo.commit("d2.txt", "2\n", "Detached 2");
+    assert_eq!(
+        git_core::unreachable_from_branches(&cli).unwrap(),
+        [second.clone(), first]
+    );
+    // A tag keeps them reachable.
+    repo.tag("keep");
+    assert!(git_core::unreachable_from_branches(&cli)
+        .unwrap()
+        .is_empty());
+}
