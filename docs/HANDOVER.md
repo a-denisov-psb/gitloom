@@ -20,29 +20,29 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M1, version 0.2.0)
+## Current state (end of M2, version 0.3.0)
 
-Done (M1-01 … M1-16, see the notes in `docs/milestones/M1-real-repository.md`):
+Done (M2-01 … M2-17, see the notes in `docs/milestones/M2-working-copy.md`; M1 in `docs/milestones/M1-real-repository.md`):
 
-- `git-core`: `GixBackend` (gix 0.88) for log, refs with upstream ahead/behind, HEAD, stashes, working tree status, commit changes and file diffs; `MockBackend` only behind the `mock` feature.
-- `git-graph`: topological order and stable lane layout, stored as vertical runs (ADR-011); criterion benchmark.
-- `app`: background loading per tab, refresh (F5, window focus), open flow (start screen with native folder dialog as the default way, typed path as fallback, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
-- Measurements: `docs/PERFORMANCE.md` (memory target counts private memory, ADR-012).
-- Branches: `master` with `v0.1.0` (M0) and `v0.2.0` (M1), `develop`.
-- GitHub repository exists (default branch `develop`); CI runs from M2-01 on.
+- `git-core`: `GixBackend` for all reads (now with filter-aware working tree diffs, operation state detection, partial clone detection); `CliBackend` / `GitWriter` for all writes through the `git` executable (stage, unstage, apply patches, discard with snapshots, commit, amend, stash, undo primitives, lazy fetch of missing blobs).
+- `git-graph`: topological order, lane layout as vertical runs (ADR-011), dashed edges for stashes and WIP, optional `LaneHints` lane groups (prepared for the Git flow layout).
+- `app`: file watcher with incremental status refresh, staging by file/hunk/line, discard (all, file, hunk, lines; "Discard all" asks about staged changes), commit box with template and merge conclusion, amend, stash/pop/apply/delete with stashes in the graph, undo/redo, operation banner (merge/rebase/cherry-pick/revert), lock retry dialog, modal and context menu infrastructure.
+- Measurements: `docs/PERFORMANCE.md` (M1 and M2 sections).
+- Branches: `master` with `v0.1.0`, `v0.2.0`, `v0.3.0`; `develop` (default branch on GitHub).
 
 Verified:
 
-- `./scripts/check.sh` green on Linux (WSL2, Rust 1.99.1).
-- UI checked by hand through WSLg/XWayland (screenshots and synthetic mouse input); keyboard input could only be injected while the window had host focus, so shortcuts are mainly covered by unit tests.
+- `./scripts/check.sh` green on Linux; CI green on Windows, macOS, Linux and MSRV 1.88 (maintainer).
+- Maintainer on Windows: all shortcuts, keyboard commit, no console window flashing.
+- UI checked by hand through WSLg (screenshots, synthetic mouse and, since M2-01, keyboard input).
 
 Not done / known limitations:
 
-- CI has not run yet (starts with M2-01); Windows and macOS are untested.
-- Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0. Fixed in M2-14: missing blobs are fetched through `git cat-file blob`.
-- Keyboard shortcuts still need a check on a real display (M2-01, maintainer).
-- Working tree files are diffed as-is (no CRLF/LFS filters).
+- Checkout, branches, tags, fetch/pull/push: M3. Merge/rebase actions and conflict resolution: M4 (the operation banner shows Abort/Continue disabled).
+- Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
+- Rebase state was only verified by integration tests (`git rebase` is blocked in Claude Code's sandbox).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
+- Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
 ## Maintainer to-dos
 
