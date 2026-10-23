@@ -32,8 +32,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
-| Push without upstream | Dialog to choose remote and branch name, sets upstream | M3 |
-| Push rejected | Offer Pull or Force push (with lease) | M3 |
+| Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
+| Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | M3 |
 | Auto-fetch | Periodic fetch in the background | done (M3, every 5 min, `auto_fetch_minutes` in the session file) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
