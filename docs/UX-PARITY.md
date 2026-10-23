@@ -31,7 +31,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
-| Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | Fetch all done (M3-03), pull modes M3-04 |
+| Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | M3 |
 | Push rejected | Offer Pull or Force push (with lease) | M3 |
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | M3 |
@@ -124,4 +124,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
+| A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | Conflict resolution comes in M4; until then the user is not left in a half-finished state without a way back |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
