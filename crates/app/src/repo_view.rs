@@ -304,6 +304,9 @@ pub struct RepoView {
     pub last_fetch: std::time::Instant,
     /// An auto-fetch error was shown; further ones stay quiet until a fetch works.
     pub fetch_error_shown: bool,
+    /// Target of the running checkout, to offer "Stash and checkout" if
+    /// local changes block it.
+    pub pending_checkout: Option<crate::app::CheckoutTarget>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -456,6 +459,7 @@ impl RepoView {
             last_write: None,
             last_fetch: std::time::Instant::now(),
             fetch_error_shown: false,
+            pending_checkout: None,
             pull_failure: None,
             network: None,
             queued: None,

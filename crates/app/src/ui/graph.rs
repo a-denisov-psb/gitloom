@@ -254,14 +254,17 @@ pub fn graph_row(
         color,
         Message::CommitSelected(commit.id.clone()),
     );
+    let id = commit.id.clone();
     if is_stash {
-        let id = commit.id.clone();
         crate::ui::context_area::context_area(row, move |position| Message::StashContextMenu {
             id: id.clone(),
             position,
         })
     } else {
-        row
+        crate::ui::context_area::context_area(row, move |position| Message::CommitContextMenu {
+            id: id.clone(),
+            position,
+        })
     }
 }
 
@@ -272,6 +275,8 @@ pub struct RefLabel {
     pub kind: LabelKind,
     /// The checked-out branch (or the detached HEAD marker).
     pub head: bool,
+    /// Double click on the pill checks this out.
+    pub checkout: Option<crate::app::CheckoutTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,6 +299,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                 text: "HEAD".into(),
                 kind: LabelKind::DetachedHead,
                 head: true,
+                checkout: None,
             });
         }
     }
@@ -326,6 +332,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
             text,
             kind: LabelKind::Local,
             head: local.is_head,
+            checkout: Some(crate::app::CheckoutTarget::Local(local.name.clone())),
         });
     }
     for kind in [RefKind::RemoteBranch, RefKind::Tag] {
@@ -340,6 +347,8 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                         LabelKind::Remote
                     },
                     head: false,
+                    checkout: (kind == RefKind::RemoteBranch)
+                        .then(|| crate::app::CheckoutTarget::Remote(reference.name.clone())),
                 });
             }
         }
@@ -376,15 +385,20 @@ fn pill<'a>(label: &RefLabel) -> Element<'a, Message> {
         LabelKind::Tag => RefKind::Tag,
         LabelKind::DetachedHead => RefKind::LocalBranch,
     };
-    container(
+    let pill = container(
         text(label.text.clone())
             .size(12)
             .wrapping(text::Wrapping::None),
     )
     .padding([1, 6])
     .clip(true)
-    .style(theme::ref_pill(kind, label.head))
-    .into()
+    .style(theme::ref_pill(kind, label.head));
+    match &label.checkout {
+        Some(target) => {
+            crate::ui::context_area::double_click_area(pill, Message::Checkout(target.clone()))
+        }
+        None => pill.into(),
+    }
 }
 
 fn cell<'a>(

@@ -160,7 +160,24 @@ fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element
     }
     let content = content.into();
 
-    list_button(content, depth, Message::RefClicked(reference.name.clone()))
+    let item = list_button(content, depth, Message::RefClicked(reference.name.clone()));
+    match checkout_target(reference) {
+        Some(target) => crate::ui::context_area::double_click_area(item, Message::Checkout(target)),
+        None => item,
+    }
+}
+
+/// Double click checks out branches (remote ones as tracking branch).
+fn checkout_target(reference: &Reference) -> Option<crate::app::CheckoutTarget> {
+    match reference.kind {
+        git_core::RefKind::LocalBranch => {
+            Some(crate::app::CheckoutTarget::Local(reference.name.clone()))
+        }
+        git_core::RefKind::RemoteBranch => {
+            Some(crate::app::CheckoutTarget::Remote(reference.name.clone()))
+        }
+        git_core::RefKind::Tag => None,
+    }
 }
 
 /// `↑2 ↓1` style badge; nothing when in sync or without upstream.
