@@ -120,3 +120,63 @@ fn cancel_before_start_stops_immediately() {
     );
     assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
 }
+
+/// Local clone of a bare remote, with `main` tracking `origin/main`.
+fn clone_of_bare() -> (TestRepo, TestRepo, TestRepo) {
+    let upstream = TestRepo::new();
+    upstream.commit("a.txt", "a\n", "Base");
+    let bare = TestRepo::new_bare();
+    upstream.git(&["push", "--quiet", bare.path().to_str().unwrap(), "main"]);
+    let local = TestRepo::new();
+    local.git(&["remote", "add", "origin", bare.path().to_str().unwrap()]);
+    local.git(&["fetch", "--quiet", "origin"]);
+    local.git(&["switch", "--quiet", "--track", "-C", "main", "origin/main"]);
+    (upstream, bare, local)
+}
+
+fn fetch_all(local: &TestRepo) {
+    CliBackend::new(local.path())
+        .run_network(
+            &["fetch", "--all", "--progress"],
+            &CancelToken::new(),
+            &mut |_| {},
+        )
+        .unwrap();
+}
+
+#[test]
+fn fetch_all_updates_remote_branches_and_ahead_behind() {
+    use git_core::GitBackend as _;
+    let (upstream, bare, local) = clone_of_bare();
+    upstream.commit("b.txt", "b\n", "Remote change");
+    upstream.git(&["push", "--quiet", bare.path().to_str().unwrap(), "main"]);
+    upstream.git(&[
+        "push",
+        "--quiet",
+        bare.path().to_str().unwrap(),
+        "main:feature",
+    ]);
+
+    fetch_all(&local);
+    let refs = git_core::GixBackend::discover(local.path())
+        .unwrap()
+        .references()
+        .unwrap();
+    let main = refs.iter().find(|r| r.name == "main").unwrap();
+    assert_eq!(main.ahead_behind, Some((0, 1)));
+    assert!(refs.iter().any(|r| r.name == "origin/feature"));
+}
+
+#[test]
+fn fetch_prunes_only_when_configured() {
+    let (_upstream, bare, local) = clone_of_bare();
+    bare.git(&["branch", "gone", "main"]);
+    fetch_all(&local);
+    bare.git(&["branch", "-D", "gone"]);
+
+    fetch_all(&local);
+    assert!(local.try_git(&["rev-parse", "--verify", "--quiet", "origin/gone"]));
+    local.git(&["config", "fetch.prune", "true"]);
+    fetch_all(&local);
+    assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "origin/gone"]));
+}

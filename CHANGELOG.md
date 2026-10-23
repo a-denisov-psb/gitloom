@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Fetch all remotes from the Pull dropdown or with Ctrl+L, with progress and Cancel in the status bar. Open repositories fetch automatically every 5 minutes (`auto_fetch_minutes` in the session file, 0 = off); auto-fetch skips busy repositories and merges/rebases in progress, yields to your own operations and reports failures once in the status bar.
 - Gitloom answers Git's and SSH's credential and host key prompts with a small window (masked for passwords and passphrases, Yes/No for host keys) when no credential helper or ssh-agent can; Gitloom never stores credentials. Authentication errors explain what to check.
 
 ### Fixed

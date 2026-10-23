@@ -1,4 +1,4 @@
-//! Wrapper widget that reports right clicks with the absolute cursor position.
+//! Wrapper widget that reports right (or left) clicks with the absolute cursor position.
 //!
 //! `mouse_area::on_right_press` carries no position and `on_move` would emit a
 //! message for every mouse movement; context menus only need the position at
@@ -10,7 +10,8 @@ use iced::{Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vect
 
 pub struct ContextArea<'a, Message> {
     content: Element<'a, Message>,
-    on_right_press: Box<dyn Fn(Point) -> Message + 'a>,
+    on_press: Box<dyn Fn(Point) -> Message + 'a>,
+    button: mouse::Button,
 }
 
 /// Wraps `content`; a right click on it emits `on_right_press(cursor position)`.
@@ -20,7 +21,21 @@ pub fn context_area<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     Element::new(ContextArea {
         content: content.into(),
-        on_right_press: Box::new(on_right_press),
+        on_press: Box::new(on_right_press),
+        button: mouse::Button::Right,
+    })
+}
+
+/// Like [`context_area`] for the left button, e.g. to open a dropdown menu
+/// at the cursor.
+pub fn click_area<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_press: impl Fn(Point) -> Message + 'a,
+) -> Element<'a, Message> {
+    Element::new(ContextArea {
+        content: content.into(),
+        on_press: Box::new(on_press),
+        button: mouse::Button::Left,
     })
 }
 
@@ -88,10 +103,10 @@ impl<Message> Widget<Message, Theme, Renderer> for ContextArea<'_, Message> {
         if shell.is_event_captured() {
             return;
         }
-        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event {
-            if cursor.is_over(layout.bounds()) {
+        if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event {
+            if *button == self.button && cursor.is_over(layout.bounds()) {
                 if let Some(position) = cursor.position() {
-                    shell.publish((self.on_right_press)(position));
+                    shell.publish((self.on_press)(position));
                     shell.capture_event();
                 }
             }

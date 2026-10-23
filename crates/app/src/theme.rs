@@ -287,6 +287,15 @@ pub fn state_banner(_: &Theme) -> container::Style {
     }
 }
 
+/// Small dropdown arrow next to a toolbar button.
+pub fn dropdown_arrow(_: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(TEXT_MUTED),
+        border: Border::default().rounded(3),
+        ..container::Style::default()
+    }
+}
+
 /// Dimmed backdrop behind a modal dialog.
 pub fn backdrop(_: &Theme) -> container::Style {
     filled(Color::BLACK.scale_alpha(0.55))

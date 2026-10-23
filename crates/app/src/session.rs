@@ -30,6 +30,13 @@ pub struct Session {
     /// Index into `tabs`.
     pub active: usize,
     pub panes: PaneRatios,
+    /// Auto-fetch interval in minutes; 0 turns it off (UI in M5).
+    #[serde(default = "default_auto_fetch")]
+    pub auto_fetch_minutes: u32,
+}
+
+fn default_auto_fetch() -> u32 {
+    crate::fetch::DEFAULT_INTERVAL_MINUTES
 }
 
 impl Default for Session {
@@ -40,6 +47,7 @@ impl Default for Session {
             tabs: Vec::new(),
             active: 0,
             panes: PaneRatios::default(),
+            auto_fetch_minutes: default_auto_fetch(),
         }
     }
 }

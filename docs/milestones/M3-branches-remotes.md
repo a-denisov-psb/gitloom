@@ -100,7 +100,9 @@ Acceptance:
 - Integration test with a fake askpass invocation (prompt in, answer out, cancel).
 - Maintainer check: HTTPS with GCM on Windows, SSH with passphrase key on Linux (Maintainer to-dos).
 
-### [ ] M3-03 Fetch and auto-fetch
+### [x] M3-03 Fetch and auto-fetch
+
+> Done: Pull dropdown (▾ next to Pull, left-click variant of the context area widget) with "Fetch all" (Ctrl+L) and the pull modes disabled until M3-04; `git fetch --all --progress` through the M3-01 runner. Auto-fetch: tick every 30 s, per tab due after `auto_fetch_minutes` (default 5, session file, 0 = off) since the last fetch or opening the tab; skipped when busy, during merge/rebase/cherry-pick/revert or without remote branches; first auto-fetch one interval after opening (no fetch on open). Errors: once in the status bar until a fetch succeeds. Tests: scheduler rules, menu/shortcut/tick in the app, fetch against a bare remote (new branches, ahead/behind, prune only with `fetch.prune`). Checked by hand (also the M3-01 status bar): remote with a sleeping upload-pack → "⟳ Fetch…" + Cancel → "Fetch: Cancelled", no helper process left; large fetch → "⟳ Fetch: Receiving objects 80%" → new commits shown; `auto_fetch_minutes: 1` → new remote commit fetched after about a minute without user action. Ctrl+L could not be checked by hand (keyboard input unreliable in WSLg), covered by tests.
 
 - Toolbar Pull dropdown entry "Fetch all" and Ctrl+L: `git fetch --all` (prune follows the user's `fetch.prune` config).
 - Auto-fetch every 5 minutes per open tab (setting in the settings file, 0 = off); skipped while another operation runs or the repo is in a merge/rebase state; errors are shown once as a quiet notice, not as a dialog.
