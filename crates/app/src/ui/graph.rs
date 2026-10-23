@@ -206,7 +206,10 @@ pub fn graph_row(
     let Some(commit) = snapshot.commits.get(index) else {
         return container(text("")).height(ROW_HEIGHT).into();
     };
-    let node = if commit.parents.len() > 1 {
+    let is_stash = snapshot.is_stash(&commit.id);
+    let node = if is_stash {
+        Node::Stash
+    } else if commit.parents.len() > 1 {
         Node::Merge
     } else {
         Node::Commit(format::initials(&commit.author))
@@ -245,12 +248,21 @@ pub fn graph_row(
         ));
     }
 
-    row_button(
+    let row = row_button(
         content,
         repo.selected_commit() == Some(commit.id.as_str()),
         color,
         Message::CommitSelected(commit.id.clone()),
-    )
+    );
+    if is_stash {
+        let id = commit.id.clone();
+        crate::ui::context_area::context_area(row, move |position| Message::StashContextMenu {
+            id: id.clone(),
+            position,
+        })
+    } else {
+        row
+    }
 }
 
 /// What a reference pill shows.
@@ -407,6 +419,8 @@ fn row_button<'a>(
 enum Node {
     Wip,
     Merge,
+    /// Stash entry: hollow square.
+    Stash,
     /// Regular commit with the author's initials.
     Commit(String),
 }
@@ -478,6 +492,15 @@ impl canvas::Program<Message> for GraphCell {
                 frame.stroke(&circle, line(color, true));
             }
             Node::Merge => frame.fill(&Path::circle(node, MERGE_RADIUS), color),
+            Node::Stash => {
+                let size = NODE_RADIUS * 1.4;
+                let square = Path::rectangle(
+                    Point::new(node.x - size / 2.0, node.y - size / 2.0),
+                    iced::Size::new(size, size),
+                );
+                frame.fill(&square, theme::BG_GRAPH);
+                frame.stroke(&square, line(color, false));
+            }
             Node::Commit(initials) => {
                 frame.fill(&Path::circle(node, NODE_RADIUS), color);
                 frame.fill_text(canvas::Text {

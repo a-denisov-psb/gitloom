@@ -18,14 +18,39 @@ pub enum Shortcut {
     TogglePanel,
     Navigate(Move),
     FocusFilter,
-    /// Esc: close the diff view.
+    /// S / U: stage or unstage the file whose diff is shown.
+    StageSelected,
+    UnstageSelected,
+    StageAll,
+    UnstageAll,
+    /// Ctrl+Z.
+    Undo,
+    /// Ctrl+Y or Ctrl+Shift+Z.
+    Redo,
+    /// Ctrl+Enter: commit staged changes.
+    Commit,
+    /// Ctrl+Shift+Enter: stage everything and commit.
+    StageAllAndCommit,
+    /// Ctrl+Shift+M: focus the commit summary.
+    FocusSummary,
+    /// Esc: close the dialog, the menu or the diff view (in that order).
     Close,
+    /// Enter: confirm the default button of an open dialog.
+    Confirm,
 }
 
 impl Shortcut {
-    /// Shortcuts that still work while a text input has focus.
+    /// Shortcuts that still work while a text input has focus
+    /// (Enter only acts while a dialog is open).
     pub fn works_in_text_input(self) -> bool {
-        matches!(self, Self::Close)
+        matches!(
+            self,
+            Self::Close
+                | Self::Confirm
+                | Self::Commit
+                | Self::StageAllAndCommit
+                | Self::FocusSummary
+        )
     }
 }
 
@@ -40,6 +65,19 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
     match key.as_ref() {
         Key::Named(Named::F5) if !command && !alt => Some(Shortcut::Refresh),
         Key::Named(Named::Escape) if plain && !shift => Some(Shortcut::Close),
+        Key::Named(Named::Enter) if plain && !shift => Some(Shortcut::Confirm),
+        Key::Named(Named::Enter) if command && !alt => Some(if shift {
+            Shortcut::StageAllAndCommit
+        } else {
+            Shortcut::Commit
+        }),
+        Key::Character("m" | "M") if command && shift && !alt => Some(Shortcut::FocusSummary),
+        Key::Character("z" | "Z") if command && !alt => Some(if shift {
+            Shortcut::Redo
+        } else {
+            Shortcut::Undo
+        }),
+        Key::Character("y" | "Y") if command && !alt && !shift => Some(Shortcut::Redo),
         Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
@@ -54,13 +92,19 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
         } else {
             Move::Previous
         })),
-        Key::Character(c) if plain => match c {
-            "j" => Some(Shortcut::Navigate(Move::Next)),
-            "k" => Some(Shortcut::Navigate(Move::Previous)),
-            "J" => Some(Shortcut::Navigate(Move::FirstParent)),
-            "K" => Some(Shortcut::Navigate(Move::Child)),
+        // iced reports the key without modifiers ("j" for Shift+J, from winit's
+        // `key_without_modifiers`); upper case is accepted too (e.g. Caps Lock).
+        Key::Character(c) if plain => match (c.to_lowercase().as_str(), shift) {
+            ("j", false) => Some(Shortcut::Navigate(Move::Next)),
+            ("k", false) => Some(Shortcut::Navigate(Move::Previous)),
+            ("j", true) => Some(Shortcut::Navigate(Move::FirstParent)),
+            ("k", true) => Some(Shortcut::Navigate(Move::Child)),
+            ("s", false) => Some(Shortcut::StageSelected),
+            ("u", false) => Some(Shortcut::UnstageSelected),
             _ => None,
         },
+        Key::Character("s" | "S") if command && shift && !alt => Some(Shortcut::StageAll),
+        Key::Character("u" | "U") if command && shift && !alt => Some(Shortcut::UnstageAll),
         Key::Character("f" | "F") if command && alt => Some(Shortcut::FocusFilter),
         Key::Named(Named::Tab) if modifiers.control() && !alt => Some(if shift {
             Shortcut::PreviousTab
@@ -151,8 +195,17 @@ mod tests {
             shortcut(&Key::Named(Named::ArrowUp), Modifiers::SHIFT),
             nav(Move::Child)
         );
+        // As iced delivers Shift+J: the key without modifiers plus Shift
+        // (regression, M2-01 check on Windows).
+        assert_eq!(shortcut(&ch("j"), Modifiers::SHIFT), nav(Move::FirstParent));
+        assert_eq!(shortcut(&ch("k"), Modifiers::SHIFT), nav(Move::Child));
         assert_eq!(shortcut(&ch("J"), Modifiers::SHIFT), nav(Move::FirstParent));
         assert_eq!(shortcut(&ch("K"), Modifiers::SHIFT), nav(Move::Child));
+        assert_eq!(
+            shortcut(&ch("s"), Modifiers::SHIFT),
+            None,
+            "Shift+S stages nothing"
+        );
         assert_eq!(
             shortcut(&Key::Named(Named::Home), Modifiers::COMMAND),
             nav(Move::First)
@@ -180,7 +233,52 @@ mod tests {
             Some(Shortcut::Close)
         );
         assert!(Shortcut::Close.works_in_text_input());
+        assert_eq!(
+            shortcut(&Key::Named(Named::Enter), Modifiers::empty()),
+            Some(Shortcut::Confirm)
+        );
         assert!(!Shortcut::Navigate(Move::Next).works_in_text_input());
+    }
+
+    #[test]
+    fn staging_shortcuts() {
+        assert_eq!(
+            shortcut(&ch("s"), Modifiers::empty()),
+            Some(Shortcut::StageSelected)
+        );
+        assert_eq!(
+            shortcut(&ch("u"), Modifiers::empty()),
+            Some(Shortcut::UnstageSelected)
+        );
+        let all = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(shortcut(&ch("S"), all), Some(Shortcut::StageAll));
+        assert_eq!(shortcut(&ch("U"), all), Some(Shortcut::UnstageAll));
+    }
+
+    #[test]
+    fn commit_shortcuts() {
+        let enter = Key::Named(Named::Enter);
+        assert_eq!(shortcut(&enter, Modifiers::COMMAND), Some(Shortcut::Commit));
+        assert_eq!(
+            shortcut(&enter, Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Shortcut::StageAllAndCommit)
+        );
+        assert_eq!(
+            shortcut(&ch("M"), Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Shortcut::FocusSummary)
+        );
+        assert!(Shortcut::Commit.works_in_text_input());
+    }
+
+    #[test]
+    fn undo_redo_shortcuts() {
+        assert_eq!(shortcut(&ch("z"), Modifiers::COMMAND), Some(Shortcut::Undo));
+        assert_eq!(shortcut(&ch("y"), Modifiers::COMMAND), Some(Shortcut::Redo));
+        assert_eq!(
+            shortcut(&ch("Z"), Modifiers::COMMAND | Modifiers::SHIFT),
+            Some(Shortcut::Redo)
+        );
+        assert!(!Shortcut::Undo.works_in_text_input());
     }
 
     #[test]

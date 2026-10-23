@@ -31,7 +31,15 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M3 |
-| Hover file in staging | Shows stage/unstage button | M2 |
+| Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
+| Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
+| Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
+| Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
+| Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
+| Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
+| Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
+| Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
+| Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 
@@ -45,23 +53,23 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|---|
 | Create branch | Ctrl+B | M3 |
 | Fetch all | Ctrl+L | M3 |
-| Stage current file | S | M2 |
-| Stage all files | Ctrl+Shift+S | M2 |
-| Unstage current file | U | M2 |
-| Unstage all files | Ctrl+Shift+U | M2 |
-| Commit staged files | Ctrl+Enter | M2 |
-| Stage all and commit | Ctrl+Shift+Enter | M2 |
-| Focus commit message | Ctrl+Shift+M | M2 |
+| Stage current file | S | done (M2) |
+| Stage all files | Ctrl+Shift+S | done (M2) |
+| Unstage current file | U | done (M2) |
+| Unstage all files | Ctrl+Shift+U | done (M2) |
+| Commit staged files | Ctrl+Enter | done (M2) |
+| Stage all and commit | Ctrl+Shift+Enter | done (M2) |
+| Focus commit message | Ctrl+Shift+M | done (M2) |
 
 ### Navigation
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Next / previous item | ↓ / J older, ↑ / K newer (natural direction; verify against GitKraken, its docs table looks swapped) | done (M1) |
+| Next / previous item | ↓ / J next (older), ↑ / K previous (newer) | done (M1) |
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | M4 |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), rest M4 |
 
 ### Command palette and search
 
@@ -102,7 +110,12 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Deviation | Reason |
 |---|---|
 | Ctrl+O opens a folder dialog directly | Quick access before the command palette exists (M5); does not collide with a GitKraken shortcut |
-| F5 refreshes the repository | No file watcher until M2 |
+| F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
 | Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
+| "Discard all" with staged changes asks whether to discard them too ("Keep staged" is the default) | Maintainer decision (HANDOVER question 8); staged work is never lost by accident |
+| Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
+| While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
+| A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
+| In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

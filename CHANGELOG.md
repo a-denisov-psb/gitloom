@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
+### Fixed
+
+- Shift+J / Shift+K moved like J / K instead of jumping along the branch: iced reports letter keys without modifiers ("j" plus Shift).
+- Keyboard shortcuts outside text fields (navigation, tabs, panels, staging, undo, F5, Ctrl+O, …) did nothing: the check whether a text field has focus gave no answer when one of the checked fields was not on screen, which was always the case.
+- An open repository no longer causes constant background CPU load (about 0.5 %): file access events from Gitloom's own ignore checks kept re-triggering the change detection.
+- Diffs of modified files in repositories with CRLF conversion (`core.autocrlf`, `eol` attributes) or clean filters now match `git diff` instead of showing every line as changed.
+
+### Added
+
+- Commit from the commit panel: summary with a 72-character counter, description, Ctrl+Enter (Ctrl+Shift+Enter stages everything first), Ctrl+Shift+M focuses the summary. Hooks run as usual; failures show the hook output and keep the message. The description is prefilled from `commit.template`, a merge in progress prefills its message and the commit concludes the merge.
+- A merge, rebase, cherry-pick or revert in progress shows a banner in the tab ("Merging topic into main", "Rebasing topic onto main (step 2 of 5)"); actions that would break it are disabled with the reason in the tooltip. Committing concludes a merge, cherry-pick or revert with Git's prepared message.
+- Partial (blobless) clones: file contents that were never downloaded are fetched through `git` when a diff needs them ("Fetching missing content…"); without `git` the diff explains that the content is not available locally.
+- When another Git process holds a lock (`index.lock`), the failed operation offers "Retry"; Gitloom never deletes the lock.
+- Undo and redo for commit, amend and discard (toolbar with the action named in the tooltip, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z). Undoing a commit keeps its changes staged; nothing is undone if the repository changed in the meantime.
+- Stashes: toolbar Stash (includes untracked files) and Pop; stashes appear in the graph attached to their base commit; right click on a stash (sidebar or graph) offers Apply, Pop and Delete.
+- "Amend previous commit" checkbox: fills the message from HEAD, allows message-only amends and warns when HEAD is already pushed.
+- Discard changes of a file (hover button, context menu), a hunk, selected lines or all changes (with staged changes, the dialog asks whether to discard them too), always after a confirmation; the content before the discard is kept for undo. File context menu: Ignore (appends to `.gitignore`) and Open file location.
+- Stage or unstage single hunks ("Stage hunk" in the hunk header) and selected lines (click, Shift+click, Ctrl+click, then "Stage selected lines") in the diff view; the diff reloads at the same position.
+- Stage and unstage files: hover button on a file row, "Stage all changes" / "Unstage all changes", context menu, S / U for the shown file and Ctrl+Shift+S / Ctrl+Shift+U for all. After staging the shown file, the next unstaged file's diff opens.
+- Changes made outside Gitloom (editor, build, `git` in a terminal) appear automatically within a second; build output in ignored folders causes no refresh. Window focus only reloads the working tree status while the file watcher runs.
+- Right click on a changed file opens a context menu ("Copy file path"); failed Git operations show a dialog with the full Git output and a "Copy" button.
+- Gitloom looks for `git` (2.34 or newer) at startup; without it the app stays read-only, shows a one-time notice and explains the reason on disabled write actions.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added

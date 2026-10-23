@@ -231,12 +231,26 @@ pub fn diff_hunk_header(_: &Theme) -> container::Style {
     filled(BG_PANEL)
 }
 
-/// Diff line background by kind.
-pub fn diff_line(kind: git_core::DiffLineKind) -> impl Fn(&Theme) -> container::Style {
-    move |_| match kind {
-        git_core::DiffLineKind::Context => container::Style::default(),
-        git_core::DiffLineKind::Added => filled(SUCCESS.scale_alpha(0.16)),
-        git_core::DiffLineKind::Removed => filled(DANGER.scale_alpha(0.16)),
+/// Diff line background by kind; selected lines are stronger and outlined.
+pub fn diff_line(
+    kind: git_core::DiffLineKind,
+    selected: bool,
+) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let alpha = if selected { 0.38 } else { 0.16 };
+        let style = match kind {
+            git_core::DiffLineKind::Context => container::Style::default(),
+            git_core::DiffLineKind::Added => filled(SUCCESS.scale_alpha(alpha)),
+            git_core::DiffLineKind::Removed => filled(DANGER.scale_alpha(alpha)),
+        };
+        if selected {
+            container::Style {
+                border: Border::default().width(1).color(ACCENT.scale_alpha(0.8)),
+                ..style
+            }
+        } else {
+            style
+        }
     }
 }
 
@@ -250,5 +264,74 @@ pub fn picker(_: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Hovered | button::Status::Pressed => button_style(Some(BG_HOVER), TEXT),
         _ => button_style(None, TEXT),
+    }
+}
+
+/// App-wide informational banner.
+pub fn notice_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(WARNING.scale_alpha(0.16))),
+        border: Border::default().width(1).color(WARNING.scale_alpha(0.5)),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+/// Operation in progress (merge, rebase, ...) at the top of a tab.
+pub fn state_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ACCENT.scale_alpha(0.16))),
+        border: Border::default().width(1).color(ACCENT.scale_alpha(0.5)),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+/// Dimmed backdrop behind a modal dialog.
+pub fn backdrop(_: &Theme) -> container::Style {
+    filled(Color::BLACK.scale_alpha(0.55))
+}
+
+pub fn dialog(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_PANEL)),
+        border: Border::default().rounded(6).width(1).color(BORDER),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn dialog_details(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_CHROME)),
+        border: Border::default().rounded(3).width(1).color(BORDER),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn menu(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BG_PANEL)),
+        border: Border::default().rounded(4).width(1).color(BORDER),
+        shadow: iced::Shadow {
+            color: Color::BLACK.scale_alpha(0.4),
+            offset: iced::Vector::new(0.0, 3.0),
+            blur_radius: 10.0,
+        },
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+pub fn menu_separator(_: &Theme) -> container::Style {
+    filled(BORDER)
+}
+
+pub fn menu_item(_: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Hovered | button::Status::Pressed => button_style(Some(BG_SELECTED), TEXT),
+        button::Status::Disabled => button_style(None, TEXT_MUTED.scale_alpha(0.6)),
+        button::Status::Active => button_style(None, TEXT),
     }
 }

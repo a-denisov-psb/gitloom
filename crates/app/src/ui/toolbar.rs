@@ -4,10 +4,10 @@ use iced::widget::{button, column, container, row, space, text};
 use iced::{Element, Fill};
 
 use crate::app::Message;
-use crate::repo_view::RepoView;
+use crate::repo_view::{Guarded, RepoView};
 use crate::theme;
 use crate::ui::muted;
-use crate::ui::panel::with_tooltip;
+use crate::ui::panel::{with_tooltip, with_tooltip_text, write_tooltip};
 
 /// Toolbar actions; all write operations arrive in later milestones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,15 +59,15 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
     .spacing(20);
 
     let actions = row![
-        action(ToolbarAction::Undo),
-        action(ToolbarAction::Redo),
+        action(view, ToolbarAction::Undo),
+        action(view, ToolbarAction::Redo),
         divider(),
-        action(ToolbarAction::Pull),
-        action(ToolbarAction::Push),
+        action(view, ToolbarAction::Pull),
+        action(view, ToolbarAction::Push),
         divider(),
-        action(ToolbarAction::Branch),
-        action(ToolbarAction::Stash),
-        action(ToolbarAction::Pop),
+        action(view, ToolbarAction::Branch),
+        action(view, ToolbarAction::Stash),
+        action(view, ToolbarAction::Pop),
     ]
     .spacing(2)
     .align_y(iced::Center);
@@ -77,7 +77,7 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
         space::horizontal(),
         actions,
         space::horizontal(),
-        action(ToolbarAction::Terminal),
+        action(view, ToolbarAction::Terminal),
     ]
     .padding([4, 12])
     .align_y(iced::Center);
@@ -95,18 +95,70 @@ fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
     )
 }
 
-fn action<'a>(action: ToolbarAction) -> Element<'a, Message> {
+fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
     let content = column![text(action.glyph()).size(16), text(action.label()).size(11)]
         .spacing(1)
         .align_x(iced::Center);
 
-    with_tooltip(
-        button(content)
-            .padding([3, 10])
-            .width(64)
-            .style(theme::flat)
-            .into(),
-    )
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    let writable = view.write_block.is_none() && view.busy.is_none();
+    // Undo/Redo name the action in their tooltip.
+    if matches!(action, ToolbarAction::Undo | ToolbarAction::Redo) {
+        let (stack, message, verb) = if action == ToolbarAction::Undo {
+            (&view.undo, Message::Undo, "Undo")
+        } else {
+            (&view.redo, Message::Redo, "Redo")
+        };
+        if view.write_block.is_some() {
+            return write_tooltip(button.into(), view);
+        }
+        if let Some(reason) = stack
+            .last()
+            .filter(|a| matches!(a, crate::undo::UndoAction::Commit { .. }))
+            .and_then(|_| view.state_block(Guarded::MoveHead))
+        {
+            return with_tooltip_text(button.into(), reason);
+        }
+        return match stack.last() {
+            Some(last) => with_tooltip_text(
+                button
+                    .on_press_maybe(view.busy.is_none().then_some(message))
+                    .into(),
+                format!("{verb}: {}", last.label()),
+            ),
+            None => with_tooltip_text(button.into(), format!("Nothing to {}", verb.to_lowercase())),
+        };
+    }
+    let message = match action {
+        ToolbarAction::Stash if !view.snapshot.working_tree.is_empty() => Some(Message::StashPush),
+        ToolbarAction::Pop => view
+            .snapshot
+            .stashes
+            .first()
+            .map(|s| Message::StashPop(s.id.clone())),
+        _ => None,
+    };
+    if let Some(reason) = view
+        .state_block(Guarded::Stash)
+        .filter(|_| matches!(action, ToolbarAction::Stash | ToolbarAction::Pop))
+        .filter(|_| view.write_block.is_none())
+    {
+        return with_tooltip_text(button.into(), reason);
+    }
+    match (action, message) {
+        (ToolbarAction::Stash | ToolbarAction::Pop, Some(message)) if writable => {
+            button.on_press(message).into()
+        }
+        // Nothing to stash or pop: plain disabled button.
+        (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => {
+            button.into()
+        }
+        (ToolbarAction::Terminal, _) => with_tooltip(button.into()),
+        _ => write_tooltip(button.into(), view),
+    }
 }
 
 fn divider<'a>() -> Element<'a, Message> {

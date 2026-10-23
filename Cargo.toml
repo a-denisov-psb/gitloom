@@ -1,9 +1,9 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/git-core", "crates/git-graph", "crates/app"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88"

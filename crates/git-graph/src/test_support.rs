@@ -136,6 +136,22 @@ struct LaneState {
 /// Checks the layout invariants and that every parent edge of the input
 /// appears exactly once as a connection in the output.
 pub fn verify(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>, layout: &Layout) {
+    verify_with(commits, order, wip, layout, true);
+}
+
+/// Like [`verify`] for layouts with lane hints: a node may sit in any
+/// incoming lane or, if none belongs to its group, in a free lane.
+pub fn verify_hinted(commits: &[GraphCommit], order: &[Id], layout: &Layout) {
+    verify_with(commits, order, None, layout, false);
+}
+
+fn verify_with(
+    commits: &[GraphCommit],
+    order: &[Id],
+    wip: Option<Wip>,
+    layout: &Layout,
+    lowest_incoming: bool,
+) {
     let offset = usize::from(wip.is_some());
     assert_eq!(layout.len(), order.len() + offset);
     let rows: Vec<Row> = layout.rows().collect();
@@ -193,6 +209,10 @@ pub fn verify(commits: &[GraphCommit], order: &[Id], wip: Option<Wip>, layout: &
         );
 
         match into.iter().min() {
+            Some(_) if !lowest_incoming => assert!(
+                into.contains(&row.lane) || !lanes.contains_key(&row.lane),
+                "row {r}: node on a lane that passes by"
+            ),
             Some(&lowest) => assert_eq!(
                 row.lane, lowest,
                 "row {r}: node not in lowest incoming lane"

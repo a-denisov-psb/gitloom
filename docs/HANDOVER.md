@@ -20,37 +20,42 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M1, version 0.2.0)
+## Current state (end of M2, version 0.3.0)
 
-Done (M1-01 … M1-16, see the notes in `docs/milestones/M1-real-repository.md`):
+Done (M2-01 … M2-17, see the notes in `docs/milestones/M2-working-copy.md`; M1 in `docs/milestones/M1-real-repository.md`):
 
-- `git-core`: `GixBackend` (gix 0.88) for log, refs with upstream ahead/behind, HEAD, stashes, working tree status, commit changes and file diffs; `MockBackend` only behind the `mock` feature.
-- `git-graph`: topological order and stable lane layout, stored as vertical runs (ADR-011); criterion benchmark.
-- `app`: background loading per tab, refresh (F5, window focus), open flow (start screen with native folder dialog as the default way, typed path as fallback, CLI), session restore, lane graph rendering, virtualized list, keyboard navigation, read-only diff view, disabled write actions with tooltips.
-- Measurements: `docs/PERFORMANCE.md` (memory target counts private memory, ADR-012).
-- Branches: `master` with `v0.1.0` (M0) and `v0.2.0` (M1), `develop`.
+- `git-core`: `GixBackend` for all reads (now with filter-aware working tree diffs, operation state detection, partial clone detection); `CliBackend` / `GitWriter` for all writes through the `git` executable (stage, unstage, apply patches, discard with snapshots, commit, amend, stash, undo primitives, lazy fetch of missing blobs).
+- `git-graph`: topological order, lane layout as vertical runs (ADR-011), dashed edges for stashes and WIP, optional `LaneHints` lane groups (prepared for the Git flow layout).
+- `app`: file watcher with incremental status refresh, staging by file/hunk/line, discard (all, file, hunk, lines; "Discard all" asks about staged changes), commit box with template and merge conclusion, amend, stash/pop/apply/delete with stashes in the graph, undo/redo, operation banner (merge/rebase/cherry-pick/revert), lock retry dialog, modal and context menu infrastructure.
+- Measurements: `docs/PERFORMANCE.md` (M1 and M2 sections).
+- Branches: `master` with `v0.1.0`, `v0.2.0`, `v0.3.0`; `develop` (default branch on GitHub).
 
 Verified:
 
-- `./scripts/check.sh` green on Linux (WSL2, Rust 1.99.1).
-- UI checked by hand through WSLg/XWayland (screenshots and synthetic mouse input); keyboard input could only be injected while the window had host focus, so shortcuts are mainly covered by unit tests.
+- `./scripts/check.sh` green on Linux; CI green on Windows, macOS, Linux and MSRV 1.88 (maintainer).
+- Maintainer on Windows: all shortcuts, keyboard commit, no console window flashing.
+- UI checked by hand through WSLg (screenshots, synthetic mouse and, since M2-01, keyboard input).
 
 Not done / known limitations:
 
-- CI has never run (no remote yet); Windows and macOS are untested.
-- Partial (blobless) clones: diffs of blobs that were never fetched fail with "object could not be found" (gix does not fetch lazily). No fix in 0.2.0.
-- Keyboard shortcuts and the J/K direction still need a check on a real display.
-- Working tree files are diffed as-is (no CRLF/LFS filters).
+- Checkout, branches, tags, fetch/pull/push: M3. Merge/rebase actions and conflict resolution: M4 (the operation banner shows Abort/Continue disabled).
+- Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
+- Rebase state was only verified by integration tests (`git rebase` is blocked in Claude Code's sandbox).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
+- Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
-## Follow-up tasks (for M2 planning)
+## Maintainer to-dos
 
-| Task | Origin |
-|---|---|
-| Blobless/partial clones: fall back to `CliBackend` (which fetches missing blobs like plain Git) for diffs; until then show an understandable message instead of "object could not be found" | M1 release |
-| LaneHints preparation for a Git-flow aware graph layout (backlog "Git flow graph layout") — not implemented in M1-03 and not part of the M1 plan in this repo; add the backlog entry and plan it | M1 release |
-| Incremental refresh with the file watcher instead of rebuilding the full snapshot on every window focus | M1-15 |
-| Optional: release or limit gix pack mappings; allocator retention after refresh | M1-15 |
+Tasks only the maintainer can do. Claude Code adds new items here and ticks them off when done.
+
+- [x] GitHub → Settings → General → Default branch: set to `develop`.
+- [x] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`
+- [x] Delete the accidental `main` branch on GitHub (only after the default branch is `develop`): `git push origin --delete main`
+- [x] M2-01: give Claude Code read access to CI results (the repository is private): install `gh` in WSL and run `gh auth login`, or export a fine-grained token with "Actions: read" as `GH_TOKEN`. Until then, please report failing CI jobs (Windows, macOS, Linux, MSRV) with their log.
+- [x] Check the CI run of `develop` 7d9b15e (Windows fix): all jobs should be green. Locally verified with the Windows test binaries (GNU target, built in WSL, run on Windows with Git for Windows): 275 passed. CI builds MSVC.
+- [x] M2-02: on Windows, check that no console window flashes up when Gitloom runs `git` (first visible with staging, M2-06).
+- [x] M2-09: commit once through the commit box with the keyboard (type a summary, Ctrl+Enter); keyboard input cannot be injected in my WSLg test setup.
+- [x] M2-01: run the app natively on Windows (`cargo run -p gitloom -- <repo>`) and check the shortcuts (checklist sent 2026-10-23, based on `docs/UX-PARITY.md`); report findings. First run: only shortcuts allowed in text fields worked; second run: all but Shift+J/K; both fixed on `develop`, please re-check Shift+J/K.
 
 ## Environment notes
 
@@ -58,6 +63,7 @@ Not done / known limitations:
 - Linux needs X11/Wayland dev libraries and `libxkbcommon`. Without a GPU: `ICED_BACKEND=tiny-skia cargo run -p gitloom`.
 - `git` is required for tests (temp repos are built with the CLI), not for running the app in M1.
 - First full debug build takes a few minutes (iced + wgpu).
+- Windows check from WSL: `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`; `cargo test --workspace --no-run --target x86_64-pc-windows-gnu` builds `.exe` test binaries (needs `mingw-w64`) that run on Windows through WSL interop when Git for Windows is installed. Copy them to a Windows folder first.
 
 ## Repository setup (once, by the maintainer)
 
@@ -76,7 +82,7 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 
 1. Read `CLAUDE.md` and this file.
 2. Run `./scripts/check.sh`.
-3. Run `/next-task` → starts M1-01.
+3. `/next-task` starts the current milestone.
 
 ## Open questions
 
@@ -85,7 +91,8 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 1 | Final project name ("Gitloom" is a working title) | M0 | open |
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
-| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | M1-12 implements the natural direction (↓/J older, ↑/K newer); maintainer please verify in GitKraken |
+| 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | done: confirmed by maintainer (J down/older, K up/newer) |
 | 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |
 | 6 | Memory target: accept "private memory < 300 MB" or require total RSS | M1-15 | done: private memory counts (ADR-012) |
+| 8 | "Discard all": should it also reset staged changes like GitKraken might (reset --hard + clean)? M2-08 discards only unstaged changes and untracked files | M2-08 | decided (maintainer, 2026-10-23): if changes are staged, ask whether to discard them too; implemented |
 | 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | done: native dialog is the default on all platforms, path input stays as fallback |

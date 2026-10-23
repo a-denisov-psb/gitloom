@@ -1,6 +1,7 @@
 mod app;
 mod format;
 mod nav;
+mod overlay;
 mod panes;
 mod repo_view;
 mod session;
@@ -8,6 +9,7 @@ mod shortcuts;
 mod snapshot;
 mod theme;
 mod ui;
+mod undo;
 
 use std::path::PathBuf;
 

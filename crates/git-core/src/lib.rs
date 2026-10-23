@@ -3,16 +3,34 @@
 //! The UI only talks to [`GitBackend`]. Concrete implementations:
 //! - [`GixBackend`]: read operations via gitoxide
 //! - `MockBackend`: static sample data, only for tests and the `mock` feature
-//! - `CliBackend` (planned, M2): write operations via the `git` executable
+//! - [`CliBackend`]: write operations via the `git` executable
 
+mod cli_backend;
 mod diff;
+mod discard;
 mod gix_backend;
+mod history;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
+mod patch;
+mod state;
+mod watch;
 
+pub use cli_backend::{
+    detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter, RunOptions,
+    MIN_GIT_VERSION,
+};
+pub use discard::{
+    discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
+    FileSnapshot, IndexSnapshot,
+};
 pub use gix_backend::GixBackend;
+pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
+pub use patch::{build_patch, PatchDirection};
+pub use state::{locked_file, RepoState};
+pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;
 use std::path::Path;
@@ -134,6 +152,11 @@ pub struct Stash {
     pub message: String,
     /// Commit of the stash entry.
     pub id: Oid,
+    /// Commit the stash was created on (first parent of the stash commit).
+    pub base: Option<Oid>,
+    /// Creation time as Unix timestamp in seconds.
+    pub time: i64,
+    pub author: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +263,8 @@ pub struct DiffLine {
     pub content: String,
     /// Last line of its version without a trailing newline.
     pub missing_newline: bool,
+    /// The line ended with `\r\n` (needed to rebuild exact patches).
+    pub crlf: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -248,7 +273,19 @@ pub enum Error {
     /// Bare repositories are not supported yet.
     BareRepository(String),
     NotFound(String),
+    /// An object the repository refers to is not in the object database;
+    /// in a partial clone `git` can fetch it from the promisor remote.
+    MissingObject {
+        id: Oid,
+        partial_clone: bool,
+    },
     Backend(String),
+    /// A `git` command failed.
+    Command {
+        command: String,
+        code: Option<i32>,
+        stderr: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -259,7 +296,28 @@ impl fmt::Display for Error {
                 write!(f, "Bare repositories are not supported yet: {path}")
             }
             Error::NotFound(what) => write!(f, "Not found: {what}"),
+            Error::MissingObject {
+                partial_clone: true,
+                ..
+            } => write!(f, "Content not available locally (partial clone)"),
+            Error::MissingObject { id, .. } => {
+                write!(f, "Object {id} is missing from the repository")
+            }
             Error::Backend(msg) => write!(f, "Git error: {msg}"),
+            Error::Command {
+                command,
+                code,
+                stderr,
+            } => {
+                match code {
+                    Some(code) => write!(f, "{command} failed (exit code {code})")?,
+                    None => write!(f, "{command} was terminated")?,
+                }
+                if !stderr.is_empty() {
+                    write!(f, ": {stderr}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -294,4 +352,18 @@ pub trait GitBackend: Send + Sync {
 
     /// Line diff of one file.
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;
+
+    /// Content of the configured `commit.template`, if any.
+    fn commit_template(&self) -> Result<Option<String>>;
+
+    /// Operation in progress (merge, rebase, cherry-pick, revert).
+    fn state(&self) -> Result<RepoState>;
+
+    /// Prepared message (`MERGE_MSG`) of a merge, cherry-pick or revert in
+    /// progress, if one is running.
+    fn merge_message(&self) -> Result<Option<String>>;
+
+    /// Working tree content of `path` as Git stores it (filters applied);
+    /// `None` if the file does not exist.
+    fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>>;
 }

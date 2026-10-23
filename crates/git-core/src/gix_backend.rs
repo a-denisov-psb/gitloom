@@ -11,7 +11,7 @@ use gix::ObjectId;
 
 use crate::{
     diff, ChangeKind, Commit, DiffKind, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head,
-    Log, RefKind, Reference, Result, Stash, WorkingTree,
+    Log, RefKind, Reference, RepoState, Result, Stash, WorkingTree,
 };
 
 /// Object cache per call; avoids decoding commits twice during date-ordered walks.
@@ -23,6 +23,8 @@ pub struct GixBackend {
     repo: gix::ThreadSafeRepository,
     root: PathBuf,
     name: String,
+    /// Objects may be missing locally and fetched on demand (blobless clone).
+    partial_clone: bool,
 }
 
 impl GixBackend {
@@ -43,7 +45,70 @@ impl GixBackend {
             || root.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        Ok(Self { repo, root, name })
+        let partial_clone = is_partial_clone(&repo.to_thread_local());
+        Ok(Self {
+            repo,
+            root,
+            name,
+            partial_clone,
+        })
+    }
+
+    /// The repository is a partial clone (`extensions.partialClone` or a
+    /// promisor remote); missing blobs can be fetched with `git`.
+    pub fn is_partial_clone(&self) -> bool {
+        self.partial_clone
+    }
+
+    /// What a batch of changed absolute paths (from a file watcher) requires.
+    /// Ignored working tree paths and `.git` internals other than the index,
+    /// refs and operation state are dropped.
+    pub fn classify_changes(&self, paths: &[PathBuf]) -> crate::ChangeSet {
+        use gix::index::entry::Mode;
+
+        let repo = self.local();
+        let git_dir = std::path::absolute(repo.git_dir()).unwrap_or_else(|_| repo.git_dir().into());
+        // Watchers may report canonical paths (e.g. /private/var on macOS).
+        let roots: Vec<PathBuf> = [Some(self.root.clone()), self.root.canonicalize().ok()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let git_dirs: Vec<PathBuf> = [Some(git_dir.clone()), git_dir.canonicalize().ok()]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let index = repo.index_or_empty().ok();
+        let mut stack = index
+            .as_ref()
+            .and_then(|index| repo.excludes(index, None, Default::default()).ok());
+        let mut ignored = crate::watch::IgnoreCache::new(|path: &Path, is_dir: bool| {
+            let mode = if is_dir { Mode::DIR } else { Mode::FILE };
+            stack.as_mut().is_some_and(|stack| {
+                stack
+                    .at_path(path, Some(mode))
+                    .is_ok_and(|platform| platform.is_excluded())
+            })
+        });
+
+        let mut changes = crate::ChangeSet::default();
+        for path in paths {
+            if let Some(relative) = git_dirs.iter().find_map(|dir| path.strip_prefix(dir).ok()) {
+                let change = crate::classify_git_path(relative);
+                changes.status |= change.status;
+                changes.refs |= change.refs;
+            } else if let Some(relative) =
+                roots.iter().find_map(|root| path.strip_prefix(root).ok())
+            {
+                if !relative.as_os_str().is_empty() && !ignored.is_ignored(relative) {
+                    changes.status = true;
+                }
+            }
+            if changes.status && changes.refs {
+                break;
+            }
+        }
+        changes
     }
 
     fn local(&self) -> gix::Repository {
@@ -164,10 +229,18 @@ impl GitBackend for GixBackend {
             .enumerate()
             .map(|(index, line)| {
                 let line = line.map_err(backend)?;
+                let commit = repo.find_commit(line.new_oid).map_err(backend)?;
+                let decoded = commit.decode().map_err(backend)?;
+                let base = decoded.parents().next().map(|id| id.to_string());
+                let committer = decoded.committer().map_err(backend)?;
+                let author = decoded.author().map_err(backend)?;
                 Ok(Stash {
                     index,
                     message: line.message.to_str_lossy().into_owned(),
                     id: line.new_oid.to_string(),
+                    base,
+                    time: committer.seconds(),
+                    author: author.name.to_str_lossy().into_owned(),
                 })
             })
             .collect()
@@ -244,9 +317,19 @@ impl GitBackend for GixBackend {
             None => repo.empty_tree(),
         };
         let options = gix::diff::Options::default().with_rewrites(Some(Default::default()));
-        let changes = repo
-            .diff_tree_to_tree(&old_tree, &new_tree, options)
-            .map_err(backend)?;
+        let changes = match repo.diff_tree_to_tree(&old_tree, &new_tree, options) {
+            Ok(changes) => changes,
+            // Similarity rename detection reads blob contents, which a partial
+            // clone may not have; renames then show as deletion plus addition.
+            Err(_) if self.partial_clone => repo
+                .diff_tree_to_tree(
+                    &old_tree,
+                    &new_tree,
+                    gix::diff::Options::default().with_rewrites(None),
+                )
+                .map_err(backend)?,
+            Err(error) => return Err(backend(error)),
+        };
 
         let mut files: Vec<FileChange> = changes
             .iter()
@@ -288,6 +371,38 @@ impl GitBackend for GixBackend {
         Ok(files)
     }
 
+    fn commit_template(&self) -> Result<Option<String>> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        let Some(path) = config.trusted_path("commit.template").map_err(backend)? else {
+            return Ok(None);
+        };
+        // A missing template file is ignored like Git warns and continues.
+        Ok(std::fs::read_to_string(path).ok())
+    }
+
+    fn state(&self) -> Result<RepoState> {
+        Ok(crate::state::detect(self.local().git_dir()))
+    }
+
+    fn merge_message(&self) -> Result<Option<String>> {
+        let repo = self.local();
+        let git_dir = repo.git_dir();
+        if !crate::state::detect(git_dir).concluded_by_commit() {
+            return Ok(None);
+        }
+        Ok(std::fs::read_to_string(git_dir.join("MERGE_MSG")).ok())
+    }
+
+    fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        let repo = self.local();
+        match worktree_file(&repo, &self.root, path)? {
+            Some(Blob::Data(data)) => Ok(Some(data)),
+            Some(Blob::TooLarge) => Err(Error::Backend(format!("{path} is too large"))),
+            None => Ok(None),
+        }
+    }
+
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
         let repo = self.local();
         let old_path = request.old_path.as_deref().unwrap_or(&request.path);
@@ -321,9 +436,9 @@ impl GitBackend for GixBackend {
             }
             DiffKind::Unstaged => (
                 index_blob(&repo, old_path)?,
-                worktree_file(&self.root, &request.path)?,
+                worktree_file(&repo, &self.root, &request.path)?,
             ),
-            DiffKind::Untracked => (None, worktree_file(&self.root, &request.path)?),
+            DiffKind::Untracked => (None, worktree_file(&repo, &self.root, &request.path)?),
         };
 
         let text = match (&old, &new) {
@@ -458,6 +573,12 @@ fn object_blob(
     if mode.is_commit() {
         return Ok(Blob::Data(format!("Subproject commit {id}\n").into_bytes()));
     }
+    if !repo.has_object(id) {
+        return Err(Error::MissingObject {
+            id: id.to_string(),
+            partial_clone: is_partial_clone(repo),
+        });
+    }
     let header = repo.find_header(id).map_err(backend)?;
     if header.size() > diff::MAX_DIFF_BYTES as u64 {
         return Ok(Blob::TooLarge);
@@ -489,7 +610,10 @@ fn index_blob(repo: &gix::Repository, path: &str) -> Result<Option<Blob>> {
     }
 }
 
-fn worktree_file(root: &Path, path: &str) -> Result<Option<Blob>> {
+/// Working tree content as Git would store it: run through the filter
+/// pipeline (eol/`core.autocrlf`, `ident`, configured `filter.*` drivers),
+/// so the diff against the index matches `git diff` (ADR-018).
+fn worktree_file(repo: &gix::Repository, root: &Path, path: &str) -> Result<Option<Blob>> {
     let full = root.join(path);
     let Ok(metadata) = std::fs::symlink_metadata(&full) else {
         return Ok(None);
@@ -508,9 +632,33 @@ fn worktree_file(root: &Path, path: &str) -> Result<Option<Blob>> {
             .into_owned()
             .into_bytes()
     } else {
-        std::fs::read(&full).map_err(backend)?
+        to_git(repo, &full, path).map_err(|reason| {
+            Error::Backend(format!("Filtered file – diff not available ({reason})"))
+        })?
     };
     Ok(Some(Blob::Data(data)))
+}
+
+fn to_git(repo: &gix::Repository, full: &Path, path: &str) -> std::result::Result<Vec<u8>, String> {
+    use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
+    use std::io::Read as _;
+
+    let (mut pipeline, index) = repo.filter_pipeline(None).map_err(|e| e.to_string())?;
+    let file = std::fs::File::open(full).map_err(|e| e.to_string())?;
+    let mut data = Vec::new();
+    match pipeline
+        .convert_to_git(file, Path::new(path), &index)
+        .map_err(|e| e.to_string())?
+    {
+        ToGitOutcome::Unchanged(mut reader) => {
+            reader.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        }
+        ToGitOutcome::Process(mut reader) => {
+            reader.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        }
+        ToGitOutcome::Buffer(buffer) => data.extend_from_slice(buffer),
+    }
+    Ok(data)
 }
 
 fn index_change(change: &gix::diff::index::Change) -> FileChange {
@@ -533,6 +681,24 @@ fn index_change(change: &gix::diff::index::Change) -> FileChange {
         kind,
         old_path,
     }
+}
+
+fn is_partial_clone(repo: &gix::Repository) -> bool {
+    let config = repo.config_snapshot();
+    if config.string("extensions.partialClone").is_some() {
+        return true;
+    }
+    let truthy = |v: &[u8]| {
+        let v = String::from_utf8_lossy(v).to_ascii_lowercase();
+        matches!(v.as_str(), "true" | "yes" | "on" | "1")
+    };
+    let promisor = config
+        .plumbing()
+        .sections_by_name("remote")
+        .into_iter()
+        .flatten()
+        .any(|section| section.value("promisor").is_some_and(|v| truthy(&v)));
+    promisor
 }
 
 fn backend(error: impl Display) -> Error {

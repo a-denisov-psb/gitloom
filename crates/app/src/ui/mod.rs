@@ -11,8 +11,10 @@
 //! +--------------------------------------------------------------+
 //! ```
 
+pub mod context_area;
 mod diff;
 mod graph;
+mod overlays;
 pub(crate) mod panel;
 mod sidebar;
 mod start;
@@ -32,16 +34,33 @@ use crate::theme;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let mut layout = column![tabs::view(app)].spacing(1);
+    if let Some(notice) = &app.notice {
+        layout = layout.push(notice_banner(notice));
+    }
     layout = match app.active_tab() {
         Some(tab) => layout.push(tab_body(app, tab)),
         None => layout.push(space::vertical()),
     };
     layout = layout.push(statusbar::view(app));
 
-    container(layout)
+    let base: Element<'_, Message> = container(layout)
         .width(Fill)
         .height(Fill)
         .style(theme::root)
+        .into();
+    let mut layers = vec![base];
+    if let Some(menu) = &app.context_menu {
+        layers.push(overlays::context_menu(menu, app.window_size));
+    }
+    if let Some(modal) = &app.modal {
+        layers.push(overlays::modal(modal));
+    }
+    if layers.len() == 1 {
+        return layers.remove(0);
+    }
+    iced::widget::Stack::with_children(layers)
+        .width(Fill)
+        .height(Fill)
         .into()
 }
 
@@ -66,6 +85,9 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
         }
         TabState::Ready(view) => {
             let mut content = column![toolbar::view(view)].spacing(1);
+            if let Some(state) = view.snapshot.state_banner() {
+                content = content.push(state_banner(view, state));
+            }
             if let Some(error) = &view.error {
                 content = content.push(banner(error, tab.id));
             }
@@ -90,6 +112,64 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     .min_size(160)
     .on_resize(6, Message::PaneResized)
     .style(theme::panes)
+    .into()
+}
+
+/// App-wide one-time notice with a dismiss button.
+fn notice_banner(notice: &str) -> Element<'_, Message> {
+    container(
+        row![
+            text(notice).color(theme::TEXT),
+            space::horizontal(),
+            button(text("Dismiss").size(12))
+                .on_press(Message::DismissNotice)
+                .padding([3, 10])
+                .style(button::secondary),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([8, 12])
+    .width(Fill)
+    .style(theme::notice_banner)
+    .into()
+}
+
+/// Operation in progress, like GitKraken's "Merging X into Y" bar. Abort
+/// and continue arrive with M4 and are shown disabled.
+fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
+    let git_state = &view.snapshot.state;
+    let hint = if git_state.concluded_by_commit() {
+        "Resolve conflicts, stage them and commit to conclude."
+    } else {
+        "Resolve conflicts and stage them, then continue in a terminal."
+    };
+    let disabled = |label: &'static str| {
+        panel::with_tooltip(
+            button(text(label).size(12))
+                .padding([3, 10])
+                .style(button::secondary)
+                .into(),
+        )
+    };
+    let mut actions = row![].spacing(6);
+    if !git_state.concluded_by_commit() {
+        actions = actions.push(disabled("Continue"));
+    }
+    actions = actions.push(disabled("Abort"));
+    container(
+        row![
+            text(state).color(theme::TEXT),
+            muted(hint).size(12),
+            space::horizontal(),
+            actions,
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([6, 12])
+    .width(Fill)
+    .style(theme::state_banner)
     .into()
 }
 

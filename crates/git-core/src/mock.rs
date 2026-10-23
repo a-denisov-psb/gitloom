@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::{
     diff, ChangeKind, Commit, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head, Log, Oid,
-    RefKind, Reference, Result, Stash, WorkingTree,
+    RefKind, Reference, RepoState, Result, Stash, WorkingTree,
 };
 
 /// Static sample repository for UI development without a real repo.
@@ -149,6 +149,9 @@ impl GitBackend for MockBackend {
             index: 0,
             message: "WIP on main: try icon font".into(),
             id: fake_oid(HISTORY.len()),
+            base: Some(self.commits[1].id.clone()),
+            time: BASE_TIME,
+            author: "Alice Meyer".into(),
         }])
     }
 
@@ -187,6 +190,22 @@ impl GitBackend for MockBackend {
                 old_path: None,
             })
             .collect())
+    }
+
+    fn commit_template(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    fn state(&self) -> Result<RepoState> {
+        Ok(RepoState::Clean)
+    }
+
+    fn merge_message(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    fn worktree_content(&self, _path: &str) -> Result<Option<Vec<u8>>> {
+        Ok(None)
     }
 
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
