@@ -72,7 +72,9 @@ Out of scope (later):
 
 ## Tasks
 
-### [ ] M3-01 Network operation runner: progress, cancel
+### [x] M3-01 Network operation runner: progress, cancel
+
+> Done: `git_core::network` (`parse_progress`, `CancelToken`) and `GitWriter::run_network`: stderr is read while the command runs and split at `\r`/`\n`; error text drops progress segments. Cancel kills the process tree without new dependencies (`unsafe` is forbidden, so no `killpg` via libc): own process group + `kill -KILL -- -pgid` on Unix, `taskkill /T /F` on Windows; result `Error::Cancelled`. App: `RepoView::network` (label, progress, cancel token, background flag), status bar shows "⟳ Fetch: Receiving objects 45%" with Cancel; cancel → "Cancelled" in the status bar, refresh, no dialog. A user write or network operation cancels a running background operation and runs afterwards (`RepoView::queued`); auto-fetch never waits. Tests: recorded progress samples, progress during a real fetch, error text, cancel before start, cancelling a fetch whose upload-pack helper sleeps leaves no process (Unix; the other tests also pass on Windows). Deviation: no UI trigger exists before fetch, so the status bar is checked by hand in M3-03.
 
 - Long-running Git commands (`fetch`, `pull`, `push`, `clone` later) run with `--progress`; stderr is parsed incrementally into phase + percentage (e.g. "Receiving objects: 45%").
 - Status bar shows operation name, phase, percentage and a Cancel button. Multiple tabs: each shows its own.

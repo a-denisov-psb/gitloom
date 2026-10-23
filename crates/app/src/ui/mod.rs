@@ -18,7 +18,7 @@ mod overlays;
 pub(crate) mod panel;
 mod sidebar;
 mod start;
-mod statusbar;
+pub(crate) mod statusbar;
 mod tabs;
 mod toolbar;
 

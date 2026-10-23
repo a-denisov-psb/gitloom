@@ -12,6 +12,7 @@ mod gix_backend;
 mod history;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
+mod network;
 mod patch;
 mod state;
 mod watch;
@@ -28,6 +29,7 @@ pub use gix_backend::GixBackend;
 pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
+pub use network::{parse_progress, CancelToken, Progress};
 pub use patch::{build_patch, PatchDirection};
 pub use state::{locked_file, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
@@ -280,6 +282,8 @@ pub enum Error {
         partial_clone: bool,
     },
     Backend(String),
+    /// The user cancelled a running command.
+    Cancelled,
     /// A `git` command failed.
     Command {
         command: String,
@@ -304,6 +308,7 @@ impl fmt::Display for Error {
                 write!(f, "Object {id} is missing from the repository")
             }
             Error::Backend(msg) => write!(f, "Git error: {msg}"),
+            Error::Cancelled => write!(f, "Cancelled"),
             Error::Command {
                 command,
                 code,

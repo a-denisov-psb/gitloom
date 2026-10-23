@@ -9,7 +9,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::{Error, Result};
+use crate::{CancelToken, Error, Progress, Result};
 
 /// Oldest supported Git (Ubuntu 22.04 LTS ships 2.34).
 pub const MIN_GIT_VERSION: GitVersion = GitVersion {
@@ -118,6 +118,19 @@ pub struct RunOptions<'a> {
 pub trait GitWriter: Send + Sync {
     /// Runs `git` with `args` in the repository root.
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput>;
+
+    /// Runs a long (network) command: reports progress parsed from stderr
+    /// (pass `--progress` in `args`) and stops the process tree when `cancel`
+    /// is set (then fails with [`Error::Cancelled`]). The default ignores both.
+    fn run_network(
+        &self,
+        args: &[&str],
+        cancel: &CancelToken,
+        progress: &mut dyn FnMut(Progress),
+    ) -> Result<GitOutput> {
+        let _ = (cancel, progress);
+        self.run(args, RunOptions::default())
+    }
 
     /// True if HEAD points to a commit (false before the first commit).
     fn has_head(&self) -> Result<bool> {
@@ -427,6 +440,15 @@ impl CliBackend {
 }
 
 impl GitWriter for CliBackend {
+    fn run_network(
+        &self,
+        args: &[&str],
+        cancel: &CancelToken,
+        progress: &mut dyn FnMut(Progress),
+    ) -> Result<GitOutput> {
+        self.network(args, cancel, progress)
+    }
+
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
         let mut cmd = command(&self.git);
         cmd.args(args).current_dir(&self.root);
@@ -465,6 +487,139 @@ impl GitWriter for CliBackend {
             .map_err(|e| Error::Backend(format!("could not run {display}: {e}")))?;
         finish(display, output)
     }
+}
+
+impl CliBackend {
+    fn spawn_network(&self, args: &[&str]) -> Result<std::process::Child> {
+        let mut cmd = command(&self.git);
+        cmd.args(args)
+            .current_dir(&self.root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // Own process group, so cancelling also stops remote helpers and ssh.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            cmd.process_group(0);
+        }
+        cmd.spawn()
+            .map_err(|e| Error::Backend(format!("could not run git {}: {e}", args.join(" "))))
+    }
+
+    /// See [`GitWriter::run_network`].
+    fn network(
+        &self,
+        args: &[&str],
+        cancel: &CancelToken,
+        progress: &mut dyn FnMut(Progress),
+    ) -> Result<GitOutput> {
+        use std::io::Read as _;
+        use std::sync::mpsc;
+
+        let display = format!("git {}", args.join(" "));
+        let mut child = self.spawn_network(args)?;
+        let mut stdout = child.stdout.take();
+        let stdout_reader = std::thread::spawn(move || {
+            let mut data = Vec::new();
+            if let Some(out) = stdout.as_mut() {
+                let _ = out.read_to_end(&mut data);
+            }
+            data
+        });
+        // Stderr is read in chunks; progress segments end with `\r` or `\n`.
+        let (segments, received) = mpsc::channel::<String>();
+        let mut stderr = child.stderr.take();
+        let stderr_reader = std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let mut pending = Vec::new();
+            let mut buf = [0u8; 4096];
+            while let Some(Ok(n @ 1..)) = stderr.as_mut().map(|e| e.read(&mut buf)) {
+                all.extend_from_slice(&buf[..n]);
+                for &byte in &buf[..n] {
+                    if byte == b'\r' || byte == b'\n' {
+                        let _ = segments.send(String::from_utf8_lossy(&pending).into_owned());
+                        pending.clear();
+                    } else {
+                        pending.push(byte);
+                    }
+                }
+            }
+            all
+        });
+
+        let mut report = |segment: &str| {
+            if let Some(p) = crate::network::parse_progress(segment) {
+                progress(p);
+            }
+        };
+        let status = loop {
+            if cancel.is_cancelled() {
+                kill_tree(&mut child);
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(Error::Cancelled);
+            }
+            let closed = match received.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(segment) => {
+                    report(&segment);
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => false,
+                Err(mpsc::RecvTimeoutError::Disconnected) => true,
+            };
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                // Stderr closed but the process still runs: do not spin.
+                Ok(None) if closed => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Ok(None) => {}
+                Err(e) => return Err(Error::Backend(format!("could not run {display}: {e}"))),
+            }
+        };
+        let stdout = stdout_reader.join().unwrap_or_default();
+        let stderr = stderr_reader.join().unwrap_or_default();
+        for segment in received.try_iter() {
+            report(&segment);
+        }
+        if status.success() {
+            Ok(GitOutput { stdout, stderr })
+        } else {
+            Err(Error::Command {
+                command: display,
+                code: status.code(),
+                stderr: crate::network::strip_progress(&String::from_utf8_lossy(&stderr)),
+            })
+        }
+    }
+}
+
+/// Stops `child` and every process it started.
+fn kill_tree(child: &mut std::process::Child) {
+    let pid = child.id().to_string();
+    #[cfg(unix)]
+    {
+        // The child leads its own process group (see `spawn_network`).
+        let group = format!("-{pid}");
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &group])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    // Fallback (and the only way on other platforms): the direct child.
+    let _ = child.kill();
 }
 
 fn finish(command: String, output: std::process::Output) -> Result<GitOutput> {

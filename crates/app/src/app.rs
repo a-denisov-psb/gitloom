@@ -9,8 +9,8 @@ use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 use crate::overlay::{ContextMenu, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, Guarded, LastWrite, Loadable, RepoView, Section, Selection,
-    WatchState, WriteOp,
+    CenterView, CommitDetails, Guarded, LastWrite, Loadable, NetworkOp, NetworkRequest, Queued,
+    RepoView, Section, Selection, WatchState, WriteOp,
 };
 use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
@@ -245,6 +245,13 @@ pub enum Message {
     },
     /// Run the last write of the tab again (after a lock error).
     RetryWrite(TabId),
+    /// Progress of the tab's running network operation.
+    NetworkProgress {
+        tab: TabId,
+        progress: git_core::Progress,
+    },
+    /// Status bar "Cancel" of the tab's network operation.
+    CancelNetwork(TabId),
     Undo,
     Redo,
     /// Toolbar "Stash": stash all changes including untracked files.
@@ -415,9 +422,13 @@ impl App {
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
             return Task::none();
         };
-        if let Some(running) = &view.busy {
-            let message = format!("Please wait: {running} is still running");
-            self.status = message;
+        if view.busy.is_some() {
+            let pending = LastWrite {
+                label: label.clone(),
+                op,
+                clears_message: false,
+            };
+            self.status = yield_or_wait(view, Queued::Write(pending));
             return Task::none();
         }
         view.busy = Some(label.clone());
@@ -436,6 +447,41 @@ impl App {
                 result,
             },
         )
+    }
+
+    /// Runs a network command (fetch, pull, push) in tab `tab` with progress
+    /// and Cancel in the status bar. Network operations are write operations
+    /// (ADR-020); a background one (auto-fetch) yields to user operations.
+    pub fn run_network(&mut self, tab: TabId, request: NetworkRequest) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            if !request.background {
+                self.status = reason;
+            }
+            return Task::none();
+        }
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        if view.busy.is_some() {
+            // Auto-fetch never waits; it runs again at its next interval.
+            if !request.background {
+                self.status = yield_or_wait(view, Queued::Network(request));
+            }
+            return Task::none();
+        }
+        let cancel = git_core::CancelToken::new();
+        view.busy = Some(request.label.clone());
+        view.suppress_watch = true;
+        view.network = Some(NetworkOp {
+            label: request.label.clone(),
+            progress: None,
+            cancel: cancel.clone(),
+            background: request.background,
+        });
+        let writer = Arc::clone(&view.writer);
+        Task::run(network_stream(tab, writer, request, cancel), |message| {
+            message
+        })
     }
 
     /// Applies the loaded session: restores tabs and panes, then opens pending paths.
@@ -1318,8 +1364,11 @@ impl App {
                     .apply_diff_lines(|diff, h, l| diff.selection.contains(&(h as u32, l as u32)))
             }
             Message::WriteFinished { tab, label, result } => {
+                let mut queued = None;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
+                    view.network = None;
+                    queued = view.queued.take();
                     match &result {
                         Ok(Some(History::Push(action))) => {
                             view.undo.push(action.clone());
@@ -1342,13 +1391,53 @@ impl App {
                         view.amend = false;
                     }
                 }
-                if let Err(error) = result {
-                    self.modal = Some(match git_core::locked_file(&error) {
-                        Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
-                        None => Modal::error(format!("{label} failed"), error),
-                    });
+                match result {
+                    // Cancelled by the user or by a queued operation: no dialog.
+                    Err(error) if error == git_core::Error::Cancelled.to_string() => {
+                        if queued.is_none() {
+                            self.status = format!("{label}: Cancelled");
+                        }
+                    }
+                    Err(error) => {
+                        self.modal = Some(match git_core::locked_file(&error) {
+                            Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
+                            None => Modal::error(format!("{label} failed"), error),
+                        });
+                    }
+                    Ok(_) => {}
                 }
-                return self.refresh(tab);
+                let refresh = self.refresh(tab);
+                let next = match queued {
+                    Some(Queued::Write(write)) => {
+                        let clears = write.clears_message;
+                        let task = self.start_write(tab, write.label, write.op);
+                        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                            view.clear_message_after_write = clears && view.busy.is_some();
+                        }
+                        task
+                    }
+                    Some(Queued::Network(request)) => self.run_network(tab, request),
+                    None => Task::none(),
+                };
+                return Task::batch([refresh, next]);
+            }
+            Message::NetworkProgress { tab, progress } => {
+                if let Some(op) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.network.as_mut())
+                {
+                    op.progress = Some(progress);
+                }
+            }
+            Message::CancelNetwork(tab) => {
+                if let Some(op) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.network.as_ref())
+                {
+                    op.cancel.cancel();
+                }
             }
             Message::RetryWrite(tab) => {
                 let Some(last) = self
@@ -1936,6 +2025,63 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
         iced::widget::operation::AbsoluteOffset {
             x: None,
             y: Some(offset),
+        },
+    )
+}
+
+/// Called while a write runs: a running background network operation is
+/// cancelled and `next` starts after it; otherwise the user has to wait.
+/// Returns the status message.
+fn yield_or_wait(view: &mut RepoView, next: Queued) -> String {
+    match &view.network {
+        Some(op) if op.background => {
+            op.cancel.cancel();
+            view.queued = Some(next);
+            format!("Stopping {}…", op.label)
+        }
+        _ => {
+            let running = view.busy.clone().unwrap_or_default();
+            format!("Please wait: {running} is still running")
+        }
+    }
+}
+
+/// Runs a network command off the UI thread and emits its progress
+/// updates, then [`Message::WriteFinished`].
+fn network_stream(
+    tab: TabId,
+    writer: Arc<dyn git_core::GitWriter>,
+    request: NetworkRequest,
+    cancel: git_core::CancelToken,
+) -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(
+        64,
+        async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            use iced::futures::{SinkExt as _, StreamExt as _};
+
+            let (sender, mut updates) = iced::futures::channel::mpsc::unbounded();
+            let NetworkRequest { label, args, .. } = request;
+            let work = tokio::task::spawn_blocking(move || {
+                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                writer
+                    .run_network(&args, &cancel, &mut |progress| {
+                        let _ = sender.unbounded_send(progress);
+                    })
+                    .map(|_| None)
+                    .map_err(|e| e.to_string())
+            });
+            // The sender is dropped when the command ends, which ends this loop.
+            while let Some(progress) = updates.next().await {
+                let _ = output
+                    .send(Message::NetworkProgress { tab, progress })
+                    .await;
+            }
+            let result = work
+                .await
+                .unwrap_or_else(|e| Err(format!("Background task failed: {e}")));
+            let _ = output
+                .send(Message::WriteFinished { tab, label, result })
+                .await;
         },
     )
 }
@@ -3673,6 +3819,90 @@ mod tests {
         op.focusable(None, iced::Rectangle::default(), &mut Field(true));
         op.focusable(None, iced::Rectangle::default(), &mut Field(false));
         assert_eq!(answer(&op), Some(true));
+    }
+
+    fn fetch_request(background: bool) -> NetworkRequest {
+        NetworkRequest {
+            label: "Fetch".into(),
+            args: vec!["fetch".into(), "--all".into(), "--progress".into()],
+            background,
+        }
+    }
+
+    #[test]
+    fn network_operation_shows_progress_and_cancels_quietly() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.run_network(tab, fetch_request(false));
+        let progress = git_core::Progress {
+            phase: "Receiving objects".into(),
+            percent: Some(45),
+        };
+        let _ = app.update(Message::NetworkProgress { tab, progress });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Fetch"));
+        let op = view.network.as_ref().unwrap();
+        assert_eq!(
+            crate::ui::statusbar::network_label(op),
+            "⟳ Fetch: Receiving objects 45%"
+        );
+
+        let _ = app.update(Message::CancelNetwork(tab));
+        assert!(op_cancelled(&app));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Fetch".into(),
+            result: Err(git_core::Error::Cancelled.to_string()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.network.is_none() && view.busy.is_none());
+        assert!(app.modal.is_none(), "no error dialog after cancel");
+        assert_eq!(app.status, "Fetch: Cancelled");
+    }
+
+    fn op_cancelled(app: &App) -> bool {
+        app.tabs[0]
+            .view()
+            .unwrap()
+            .network
+            .as_ref()
+            .is_some_and(|op| op.cancel.is_cancelled())
+    }
+
+    #[test]
+    fn user_operation_cancels_auto_fetch_and_runs_afterwards() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.run_network(tab, fetch_request(true));
+        let _ = app.update(Message::Stage(file("a")));
+        assert!(op_cancelled(&app), "auto-fetch is stopped");
+        assert!(app.tabs[0].view().unwrap().queued.is_some());
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Fetch".into(),
+            result: Err(git_core::Error::Cancelled.to_string()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Stage a"), "queued write runs");
+        assert!(view.queued.is_none());
+        assert!(!app.status.contains("Cancelled"));
+    }
+
+    #[test]
+    fn auto_fetch_never_interrupts_or_waits() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Stage(file("a")));
+        let _ = app.run_network(tab, fetch_request(true));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Stage a"));
+        assert!(view.network.is_none() && view.queued.is_none());
+
+        // A user fetch while a user write runs has to wait (no queue).
+        let _ = app.run_network(tab, fetch_request(false));
+        assert!(app.status.starts_with("Please wait"));
+        assert!(app.tabs[0].view().unwrap().queued.is_none());
     }
 
     #[test]
