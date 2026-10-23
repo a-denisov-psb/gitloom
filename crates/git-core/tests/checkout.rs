@@ -90,3 +90,37 @@ fn untracked_file_in_the_way_blocks_too() {
         other => panic!("unexpected {other:?}"),
     }
 }
+
+#[test]
+fn create_branch_at_a_commit_and_switch_to_it() {
+    let repo = two_branches();
+    let base = repo.git(&["rev-parse", "main"]);
+    let cli = CliBackend::new(repo.path());
+    cli.create_branch("feature/new", &base).unwrap();
+    assert!(
+        matches!(head(&repo), Head::Branch { name, target } if name == "feature/new" && target == base)
+    );
+
+    // Existing names and invalid names fail without changing HEAD.
+    assert!(cli.create_branch("topic", &base).is_err());
+    match cli.create_branch("bad..name", &base) {
+        Err(Error::Backend(message)) => assert!(message.contains("not a valid branch name")),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert!(matches!(head(&repo), Head::Branch { name, .. } if name == "feature/new"));
+}
+
+#[test]
+fn name_rules_agree_with_git() {
+    let repo = TestRepo::new();
+    for name in [
+        "ok/name", "a..b", "a.lock", "-x", "a b", "x/", ".hidden", "fine-1.2",
+    ] {
+        let git_ok = repo.try_git(&["check-ref-format", "--branch", name]);
+        assert_eq!(
+            git_core::check_branch_name(name).is_none(),
+            git_ok,
+            "{name}"
+        );
+    }
+}

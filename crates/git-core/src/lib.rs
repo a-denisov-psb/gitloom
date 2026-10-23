@@ -14,6 +14,7 @@ mod history;
 mod mock;
 mod network;
 mod patch;
+mod refname;
 mod state;
 mod watch;
 
@@ -33,6 +34,7 @@ pub use network::{
     parse_progress, push_args, push_rejection, CancelToken, Progress, PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
+pub use refname::check_branch_name;
 pub use state::{locked_file, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
 
