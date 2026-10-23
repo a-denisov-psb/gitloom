@@ -371,6 +371,48 @@ pub trait GitWriter: Send + Sync {
             .map(drop)
     }
 
+    /// Makes remote branch `remote_ref` (e.g. `origin/main`) the upstream of `local`.
+    fn set_upstream(&self, local: &str, remote_ref: &str) -> Result<()> {
+        let target = format!("--set-upstream-to={remote_ref}");
+        self.run(&["branch", &target, local], RunOptions::default())
+            .map(drop)
+    }
+
+    /// Removes the upstream of `local`.
+    fn unset_upstream(&self, local: &str) -> Result<()> {
+        self.run(
+            &["branch", "--unset-upstream", local],
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
+    /// Adds remote `name` with `url` (nothing is fetched).
+    fn add_remote(&self, name: &str, url: &str) -> Result<()> {
+        self.run(&["remote", "add", "--", name, url], RunOptions::default())
+            .map(drop)
+    }
+
+    fn set_remote_url(&self, name: &str, url: &str) -> Result<()> {
+        self.run(
+            &["remote", "set-url", "--", name, url],
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
+    /// Renames remote `old`; its remote-tracking branches and upstreams follow.
+    fn rename_remote(&self, old: &str, new: &str) -> Result<()> {
+        self.run(&["remote", "rename", old, new], RunOptions::default())
+            .map(drop)
+    }
+
+    /// Removes remote `name` with its remote-tracking branches.
+    fn remove_remote(&self, name: &str) -> Result<()> {
+        self.run(&["remote", "remove", name], RunOptions::default())
+            .map(drop)
+    }
+
     /// Switches to local branch `branch`.
     fn switch_branch(&self, branch: &str) -> Result<()> {
         self.run(

@@ -148,6 +148,10 @@ impl GitBackend for MockBackend {
         Ok(vec!["origin".into(), "upstream".into()])
     }
 
+    fn remote_url(&self, name: &str) -> Result<Option<String>> {
+        Ok(Some(format!("https://example.com/{name}.git")))
+    }
+
     fn stashes(&self) -> Result<Vec<Stash>> {
         Ok(vec![Stash {
             index: 0,
