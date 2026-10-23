@@ -94,6 +94,12 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Why: no extra storage, works for tracked and untracked files, safe preconditions.
 - Consequences: undo history is lost on restart; snapshot blobs are unreferenced and
   pruned by `git gc` after the usual grace period.
+- Extension (M3-12): checkout, branch create/delete/rename and tag create/delete are
+  `git_core::RefChange` entries; undo/redo checks that HEAD or the ref is still where
+  the change left it (otherwise "the repository changed") and replays the inverse
+  Git command. Not undone: the stash made by "Stash and checkout", the remote side of
+  a branch rename; restored annotated tags are new tag objects with the same message.
+  Network operations are not undoable and clear the redo stack.
 
 ## ADR-015 Context menus and modals in M2
 
