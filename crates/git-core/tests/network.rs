@@ -340,3 +340,68 @@ fn force_with_lease_refuses_when_the_remote_moved() {
     }
     assert_eq!(remote_head(&bare, "main"), theirs, "their commit survived");
 }
+
+fn network(local: &TestRepo, args: Vec<String>) -> git_core::Result<()> {
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    CliBackend::new(local.path())
+        .run_network(&args, &CancelToken::new(), &mut |_| {})
+        .map(drop)
+}
+
+#[test]
+fn rename_branch_locally_and_on_the_remote() {
+    let (_upstream, bare, local) = pull_setup();
+    local.git(&["switch", "--quiet", "-c", "old-name"]);
+    let head = local.commit("o.txt", "o\n", "On old");
+    push(&local, "old-name", true, false).unwrap();
+
+    let cli = CliBackend::new(local.path());
+    cli.rename_branch("old-name", "new-name").unwrap();
+    // Locally renamed; the upstream still points at the old remote branch.
+    assert_eq!(
+        local.git(&["rev-parse", "--abbrev-ref", "new-name@{upstream}"]),
+        "origin/old-name"
+    );
+    network(
+        &local,
+        git_core::rename_remote_branch_args("origin", "new-name", "old-name"),
+    )
+    .unwrap();
+    assert_eq!(remote_head(&bare, "new-name"), head);
+    assert!(!bare.try_git(&["rev-parse", "--verify", "--quiet", "old-name"]));
+    assert_eq!(
+        local.git(&["rev-parse", "--abbrev-ref", "new-name@{upstream}"]),
+        "origin/new-name"
+    );
+}
+
+#[test]
+fn delete_branches_locally_and_on_the_remote() {
+    let (_upstream, bare, local) = pull_setup();
+    let cli = CliBackend::new(local.path());
+    // Merged branch: plain delete works.
+    local.git(&["branch", "merged"]);
+    cli.delete_branch("merged", false).unwrap();
+
+    // Unmerged branch: refused without force.
+    local.git(&["switch", "--quiet", "-c", "unmerged"]);
+    local.commit("u.txt", "u\n", "Unmerged");
+    local.git(&["switch", "--quiet", "main"]);
+    match cli.delete_branch("unmerged", false) {
+        Err(Error::Command { stderr, .. }) => {
+            assert!(git_core::branch_not_merged(&stderr), "{stderr}")
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    cli.delete_branch("unmerged", true).unwrap();
+    assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "unmerged"]));
+
+    // Remote branch.
+    bare.git(&["branch", "gone", "main"]);
+    network(
+        &local,
+        git_core::delete_remote_branch_args("origin", "gone"),
+    )
+    .unwrap();
+    assert!(!bare.try_git(&["rev-parse", "--verify", "--quiet", "gone"]));
+}

@@ -19,8 +19,8 @@ mod state;
 mod watch;
 
 pub use cli_backend::{
-    checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter,
-    RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
+    branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
+    GitVersion, GitWriter, RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
 };
 pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
@@ -31,7 +31,8 @@ pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use network::{
-    parse_progress, push_args, push_rejection, CancelToken, Progress, PullMode, PushRejection,
+    delete_remote_branch_args, parse_progress, push_args, push_rejection,
+    rename_remote_branch_args, CancelToken, Progress, PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
 pub use refname::check_branch_name;
