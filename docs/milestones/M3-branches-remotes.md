@@ -124,7 +124,9 @@ Acceptance:
 Acceptance:
 - Integration tests for each mode incl. ff-only failure and conflict + abort.
 
-### [ ] M3-05 Push
+### [x] M3-05 Push
+
+> Done: `git_core::push_args` (explicit `refs/heads/<local>:refs/heads/<remote>` refspec, optional `--set-upstream`, `--force-with-lease`), `push_rejection` (non-fast-forward vs. stale lease). Toolbar Push targets the upstream (tooltip "Push main to origin/main"); no upstream → generic form overlay (new, reused by M3-07…M3-10: text fields and pick lists, validation message, Enter submits, Esc cancels) with remote (origin preferred) and remote branch name → `push -u`; no remote → explanatory dialog. Rejected → "Push rejected" with Pull (default), Force push → confirmation → `--force-with-lease`; stale lease → "Force push refused". Fixed on the way: gix reads the config only on open, so new remotes and upstreams stayed invisible until a restart; `GixBackend` now reopens when `.git/config` changes (also a fix for M1/M2 behavior). `GitBackend::remotes`, `RepoSnapshot::remotes`/`head_upstream`. Tests: normal push, new branch with upstream, rejection → force-with-lease, lease refused when the remote moved, config reload; app tests for target, form defaults/validation, rejection dialogs. Checked by hand: diverged main → Push → "Push rejected" → Force push → confirm → remote updated; new branch `topic` → Push → form (origin, topic) → pushed, upstream `origin/topic`, pill "topic · origin" right away.
 
 - Toolbar "Push": pushes the current branch to its upstream.
 - No upstream → dialog: remote (default `origin`), remote branch name (default = local name) → `git push -u`.

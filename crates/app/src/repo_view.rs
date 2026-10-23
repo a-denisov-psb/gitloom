@@ -233,6 +233,7 @@ pub struct LastWrite {
 pub enum NetworkKind {
     Fetch,
     Pull,
+    Push,
 }
 
 /// A running network operation (fetch, pull, push) of a tab.

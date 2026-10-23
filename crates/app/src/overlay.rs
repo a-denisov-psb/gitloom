@@ -176,6 +176,72 @@ impl Modal {
     }
 }
 
+/// Input of a [`Form`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldKind {
+    Text,
+    /// One of the given values (pick list).
+    Choice(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormField {
+    pub label: String,
+    pub value: String,
+    pub kind: FieldKind,
+}
+
+impl FormField {
+    pub fn text(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            kind: FieldKind::Text,
+        }
+    }
+
+    pub fn choice(
+        label: impl Into<String>,
+        value: impl Into<String>,
+        options: Vec<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            kind: FieldKind::Choice(options),
+        }
+    }
+}
+
+/// What submitting a [`Form`] does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormAction {
+    /// Push local branch `local` of tab `tab` and make the target its upstream.
+    PushSetUpstream {
+        tab: crate::app::TabId,
+        local: String,
+    },
+}
+
+/// Modal dialog with inputs (e.g. remote and branch name for a first push).
+#[derive(Debug, Clone)]
+pub struct Form {
+    pub title: String,
+    pub text: String,
+    pub fields: Vec<FormField>,
+    pub submit: String,
+    pub action: FormAction,
+    /// Validation message shown above the buttons.
+    pub error: Option<String>,
+}
+
+impl Form {
+    /// Trimmed value of field `index` (empty if out of range).
+    pub fn value(&self, index: usize) -> &str {
+        self.fields.get(index).map_or("", |f| f.value.trim())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MenuEntry {
     Item {

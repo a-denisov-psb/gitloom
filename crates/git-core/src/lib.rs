@@ -29,7 +29,9 @@ pub use gix_backend::GixBackend;
 pub use history::{head_commit, move_head, restore_snapshot};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
-pub use network::{parse_progress, CancelToken, Progress, PullMode};
+pub use network::{
+    parse_progress, push_args, push_rejection, CancelToken, Progress, PullMode, PushRejection,
+};
 pub use patch::{build_patch, PatchDirection};
 pub use state::{locked_file, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
@@ -384,6 +386,9 @@ pub trait GitBackend: Send + Sync {
 
     /// Local branches, remote branches (without `*/HEAD`) and tags.
     fn references(&self) -> Result<Vec<Reference>>;
+
+    /// Names of the configured remotes, sorted.
+    fn remotes(&self) -> Result<Vec<String>>;
 
     fn stashes(&self) -> Result<Vec<Stash>>;
 

@@ -268,3 +268,75 @@ fn conflicting_pull_can_be_aborted() {
         assert_eq!(local.head(), before, "{mode:?}");
     }
 }
+
+fn push(local: &TestRepo, branch: &str, upstream: bool, lease: bool) -> git_core::Result<()> {
+    let args = git_core::push_args("origin", branch, branch, upstream, lease);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    CliBackend::new(local.path())
+        .run_network(&args, &CancelToken::new(), &mut |_| {})
+        .map(drop)
+}
+
+fn remote_head(bare: &TestRepo, branch: &str) -> String {
+    bare.git(&["rev-parse", branch])
+}
+
+#[test]
+fn push_updates_the_upstream() {
+    let (_upstream, bare, local) = pull_setup();
+    let head = local.commit("c.txt", "c\n", "Local change");
+    push(&local, "main", false, false).unwrap();
+    assert_eq!(remote_head(&bare, "main"), head);
+}
+
+#[test]
+fn push_new_branch_sets_its_upstream() {
+    let (_upstream, bare, local) = pull_setup();
+    local.git(&["switch", "--quiet", "-c", "topic"]);
+    let head = local.commit("t.txt", "t\n", "Topic");
+    push(&local, "topic", true, false).unwrap();
+    assert_eq!(remote_head(&bare, "topic"), head);
+    assert_eq!(
+        local.git(&["rev-parse", "--abbrev-ref", "topic@{upstream}"]),
+        "origin/topic"
+    );
+}
+
+#[test]
+fn rejected_push_then_force_with_lease() {
+    let (upstream, bare, local) = pull_setup();
+    push_upstream(&upstream, &bare, "b.txt", "b\n");
+    local.git(&["fetch", "--quiet", "origin"]);
+    let head = local.commit("c.txt", "c\n", "Local change");
+
+    match push(&local, "main", false, false) {
+        Err(Error::Command { stderr, .. }) => assert_eq!(
+            git_core::push_rejection(&stderr),
+            Some(git_core::PushRejection::NonFastForward),
+            "{stderr}"
+        ),
+        other => panic!("unexpected {other:?}"),
+    }
+    // The remote is where our remote-tracking branch says: the lease holds.
+    push(&local, "main", false, true).unwrap();
+    assert_eq!(remote_head(&bare, "main"), head);
+}
+
+#[test]
+fn force_with_lease_refuses_when_the_remote_moved() {
+    let (upstream, bare, local) = pull_setup();
+    // Someone pushes after our last fetch.
+    push_upstream(&upstream, &bare, "b.txt", "b\n");
+    let theirs = remote_head(&bare, "main");
+    local.commit("c.txt", "c\n", "Local change");
+
+    match push(&local, "main", false, true) {
+        Err(Error::Command { stderr, .. }) => assert_eq!(
+            git_core::push_rejection(&stderr),
+            Some(git_core::PushRejection::StaleLease),
+            "{stderr}"
+        ),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(remote_head(&bare, "main"), theirs, "their commit survived");
+}

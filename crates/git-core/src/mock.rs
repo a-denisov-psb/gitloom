@@ -144,6 +144,10 @@ impl GitBackend for MockBackend {
         ])
     }
 
+    fn remotes(&self) -> Result<Vec<String>> {
+        Ok(vec!["origin".into(), "upstream".into()])
+    }
+
     fn stashes(&self) -> Result<Vec<Stash>> {
         Ok(vec![Stash {
             index: 0,

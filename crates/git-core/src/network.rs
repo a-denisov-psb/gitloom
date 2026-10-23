@@ -85,6 +85,51 @@ impl PullMode {
     }
 }
 
+/// Arguments to push local branch `local` to `remote_branch` on `remote`.
+/// `set_upstream` makes it the upstream (`-u`); `force_with_lease`
+/// overwrites the remote branch only if it is still where our
+/// remote-tracking branch says it is.
+pub fn push_args(
+    remote: &str,
+    local: &str,
+    remote_branch: &str,
+    set_upstream: bool,
+    force_with_lease: bool,
+) -> Vec<String> {
+    let mut args = vec!["push".to_owned(), "--progress".to_owned()];
+    if set_upstream {
+        args.push("--set-upstream".into());
+    }
+    if force_with_lease {
+        args.push("--force-with-lease".into());
+    }
+    args.push(remote.to_owned());
+    args.push(format!("refs/heads/{local}:refs/heads/{remote_branch}"));
+    args
+}
+
+/// Why Git rejected a push, from its error output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushRejection {
+    /// The remote has commits we do not have (pull or force push).
+    NonFastForward,
+    /// Force-with-lease refused: the remote moved since the last fetch.
+    StaleLease,
+}
+
+pub fn push_rejection(stderr: &str) -> Option<PushRejection> {
+    let rejected = stderr
+        .lines()
+        .find(|l| l.trim_start().starts_with("! [rejected]"))?;
+    if rejected.contains("(stale info)") {
+        Some(PushRejection::StaleLease)
+    } else if rejected.contains("(fetch first)") || rejected.contains("(non-fast-forward)") {
+        Some(PushRejection::NonFastForward)
+    } else {
+        None
+    }
+}
+
 /// Shared flag that asks a running command to stop.
 #[derive(Debug, Clone, Default)]
 pub struct CancelToken(Arc<AtomicBool>);
@@ -177,6 +222,33 @@ mod tests {
             "To ../bare.git\n ! [rejected]        main -> main (fetch first)\n\
              error: failed to push some refs to '../bare.git'"
         );
+    }
+
+    #[test]
+    fn push_arguments_and_rejections() {
+        assert_eq!(
+            push_args("origin", "topic", "feature/topic", true, false),
+            [
+                "push",
+                "--progress",
+                "--set-upstream",
+                "origin",
+                "refs/heads/topic:refs/heads/feature/topic"
+            ]
+        );
+        assert!(push_args("origin", "main", "main", false, true)
+            .contains(&"--force-with-lease".to_owned()));
+
+        let fetch_first = "To ../bare.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push";
+        assert_eq!(
+            push_rejection(fetch_first),
+            Some(PushRejection::NonFastForward)
+        );
+        let non_ff = " ! [rejected]        main -> main (non-fast-forward)";
+        assert_eq!(push_rejection(non_ff), Some(PushRejection::NonFastForward));
+        let stale = " ! [rejected]        main -> main (stale info)";
+        assert_eq!(push_rejection(stale), Some(PushRejection::StaleLease));
+        assert_eq!(push_rejection("fatal: Authentication failed"), None);
     }
 
     #[test]
