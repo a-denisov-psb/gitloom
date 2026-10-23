@@ -219,6 +219,32 @@ pub struct LastWrite {
     pub clears_message: bool,
 }
 
+/// A running network operation (fetch, pull, push) of a tab.
+#[derive(Debug, Clone)]
+pub struct NetworkOp {
+    pub label: String,
+    /// Latest progress update, if Git reported one.
+    pub progress: Option<git_core::Progress>,
+    pub cancel: git_core::CancelToken,
+    /// Started automatically (auto-fetch); yields to user operations.
+    pub background: bool,
+}
+
+/// A network command to run, with its display label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkRequest {
+    pub label: String,
+    pub args: Vec<String>,
+    pub background: bool,
+}
+
+/// Operation waiting for a cancelled background operation to end.
+#[derive(Clone)]
+pub enum Queued {
+    Write(LastWrite),
+    Network(NetworkRequest),
+}
+
 pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
@@ -255,6 +281,10 @@ pub struct RepoView {
     /// Clear the commit message when the running write (a commit) succeeds.
     pub clear_message_after_write: bool,
     pub last_write: Option<LastWrite>,
+    /// Running network operation, shown in the status bar with Cancel.
+    pub network: Option<NetworkOp>,
+    /// Starts once the running (cancelled) background operation finished.
+    pub queued: Option<Queued>,
     /// Undoable actions, most recent last.
     pub undo: Vec<crate::undo::UndoAction>,
     /// Undone actions that can be redone, most recent last.
@@ -394,6 +424,8 @@ impl RepoView {
             reload_diff: false,
             clear_message_after_write: false,
             last_write: None,
+            network: None,
+            queued: None,
             undo: Vec::new(),
             redo: Vec::new(),
             graph_scroll_id: iced::widget::Id::unique(),

@@ -3,8 +3,6 @@
 
 mod support;
 
-use std::time::{Duration, Instant};
-
 use git_core::{CancelToken, CliBackend, Error, GitWriter, Progress};
 use support::TestRepo;
 
@@ -60,6 +58,8 @@ fn failures_report_git_output_without_progress() {
 #[cfg(unix)]
 #[test]
 fn cancelling_a_slow_fetch_stops_the_whole_process_tree() {
+    use std::time::{Duration, Instant};
+
     let (remote, local) = remote_and_local();
     let pid_file = local.path().join("upload-pack.pid");
     let upload_pack = format!(
