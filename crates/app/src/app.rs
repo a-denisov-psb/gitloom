@@ -37,6 +37,8 @@ pub enum DiscardTarget {
     File(git_core::FileChange),
     /// All unstaged changes and untracked files.
     All,
+    /// Staged changes too: index and working tree back to HEAD.
+    Everything,
     /// Hunk `index` of the shown diff.
     Hunk(usize),
     /// Selected lines of the shown diff.
@@ -940,6 +942,19 @@ impl App {
                     })))
                 })
             }
+            DiscardTarget::Everything => {
+                let tree = view.snapshot.working_tree.clone();
+                if matches!(&view.center, CenterView::Diff(d) if d.staged().is_some()) {
+                    view.center = CenterView::Graph;
+                }
+                self.run_undoable(tab, "Discard all changes", move |git| {
+                    let snapshot = git_core::discard_everything(git, &root, &tree)?;
+                    Ok(Some(History::Push(UndoAction::Discard {
+                        label: "Discard all changes".into(),
+                        snapshot,
+                    })))
+                })
+            }
             DiscardTarget::Hunk(index) => self.discard_diff_lines(tab, move |_, h, _| h == index),
             DiscardTarget::Lines => self.discard_diff_lines(tab, |diff, h, l| {
                 diff.selection.contains(&(h as u32, l as u32))
@@ -1351,15 +1366,35 @@ impl App {
                 }
                 return task;
             }
+            // With staged changes, ask whether they go as well (maintainer decision).
+            Message::Discard(DiscardTarget::All)
+                if self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| !v.snapshot.working_tree.staged.is_empty()) =>
+            {
+                self.modal = Some(Modal::discard_all_with_staged(
+                    Message::DiscardConfirmed(DiscardTarget::All),
+                    Message::DiscardConfirmed(DiscardTarget::Everything),
+                ));
+            }
             Message::Discard(target) => {
                 let (title, text) = match &target {
                     DiscardTarget::File(file) => (
                         "Discard changes".to_string(),
-                        format!("Discard all changes to {}? This cannot be undone outside Gitloom.", file.path),
+                        format!(
+                            "Discard all changes to {}? This cannot be undone outside Gitloom.",
+                            file.path
+                        ),
                     ),
                     DiscardTarget::All => (
                         "Discard all changes".to_string(),
-                        "Discard all unstaged changes and delete all untracked files? Staged changes are kept.".to_string(),
+                        "Discard all unstaged changes and delete all untracked files?".to_string(),
+                    ),
+                    DiscardTarget::Everything => (
+                        "Discard all changes".to_string(),
+                        "Discard all staged and unstaged changes and delete all untracked files?"
+                            .to_string(),
                     ),
                     DiscardTarget::Hunk(_) => (
                         "Discard hunk".to_string(),
@@ -3274,6 +3309,32 @@ mod tests {
                 matches!(modal.default_action(), Some(Message::DiscardConfirmed(t)) if t == target)
             );
         }
+    }
+
+    #[test]
+    fn discard_all_asks_about_staged_changes() {
+        let mut app = staging_app(&["a"], &["b"]);
+        let _ = app.update(Message::Discard(DiscardTarget::All));
+        let modal = app.modal.clone().expect("question");
+        assert_eq!(modal.buttons.len(), 3);
+        assert!(
+            matches!(
+                modal.default_action(),
+                Some(Message::DiscardConfirmed(DiscardTarget::All))
+            ),
+            "Enter keeps the staged changes"
+        );
+        assert!(matches!(
+            modal.action(2),
+            Some(Message::DiscardConfirmed(DiscardTarget::Everything))
+        ));
+        assert_eq!(modal.buttons[2].kind, crate::overlay::ButtonKind::Danger);
+
+        let _ = app.update(Message::ModalAction(2));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Discard all changes")
+        );
     }
 
     #[test]
