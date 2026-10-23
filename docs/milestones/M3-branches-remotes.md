@@ -226,7 +226,9 @@ Extend the M2 undo stack (ADR-014):
 Acceptance:
 - Integration tests for each undo/redo pair and for failing preconditions.
 
-### [ ] M3-13 Detached HEAD polish
+### [x] M3-13 Detached HEAD polish
+
+> Done: `git_core::unreachable_from_branches` (`rev-list --max-count=100 HEAD --not --branches --remotes --tags`). Every checkout from a detached HEAD first runs this check in the background; with such commits "Leave detached HEAD" offers Create branch (default; inline input at HEAD), Leave anyway or Cancel. Commit panel hint "You are in detached HEAD; create a branch to keep your commits." Toolbar `HEAD (abc1234)` and the graph HEAD pill existed already. Tests: detection incl. tags keeping commits reachable; app tests for the dialog and the direct checkout when nothing would be lost. Checked by hand: detached commit → picker `HEAD (b9ccebb)`, HEAD pill, panel hint; double click main → dialog → Create branch → input in the HEAD row.
 
 - Detached HEAD: banner-free, but toolbar branch picker shows `HEAD (abc1234)`, graph HEAD marker, commit panel hint "You are in detached HEAD; create a branch to keep your commits".
 - Leaving detached HEAD with commits not on any branch → confirmation offering "Create branch" first.
