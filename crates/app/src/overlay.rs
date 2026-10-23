@@ -56,6 +56,12 @@ impl Modal {
         }
     }
 
+    /// Replaces the summary line, e.g. with a hint how to fix the error.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = text.into();
+        self
+    }
+
     /// Operation failed because another process holds a Git lock. The lock
     /// is never removed automatically; the user retries or deletes it.
     pub fn locked(label: &str, lock: &str, retry: Message) -> Self {
