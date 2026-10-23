@@ -213,7 +213,9 @@ Complete menus using the M2 infrastructure. M4 actions are visible but disabled 
 Acceptance:
 - Unit tests for menu building (enabled/disabled rules, e.g. current branch cannot be deleted).
 
-### [ ] M3-12 Undo/redo for refs
+### [x] M3-12 Undo/redo for refs
+
+> Done: `git_core::RefChange` (Checkout, CreateBranch, DeleteBranch with target and upstream, RenameBranch, CreateTag/DeleteTag with message) with `apply(writer, undo)` and preconditions ("Cannot undo/redo: the repository changed"); helpers `head_position`, `ref_commit`, `branch_upstream`, `tag_message`. The app records each of these operations (`UndoAction::Ref`); undoing a checkout or branch creation counts as moving HEAD and is blocked during merge/rebase; a successful network operation clears the redo stack. Not undone (ADR-014): the stash of "Stash and checkout", the remote part of a branch rename, a tracking branch created by a remote checkout. Tests: every undo/redo pair plus failing preconditions (HEAD moved, commit on the new branch, old name taken again); app tests for recording, guard and redo clearing. Checked by hand: double click topic → Undo (tooltip "Undo: Checkout topic") → main → Redo → topic; force delete main → Undo → main back at bd3f213.
 
 Extend the M2 undo stack (ADR-014):
 - Checkout: undo switches back to the previous branch/commit (only if the working tree state allows it).
