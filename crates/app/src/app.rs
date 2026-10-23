@@ -275,6 +275,14 @@ pub enum Message {
     /// Double click on a branch, or "Checkout this commit" (asks first).
     Checkout(CheckoutTarget),
     CheckoutConfirmed(CheckoutTarget),
+    /// Checkout after the detached HEAD check (nothing would be lost).
+    CheckoutChecked(CheckoutTarget),
+    /// Result of looking for commits only reachable from a detached HEAD.
+    DetachedChecked {
+        tab: TabId,
+        target: CheckoutTarget,
+        result: Result<Vec<String>, String>,
+    },
     /// Local changes blocked the checkout: stash them, then check out.
     StashAndCheckout(CheckoutTarget),
     /// Open the inline new-branch input at commit `Some(id)` or at the
@@ -2395,7 +2403,51 @@ impl App {
                     return self.pull(tab);
                 }
             }
-            Message::Checkout(CheckoutTarget::Commit(id)) => {
+            // Leaving a detached HEAD first checks for commits on no branch.
+            Message::Checkout(target) => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let tab = self.tabs[self.active].id;
+                if !matches!(view.snapshot.head, git_core::Head::Detached { .. }) {
+                    return self.update(Message::CheckoutChecked(target));
+                }
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::unreachable_from_branches(writer.as_ref())
+                            .map_err(|e| e.to_string())
+                    }),
+                    move |result| Message::DetachedChecked {
+                        tab,
+                        target: target.clone(),
+                        result,
+                    },
+                );
+            }
+            Message::DetachedChecked {
+                tab,
+                target,
+                result,
+            } => {
+                let head = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .and_then(|v| v.snapshot.head.target().map(str::to_owned));
+                match (result, head) {
+                    (Ok(orphans), _) if orphans.is_empty() => {
+                        return self.update(Message::CheckoutChecked(target))
+                    }
+                    (Ok(orphans), Some(head)) => {
+                        self.modal = Some(leave_detached_dialog(orphans.len(), head, target));
+                    }
+                    (Ok(_), None) => return self.update(Message::CheckoutChecked(target)),
+                    (Err(error), _) => {
+                        self.modal = Some(Modal::error("Checkout failed", error));
+                    }
+                }
+            }
+            Message::CheckoutChecked(CheckoutTarget::Commit(id)) => {
                 let short = id[..id.len().min(7)].to_owned();
                 self.modal = Some(Modal::confirm(
                     "Checkout commit",
@@ -2408,7 +2460,7 @@ impl App {
                     Message::CheckoutConfirmed(CheckoutTarget::Commit(id)),
                 ));
             }
-            Message::Checkout(target) | Message::CheckoutConfirmed(target) => {
+            Message::CheckoutChecked(target) | Message::CheckoutConfirmed(target) => {
                 return self.checkout(target, false)
             }
             Message::StashAndCheckout(target) => return self.checkout(target, true),
@@ -3458,6 +3510,45 @@ fn branch_name_problem(name: &str, existing: &[String]) -> Option<String> {
         .iter()
         .any(|b| b == name)
         .then(|| format!("A branch named \"{name}\" already exists"))
+}
+
+/// Leaving a detached HEAD with commits on no branch: offer to create a
+/// branch at HEAD first (GitKraken warns the same way).
+fn leave_detached_dialog(count: usize, head: String, target: CheckoutTarget) -> Modal {
+    let (commits, them) = if count == 1 {
+        ("1 commit is".to_owned(), "it")
+    } else if count >= 100 {
+        ("100 or more commits are".to_owned(), "them")
+    } else {
+        (format!("{count} commits are"), "them")
+    };
+    let they = if count == 1 { "it" } else { "they" };
+    Modal {
+        title: "Leave detached HEAD".into(),
+        text: format!(
+            "{commits} not on any branch or tag. After leaving, {they} can only be found in \
+             the reflog. Create a branch to keep {them}?"
+        ),
+        details: None,
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Leave anyway".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::CheckoutChecked(target)),
+            },
+            crate::overlay::DialogButton {
+                label: "Create branch".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(Message::NewBranchStart(Some(head))),
+            },
+        ],
+        default: Some(2),
+    }
 }
 
 /// Local changes would be overwritten by the checkout: offer to stash them
@@ -6359,6 +6450,49 @@ mod tests {
             result: Ok(None),
         });
         assert!(app.tabs[0].view().unwrap().redo.is_empty());
+    }
+
+    /// Checkout app with HEAD detached at "c".
+    fn detached_app() -> App {
+        let mut app = checkout_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Detached { target: "c".into() };
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn leaving_detached_head_checks_for_lost_commits() {
+        let mut app = detached_app();
+        let tab = app.tabs[0].id;
+        let target = CheckoutTarget::Local("topic".into());
+        let _ = app.update(Message::Checkout(target.clone()));
+        assert!(app.tabs[0].view().unwrap().busy.is_none(), "checked first");
+
+        let _ = app.update(Message::DetachedChecked {
+            tab,
+            target: target.clone(),
+            result: Ok(vec!["d2".into(), "d1".into()]),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Leave detached HEAD");
+        assert!(modal.text.starts_with("2 commits are"));
+        assert!(
+            matches!(modal.default_action(), Some(Message::NewBranchStart(Some(h))) if h == "c")
+        );
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Checkout topic"], "leave anyway");
+
+        // Nothing would be lost: checkout right away.
+        let mut app = detached_app();
+        let _ = app.update(Message::DetachedChecked {
+            tab,
+            target,
+            result: Ok(Vec::new()),
+        });
+        assert!(app.modal.is_none());
+        assert_eq!(running_args(&app), ["Checkout topic"]);
     }
 
     #[test]
