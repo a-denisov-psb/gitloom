@@ -21,7 +21,8 @@ pub use cli_backend::{
     MIN_GIT_VERSION,
 };
 pub use discard::{
-    discard_all, discard_files, discard_lines, revert_lines, DiscardSnapshot, FileSnapshot,
+    discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
+    FileSnapshot, IndexSnapshot,
 };
 pub use gix_backend::GixBackend;
 pub use history::{head_commit, move_head, restore_snapshot};
