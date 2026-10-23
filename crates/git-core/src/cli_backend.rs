@@ -418,11 +418,17 @@ fn with_pathspecs<W: GitWriter + ?Sized>(
         .map(drop)
 }
 
+/// Environment variable that tells a program started as `GIT_ASKPASS` /
+/// `SSH_ASKPASS` that it runs in askpass mode (Git passes only the prompt).
+pub const ASKPASS_ENV: &str = "GITLOOM_ASKPASS";
+
 /// Runs the `git` executable in one repository.
 #[derive(Debug, Clone)]
 pub struct CliBackend {
     git: PathBuf,
     root: PathBuf,
+    /// Program answering credential and host key prompts (ADR-019).
+    askpass: Option<PathBuf>,
 }
 
 impl CliBackend {
@@ -431,7 +437,16 @@ impl CliBackend {
         Self {
             git: PathBuf::from("git"),
             root: root.into(),
+            askpass: None,
         }
+    }
+
+    /// Prompts for credentials (when no credential helper or ssh-agent can
+    /// answer) and host key confirmations go to `program`: it receives the
+    /// prompt as only argument, with [`ASKPASS_ENV`] set, and prints the answer.
+    pub fn with_askpass(mut self, program: impl Into<PathBuf>) -> Self {
+        self.askpass = Some(program.into());
+        self
     }
 
     pub fn root(&self) -> &Path {
@@ -450,7 +465,7 @@ impl GitWriter for CliBackend {
     }
 
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
-        let mut cmd = command(&self.git);
+        let mut cmd = self.command();
         cmd.args(args).current_dir(&self.root);
         if options.read_only {
             cmd.env("GIT_OPTIONAL_LOCKS", "0");
@@ -490,8 +505,21 @@ impl GitWriter for CliBackend {
 }
 
 impl CliBackend {
-    fn spawn_network(&self, args: &[&str]) -> Result<std::process::Child> {
+    /// `git` command with the fixed environment and the askpass program.
+    fn command(&self) -> Command {
         let mut cmd = command(&self.git);
+        if let Some(askpass) = &self.askpass {
+            cmd.env("GIT_ASKPASS", askpass)
+                .env("SSH_ASKPASS", askpass)
+                // OpenSSH >= 8.4: use askpass even without a display.
+                .env("SSH_ASKPASS_REQUIRE", "force")
+                .env(ASKPASS_ENV, "1");
+        }
+        cmd
+    }
+
+    fn spawn_network(&self, args: &[&str]) -> Result<std::process::Child> {
+        let mut cmd = self.command();
         cmd.args(args)
             .current_dir(&self.root)
             .stdin(Stdio::null())
