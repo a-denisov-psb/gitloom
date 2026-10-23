@@ -92,13 +92,15 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
         } else {
             Move::Previous
         })),
-        Key::Character(c) if plain => match c {
-            "j" => Some(Shortcut::Navigate(Move::Next)),
-            "k" => Some(Shortcut::Navigate(Move::Previous)),
-            "J" => Some(Shortcut::Navigate(Move::FirstParent)),
-            "K" => Some(Shortcut::Navigate(Move::Child)),
-            "s" => Some(Shortcut::StageSelected),
-            "u" => Some(Shortcut::UnstageSelected),
+        // iced reports the key without modifiers ("j" for Shift+J, from winit's
+        // `key_without_modifiers`); upper case is accepted too (e.g. Caps Lock).
+        Key::Character(c) if plain => match (c.to_lowercase().as_str(), shift) {
+            ("j", false) => Some(Shortcut::Navigate(Move::Next)),
+            ("k", false) => Some(Shortcut::Navigate(Move::Previous)),
+            ("j", true) => Some(Shortcut::Navigate(Move::FirstParent)),
+            ("k", true) => Some(Shortcut::Navigate(Move::Child)),
+            ("s", false) => Some(Shortcut::StageSelected),
+            ("u", false) => Some(Shortcut::UnstageSelected),
             _ => None,
         },
         Key::Character("s" | "S") if command && shift && !alt => Some(Shortcut::StageAll),
@@ -193,8 +195,17 @@ mod tests {
             shortcut(&Key::Named(Named::ArrowUp), Modifiers::SHIFT),
             nav(Move::Child)
         );
+        // As iced delivers Shift+J: the key without modifiers plus Shift
+        // (regression, M2-01 check on Windows).
+        assert_eq!(shortcut(&ch("j"), Modifiers::SHIFT), nav(Move::FirstParent));
+        assert_eq!(shortcut(&ch("k"), Modifiers::SHIFT), nav(Move::Child));
         assert_eq!(shortcut(&ch("J"), Modifiers::SHIFT), nav(Move::FirstParent));
         assert_eq!(shortcut(&ch("K"), Modifiers::SHIFT), nav(Move::Child));
+        assert_eq!(
+            shortcut(&ch("s"), Modifiers::SHIFT),
+            None,
+            "Shift+S stages nothing"
+        );
         assert_eq!(
             shortcut(&Key::Named(Named::Home), Modifiers::COMMAND),
             nav(Move::First)
