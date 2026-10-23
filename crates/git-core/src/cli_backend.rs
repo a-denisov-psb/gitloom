@@ -303,6 +303,22 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Creates branch `name` at commit `start` and switches to it; Git
+    /// validates the name first (`check-ref-format --branch`).
+    fn create_branch(&self, name: &str, start: &str) -> Result<()> {
+        let read = RunOptions {
+            read_only: true,
+            ..RunOptions::default()
+        };
+        self.run(&["check-ref-format", "--branch", name], read)
+            .map_err(|_| Error::Backend(format!("\"{name}\" is not a valid branch name")))?;
+        self.run(
+            &["switch", "--no-guess", "--create", name, start, "--"],
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
     /// Switches to local branch `branch`.
     fn switch_branch(&self, branch: &str) -> Result<()> {
         self.run(

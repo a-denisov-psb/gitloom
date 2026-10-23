@@ -65,7 +65,7 @@ pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Messa
         row![pull_button(view, pull_mode), pull_dropdown()].align_y(iced::Center),
         push_button(view),
         divider(),
-        action(view, ToolbarAction::Branch),
+        branch_button(view),
         action(view, ToolbarAction::Stash),
         action(view, ToolbarAction::Pop),
     ]
@@ -181,6 +181,29 @@ fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Mes
             .on_press_maybe(view.busy.is_none().then_some(Message::Pull(None)))
             .into(),
         mode.label().to_owned(),
+    )
+}
+
+/// New branch at the selected commit (inline input, Ctrl+B).
+fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
+    let content = column![
+        text(ToolbarAction::Branch.glyph()).size(16),
+        text(ToolbarAction::Branch.label()).size(11)
+    ]
+    .spacing(1)
+    .align_x(iced::Center);
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    with_tooltip_text(
+        button
+            .on_press_maybe(view.busy.is_none().then_some(Message::NewBranchStart(None)))
+            .into(),
+        "Create a branch at the selected commit (Ctrl+B)".to_owned(),
     )
 }
 

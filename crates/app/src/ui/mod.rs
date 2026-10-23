@@ -24,6 +24,9 @@ mod toolbar;
 
 pub use graph::reveal_offset;
 
+/// Id of the inline new-branch input in the graph.
+pub const NEW_BRANCH_INPUT: &str = "new-branch-input";
+
 use iced::widget::{button, column, container, pane_grid, row, space, text};
 use iced::{Element, Fill};
 

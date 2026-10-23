@@ -277,6 +277,11 @@ pub enum Message {
     CheckoutConfirmed(CheckoutTarget),
     /// Local changes blocked the checkout: stash them, then check out.
     StashAndCheckout(CheckoutTarget),
+    /// Open the inline new-branch input at commit `Some(id)` or at the
+    /// selection (`None`: selected commit, or HEAD for the WIP row).
+    NewBranchStart(Option<String>),
+    NewBranchInput(String),
+    NewBranchSubmit,
     /// Right click on a commit row.
     CommitContextMenu {
         id: String,
@@ -549,6 +554,72 @@ impl App {
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
             if view.network.is_some() || view.queued.is_some() {
                 view.last_fetch = std::time::Instant::now();
+            }
+        }
+        task
+    }
+
+    /// Opens the inline new-branch input (see [`Message::NewBranchStart`]).
+    fn start_new_branch(&mut self, at: Option<String>) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            self.status = reason;
+            return Task::none();
+        }
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let snapshot = Arc::clone(&view.snapshot);
+        let at = at.or_else(|| view.selected_commit().map(str::to_owned));
+        let (start, row) = match at {
+            Some(id) if snapshot.is_stash(&id) => {
+                self.status = "Branches cannot start at a stash".into();
+                return Task::none();
+            }
+            Some(id) => (id.clone(), Some(id)),
+            None => match snapshot.head.target() {
+                // The WIP row stands for HEAD.
+                Some(head) if snapshot.has_wip => (head.to_owned(), None),
+                Some(head) => (head.to_owned(), Some(head.to_owned())),
+                None => {
+                    self.status = "Create the first commit before creating branches".into();
+                    return Task::none();
+                }
+            },
+        };
+        view.new_branch = Some(crate::repo_view::NewBranch {
+            start,
+            row,
+            name: String::new(),
+            error: None,
+            submitted: false,
+        });
+        iced::widget::operation::focus(crate::ui::NEW_BRANCH_INPUT)
+    }
+
+    /// Creates the branch typed in the inline input and checks it out.
+    fn create_branch(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let names = local_branch_names(&view.snapshot);
+        let Some(input) = view.new_branch.as_mut() else {
+            return Task::none();
+        };
+        let name = input.name.trim().to_owned();
+        if let Some(problem) = branch_name_problem(&name, &names) {
+            input.error = Some(problem);
+            return Task::none();
+        }
+        let start = input.start.clone();
+        let label = format!("Create branch {name}");
+        let task = self.run_write(tab, label, move |git| git.create_branch(&name, &start));
+        if let Some(view) = self.active_view_mut() {
+            let running = view.busy.is_some();
+            if let Some(input) = view.new_branch.as_mut() {
+                input.submitted = running;
             }
         }
         task
@@ -954,6 +1025,7 @@ impl App {
                 }
             }
             Shortcut::FetchAll => return self.update(Message::FetchAll),
+            Shortcut::CreateBranch => return self.update(Message::NewBranchStart(None)),
             Shortcut::Undo => return self.undo_redo(true),
             Shortcut::Redo => return self.undo_redo(false),
             Shortcut::Commit => return self.commit(false),
@@ -980,6 +1052,9 @@ impl App {
                 if self.modal.take().is_some()
                     || self.context_menu.take().is_some()
                     || self.form.take().is_some()
+                    || self
+                        .active_view_mut()
+                        .is_some_and(|v| v.new_branch.take().is_some())
                 {
                     return Task::none();
                 }
@@ -1663,6 +1738,7 @@ impl App {
                 let mut pull = false;
                 let mut push = false;
                 let mut blocked_checkout = None;
+                let mut inline_error = false;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
@@ -1674,6 +1750,17 @@ impl App {
                         push = op.kind == NetworkKind::Push;
                     }
                     queued = view.queued.take();
+                    // A new branch: close the input, or show Git's error there.
+                    if let Some(input) = view.new_branch.as_mut().filter(|i| i.submitted) {
+                        input.submitted = false;
+                        match &result {
+                            Ok(_) => view.new_branch = None,
+                            Err(error) => {
+                                input.error = Some(error.clone());
+                                inline_error = true;
+                            }
+                        }
+                    }
                     let checkout = view.pending_checkout.take();
                     if let Err(error) = &result {
                         if git_core::checkout_blocked(error) {
@@ -1709,6 +1796,7 @@ impl App {
                             self.status = format!("{label}: Cancelled");
                         }
                     }
+                    Err(_) if inline_error => {}
                     Err(error) if blocked_checkout.is_some() => {
                         if let Some(target) = blocked_checkout {
                             self.modal = Some(checkout_blocked_dialog(error, target));
@@ -1822,14 +1910,38 @@ impl App {
                 let enabled = self.write_block().is_none();
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    vec![MenuEntry::Item {
-                        label: "Checkout this commit".into(),
-                        shortcut: None,
-                        enabled,
-                        message: Box::new(Message::Checkout(CheckoutTarget::Commit(id))),
-                    }],
+                    vec![
+                        MenuEntry::Item {
+                            label: "Checkout this commit".into(),
+                            shortcut: None,
+                            enabled,
+                            message: Box::new(Message::Checkout(CheckoutTarget::Commit(
+                                id.clone(),
+                            ))),
+                        },
+                        MenuEntry::Item {
+                            label: "Create branch here".into(),
+                            shortcut: None,
+                            enabled,
+                            message: Box::new(Message::NewBranchStart(Some(id))),
+                        },
+                    ],
                 ));
             }
+            Message::NewBranchStart(at) => return self.start_new_branch(at),
+            Message::NewBranchInput(name) => {
+                if let Some(view) = self.active_view_mut() {
+                    let names: Vec<String> = local_branch_names(&view.snapshot);
+                    if let Some(input) = view.new_branch.as_mut() {
+                        // Instant feedback while typing; empty input shows no error yet.
+                        input.error = (!name.is_empty())
+                            .then(|| branch_name_problem(&name, &names))
+                            .flatten();
+                        input.name = name;
+                    }
+                }
+            }
+            Message::NewBranchSubmit => return self.create_branch(),
             Message::Push { force } => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     return self.push(tab, force);
@@ -2478,6 +2590,26 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
             y: Some(offset),
         },
     )
+}
+
+fn local_branch_names(snapshot: &RepoSnapshot) -> Vec<String> {
+    snapshot
+        .refs
+        .iter()
+        .filter(|r| r.kind == git_core::RefKind::LocalBranch)
+        .map(|r| r.name.clone())
+        .collect()
+}
+
+/// Why `name` cannot be used for a new branch: invalid or already taken.
+fn branch_name_problem(name: &str, existing: &[String]) -> Option<String> {
+    if let Some(problem) = git_core::check_branch_name(name) {
+        return Some(problem.to_owned());
+    }
+    existing
+        .iter()
+        .any(|b| b == name)
+        .then(|| format!("A branch named \"{name}\" already exists"))
 }
 
 /// Local changes would be overwritten by the checkout: offer to stash them
@@ -4899,6 +5031,86 @@ mod tests {
         ));
         let _ = app.update(Message::Shortcut(Shortcut::Confirm));
         assert_eq!(running_args(&app), ["Checkout topic"]);
+    }
+
+    #[test]
+    fn new_branch_input_validates_and_creates() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::NewBranchStart(Some("c".into())));
+        let input = app.tabs[0].view().unwrap().new_branch.clone().unwrap();
+        assert_eq!(
+            (input.start.as_str(), input.row.as_deref()),
+            ("c", Some("c"))
+        );
+
+        let _ = app.update(Message::NewBranchInput("bad name".into()));
+        assert!(app.tabs[0]
+            .view()
+            .unwrap()
+            .new_branch
+            .as_ref()
+            .unwrap()
+            .error
+            .is_some());
+        let _ = app.update(Message::NewBranchInput("topic".into()));
+        let _ = app.update(Message::NewBranchSubmit);
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none(), "duplicate refused");
+        assert!(view
+            .new_branch
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+
+        let _ = app.update(Message::NewBranchInput("feature/x".into()));
+        let _ = app.update(Message::NewBranchSubmit);
+        assert_eq!(running_args(&app), ["Create branch feature/x"]);
+
+        // Git's error stays at the input instead of a dialog.
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Create branch feature/x".into(),
+            result: Err("fatal: cannot lock ref".into()),
+        });
+        assert!(app.modal.is_none());
+        let input = app.tabs[0].view().unwrap().new_branch.clone().unwrap();
+        assert_eq!(input.error.as_deref(), Some("fatal: cannot lock ref"));
+
+        let _ = app.update(Message::NewBranchSubmit);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Create branch feature/x".into(),
+            result: Ok(None),
+        });
+        assert!(
+            app.tabs[0].view().unwrap().new_branch.is_none(),
+            "closed on success"
+        );
+    }
+
+    #[test]
+    fn new_branch_from_wip_starts_at_head_and_esc_cancels() {
+        let mut app = checkout_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.snapshot = Arc::new(
+            view.snapshot
+                .with_working_tree(git_core::WorkingTree {
+                    unstaged: vec![file("a")],
+                    staged: Vec::new(),
+                })
+                .unwrap(),
+        );
+        view.selection = Some(Selection::Wip);
+        let _ = app.update(checked(Shortcut::CreateBranch, false));
+        let input = app.tabs[0].view().unwrap().new_branch.clone().unwrap();
+        assert_eq!((input.start.as_str(), input.row), ("c", None));
+
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.tabs[0].view().unwrap().new_branch.is_none());
     }
 
     #[test]
