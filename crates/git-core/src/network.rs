@@ -108,6 +108,17 @@ pub fn push_args(
     args
 }
 
+/// Arguments to fast-forward local branch `local` (not checked out) to
+/// `remote_branch` on `remote`; Git refuses if they diverged.
+pub fn fast_forward_args(remote: &str, remote_branch: &str, local: &str) -> Vec<String> {
+    vec![
+        "fetch".into(),
+        "--progress".into(),
+        remote.into(),
+        format!("refs/heads/{remote_branch}:refs/heads/{local}"),
+    ]
+}
+
 /// Arguments to fetch one remote (remote context menu "Fetch").
 pub fn fetch_remote_args(remote: &str) -> Vec<String> {
     ["fetch", "--progress", remote].map(str::to_owned).to_vec()

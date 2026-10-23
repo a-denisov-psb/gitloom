@@ -482,3 +482,28 @@ fn upstream_and_remote_management() {
     assert_eq!(backend.remotes().unwrap(), ["origin"]);
     assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "mirror/main"]));
 }
+
+#[test]
+fn fast_forward_a_branch_that_is_not_checked_out() {
+    let (upstream, bare, local) = pull_setup();
+    local.git(&["branch", "--track", "other", "origin/main"]);
+    push_upstream(&upstream, &bare, "b.txt", "b\n");
+    network(
+        &local,
+        git_core::fast_forward_args("origin", "main", "other"),
+    )
+    .unwrap();
+    assert_eq!(local.git(&["rev-parse", "other"]), upstream.head());
+
+    // Diverged: refused, the branch stays where it was.
+    local.git(&["switch", "--quiet", "other"]);
+    let mine = local.commit("o.txt", "o\n", "Local on other");
+    local.git(&["switch", "--quiet", "main"]);
+    push_upstream(&upstream, &bare, "c.txt", "c\n");
+    assert!(network(
+        &local,
+        git_core::fast_forward_args("origin", "main", "other")
+    )
+    .is_err());
+    assert_eq!(local.git(&["rev-parse", "other"]), mine);
+}

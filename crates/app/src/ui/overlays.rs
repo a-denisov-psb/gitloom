@@ -145,6 +145,7 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
                 label,
                 shortcut,
                 enabled,
+                hint,
                 ..
             } => {
                 // Items never wrap: a wrapped label would overlap the next item.
@@ -155,13 +156,16 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
                 if let Some(shortcut) = shortcut {
                     line = line.push(muted(shortcut).size(11));
                 }
-                button(line.align_y(iced::Center))
+                let item = button(line.align_y(iced::Center))
                     .on_press_maybe(enabled.then_some(Message::MenuSelected(index)))
                     .height(MENU_ITEM_HEIGHT)
                     .padding([4, 10])
                     .width(Fill)
-                    .style(theme::menu_item)
-                    .into()
+                    .style(theme::menu_item);
+                match hint {
+                    Some(hint) => crate::ui::panel::with_tooltip_text(item.into(), hint.clone()),
+                    None => item.into(),
+                }
             }
         }
     }));

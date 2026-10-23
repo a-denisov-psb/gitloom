@@ -273,6 +273,8 @@ pub enum MenuEntry {
         shortcut: Option<String>,
         enabled: bool,
         message: Box<Message>,
+        /// Tooltip, e.g. "Not available yet" on disabled future actions.
+        hint: Option<String>,
     },
     Separator,
 }
@@ -284,6 +286,7 @@ impl MenuEntry {
             shortcut: None,
             enabled: true,
             message: Box::new(message),
+            hint: None,
         }
     }
 }
@@ -359,6 +362,7 @@ mod tests {
                     shortcut: Some("D".into()),
                     enabled: false,
                     message: Box::new(Message::Refresh),
+                    hint: None,
                 },
             ],
         )
