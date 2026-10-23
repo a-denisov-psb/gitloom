@@ -210,6 +210,43 @@ pub enum DiffKind {
     Unstaged,
     /// Nothing against the working tree.
     Untracked,
+    /// One part of a stash entry (see [`StashChanges`]).
+    Stash { id: Oid, part: StashPart },
+}
+
+/// Part of a stash entry, like the sections of the working copy view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StashPart {
+    /// Index (second parent) against HEAD (first parent).
+    Staged,
+    /// Stashed working tree (the stash commit) against the index.
+    Unstaged,
+    /// Untracked files (third parent, `git stash -u`) against nothing.
+    Untracked,
+}
+
+/// Everything a stash entry contains, split like the working copy view.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StashChanges {
+    pub staged: Vec<FileChange>,
+    pub unstaged: Vec<FileChange>,
+    pub untracked: Vec<FileChange>,
+}
+
+impl StashChanges {
+    /// Number of distinct paths over all parts.
+    pub fn file_count(&self) -> usize {
+        let mut paths: Vec<&str> = self
+            .staged
+            .iter()
+            .chain(&self.unstaged)
+            .chain(&self.untracked)
+            .map(|f| f.path.as_str())
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        paths.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -354,6 +391,9 @@ pub trait GitBackend: Send + Sync {
 
     /// Files changed by a commit compared to its first parent, sorted by path.
     fn commit_changes(&self, id: &str) -> Result<Vec<FileChange>>;
+
+    /// Staged, unstaged and untracked changes of the stash commit `id`.
+    fn stash_changes(&self, id: &str) -> Result<StashChanges>;
 
     /// Line diff of one file.
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;

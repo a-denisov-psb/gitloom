@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::{
     diff, ChangeKind, Commit, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head, Log, Oid,
-    RefKind, Reference, RepoState, Result, Stash, WorkingTree,
+    RefKind, Reference, RepoState, Result, Stash, StashChanges, WorkingTree,
 };
 
 /// Static sample repository for UI development without a real repo.
@@ -190,6 +190,10 @@ impl GitBackend for MockBackend {
                 old_path: None,
             })
             .collect())
+    }
+
+    fn stash_changes(&self, _id: &str) -> Result<StashChanges> {
+        Ok(StashChanges::default())
     }
 
     fn commit_template(&self) -> Result<Option<String>> {

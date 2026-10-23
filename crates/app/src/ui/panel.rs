@@ -9,7 +9,7 @@ use iced::{Element, Fill, FillPortion};
 
 use crate::app::{DiscardTarget, FileArea, Message};
 use crate::format;
-use crate::repo_view::{CenterView, Loadable, RepoView, Selection};
+use crate::repo_view::{CenterView, DetailChanges, Loadable, RepoView, Selection};
 use crate::theme;
 use crate::ui::context_area::context_area;
 use crate::ui::{change_badge, muted};
@@ -211,12 +211,7 @@ fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
 
     let author = column![
         text(&commit.author),
-        muted(format!(
-            "{} · authored {}",
-            commit.email,
-            format::date_time(commit.author_time)
-        ))
-        .size(12),
+        muted(author_line(&commit.email, commit.author_time)).size(12),
     ]
     .spacing(2);
 
@@ -228,7 +223,7 @@ fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
     });
 
     let files: Element<'a, Message> = match view.details.as_ref().map(|d| &d.changes) {
-        Some(Loadable::Ready(changes)) => column![
+        Some(Loadable::Ready(DetailChanges::Commit(changes))) => column![
             muted(format!("{} changed files", changes.len())),
             Column::with_children(
                 changes
@@ -238,6 +233,9 @@ fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
+        Some(Loadable::Ready(DetailChanges::Stash(changes))) => {
+            stash_files(view, &commit.id, changes)
+        }
         Some(Loadable::Failed(error)) => text(error).color(theme::DANGER).into(),
         Some(Loadable::Loading) | None => muted("Loading changed files…").into(),
     };
@@ -252,6 +250,47 @@ fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
         .padding(12);
 
     scrollable(content).height(Fill).into()
+}
+
+/// "email · authored date", without the separator when the email is empty.
+pub(crate) fn author_line(email: &str, time: i64) -> String {
+    let date = format::date_time(time);
+    if email.is_empty() {
+        format!("authored {date}")
+    } else {
+        format!("{email} · authored {date}")
+    }
+}
+
+/// Files of a stash entry in sections like the working copy view.
+fn stash_files<'a>(
+    view: &'a RepoView,
+    id: &str,
+    changes: &'a git_core::StashChanges,
+) -> Element<'a, Message> {
+    use git_core::StashPart;
+    let mut content = column![muted(format!("{} changed files", changes.file_count()))].spacing(8);
+    for (title, part, files) in [
+        ("Staged", StashPart::Staged, &changes.staged),
+        ("Unstaged", StashPart::Unstaged, &changes.unstaged),
+        ("Untracked", StashPart::Untracked, &changes.untracked),
+    ] {
+        if files.is_empty() {
+            continue;
+        }
+        let kind = DiffKind::Stash {
+            id: id.to_owned(),
+            part,
+        };
+        content = content.push(
+            column![
+                text(format!("{title} ({})", files.len())).size(12),
+                Column::with_children(files.iter().map(|file| file_row(view, file, kind.clone()))),
+            ]
+            .spacing(2),
+        );
+    }
+    content.into()
 }
 
 fn short(id: &str) -> &str {
@@ -297,7 +336,7 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
     let area = match &request.kind {
         DiffKind::Staged => FileArea::Staged,
         DiffKind::Unstaged | DiffKind::Untracked => FileArea::Unstaged,
-        DiffKind::Commit(_) => FileArea::Commit,
+        DiffKind::Commit(_) | DiffKind::Stash { .. } => FileArea::Commit,
     };
     let row = button(
         row![

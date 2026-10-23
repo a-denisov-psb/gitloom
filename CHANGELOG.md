@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Fixed
+
+- Stash details showed "0 changed files" for stashes with only untracked files (or only staged changes): they now list staged, unstaged and untracked files in separate sections, and each file opens its diff.
+- The author line in commit and stash details no longer shows a lone "·" when the email is empty.
+
 ## [0.3.0] - 2026-10-23
 
 ### Fixed

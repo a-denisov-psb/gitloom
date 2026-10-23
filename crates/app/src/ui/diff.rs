@@ -23,6 +23,11 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
         DiffKind::Untracked => "Untracked".to_string(),
         DiffKind::Staged => "Staged".to_string(),
         DiffKind::Commit(id) => format!("commit {}", &id[..id.len().min(7)]),
+        DiffKind::Stash { part, .. } => match part {
+            git_core::StashPart::Staged => "Stash · staged".to_string(),
+            git_core::StashPart::Unstaged => "Stash · unstaged".to_string(),
+            git_core::StashPart::Untracked => "Stash · untracked".to_string(),
+        },
     };
     let title = match &request.old_path {
         Some(old) => format!("{old} → {}", request.path),

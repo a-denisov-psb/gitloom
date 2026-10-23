@@ -11,7 +11,7 @@ use gix::ObjectId;
 
 use crate::{
     diff, ChangeKind, Commit, DiffKind, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head,
-    Log, RefKind, Reference, RepoState, Result, Stash, WorkingTree,
+    Log, RefKind, Reference, RepoState, Result, Stash, StashChanges, StashPart, WorkingTree,
 };
 
 /// Object cache per call; avoids decoding commits twice during date-ordered walks.
@@ -109,6 +109,70 @@ impl GixBackend {
             }
         }
         changes
+    }
+
+    /// Files changed between two trees, with rename detection, sorted by path.
+    fn tree_changes(
+        &self,
+        repo: &gix::Repository,
+        old_tree: &gix::Tree<'_>,
+        new_tree: &gix::Tree<'_>,
+    ) -> Result<Vec<FileChange>> {
+        use gix::object::tree::diff::ChangeDetached;
+
+        let options = gix::diff::Options::default().with_rewrites(Some(Default::default()));
+        let changes = match repo.diff_tree_to_tree(old_tree, new_tree, options) {
+            Ok(changes) => changes,
+            // Similarity rename detection reads blob contents, which a partial
+            // clone may not have; renames then show as deletion plus addition.
+            Err(_) if self.partial_clone => repo
+                .diff_tree_to_tree(
+                    old_tree,
+                    new_tree,
+                    gix::diff::Options::default().with_rewrites(None),
+                )
+                .map_err(backend)?,
+            Err(error) => return Err(backend(error)),
+        };
+
+        let mut files: Vec<FileChange> = changes
+            .iter()
+            .filter_map(|change| {
+                let (kind, mode, old_path) = match change {
+                    ChangeDetached::Addition { entry_mode, .. } => {
+                        (ChangeKind::Added, entry_mode, None)
+                    }
+                    ChangeDetached::Deletion { entry_mode, .. } => {
+                        (ChangeKind::Deleted, entry_mode, None)
+                    }
+                    ChangeDetached::Modification { entry_mode, .. } => {
+                        (ChangeKind::Modified, entry_mode, None)
+                    }
+                    ChangeDetached::Rewrite {
+                        entry_mode,
+                        copy: true,
+                        ..
+                    } => (ChangeKind::Added, entry_mode, None),
+                    ChangeDetached::Rewrite {
+                        entry_mode,
+                        source_location,
+                        ..
+                    } => (
+                        ChangeKind::Renamed,
+                        entry_mode,
+                        Some(source_location.to_str_lossy().into_owned()),
+                    ),
+                };
+                // Directories are reported as well; only files are of interest.
+                (!mode.is_tree()).then(|| FileChange {
+                    path: change.location().to_str_lossy().into_owned(),
+                    kind,
+                    old_path,
+                })
+            })
+            .collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(files)
     }
 
     fn local(&self) -> gix::Repository {
@@ -303,8 +367,6 @@ impl GitBackend for GixBackend {
     }
 
     fn commit_changes(&self, id: &str) -> Result<Vec<FileChange>> {
-        use gix::object::tree::diff::ChangeDetached;
-
         let repo = self.local();
         let commit = find_commit(&repo, id)?;
         let new_tree = commit.tree().map_err(backend)?;
@@ -316,59 +378,33 @@ impl GitBackend for GixBackend {
                 .map_err(backend)?,
             None => repo.empty_tree(),
         };
-        let options = gix::diff::Options::default().with_rewrites(Some(Default::default()));
-        let changes = match repo.diff_tree_to_tree(&old_tree, &new_tree, options) {
-            Ok(changes) => changes,
-            // Similarity rename detection reads blob contents, which a partial
-            // clone may not have; renames then show as deletion plus addition.
-            Err(_) if self.partial_clone => repo
-                .diff_tree_to_tree(
-                    &old_tree,
-                    &new_tree,
-                    gix::diff::Options::default().with_rewrites(None),
-                )
-                .map_err(backend)?,
-            Err(error) => return Err(backend(error)),
-        };
+        self.tree_changes(&repo, &old_tree, &new_tree)
+    }
 
-        let mut files: Vec<FileChange> = changes
-            .iter()
-            .filter_map(|change| {
-                let (kind, mode, old_path) = match change {
-                    ChangeDetached::Addition { entry_mode, .. } => {
-                        (ChangeKind::Added, entry_mode, None)
-                    }
-                    ChangeDetached::Deletion { entry_mode, .. } => {
-                        (ChangeKind::Deleted, entry_mode, None)
-                    }
-                    ChangeDetached::Modification { entry_mode, .. } => {
-                        (ChangeKind::Modified, entry_mode, None)
-                    }
-                    ChangeDetached::Rewrite {
-                        entry_mode,
-                        copy: true,
-                        ..
-                    } => (ChangeKind::Added, entry_mode, None),
-                    ChangeDetached::Rewrite {
-                        entry_mode,
-                        source_location,
-                        ..
-                    } => (
-                        ChangeKind::Renamed,
-                        entry_mode,
-                        Some(source_location.to_str_lossy().into_owned()),
-                    ),
-                };
-                // Directories are reported as well; only files are of interest.
-                (!mode.is_tree()).then(|| FileChange {
-                    path: change.location().to_str_lossy().into_owned(),
-                    kind,
-                    old_path,
+    fn stash_changes(&self, id: &str) -> Result<StashChanges> {
+        let repo = self.local();
+        let stash = find_commit(&repo, id)?;
+        let parents = stash_parent_trees(&stash)?;
+        let (Some(head), Some(index)) = (parents.first(), parents.get(1)) else {
+            return Err(Error::Backend(format!("{id} is not a stash commit")));
+        };
+        let worktree = stash.tree().map_err(backend)?;
+        let untracked = match parents.get(2) {
+            Some(tree) => self
+                .tree_changes(&repo, &repo.empty_tree(), tree)?
+                .into_iter()
+                .map(|file| FileChange {
+                    kind: ChangeKind::Untracked,
+                    ..file
                 })
-            })
-            .collect();
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(files)
+                .collect(),
+            None => Vec::new(),
+        };
+        Ok(StashChanges {
+            staged: self.tree_changes(&repo, head, index)?,
+            unstaged: self.tree_changes(&repo, index, &worktree)?,
+            untracked,
+        })
     }
 
     fn commit_template(&self) -> Result<Option<String>> {
@@ -425,6 +461,25 @@ impl GitBackend for GixBackend {
                     None => None,
                 };
                 (old, tree_blob(&repo, &new_tree, &request.path)?)
+            }
+            DiffKind::Stash { id, part } => {
+                let stash = find_commit(&repo, id)?;
+                let parents = stash_parent_trees(&stash)?;
+                let worktree = stash.tree().map_err(backend)?;
+                let (old_tree, new_tree) = match part {
+                    StashPart::Staged => (parents.first(), parents.get(1)),
+                    StashPart::Unstaged => (parents.get(1), Some(&worktree)),
+                    StashPart::Untracked => (None, parents.get(2)),
+                };
+                let old = match old_tree {
+                    Some(tree) => tree_blob(&repo, tree, old_path)?,
+                    None => None,
+                };
+                let new = match new_tree {
+                    Some(tree) => tree_blob(&repo, tree, &request.path)?,
+                    None => None,
+                };
+                (old, new)
             }
             DiffKind::Staged => {
                 let old = match repo.head_tree() {
@@ -555,6 +610,20 @@ impl Blob {
             Self::TooLarge => &[],
         }
     }
+}
+
+/// Trees of a stash commit's parents: HEAD, index and (with `-u`) untracked files.
+fn stash_parent_trees<'r>(stash: &gix::Commit<'r>) -> Result<Vec<gix::Tree<'r>>> {
+    stash
+        .parent_ids()
+        .map(|parent| {
+            parent
+                .object()
+                .map_err(backend)?
+                .peel_to_tree()
+                .map_err(backend)
+        })
+        .collect()
 }
 
 fn find_commit<'r>(repo: &'r gix::Repository, id: &str) -> Result<gix::Commit<'r>> {

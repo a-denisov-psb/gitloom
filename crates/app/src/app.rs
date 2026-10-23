@@ -2,15 +2,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use git_core::{DiffRequest, FileChange, GitBackend, GixBackend};
+use git_core::{DiffRequest, GitBackend, GixBackend};
 use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
 use crate::overlay::{ContextMenu, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, Guarded, LastWrite, Loadable, NetworkOp, NetworkRequest, Queued,
-    RepoView, Section, Selection, WatchState, WriteOp,
+    CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkOp,
+    NetworkRequest, Queued, RepoView, Section, Selection, WatchState, WriteOp,
 };
 use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
@@ -193,7 +193,7 @@ pub enum Message {
     CommitChangesLoaded {
         tab: TabId,
         id: String,
-        result: Result<Vec<FileChange>, String>,
+        result: Result<DetailChanges, String>,
     },
     SessionLoaded(session::Loaded),
     WatcherStarted(TabId),
@@ -1100,7 +1100,7 @@ impl App {
                 .iter()
                 .find(|f| f.path == diff.request.path)
                 .map(|f| (f.clone(), false)),
-            git_core::DiffKind::Commit(_) => None,
+            git_core::DiffKind::Commit(_) | git_core::DiffKind::Stash { .. } => None,
         }
     }
 
@@ -1170,8 +1170,17 @@ impl App {
         });
         let backend = Arc::clone(&view.backend);
         let commit = id.clone();
+        let is_stash = view.snapshot.is_stash(&id);
         Task::perform(
-            blocking(move || backend.commit_changes(&commit).map_err(|e| e.to_string())),
+            blocking(move || {
+                // A stash keeps staged changes and untracked files in extra parents.
+                let changes = if is_stash {
+                    backend.stash_changes(&commit).map(DetailChanges::Stash)
+                } else {
+                    backend.commit_changes(&commit).map(DetailChanges::Commit)
+                };
+                changes.map_err(|e| e.to_string())
+            }),
             move |result| Message::CommitChangesLoaded {
                 tab: tab_id,
                 id: id.clone(),
@@ -3903,6 +3912,46 @@ mod tests {
         let _ = app.run_network(tab, fetch_request(false));
         assert!(app.status.starts_with("Please wait"));
         assert!(app.tabs[0].view().unwrap().queued.is_none());
+    }
+
+    #[test]
+    fn author_line_skips_the_separator_without_email() {
+        let with = crate::ui::panel::author_line("a@example.com", 0);
+        assert!(with.starts_with("a@example.com · authored "), "{with}");
+        let without = crate::ui::panel::author_line("", 0);
+        assert!(without.starts_with("authored "), "{without}");
+        assert!(!without.contains('·'));
+    }
+
+    #[test]
+    fn stash_details_keep_their_sections() {
+        let mut app = ready_app(&["s"]);
+        let tab = app.tabs[0].id;
+        let view = app.tabs[0].view_mut().unwrap();
+        view.selection = Some(Selection::Commit("s".into()));
+        view.details = Some(CommitDetails {
+            id: "s".into(),
+            changes: Loadable::Loading,
+        });
+        let untracked = git_core::FileChange {
+            path: "new.txt".into(),
+            kind: git_core::ChangeKind::Untracked,
+            old_path: None,
+        };
+        let changes = git_core::StashChanges {
+            untracked: vec![untracked],
+            ..Default::default()
+        };
+        let _ = app.update(Message::CommitChangesLoaded {
+            tab,
+            id: "s".into(),
+            result: Ok(DetailChanges::Stash(changes.clone())),
+        });
+        let details = app.tabs[0].view().unwrap().details.clone().unwrap();
+        assert_eq!(
+            details.changes,
+            Loadable::Ready(DetailChanges::Stash(changes))
+        );
     }
 
     #[test]
