@@ -43,6 +43,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
+| Right click remote | Fetch, Edit URL, Rename, Remove | done (M3) |
+| "+" in the remote section | Add a remote (name, URL) | done (M3) |
 | Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |

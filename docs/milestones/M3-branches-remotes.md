@@ -183,7 +183,9 @@ Acceptance:
 Acceptance:
 - Integration tests for create (both kinds), push, delete local/remote.
 
-### [ ] M3-10 Upstream and remote management
+### [x] M3-10 Upstream and remote management
+
+> Done: `GitWriter::set_upstream`, `unset_upstream`, `add_remote`, `set_remote_url`, `rename_remote`, `remove_remote`; `fetch_remote_args`; `GitBackend::remote_url` (snapshot keeps the URLs for Edit URL). Branch menu: Set upstream… (form with the remote branches; default: current upstream if it still exists, else the same-named `origin/<branch>`) and Unset upstream (only with an upstream). Pull without upstream now offers "Set upstream" (closes the M3-04 deviation). REMOTE section: "+" adds a remote (form: name, URL; invalid, "/" and duplicate names refused); remotes without fetched branches are listed; right click a remote: Fetch, Edit URL… (prefilled), Rename… (form), Remove (confirmation). Fixed on the way: the watcher ignored `.git/config`, and the refs check compared neither remotes nor upstreams, so terminal changes there did not refresh. Tests: each git operation (set/unset upstream, add, fetch, set-url, rename, remove), config classification; app tests for menus, defaults incl. a gone upstream, form validation, remote menu actions. Checked by hand: Set upstream for a branch whose upstream was gone (default fixed after the check showed the gone ref) → tracks origin/main; Edit URL prefilled; `git remote add` in a terminal → appears without branches → Fetch → backup/main → Remove → gone. Typing in the add/rename forms could not be checked (keyboard input unreliable in WSLg), maintainer to-do.
 
 - Branch context menu: Set upstream (choose remote branch), Unset upstream.
 - Remote section: "+" adds a remote (name, URL); remote context menu: Edit URL, Rename, Remove (confirmation), Fetch this remote.

@@ -60,6 +60,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M3-02 (once fetch/push exist, M3-03/M3-05): HTTPS with Git Credential Manager on Windows and SSH with a passphrase-protected key on Linux; a missing credential must show Gitloom's prompt window. Also check that Esc closes the prompt window (keyboard input did not reach it in my WSLg session; Cancel/OK/Yes by mouse verified).
 - [ ] M3-07: create a branch with the keyboard: select a commit, Ctrl+B, type a name (an invalid one shows a red border with the reason), Enter creates and checks it out, Esc cancels. Keyboard input was unreliable in my WSLg session (input, validation and typing verified; Enter only by tests).
 - [ ] M3-08: rename a branch with the keyboard: right click a local branch → Rename… → edit the name → Enter; for a branch with an upstream choose "Rename remote too" and check the remote. (Menu, input, delete, force delete and remote delete verified by mouse; keyboard input did not reach the window in my session.)
+- [ ] M3-10: add a remote with "+" in the REMOTE section (type name and URL) and rename a remote from its context menu (type the new name). Set/unset upstream, Edit URL (prefilled), Fetch and Remove were verified by mouse; typing did not reach the window reliably in my session.
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 
 ## Environment notes
