@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- Shift+J / Shift+K moved like J / K instead of jumping along the branch: iced reports letter keys without modifiers ("j" plus Shift).
 - Keyboard shortcuts outside text fields (navigation, tabs, panels, staging, undo, F5, Ctrl+O, …) did nothing: the check whether a text field has focus gave no answer when one of the checked fields was not on screen, which was always the case.
 - An open repository no longer causes constant background CPU load (about 0.5 %): file access events from Gitloom's own ignore checks kept re-triggering the change detection.
 - Diffs of modified files in repositories with CRLF conversion (`core.autocrlf`, `eol` attributes) or clean filters now match `git diff` instead of showing every line as changed.
