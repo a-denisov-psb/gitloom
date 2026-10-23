@@ -3,7 +3,7 @@
 
 mod support;
 
-use git_core::{CliBackend, Error, GitBackend, GitWriter, GixBackend};
+use git_core::{ChangeKind, CliBackend, Error, GitBackend, GitWriter, GixBackend};
 use support::TestRepo;
 
 fn isolated() -> TestRepo {
@@ -102,4 +102,124 @@ fn unknown_stash_is_not_found() {
         .stash_pop("0123456789012345678901234567890123456789")
         .unwrap_err();
     assert!(matches!(error, Error::NotFound(_)));
+}
+
+fn paths(files: &[git_core::FileChange]) -> Vec<(&str, ChangeKind)> {
+    files.iter().map(|f| (f.path.as_str(), f.kind)).collect()
+}
+
+/// Id of the newest stash entry.
+fn top_stash(repo: &TestRepo) -> String {
+    repo.git(&["rev-parse", "stash@{0}"])
+}
+
+#[test]
+fn stash_with_only_untracked_files_lists_them() {
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "a\n", "Base");
+    repo.write("new.txt", "new\n");
+    repo.write("dir/other.txt", "other\n");
+    repo.git(&["stash", "push", "-u", "-m", "untracked only"]);
+
+    let backend = GixBackend::discover(repo.path()).unwrap();
+    let id = top_stash(&repo);
+    let changes = backend.stash_changes(&id).unwrap();
+    assert!(changes.staged.is_empty() && changes.unstaged.is_empty());
+    assert_eq!(
+        paths(&changes.untracked),
+        [
+            ("dir/other.txt", ChangeKind::Untracked),
+            ("new.txt", ChangeKind::Untracked)
+        ]
+    );
+    assert_eq!(changes.file_count(), 2);
+
+    // The diff of an untracked file is its content against nothing.
+    let diff = backend
+        .file_diff(&git_core::DiffRequest {
+            kind: git_core::DiffKind::Stash {
+                id,
+                part: git_core::StashPart::Untracked,
+            },
+            path: "new.txt".into(),
+            old_path: None,
+        })
+        .unwrap();
+    assert_eq!(diff.old_path, None);
+    assert_eq!(diff.hunks[0].lines[0].content, "new");
+}
+
+#[test]
+fn stash_with_only_staged_changes() {
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "a\n", "Base");
+    repo.write("a.txt", "staged\n");
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["stash", "push", "-m", "staged only"]);
+
+    let changes = GixBackend::discover(repo.path())
+        .unwrap()
+        .stash_changes(&top_stash(&repo))
+        .unwrap();
+    assert_eq!(paths(&changes.staged), [("a.txt", ChangeKind::Modified)]);
+    assert!(changes.unstaged.is_empty() && changes.untracked.is_empty());
+}
+
+#[test]
+fn mixed_stash_is_split_like_the_working_copy() {
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "a\n", "Base");
+    repo.commit("b.txt", "b\n", "B");
+    // a.txt staged and edited again, b.txt only edited, c.txt untracked.
+    repo.write("a.txt", "staged\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "staged and edited\n");
+    repo.write("b.txt", "edited\n");
+    repo.write("c.txt", "new\n");
+    repo.git(&["stash", "push", "-u", "-m", "mixed"]);
+
+    let backend = GixBackend::discover(repo.path()).unwrap();
+    let id = top_stash(&repo);
+    let changes = backend.stash_changes(&id).unwrap();
+    assert_eq!(paths(&changes.staged), [("a.txt", ChangeKind::Modified)]);
+    assert_eq!(
+        paths(&changes.unstaged),
+        [
+            ("a.txt", ChangeKind::Modified),
+            ("b.txt", ChangeKind::Modified)
+        ]
+    );
+    assert_eq!(
+        paths(&changes.untracked),
+        [("c.txt", ChangeKind::Untracked)]
+    );
+    assert_eq!(changes.file_count(), 3, "a.txt counts once");
+
+    let diff = |part, path: &str| {
+        backend
+            .file_diff(&git_core::DiffRequest {
+                kind: git_core::DiffKind::Stash {
+                    id: id.clone(),
+                    part,
+                },
+                path: path.into(),
+                old_path: None,
+            })
+            .unwrap()
+    };
+    let lines = |d: git_core::FileDiff| -> Vec<String> {
+        d.hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .map(|l| l.content.clone())
+            .collect()
+    };
+    assert_eq!(
+        lines(diff(git_core::StashPart::Staged, "a.txt")),
+        ["a", "staged"]
+    );
+    assert_eq!(
+        lines(diff(git_core::StashPart::Unstaged, "a.txt")),
+        ["staged", "staged and edited"]
+    );
 }
