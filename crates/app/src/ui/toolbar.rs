@@ -62,7 +62,7 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
         action(view, ToolbarAction::Undo),
         action(view, ToolbarAction::Redo),
         divider(),
-        action(view, ToolbarAction::Pull),
+        row![action(view, ToolbarAction::Pull), pull_dropdown()].align_y(iced::Center),
         action(view, ToolbarAction::Push),
         divider(),
         action(view, ToolbarAction::Branch),
@@ -159,6 +159,17 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         (ToolbarAction::Terminal, _) => with_tooltip(button.into()),
         _ => write_tooltip(button.into(), view),
     }
+}
+
+/// Arrow next to Pull that opens the Pull menu (Fetch all, pull modes).
+fn pull_dropdown<'a>() -> Element<'a, Message> {
+    let arrow = container(text("▾").size(12))
+        .padding([12, 4])
+        .style(theme::dropdown_arrow);
+    crate::ui::context_area::click_area(
+        iced::widget::mouse_area(arrow).interaction(iced::mouse::Interaction::Pointer),
+        Message::PullMenu,
+    )
 }
 
 fn divider<'a>() -> Element<'a, Message> {

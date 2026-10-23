@@ -23,6 +23,8 @@ pub enum Shortcut {
     UnstageSelected,
     StageAll,
     UnstageAll,
+    /// Ctrl+L: fetch all remotes.
+    FetchAll,
     /// Ctrl+Z.
     Undo,
     /// Ctrl+Y or Ctrl+Shift+Z.
@@ -115,6 +117,7 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             "t" | "T" => Some(Shortcut::NewTab),
             "w" | "W" => Some(Shortcut::CloseTab),
             "o" | "O" => Some(Shortcut::OpenRepository),
+            "l" | "L" => Some(Shortcut::FetchAll),
             "j" | "J" => Some(Shortcut::ToggleSidebar),
             "k" | "K" => Some(Shortcut::TogglePanel),
             digit => digit
@@ -133,6 +136,15 @@ mod tests {
 
     fn ch(c: &str) -> Key {
         Key::Character(c.into())
+    }
+
+    #[test]
+    fn fetch_shortcut() {
+        assert_eq!(
+            shortcut(&ch("l"), Modifiers::COMMAND),
+            Some(Shortcut::FetchAll)
+        );
+        assert_eq!(shortcut(&ch("l"), Modifiers::empty()), None);
     }
 
     #[test]

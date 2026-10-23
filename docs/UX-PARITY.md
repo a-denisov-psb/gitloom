@@ -31,11 +31,11 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | M3 |
 | Right click commit/branch | Context menu | M3 |
 | Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
-| Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | M3 |
+| Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | Fetch all done (M3-03), pull modes M3-04 |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | M3 |
 | Push rejected | Offer Pull or Force push (with lease) | M3 |
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | M3 |
-| Auto-fetch | Periodic fetch in the background | M3 |
+| Auto-fetch | Periodic fetch in the background | done (M3, every 5 min, `auto_fetch_minutes` in the session file) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
@@ -57,7 +57,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Action | Shortcut | Status |
 |---|---|---|
 | Create branch | Ctrl+B | M3 |
-| Fetch all | Ctrl+L | M3 |
+| Fetch all | Ctrl+L | done (M3) |
 | Stage current file | S | done (M2) |
 | Stage all files | Ctrl+Shift+S | done (M2) |
 | Unstage current file | U | done (M2) |

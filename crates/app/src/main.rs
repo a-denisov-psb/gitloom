@@ -1,5 +1,6 @@
 mod app;
 mod askpass;
+mod fetch;
 mod format;
 mod nav;
 mod overlay;

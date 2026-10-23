@@ -290,6 +290,10 @@ pub struct RepoView {
     /// Clear the commit message when the running write (a commit) succeeds.
     pub clear_message_after_write: bool,
     pub last_write: Option<LastWrite>,
+    /// Last fetch (or when the tab was opened), for auto-fetch.
+    pub last_fetch: std::time::Instant,
+    /// An auto-fetch error was shown; further ones stay quiet until a fetch works.
+    pub fetch_error_shown: bool,
     /// Running network operation, shown in the status bar with Cancel.
     pub network: Option<NetworkOp>,
     /// Starts once the running (cancelled) background operation finished.
@@ -437,6 +441,8 @@ impl RepoView {
             reload_diff: false,
             clear_message_after_write: false,
             last_write: None,
+            last_fetch: std::time::Instant::now(),
+            fetch_error_shown: false,
             network: None,
             queued: None,
             undo: Vec::new(),

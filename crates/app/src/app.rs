@@ -252,6 +252,12 @@ pub enum Message {
     },
     /// Status bar "Cancel" of the tab's network operation.
     CancelNetwork(TabId),
+    /// "Fetch all" (Pull dropdown, Ctrl+L) in the active tab.
+    FetchAll,
+    /// Pull dropdown opened at the cursor.
+    PullMenu(iced::Point),
+    /// Periodic check for due auto-fetches.
+    AutoFetchTick(std::time::Instant),
     Undo,
     Redo,
     /// Toolbar "Stash": stash all changes including untracked files.
@@ -470,6 +476,13 @@ impl App {
             return Task::none();
         }
         let cancel = git_core::CancelToken::new();
+        // An old "Cancelled" or failure notice would be misleading now.
+        if !request.background {
+            self.status.clear();
+        }
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
         view.busy = Some(request.label.clone());
         view.suppress_watch = true;
         view.network = Some(NetworkOp {
@@ -482,6 +495,41 @@ impl App {
         Task::run(network_stream(tab, writer, request, cancel), |message| {
             message
         })
+    }
+
+    /// Fetches all remotes of tab `tab`; `background` for auto-fetch.
+    fn fetch(&mut self, tab: TabId, background: bool) -> Task<Message> {
+        let task = self.run_network(tab, crate::fetch::fetch_all(background));
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.network.is_some() || view.queued.is_some() {
+                view.last_fetch = std::time::Instant::now();
+            }
+        }
+        task
+    }
+
+    /// Starts an auto-fetch in every tab where one is due.
+    fn auto_fetch(&mut self, now: std::time::Instant) -> Task<Message> {
+        let interval = self.session.auto_fetch_minutes;
+        let due: Vec<TabId> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                let view = tab.view()?;
+                let state = crate::fetch::TabState {
+                    last_fetch: view.last_fetch,
+                    busy: view.busy.is_some(),
+                    operation_in_progress: !view.snapshot.state.is_clean(),
+                    has_remotes: view
+                        .snapshot
+                        .refs
+                        .iter()
+                        .any(|r| r.kind == git_core::RefKind::RemoteBranch),
+                };
+                crate::fetch::auto_fetch_due(now, interval, state).then_some(tab.id)
+            })
+            .collect();
+        Task::batch(due.into_iter().map(|tab| self.fetch(tab, true)))
     }
 
     /// Applies the loaded session: restores tabs and panes, then opens pending paths.
@@ -528,6 +576,7 @@ impl App {
             tabs,
             active,
             panes: self.panes.ratios,
+            auto_fetch_minutes: self.session.auto_fetch_minutes,
         }
     }
 
@@ -676,6 +725,7 @@ impl App {
                     return self.stage_file(file, false);
                 }
             }
+            Shortcut::FetchAll => return self.update(Message::FetchAll),
             Shortcut::Undo => return self.undo_redo(true),
             Shortcut::Redo => return self.undo_redo(false),
             Shortcut::Commit => return self.commit(false),
@@ -1374,9 +1424,15 @@ impl App {
             }
             Message::WriteFinished { tab, label, result } => {
                 let mut queued = None;
+                // `Some(show_notice)` for an auto-fetch: its errors appear once
+                // in the status bar (until a fetch works again), never as a dialog.
+                let mut background = None;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
-                    view.network = None;
+                    if view.network.take().is_some_and(|op| op.background) {
+                        background = Some(result.is_err() && !view.fetch_error_shown);
+                        view.fetch_error_shown = result.is_err();
+                    }
                     queued = view.queued.take();
                     match &result {
                         Ok(Some(History::Push(action))) => {
@@ -1405,6 +1461,12 @@ impl App {
                     Err(error) if error == git_core::Error::Cancelled.to_string() => {
                         if queued.is_none() {
                             self.status = format!("{label}: Cancelled");
+                        }
+                    }
+                    Err(error) if background.is_some() => {
+                        if background == Some(true) {
+                            let reason = error.lines().last().unwrap_or_default();
+                            self.status = format!("{label} failed: {reason}");
                         }
                     }
                     Err(error) => {
@@ -1444,6 +1506,36 @@ impl App {
                     op.progress = Some(progress);
                 }
             }
+            Message::FetchAll => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.fetch(tab, false);
+                }
+            }
+            Message::PullMenu(position) => {
+                let writable = self.write_block().is_none();
+                let disabled = |label: &str| MenuEntry::Item {
+                    label: label.into(),
+                    shortcut: None,
+                    enabled: false,
+                    message: Box::new(Message::Refresh),
+                };
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![
+                        MenuEntry::Item {
+                            label: "Fetch all".into(),
+                            shortcut: Some("Ctrl+L".into()),
+                            enabled: writable,
+                            message: Box::new(Message::FetchAll),
+                        },
+                        MenuEntry::Separator,
+                        disabled("Pull (fast-forward if possible)"),
+                        disabled("Pull (fast-forward only)"),
+                        disabled("Pull (rebase)"),
+                    ],
+                ));
+            }
+            Message::AutoFetchTick(now) => return self.auto_fetch(now),
             Message::CancelNetwork(tab) => {
                 if let Some(op) = self
                     .tab_mut(tab)
@@ -2018,6 +2110,7 @@ impl App {
             [
                 event::listen_with(global_event),
                 window::close_requests().map(Message::CloseRequested),
+                iced::time::every(crate::fetch::TICK).map(Message::AutoFetchTick),
             ]
             .into_iter()
             .chain(watchers),
@@ -4001,6 +4094,85 @@ mod tests {
             modal.details.as_deref(),
             Some("fatal: Authentication failed for 'https://x/'")
         );
+    }
+
+    /// Staging app whose repository has a remote branch.
+    fn app_with_remote() -> App {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs.push(git_core::Reference {
+            name: "origin/main".into(),
+            kind: git_core::RefKind::RemoteBranch,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn fetch_all_by_shortcut_and_menu() {
+        let mut app = app_with_remote();
+        let _ = app.update(checked(Shortcut::FetchAll, false));
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Fetch"));
+
+        let mut app = app_with_remote();
+        let _ = app.update(Message::PullMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.clone().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::FetchAll)));
+        assert!(menu.select(2).is_none(), "pull modes follow in M3-04");
+    }
+
+    #[test]
+    fn auto_fetch_runs_when_due() {
+        let mut app = app_with_remote();
+        let opened = app.tabs[0].view().unwrap().last_fetch;
+        let _ = app.update(Message::AutoFetchTick(
+            opened + std::time::Duration::from_secs(60),
+        ));
+        assert!(app.tabs[0].view().unwrap().busy.is_none(), "not due yet");
+
+        let later = opened + std::time::Duration::from_secs(5 * 60);
+        let _ = app.update(Message::AutoFetchTick(later));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Auto-fetch"));
+        assert!(view.network.as_ref().is_some_and(|op| op.background));
+        assert!(view.last_fetch > opened);
+
+        // Off when the interval is 0.
+        let mut app = app_with_remote();
+        app.session.auto_fetch_minutes = 0;
+        let _ = app.update(Message::AutoFetchTick(
+            later + std::time::Duration::from_secs(3600),
+        ));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn auto_fetch_errors_are_quiet_and_shown_once() {
+        let mut app = app_with_remote();
+        let tab = app.tabs[0].id;
+        let fail = |app: &mut App| {
+            let _ = app.fetch(tab, true);
+            let _ = app.update(Message::WriteFinished {
+                tab,
+                label: "Auto-fetch".into(),
+                result: Err(
+                    "fatal: unable to access 'https://x/': Could not resolve host: x".into(),
+                ),
+            });
+        };
+        fail(&mut app);
+        assert!(app.modal.is_none(), "no dialog for auto-fetch");
+        assert!(app
+            .status
+            .starts_with("Auto-fetch failed: fatal: unable to access"));
+        app.status.clear();
+        fail(&mut app);
+        assert!(app.status.is_empty(), "the same failure stays quiet");
     }
 
     #[test]
