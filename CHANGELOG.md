@@ -6,11 +6,14 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Pull from the toolbar: fast-forward if possible, fast-forward only or rebase, chosen in the Pull dropdown; the last choice becomes the button's mode (stored in the session file). Without an upstream branch a dialog explains why; a pull that stops in a conflict offers to abort the merge or rebase.
 - Fetch all remotes from the Pull dropdown or with Ctrl+L, with progress and Cancel in the status bar. Open repositories fetch automatically every 5 minutes (`auto_fetch_minutes` in the session file, 0 = off); auto-fetch skips busy repositories and merges/rebases in progress, yields to your own operations and reports failures once in the status bar.
 - Gitloom answers Git's and SSH's credential and host key prompts with a small window (masked for passwords and passphrases, Yes/No for host keys) when no credential helper or ssh-agent can; Gitloom never stores credentials. Authentication errors explain what to check.
 
 ### Fixed
 
+- The banner of a merge started by `git pull` named the local branch twice ("Merging main into main"); it now names the remote branch.
+- Context menu entries no longer wrap into the next entry when the label is long.
 - Stash details showed "0 changed files" for stashes with only untracked files (or only staged changes): they now list staged, unstaged and untracked files in separate sections, and each file opens its diff.
 - The author line in commit and stash details no longer shows a lone "·" when the email is empty.
 

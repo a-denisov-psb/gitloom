@@ -112,7 +112,9 @@ Acceptance:
 - Integration tests against a local bare remote.
 - Unit tests for the scheduler (interval, skip rules, cancel by user operation).
 
-### [ ] M3-04 Pull
+### [x] M3-04 Pull
+
+> Done: `git_core::PullMode` (`--ff`, `--ff-only`, `--rebase` with `--progress`), `GitWriter::abort_merge/abort_rebase`. Toolbar Pull runs the current mode (tooltip names it); dropdown modes are enabled, marked ✓ and become the button's mode (`pull_mode` in the session file). Detached HEAD / no commits / no upstream → explanatory dialog; deviation: the "Set upstream" button follows with M3-10. Failed pull: Git prints merge conflicts on stdout, so the decision waits for the refresh — a merge/rebase in progress shows "Pull stopped with conflicts" with "Abort merge"/"Abort rebase" (Enter only closes), otherwise the error dialog. Tests: all modes fast-forward, diverged per mode (merge commit, ff-only refused and unchanged, rebase), conflict + abort for merge and rebase; app tests for mode memory, no upstream, conflict/error dialog. Checked by hand: diverged branch with a conflict → Pull → conflict dialog → Abort merge → clean; Pull (rebase) from the dropdown → dialog + banner "Rebasing main onto origin/main (step 1 of 1)" → Abort rebase → clean; session stores `"pull_mode": "rebase"`. Fixed on the way: pull merge banner named the local branch twice, long menu labels wrapped into the next entry.
 
 - Toolbar "Pull" with dropdown (GitKraken): Fetch all; Pull (fast-forward if possible); Pull (fast-forward only); Pull (rebase). The chosen mode becomes the default of the button (stored in settings).
 - Commands: `git pull --ff`, `git pull --ff-only`, `git pull --rebase`.
