@@ -4,7 +4,11 @@
 
 use std::path::Path;
 
-use crate::{ChangeKind, DiffLineKind, Error, FileChange, FileDiff, GitWriter, Result};
+use std::collections::HashMap;
+
+use crate::{
+    ChangeKind, DiffLineKind, Error, FileChange, FileDiff, GitWriter, Result, WorkingTree,
+};
 
 /// Working tree state of one file before a discard.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,10 +20,20 @@ pub struct FileSnapshot {
     pub executable: bool,
 }
 
+/// Index entry of one path before a discard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexSnapshot {
+    pub path: String,
+    /// `(mode, object id)`; `None` if the path was not in the index.
+    pub entry: Option<(String, String)>,
+}
+
 /// Everything needed to undo a discard.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DiscardSnapshot {
     pub files: Vec<FileSnapshot>,
+    /// Index entries, only for discards that changed the index.
+    pub index: Vec<IndexSnapshot>,
 }
 
 /// Records the current content of `paths` as blobs.
@@ -51,7 +65,80 @@ pub(crate) fn snapshot(
             blob,
         });
     }
-    Ok(DiscardSnapshot { files })
+    Ok(DiscardSnapshot {
+        files,
+        index: Vec::new(),
+    })
+}
+
+/// Records the stage-0 index entries of `paths`.
+pub(crate) fn index_snapshot(
+    writer: &dyn GitWriter,
+    paths: &[String],
+) -> Result<Vec<IndexSnapshot>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut entries: HashMap<String, (String, String)> = writer
+        .index_entries()?
+        .into_iter()
+        .map(|(path, mode, id)| (path, (mode, id)))
+        .collect();
+    Ok(paths
+        .iter()
+        .map(|path| IndexSnapshot {
+            path: path.clone(),
+            entry: entries.remove(path),
+        })
+        .collect())
+}
+
+/// Discards everything in `tree`: staged changes go back to HEAD in index
+/// and working tree, then unstaged changes and untracked files are discarded
+/// like [`discard_all`].
+pub fn discard_everything(
+    writer: &dyn GitWriter,
+    root: &Path,
+    tree: &WorkingTree,
+) -> Result<DiscardSnapshot> {
+    let mut staged: Vec<String> = Vec::new();
+    for file in &tree.staged {
+        staged.extend(file.old_path.iter().cloned());
+        staged.push(file.path.clone());
+    }
+    staged.sort();
+    staged.dedup();
+    let unstaged: Vec<FileChange> = tree
+        .unstaged
+        .iter()
+        .filter(|f| staged.binary_search(&f.path).is_err())
+        .cloned()
+        .collect();
+    let mut all: Vec<String> = staged.clone();
+    all.extend(unstaged.iter().map(|f| f.path.clone()));
+    all.sort();
+    all.dedup();
+
+    let mut snapshot = snapshot(writer, root, &all)?;
+    snapshot.index = index_snapshot(writer, &staged)?;
+    if writer.has_head()? {
+        writer.restore_from_head(&staged)?;
+    } else {
+        // Before the first commit everything staged is new.
+        writer.unstage(&staged)?;
+        for path in &staged {
+            remove_file(root, path)?;
+        }
+    }
+    let (untracked, tracked): (Vec<&FileChange>, Vec<&FileChange>) = unstaged
+        .iter()
+        .partition(|f| f.kind == ChangeKind::Untracked);
+    let tracked: Vec<String> = tracked.iter().map(|f| f.path.clone()).collect();
+    writer.restore_worktree(&tracked)?;
+    for file in untracked {
+        remove_file(root, &file.path)?;
+    }
+    Ok(snapshot)
 }
 
 /// Discards the working tree changes of `files`: tracked files go back to

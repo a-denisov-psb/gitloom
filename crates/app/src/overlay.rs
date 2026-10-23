@@ -82,6 +82,36 @@ impl Modal {
         }
     }
 
+    /// "Discard all" while changes are staged: keep them (default) or
+    /// discard them as well.
+    pub fn discard_all_with_staged(keep_staged: Message, everything: Message) -> Self {
+        Self {
+            title: "Discard all changes".into(),
+            text: "Some changes are staged. Discard the staged changes as well? Unstaged \
+                   changes are discarded and untracked files are deleted in both cases."
+                .into(),
+            details: None,
+            buttons: vec![
+                DialogButton {
+                    label: "Cancel".into(),
+                    kind: ButtonKind::Secondary,
+                    message: None,
+                },
+                DialogButton {
+                    label: "Keep staged".into(),
+                    kind: ButtonKind::Secondary,
+                    message: Some(keep_staged),
+                },
+                DialogButton {
+                    label: "Discard staged too".into(),
+                    kind: ButtonKind::Danger,
+                    message: Some(everything),
+                },
+            ],
+            default: Some(1),
+        }
+    }
+
     /// Asks before an action; destructive actions get the danger style.
     pub fn confirm(
         title: impl Into<String>,

@@ -219,6 +219,77 @@ pub trait GitWriter: Send + Sync {
         .map(drop)
     }
 
+    /// Resets index and working tree of `paths` to HEAD; paths not in HEAD
+    /// are removed from both.
+    fn restore_from_head(&self, paths: &[String]) -> Result<()> {
+        with_pathspecs(
+            self,
+            &["restore", "--source=HEAD", "--staged", "--worktree"],
+            paths,
+        )
+    }
+
+    /// Stage-0 index entries as `(path, mode, object id)`.
+    fn index_entries(&self) -> Result<Vec<(String, String, String)>> {
+        let output = self.run(
+            &["ls-files", "--stage", "-z"],
+            RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            },
+        )?;
+        Ok(output
+            .stdout
+            .split(|&b| b == 0)
+            .filter_map(|record| {
+                let record = std::str::from_utf8(record).ok()?;
+                let (meta, path) = record.split_once('\t')?;
+                let mut fields = meta.split(' ');
+                let (mode, id, stage) = (fields.next()?, fields.next()?, fields.next()?);
+                (stage == "0").then(|| (path.to_owned(), mode.to_owned(), id.to_owned()))
+            })
+            .collect())
+    }
+
+    /// Sets index entries: `Some((mode, id))` adds or replaces, `None` removes.
+    fn set_index_entries(&self, entries: &[(String, Option<(String, String)>)]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let null = if entries.iter().any(|(_, e)| e.is_none()) {
+            let read = RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            };
+            let format = self.run(&["rev-parse", "--show-object-format"], read)?;
+            let len = if format.stdout_text().trim() == "sha256" {
+                64
+            } else {
+                40
+            };
+            "0".repeat(len)
+        } else {
+            String::new()
+        };
+        let mut input = Vec::new();
+        for (path, entry) in entries {
+            let line = match entry {
+                Some((mode, id)) => format!("{mode} {id}\t{path}"),
+                None => format!("0 {null}\t{path}"),
+            };
+            input.extend_from_slice(line.as_bytes());
+            input.push(0);
+        }
+        self.run(
+            &["update-index", "-z", "--index-info"],
+            RunOptions {
+                stdin: Some(&input),
+                read_only: false,
+            },
+        )
+        .map(drop)
+    }
+
     /// Resets the working tree files `paths` to their index content.
     fn restore_worktree(&self, paths: &[String]) -> Result<()> {
         with_pathspecs(self, &["restore", "--worktree"], paths)

@@ -166,3 +166,86 @@ fn discarding_lines_keeps_crlf_in_the_working_tree() {
     discard_matching(&repo, "w.txt", |line| line == "d");
     assert_eq!(read(&repo, "w.txt"), b"a\r\nB\r\nc\r\n");
 }
+
+/// Status, staged diff and unstaged diff: the full working copy state.
+fn state(repo: &TestRepo) -> (String, String, String) {
+    (
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        repo.git(&["diff", "--cached"]),
+        repo.git(&["diff"]),
+    )
+}
+
+#[test]
+fn discard_everything_including_staged_and_undo_it() {
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "base\n", "Base");
+    repo.commit("b.txt", "bee\n", "B");
+    repo.commit("e.txt", "eee\n", "E");
+    // Staged and modified again, a staged new file, a staged rename,
+    // an untracked file and an unstaged change.
+    repo.write("a.txt", "staged\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "staged and edited\n");
+    repo.write("c.txt", "new\n");
+    repo.git(&["add", "c.txt"]);
+    repo.git(&["mv", "b.txt", "d.txt"]);
+    repo.write("u.txt", "untracked\n");
+    repo.write("e.txt", "edited\n");
+    let before = state(&repo);
+
+    let cli = CliBackend::new(repo.path());
+    let tree = GixBackend::discover(repo.path())
+        .unwrap()
+        .working_tree()
+        .unwrap();
+    let snapshot = git_core::discard_everything(&cli, repo.path(), &tree).unwrap();
+    assert_eq!(
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        ""
+    );
+    assert_eq!(read(&repo, "a.txt"), b"base\n");
+    assert_eq!(read(&repo, "b.txt"), b"bee\n");
+    assert!(!repo.path().join("c.txt").exists());
+    assert!(!repo.path().join("d.txt").exists());
+    assert!(!repo.path().join("u.txt").exists());
+
+    // Undo brings back index and working tree; redo discards again.
+    let redo = git_core::restore_snapshot(&cli, repo.path(), &snapshot).unwrap();
+    assert_eq!(state(&repo), before);
+    git_core::restore_snapshot(&cli, repo.path(), &redo).unwrap();
+    assert_eq!(
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        ""
+    );
+}
+
+#[test]
+fn discard_everything_before_the_first_commit() {
+    let repo = TestRepo::new();
+    repo.write("a.txt", "new\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("u.txt", "untracked\n");
+    let before = state_unborn(&repo);
+
+    let cli = CliBackend::new(repo.path());
+    let tree = GixBackend::discover(repo.path())
+        .unwrap()
+        .working_tree()
+        .unwrap();
+    let snapshot = git_core::discard_everything(&cli, repo.path(), &tree).unwrap();
+    assert_eq!(
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        ""
+    );
+    git_core::restore_snapshot(&cli, repo.path(), &snapshot).unwrap();
+    assert_eq!(state_unborn(&repo), before);
+}
+
+/// `git diff --cached` needs HEAD; compare status and index content instead.
+fn state_unborn(repo: &TestRepo) -> (String, String) {
+    (
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        repo.git(&["ls-files", "--stage"]),
+    )
+}
