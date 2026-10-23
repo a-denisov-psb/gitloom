@@ -125,3 +125,23 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: before diffing against the index, working tree content runs through gix's `convert_to_git` pipeline: eol conversion (`core.autocrlf`, `.gitattributes` `text`/`eol`), `ident`, and configured external `filter.<name>.clean`/`process` drivers (e.g. Git LFS). If the pipeline fails (driver missing or failing), the diff view shows "Filtered file – diff not available" with the reason.
 - Why: the diff then equals `git diff`, so patches built from it (hunk/line staging, M2-07) apply cleanly; running the configured drivers is what Git itself does.
 - Consequences: external filter programs run in the background when such a file's diff is opened.
+
+## ADR-019 Askpass and credentials
+
+- Status: accepted (M3 plan)
+- Decision: Gitloom never stores credentials. Network commands run with
+  `GIT_ASKPASS` and `SSH_ASKPASS` pointing to the Gitloom executable in askpass mode
+  (`gitloom --askpass "<prompt>"`, small modal window, answer on stdout) and
+  `SSH_ASKPASS_REQUIRE=force`. Credential helpers and ssh-agent are used first, as
+  configured by the user.
+- Why: works with every credential setup without security-sensitive storage in Gitloom.
+
+## ADR-020 Network operations and auto-fetch
+
+- Status: accepted (M3 plan)
+- Decision: network operations are write operations (one at a time per repo), show
+  progress parsed from `--progress` and can be cancelled (process tree kill).
+  Auto-fetch is on by default every 5 minutes, yields to user operations and is
+  skipped during merge/rebase states.
+- Note: this is network access by default; it only contacts remotes the user
+  configured, so it does not conflict with ADR-009.

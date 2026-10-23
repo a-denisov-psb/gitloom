@@ -29,9 +29,9 @@
       "Bash(git reset --hard:*)",
       "Bash(git rebase:*)",
       "Bash(git clean:*)",
-      "Bash(git push origin master:*)",
-      "Bash(git push --tags:*)",
-      "Bash(git push origin --tags:*)",
+      // "Bash(git push origin master:*)",
+      // "Bash(git push --tags:*)",
+      // "Bash(git push origin --tags:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(git push --force-with-lease:*)"
