@@ -172,7 +172,9 @@ Acceptance:
 Acceptance:
 - Integration tests incl. unmerged force delete and remote delete against a bare remote.
 
-### [ ] M3-09 Tags
+### [x] M3-09 Tags
+
+> Done: `GitWriter::create_tag` (check-ref-format `refs/tags/<name>`; message via stdin makes it annotated) and `delete_tag`; `push_tag_args`, `delete_remote_tag_args`. Commit menu "Create tag here" → form (name, optional message; invalid or existing names refused in the form). Tag menu (sidebar entries and graph pills): Push to remote, Delete local (confirmation), Delete on remote (confirmation with one remote, remote form with several), Copy name. The sidebar lists local tags only (as before). Tests: lightweight and annotated create, invalid name, push, remote delete, local delete; app tests for form validation, menu, one vs. several remotes. Checked by hand: form → annotated tag v1 with message "rel" (pill and sidebar), Push to remote → tag on the bare remote, Delete on remote → gone there, Delete local → gone.
 
 - Commit context menu "Create tag here": name + optional message (annotated if a message is given).
 - Tag context menu: Delete local, Delete on remote, Push to remote, Copy name.

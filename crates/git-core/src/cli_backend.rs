@@ -339,6 +339,38 @@ pub trait GitWriter: Send + Sync {
             .map(drop)
     }
 
+    /// Creates tag `name` at commit `target`: annotated with `message`,
+    /// otherwise lightweight.
+    fn create_tag(&self, name: &str, target: &str, message: Option<&str>) -> Result<()> {
+        let read = RunOptions {
+            read_only: true,
+            ..RunOptions::default()
+        };
+        let full = format!("refs/tags/{name}");
+        self.run(&["check-ref-format", &full], read)
+            .map_err(|_| Error::Backend(format!("\"{name}\" is not a valid tag name")))?;
+        match message {
+            Some(message) => self
+                .run(
+                    &["tag", "--annotate", "--file=-", name, target],
+                    RunOptions {
+                        stdin: Some(message.as_bytes()),
+                        read_only: false,
+                    },
+                )
+                .map(drop),
+            None => self
+                .run(&["tag", name, target], RunOptions::default())
+                .map(drop),
+        }
+    }
+
+    /// Deletes local tag `name`.
+    fn delete_tag(&self, name: &str) -> Result<()> {
+        self.run(&["tag", "--delete", name], RunOptions::default())
+            .map(drop)
+    }
+
     /// Switches to local branch `branch`.
     fn switch_branch(&self, branch: &str) -> Result<()> {
         self.run(

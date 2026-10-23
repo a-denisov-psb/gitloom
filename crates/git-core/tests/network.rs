@@ -405,3 +405,33 @@ fn delete_branches_locally_and_on_the_remote() {
     .unwrap();
     assert!(!bare.try_git(&["rev-parse", "--verify", "--quiet", "gone"]));
 }
+
+#[test]
+fn tags_create_push_and_delete() {
+    let (_upstream, bare, local) = pull_setup();
+    let head = local.head();
+    let cli = CliBackend::new(local.path());
+
+    cli.create_tag("v1", &head, None).unwrap();
+    cli.create_tag("v2", &head, Some("Release 2\n\nNotes"))
+        .unwrap();
+    assert_eq!(
+        local.git(&["cat-file", "-t", "v1"]),
+        "commit",
+        "lightweight"
+    );
+    assert_eq!(local.git(&["cat-file", "-t", "v2"]), "tag", "annotated");
+    assert_eq!(
+        local.git(&["tag", "-l", "--format=%(contents:subject)", "v2"]),
+        "Release 2"
+    );
+    assert!(cli.create_tag("bad..name", &head, None).is_err());
+
+    network(&local, git_core::push_tag_args("origin", "v2")).unwrap();
+    assert_eq!(bare.git(&["rev-parse", "v2^{commit}"]), head);
+    network(&local, git_core::delete_remote_tag_args("origin", "v2")).unwrap();
+    assert!(!bare.try_git(&["rev-parse", "--verify", "--quiet", "refs/tags/v2"]));
+
+    cli.delete_tag("v1").unwrap();
+    assert!(!local.try_git(&["rev-parse", "--verify", "--quiet", "refs/tags/v1"]));
+}
