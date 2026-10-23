@@ -150,7 +150,9 @@ Acceptance:
 Acceptance:
 - Integration tests for all variants incl. blocked checkout + stash.
 
-### [ ] M3-07 Create branch
+### [x] M3-07 Create branch
+
+> Done: `git_core::check_branch_name` (pure, rules of `check-ref-format --branch`; an integration test compares with Git) for instant feedback, `GitWriter::create_branch` (runs `git check-ref-format --branch`, then `switch --create <name> <start>`). Toolbar Branch, Ctrl+B and commit menu "Create branch here" open an inline input in the branch/tag column (WIP row → HEAD; stash rows refused, unborn HEAD explained); red border + tooltip for invalid or duplicate names; Enter creates and checks out, Esc cancels; Git errors stay at the input instead of a dialog. Tests: name rules, Git agreement, create + checkout, invalid/duplicate names; app tests for validation, submit, inline Git error, close on success, WIP start, Esc. Checked by hand: commit menu → input in the "Main change" row, typing, "feature x" → red border and tooltip. Enter could not be checked by hand (keyboard input in WSLg stopped arriving), maintainer to-do.
 
 - Toolbar "Branch" and Ctrl+B: inline text input in the branch/tag column of the selected commit (WIP row → HEAD). Enter creates and checks out, Esc cancels.
 - Commit context menu "Create branch here".

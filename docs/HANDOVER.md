@@ -58,6 +58,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] M2-01: run the app natively on Windows (`cargo run -p gitloom -- <repo>`) and check the shortcuts (checklist sent 2026-10-23, based on `docs/UX-PARITY.md`); report findings. First run: only shortcuts allowed in text fields worked; second run: all but Shift+J/K; both fixed on `develop`, please re-check Shift+J/K.
 
 - [ ] M3-02 (once fetch/push exist, M3-03/M3-05): HTTPS with Git Credential Manager on Windows and SSH with a passphrase-protected key on Linux; a missing credential must show Gitloom's prompt window. Also check that Esc closes the prompt window (keyboard input did not reach it in my WSLg session; Cancel/OK/Yes by mouse verified).
+- [ ] M3-07: create a branch with the keyboard: select a commit, Ctrl+B, type a name (an invalid one shows a red border with the reason), Enter creates and checks it out, Esc cancels. Keyboard input was unreliable in my WSLg session (input, validation and typing verified; Enter only by tests).
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 
 ## Environment notes
