@@ -305,6 +305,19 @@ pub enum Message {
     /// Ask before deleting a remote branch (full name, e.g. `origin/topic`).
     DeleteRemoteBranch(String),
     DeleteRemoteBranchConfirmed(String),
+    /// Form for a new tag at commit `id`.
+    CreateTagStart(String),
+    /// Push a tag (asks for the remote if there are several).
+    PushTag(String),
+    /// Ask before deleting a local tag.
+    DeleteTag(String),
+    DeleteTagConfirmed(String),
+    /// Ask before deleting a tag on a remote.
+    DeleteRemoteTag(String),
+    DeleteRemoteTagConfirmed {
+        remote: String,
+        tag: String,
+    },
     /// Right click on a commit row.
     CommitContextMenu {
         id: String,
@@ -884,12 +897,123 @@ impl App {
         }
     }
 
+    /// Push (`delete == false`) or remote delete of tag `tag`: one remote
+    /// runs directly (delete after a confirmation), several ask in a form.
+    fn tag_remote_action(&mut self, tag: String, delete: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let remotes = self
+            .active_tab()
+            .and_then(Tab::view)
+            .map(|v| v.snapshot.remotes.clone())
+            .unwrap_or_default();
+        match remotes.as_slice() {
+            [] => {
+                self.modal = Some(Modal::info(
+                    "No remote",
+                    "This repository has no remote to push tags to.",
+                ));
+                Task::none()
+            }
+            [remote] if delete => {
+                self.modal = Some(Modal::confirm(
+                    "Delete remote tag",
+                    format!("Delete the tag {tag} on {remote}?"),
+                    "Delete",
+                    true,
+                    Message::DeleteRemoteTagConfirmed {
+                        remote: remote.clone(),
+                        tag,
+                    },
+                ));
+                Task::none()
+            }
+            [remote] => self.run_network(tab, push_tag_request(remote, &tag)),
+            _ => {
+                let default = if remotes.iter().any(|r| r == "origin") {
+                    "origin".to_owned()
+                } else {
+                    remotes[0].clone()
+                };
+                let (title, submit, action) = if delete {
+                    (
+                        format!("Delete tag {tag} on a remote"),
+                        "Delete",
+                        FormAction::DeleteRemoteTag { tab, tag },
+                    )
+                } else {
+                    (
+                        format!("Push tag {tag}"),
+                        "Push",
+                        FormAction::PushTag { tab, tag },
+                    )
+                };
+                self.form = Some(Form {
+                    title,
+                    text: String::new(),
+                    fields: vec![FormField::choice("Remote", default, remotes)],
+                    submit: submit.into(),
+                    action,
+                    error: None,
+                });
+                Task::none()
+            }
+        }
+    }
+
     /// Validates and runs the open form.
     fn submit_form(&mut self) -> Task<Message> {
         let Some(form) = self.form.as_mut() else {
             return Task::none();
         };
         match form.action.clone() {
+            FormAction::CreateTag { tab, target } => {
+                let name = form.value(0).to_owned();
+                let message = form.value(1).to_owned();
+                let tags: Vec<String> = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .map(|v| {
+                        v.snapshot
+                            .refs
+                            .iter()
+                            .filter(|r| r.kind == git_core::RefKind::Tag)
+                            .map(|r| r.name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let Some(form) = self.form.as_mut() else {
+                    return Task::none();
+                };
+                if let Some(problem) = git_core::check_branch_name(&name) {
+                    form.error = Some(
+                        problem
+                            .replace("Branch names", "Tag names")
+                            .replace("branch name", "tag name"),
+                    );
+                    return Task::none();
+                }
+                if tags.contains(&name) {
+                    form.error = Some(format!("A tag named \"{name}\" already exists"));
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Create tag {name}"), move |git| {
+                    let message = (!message.is_empty()).then_some(message.as_str());
+                    git.create_tag(&name, &target, message)
+                })
+            }
+            FormAction::PushTag { tab, tag } => {
+                let remote = form.value(0).to_owned();
+                self.form = None;
+                self.run_network(tab, push_tag_request(&remote, &tag))
+            }
+            FormAction::DeleteRemoteTag { tab, tag } => {
+                let remote = form.value(0).to_owned();
+                self.form = None;
+                self.run_network(tab, delete_remote_tag_request(&remote, &tag))
+            }
             FormAction::PushSetUpstream { tab, local } => {
                 let remote = form.value(0).to_owned();
                 let branch = form.value(1).to_owned();
@@ -2079,7 +2203,13 @@ impl App {
                             label: "Create branch here".into(),
                             shortcut: None,
                             enabled,
-                            message: Box::new(Message::NewBranchStart(Some(id))),
+                            message: Box::new(Message::NewBranchStart(Some(id.clone()))),
+                        },
+                        MenuEntry::Item {
+                            label: "Create tag here".into(),
+                            shortcut: None,
+                            enabled,
+                            message: Box::new(Message::CreateTagStart(id)),
                         },
                     ],
                 ));
@@ -2112,7 +2242,17 @@ impl App {
                         writable,
                         Message::DeleteRemoteBranch(name),
                     )],
-                    git_core::RefKind::Tag => Vec::new(),
+                    git_core::RefKind::Tag => vec![
+                        item("Push to remote", writable, Message::PushTag(name.clone())),
+                        item("Delete local", writable, Message::DeleteTag(name.clone())),
+                        item(
+                            "Delete on remote",
+                            writable,
+                            Message::DeleteRemoteTag(name.clone()),
+                        ),
+                        MenuEntry::Separator,
+                        item("Copy name", true, Message::CopyToClipboard(name)),
+                    ],
                 };
                 if !entries.is_empty() {
                     self.context_menu = Some(ContextMenu::new(position, entries));
@@ -2187,6 +2327,47 @@ impl App {
                     background: false,
                 };
                 return self.run_network(tab, request);
+            }
+            Message::CreateTagStart(target) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: format!("Create tag at {}", &target[..target.len().min(7)]),
+                    text: String::new(),
+                    fields: vec![
+                        FormField::text("Tag name", ""),
+                        FormField::text("Message (optional; makes an annotated tag)", ""),
+                    ],
+                    submit: "Create tag".into(),
+                    action: FormAction::CreateTag { tab, target },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::PushTag(tag) => return self.tag_remote_action(tag, false),
+            Message::DeleteRemoteTag(tag) => return self.tag_remote_action(tag, true),
+            Message::DeleteTag(tag) => {
+                self.modal = Some(Modal::confirm(
+                    "Delete tag",
+                    format!("Delete the local tag {tag}? Tags on remotes stay."),
+                    "Delete",
+                    true,
+                    Message::DeleteTagConfirmed(tag),
+                ));
+            }
+            Message::DeleteTagConfirmed(tag) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let name = tag.clone();
+                    return self.run_write(tab, format!("Delete tag {tag}"), move |git| {
+                        git.delete_tag(&name)
+                    });
+                }
+            }
+            Message::DeleteRemoteTagConfirmed { remote, tag } => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_network(tab, delete_remote_tag_request(&remote, &tag));
+                }
             }
             Message::NewBranchStart(at) => return self.start_new_branch(at),
             Message::NewBranchInput(name) => {
@@ -2850,6 +3031,24 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
             y: Some(offset),
         },
     )
+}
+
+fn push_tag_request(remote: &str, tag: &str) -> NetworkRequest {
+    NetworkRequest {
+        label: format!("Push tag {tag}"),
+        kind: NetworkKind::Push,
+        args: git_core::push_tag_args(remote, tag),
+        background: false,
+    }
+}
+
+fn delete_remote_tag_request(remote: &str, tag: &str) -> NetworkRequest {
+    NetworkRequest {
+        label: format!("Delete tag {tag} on {remote}"),
+        kind: NetworkKind::Push,
+        args: git_core::delete_remote_tag_args(remote, tag),
+        background: false,
+    }
 }
 
 fn local_branch_names(snapshot: &RepoSnapshot) -> Vec<String> {
@@ -5507,6 +5706,89 @@ mod tests {
         assert_eq!(app.modal.clone().unwrap().title, "Delete remote branch");
         let _ = app.update(Message::ModalAction(1));
         assert_eq!(running_args(&app), ["Delete origin/feature"]);
+    }
+
+    /// Checkout app with remotes and an existing tag `v1`.
+    fn tag_app(remotes: &[&str]) -> App {
+        let mut app = checkout_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.remotes = remotes.iter().map(|r| r.to_string()).collect();
+        snapshot.refs.push(git_core::Reference {
+            name: "v1".into(),
+            kind: git_core::RefKind::Tag,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn create_tag_form_validates() {
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::CreateTagStart("c".into()));
+        let input = |app: &mut App, field, value: &str| {
+            let _ = app.update(Message::FormInput {
+                field,
+                value: value.into(),
+            });
+        };
+        input(&mut app, 0, "bad name");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .starts_with("Tag names"));
+        input(&mut app, 0, "v1");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+        input(&mut app, 0, "v2");
+        input(&mut app, 1, "Release 2");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Create tag v2"]);
+    }
+
+    #[test]
+    fn tag_menu_and_remote_actions() {
+        let mut app = tag_app(&["origin"]);
+        let menu = branch_menu(&mut app, "v1", git_core::RefKind::Tag);
+        assert!(matches!(menu.select(0), Some(Message::PushTag(t)) if t == "v1"));
+        assert!(matches!(menu.select(4), Some(Message::CopyToClipboard(t)) if t == "v1"));
+
+        // One remote: push runs, remote delete asks.
+        let _ = app.update(Message::PushTag("v1".into()));
+        assert_eq!(running_args(&app), ["Push tag v1"]);
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::DeleteRemoteTag("v1".into()));
+        assert_eq!(app.modal.clone().unwrap().title, "Delete remote tag");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete tag v1 on origin"]);
+
+        // Several remotes: a form asks which one.
+        let mut app = tag_app(&["backup", "origin"]);
+        let _ = app.update(Message::PushTag("v1".into()));
+        assert_eq!(app.form.as_ref().unwrap().value(0), "origin");
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: "backup".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Push tag v1"]);
     }
 
     #[test]

@@ -449,6 +449,16 @@ fn pill<'a>(label: &RefLabel) -> Element<'a, Message> {
                 }
             })
         }
+        _ if label.kind == LabelKind::Tag => {
+            let name = label.text.clone();
+            crate::ui::context_area::context_area(pill, move |position| {
+                Message::BranchContextMenu {
+                    name: name.clone(),
+                    kind: RefKind::Tag,
+                    position,
+                }
+            })
+        }
         _ => pill,
     }
 }

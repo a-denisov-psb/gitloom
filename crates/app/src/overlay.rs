@@ -221,6 +221,15 @@ pub enum FormAction {
         tab: crate::app::TabId,
         local: String,
     },
+    /// Create a tag (name, optional message) at commit `target`.
+    CreateTag {
+        tab: crate::app::TabId,
+        target: String,
+    },
+    /// Push tag `tag` to the chosen remote.
+    PushTag { tab: crate::app::TabId, tag: String },
+    /// Delete tag `tag` on the chosen remote.
+    DeleteRemoteTag { tab: crate::app::TabId, tag: String },
 }
 
 /// Modal dialog with inputs (e.g. remote and branch name for a first push).
