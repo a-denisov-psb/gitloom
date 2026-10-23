@@ -35,7 +35,16 @@ pub enum Loadable<T> {
 #[derive(Debug, Clone)]
 pub struct CommitDetails {
     pub id: String,
-    pub changes: Loadable<Vec<FileChange>>,
+    pub changes: Loadable<DetailChanges>,
+}
+
+/// Files shown in the details panel of a graph row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DetailChanges {
+    /// Commit against its first parent.
+    Commit(Vec<FileChange>),
+    /// Stash entry, split into staged, unstaged and untracked parts.
+    Stash(git_core::StashChanges),
 }
 
 #[derive(Debug, Clone)]
@@ -101,7 +110,7 @@ impl DiffView {
         match self.request.kind {
             git_core::DiffKind::Unstaged | git_core::DiffKind::Untracked => Some(false),
             git_core::DiffKind::Staged => Some(true),
-            git_core::DiffKind::Commit(_) => None,
+            git_core::DiffKind::Commit(_) | git_core::DiffKind::Stash { .. } => None,
         }
     }
 
