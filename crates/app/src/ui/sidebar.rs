@@ -25,7 +25,10 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     };
 
     let local: Vec<_> = refs_of(RefKind::LocalBranch)
-        .map(|r| ref_item(r, &r.name, 1))
+        .map(|r| match &repo.rename {
+            Some(rename) if rename.old == r.name => rename_input(rename),
+            _ => ref_item(r, &r.name, 1),
+        })
         .collect();
 
     let mut by_remote: BTreeMap<&str, Vec<&Reference>> = BTreeMap::new();
@@ -161,9 +164,33 @@ fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element
     let content = content.into();
 
     let item = list_button(content, depth, Message::RefClicked(reference.name.clone()));
-    match checkout_target(reference) {
+    let item = match checkout_target(reference) {
         Some(target) => crate::ui::context_area::double_click_area(item, Message::Checkout(target)),
         None => item,
+    };
+    let (name, kind) = (reference.name.clone(), reference.kind);
+    crate::ui::context_area::context_area(item, move |position| Message::BranchContextMenu {
+        name: name.clone(),
+        kind,
+        position,
+    })
+}
+
+/// Inline rename input in place of the branch entry; red border on an error.
+fn rename_input(rename: &crate::repo_view::RenameBranch) -> Element<'_, Message> {
+    let field = text_input("Branch name", &rename.name)
+        .id(crate::ui::RENAME_INPUT)
+        .on_input(Message::RenameInput)
+        .on_submit(Message::RenameSubmit)
+        .size(13)
+        .padding([2, 4])
+        .style(theme::inline_input(rename.error.is_some()));
+    let field = container(field).padding(iced::Padding::from([1, 6]).left(6.0 + INDENT));
+    match &rename.error {
+        Some(error) => column![field, text(error.clone()).size(11).color(theme::DANGER)]
+            .spacing(2)
+            .into(),
+        None => field.into(),
     }
 }
 
