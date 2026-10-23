@@ -43,6 +43,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
+| Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
+| Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
