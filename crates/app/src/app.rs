@@ -6,7 +6,7 @@ use git_core::{DiffRequest, GitBackend, GixBackend};
 use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
-use crate::overlay::{ContextMenu, MenuEntry, Modal};
+use crate::overlay::{ContextMenu, Form, FormAction, FormField, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{
     CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkKind, NetworkOp,
@@ -261,6 +261,19 @@ pub enum Message {
     Pull(Option<git_core::PullMode>),
     /// Abort the merge or rebase a failed pull left behind.
     AbortOperation,
+    /// Toolbar Push; `force` uses `--force-with-lease` (after confirmation).
+    Push {
+        force: bool,
+    },
+    /// Ask before a force push.
+    ForcePushRequested,
+    /// Input of field `field` of the open form changed.
+    FormInput {
+        field: usize,
+        value: String,
+    },
+    FormSubmit,
+    FormClosed,
     /// Periodic check for due auto-fetches.
     AutoFetchTick(std::time::Instant),
     Undo,
@@ -314,6 +327,8 @@ pub struct App {
     pub notice: Option<String>,
     /// Open modal dialog; blocks the rest of the window.
     pub modal: Option<Modal>,
+    /// Open form dialog (inputs); below a modal, above everything else.
+    pub form: Option<Form>,
     pub context_menu: Option<ContextMenu>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
@@ -348,6 +363,7 @@ impl App {
             git: None,
             notice: None,
             modal: None,
+            form: None,
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
             pull_mode: git_core::PullMode::default(),
@@ -515,6 +531,91 @@ impl App {
             }
         }
         task
+    }
+
+    /// Pushes the current branch of tab `tab` to its upstream; without one,
+    /// a form asks for remote and branch name and sets the upstream.
+    fn push(&mut self, tab: TabId, force: bool) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let snapshot = Arc::clone(&view.snapshot);
+        let Some((local, upstream)) = snapshot.head_upstream() else {
+            self.modal = Some(Modal::info(
+                "Cannot push",
+                "HEAD is detached. Create or check out a branch to push.",
+            ));
+            return Task::none();
+        };
+        match upstream {
+            Some((remote, branch)) => {
+                let request = NetworkRequest {
+                    label: if force { "Force push" } else { "Push" }.into(),
+                    kind: NetworkKind::Push,
+                    args: git_core::push_args(&remote, local, &branch, false, force),
+                    background: false,
+                };
+                self.run_network(tab, request)
+            }
+            None if snapshot.remotes.is_empty() => {
+                self.modal = Some(Modal::info(
+                    "Cannot push",
+                    "This repository has no remote. Add one first (e.g. `git remote add origin <url>`).",
+                ));
+                Task::none()
+            }
+            None => {
+                let remote = if snapshot.remotes.iter().any(|r| r == "origin") {
+                    "origin".to_owned()
+                } else {
+                    snapshot.remotes[0].clone()
+                };
+                self.form = Some(Form {
+                    title: format!("Push {local}"),
+                    text: format!(
+                        "{local} has no upstream branch yet. Push it and set the upstream:"
+                    ),
+                    fields: vec![
+                        FormField::choice("Remote", remote, snapshot.remotes.clone()),
+                        FormField::text("Branch name on the remote", local),
+                    ],
+                    submit: "Push".into(),
+                    action: FormAction::PushSetUpstream {
+                        tab,
+                        local: local.to_owned(),
+                    },
+                    error: None,
+                });
+                iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
+            }
+        }
+    }
+
+    /// Validates and runs the open form.
+    fn submit_form(&mut self) -> Task<Message> {
+        let Some(form) = self.form.as_mut() else {
+            return Task::none();
+        };
+        match form.action.clone() {
+            FormAction::PushSetUpstream { tab, local } => {
+                let remote = form.value(0).to_owned();
+                let branch = form.value(1).to_owned();
+                if remote.is_empty() || branch.is_empty() {
+                    form.error = Some("Choose a remote and enter a branch name.".into());
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_network(
+                    tab,
+                    NetworkRequest {
+                        label: "Push".into(),
+                        kind: NetworkKind::Push,
+                        args: git_core::push_args(&remote, &local, &branch, true, false),
+                        background: false,
+                    },
+                )
+            }
+        }
     }
 
     /// Pulls the current branch of tab `tab` in the current pull mode.
@@ -782,7 +883,10 @@ impl App {
                 return iced::widget::operation::focus(FILTER_INPUT);
             }
             Shortcut::Close => {
-                if self.modal.take().is_some() || self.context_menu.take().is_some() {
+                if self.modal.take().is_some()
+                    || self.context_menu.take().is_some()
+                    || self.form.take().is_some()
+                {
                     return Task::none();
                 }
                 if let Some(view) = self.active_view_mut() {
@@ -794,6 +898,8 @@ impl App {
                     if let Some(message) = modal.default_action() {
                         return self.update(message);
                     }
+                } else if self.form.is_some() {
+                    return self.update(Message::FormSubmit);
                 }
             }
         }
@@ -1461,6 +1567,7 @@ impl App {
                 // in the status bar (until a fetch works again), never as a dialog.
                 let mut background = None;
                 let mut pull = false;
+                let mut push = false;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
@@ -1469,6 +1576,7 @@ impl App {
                             view.fetch_error_shown = result.is_err();
                         }
                         pull = op.kind == NetworkKind::Pull;
+                        push = op.kind == NetworkKind::Push;
                     }
                     queued = view.queued.take();
                     match &result {
@@ -1499,6 +1607,9 @@ impl App {
                         if queued.is_none() {
                             self.status = format!("{label}: Cancelled");
                         }
+                    }
+                    Err(error) if push && git_core::push_rejection(&error).is_some() => {
+                        self.modal = Some(push_rejected_dialog(error));
                     }
                     // Decided after the refresh: conflict dialog or error dialog.
                     Err(error) if pull => {
@@ -1584,6 +1695,29 @@ impl App {
                     return self.pull(tab);
                 }
             }
+            Message::Push { force } => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.push(tab, force);
+                }
+            }
+            Message::ForcePushRequested => {
+                self.modal = Some(Modal::confirm(
+                    "Force push",
+                    "Overwrite the remote branch with your local branch? Commits on the remote \
+                     that you do not have are lost. The push is refused if the remote changed \
+                     since your last fetch (--force-with-lease).",
+                    "Force push",
+                    true,
+                    Message::Push { force: true },
+                ));
+            }
+            Message::FormInput { field, value } => {
+                if let Some(field) = self.form.as_mut().and_then(|f| f.fields.get_mut(field)) {
+                    field.value = value;
+                }
+            }
+            Message::FormClosed => self.form = None,
+            Message::FormSubmit => return self.submit_form(),
             Message::AbortOperation => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -2209,6 +2343,42 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
             y: Some(offset),
         },
     )
+}
+
+/// Dialog for a rejected push: the remote has commits we do not have
+/// (offer Pull or a force push), or a force push lost its lease.
+fn push_rejected_dialog(error: String) -> Modal {
+    if git_core::push_rejection(&error) == Some(git_core::PushRejection::StaleLease) {
+        return Modal::error("Force push refused", error).with_text(
+            "The remote branch changed since your last fetch, so the force push was refused \
+             to keep those commits. Fetch and check the changes first.",
+        );
+    }
+    Modal {
+        title: "Push rejected".into(),
+        text: "The remote branch has commits that you do not have. Pull them first, or \
+               overwrite the remote branch with a force push."
+            .into(),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Force push".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::ForcePushRequested),
+            },
+            crate::overlay::DialogButton {
+                label: "Pull".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(Message::Pull(None)),
+            },
+        ],
+        default: Some(2),
+    }
 }
 
 /// Why the current branch cannot be pulled, if it cannot.
@@ -4398,6 +4568,89 @@ mod tests {
                 assert_eq!(modal.title, "Pull failed");
             }
         }
+    }
+
+    fn running_args(app: &App) -> Vec<String> {
+        // The request is consumed by the task; the label tells what started.
+        app.tabs[0]
+            .view()
+            .unwrap()
+            .busy
+            .clone()
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn push_goes_to_the_upstream() {
+        let mut app = app_with_upstream();
+        let _ = app.update(Message::Push { force: false });
+        assert_eq!(running_args(&app), ["Push"]);
+        assert!(app.form.is_none());
+    }
+
+    #[test]
+    fn first_push_asks_for_remote_and_branch() {
+        let mut app = app_with_remote();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "topic".into(),
+            target: "c".into(),
+        };
+        snapshot.remotes = vec!["backup".into(), "origin".into()];
+        view.snapshot = Arc::new(snapshot);
+
+        let _ = app.update(Message::Push { force: false });
+        let form = app.form.clone().expect("push form");
+        assert_eq!(form.value(0), "origin", "origin preferred");
+        assert_eq!(form.value(1), "topic");
+
+        let _ = app.update(Message::FormInput {
+            field: 1,
+            value: "  ".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(
+            app.form.as_ref().unwrap().error.is_some(),
+            "empty name refused"
+        );
+        let _ = app.update(Message::FormInput {
+            field: 1,
+            value: "feature/topic".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Push"]);
+    }
+
+    #[test]
+    fn rejected_push_offers_pull_or_force_push() {
+        let mut app = app_with_upstream();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Push { force: false });
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Push".into(),
+            result: Err(" ! [rejected]        main -> main (fetch first)".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Push rejected");
+        assert!(matches!(modal.default_action(), Some(Message::Pull(None))));
+        assert!(matches!(modal.action(1), Some(Message::ForcePushRequested)));
+
+        let _ = app.update(Message::ModalAction(1));
+        let confirm = app.modal.clone().unwrap();
+        assert_eq!(confirm.title, "Force push");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Force push"]);
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Force push".into(),
+            result: Err(" ! [rejected]        main -> main (stale info)".into()),
+        });
+        assert_eq!(app.modal.unwrap().title, "Force push refused");
     }
 
     #[test]

@@ -45,6 +45,8 @@ pub struct RepoSnapshot {
     pub truncated: bool,
     /// Operation in progress (merge, rebase, cherry-pick, revert).
     pub state: git_core::RepoState,
+    /// Names of the configured remotes.
+    pub remotes: Vec<String>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
@@ -61,6 +63,7 @@ impl RepoSnapshot {
         let working_tree = backend.working_tree().map_err(|e| e.to_string())?;
         let mut snapshot = Self::build(log, head, refs, stashes, working_tree)?;
         snapshot.state = backend.state().map_err(|e| e.to_string())?;
+        snapshot.remotes = backend.remotes().map_err(|e| e.to_string())?;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
         Ok(snapshot)
@@ -173,6 +176,7 @@ impl RepoSnapshot {
             head,
             truncated: log.truncated,
             state: git_core::RepoState::Clean,
+            remotes: Vec::new(),
             merge_message: None,
             commit_template: None,
         })
@@ -226,6 +230,35 @@ impl RepoSnapshot {
             Head::Branch { name, .. } | Head::Unborn { name } => name.clone(),
             Head::Detached { target } => format!("HEAD ({})", &target[..target.len().min(7)]),
         }
+    }
+
+    /// The checked-out local branch and its upstream as `(remote, branch)`.
+    pub fn head_upstream(&self) -> Option<(&str, Option<(String, String)>)> {
+        let Head::Branch { name, .. } = &self.head else {
+            return None;
+        };
+        let local = self
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && &r.name == name);
+        let upstream = local.and_then(|r| r.upstream.as_deref()).map(|upstream| {
+            // Prefer the remote-tracking ref (handles remotes with "/" in the branch).
+            match self
+                .refs
+                .iter()
+                .find(|r| r.kind == git_core::RefKind::RemoteBranch && r.name == upstream)
+            {
+                Some(r) => (
+                    r.remote().unwrap_or_default().to_owned(),
+                    r.local_name().to_owned(),
+                ),
+                None => match upstream.split_once('/') {
+                    Some((remote, branch)) => (remote.to_owned(), branch.to_owned()),
+                    None => (upstream.to_owned(), name.clone()),
+                },
+            }
+        });
+        Some((name.as_str(), upstream))
     }
 
     /// Readable name of `id`: a branch or tag pointing at it (local

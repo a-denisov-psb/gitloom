@@ -14,7 +14,7 @@
 pub mod context_area;
 mod diff;
 mod graph;
-mod overlays;
+pub(crate) mod overlays;
 pub(crate) mod panel;
 mod sidebar;
 mod start;
@@ -51,6 +51,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut layers = vec![base];
     if let Some(menu) = &app.context_menu {
         layers.push(overlays::context_menu(menu, app.window_size));
+    }
+    if let Some(form) = &app.form {
+        layers.push(overlays::form(form));
     }
     if let Some(modal) = &app.modal {
         layers.push(overlays::modal(modal));

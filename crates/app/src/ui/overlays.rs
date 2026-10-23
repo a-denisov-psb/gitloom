@@ -1,12 +1,15 @@
 //! Rendering of the modal dialog and the context menu above the window.
 
 use iced::widget::{
-    button, column, container, mouse_area, opaque, row, scrollable, space, text, Column,
+    button, column, container, mouse_area, opaque, pick_list, row, scrollable, space, text,
+    text_input, Column,
 };
 use iced::{Element, Fill, Font, Length, Padding};
 
 use crate::app::Message;
-use crate::overlay::{ButtonKind, ContextMenu, MenuEntry, Modal, MENU_ITEM_HEIGHT, MENU_WIDTH};
+use crate::overlay::{
+    ButtonKind, ContextMenu, FieldKind, Form, MenuEntry, Modal, MENU_ITEM_HEIGHT, MENU_WIDTH,
+};
 use crate::theme;
 use crate::ui::muted;
 
@@ -55,6 +58,72 @@ pub fn modal(modal: &Modal) -> Element<'_, Message> {
     opaque(
         mouse_area(container(dialog).center(Fill).style(theme::backdrop))
             .on_press(Message::ModalClosed)
+            .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
+/// Id of the first input of a form, focused when the form opens.
+pub const FORM_FIRST_INPUT: &str = "form-first-input";
+
+/// Form dialog: labelled inputs, validation message, Cancel and submit.
+pub fn form(form: &Form) -> Element<'_, Message> {
+    let mut content = column![text(&form.title).size(17)].spacing(12);
+    if !form.text.is_empty() {
+        content = content.push(text(&form.text));
+    }
+    let mut first_text = true;
+    for (index, field) in form.fields.iter().enumerate() {
+        let input: Element<'_, Message> = match &field.kind {
+            FieldKind::Text => {
+                let mut input = text_input("", &field.value)
+                    .on_input(move |value| Message::FormInput {
+                        field: index,
+                        value,
+                    })
+                    .on_submit(Message::FormSubmit)
+                    .padding(6);
+                if first_text {
+                    input = input.id(FORM_FIRST_INPUT);
+                    first_text = false;
+                }
+                input.into()
+            }
+            FieldKind::Choice(options) => {
+                pick_list(options.clone(), Some(field.value.clone()), move |value| {
+                    Message::FormInput {
+                        field: index,
+                        value,
+                    }
+                })
+                .width(Fill)
+                .into()
+            }
+        };
+        content = content.push(column![muted(&field.label).size(12), input].spacing(4));
+    }
+    if let Some(error) = &form.error {
+        content = content.push(text(error).size(12).color(theme::DANGER));
+    }
+    content = content.push(
+        row![
+            space::horizontal(),
+            button(text("Cancel"))
+                .on_press(Message::FormClosed)
+                .padding([6, 14])
+                .style(button::secondary),
+            button(text(&form.submit))
+                .on_press(Message::FormSubmit)
+                .padding([6, 14])
+                .style(button::primary),
+        ]
+        .spacing(8),
+    );
+    let dialog = container(content)
+        .width(DIALOG_WIDTH)
+        .padding(20)
+        .style(theme::dialog);
+    opaque(
+        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
             .interaction(iced::mouse::Interaction::Idle),
     )
 }

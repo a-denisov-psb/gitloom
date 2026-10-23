@@ -63,7 +63,7 @@ pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Messa
         action(view, ToolbarAction::Redo),
         divider(),
         row![pull_button(view, pull_mode), pull_dropdown()].align_y(iced::Center),
-        action(view, ToolbarAction::Push),
+        push_button(view),
         divider(),
         action(view, ToolbarAction::Branch),
         action(view, ToolbarAction::Stash),
@@ -181,6 +181,38 @@ fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Mes
             .on_press_maybe(view.busy.is_none().then_some(Message::Pull(None)))
             .into(),
         mode.label().to_owned(),
+    )
+}
+
+/// Push the current branch; the tooltip names the target.
+fn push_button<'a>(view: &RepoView) -> Element<'a, Message> {
+    let content = column![
+        text(ToolbarAction::Push.glyph()).size(16),
+        text(ToolbarAction::Push.label()).size(11)
+    ]
+    .spacing(1)
+    .align_x(iced::Center);
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    let tooltip = match view.snapshot.head_upstream() {
+        Some((local, Some((remote, branch)))) => format!("Push {local} to {remote}/{branch}"),
+        Some((local, None)) => format!("Push {local} and set its upstream"),
+        None => "Check out a branch to push".to_owned(),
+    };
+    with_tooltip_text(
+        button
+            .on_press_maybe(
+                view.busy
+                    .is_none()
+                    .then_some(Message::Push { force: false }),
+            )
+            .into(),
+        tooltip,
     )
 }
 
