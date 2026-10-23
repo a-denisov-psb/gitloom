@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M2 – Working copy: stage, commit, stash** → [`milestones/M2-working-copy.md`](milestones/M2-working-copy.md)
+**M3 – Branches and remotes** (version 0.4.0): task-level plan to be prepared with the maintainer; no milestone file yet.
 
 ## Vision
 
@@ -14,8 +14,8 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 |---|---|---|---|
 | M0 | 0.1.0 | Layout shell | Done |
 | M1 | 0.2.0 | Real repository (read-only) and lane graph | Done |
-| M2 | 0.3.0 | Working copy: stage, commit, stash | In progress |
-| M3 | 0.4.0 | Branches and remotes | Planned |
+| M2 | 0.3.0 | Working copy: stage, commit, stash | Done |
+| M3 | 0.4.0 | Branches and remotes | Next (planning) |
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Planned |
 | M5 | 0.6.0 | Productivity parity | Planned |
 | M6 | 1.0.0 | Release readiness | Planned |
@@ -30,7 +30,7 @@ iced shell with tabs, toolbar, sidebar, graph table, staging and detail panel, d
 
 Open any local non-bare repository and see real history with a correct lane graph, refs, working tree status, commit details and read-only diffs. Session restore. No demo data left in the app.
 
-### M2 – Working copy
+### M2 – Working copy (done)
 
 The daily loop without a terminal: file watcher, stage/unstage and discard by file, hunk and line, commit and amend, stash with stashes in the graph, undo/redo for commit, amend and discard. All writes go through the new `CliBackend`. Context menu and modal infrastructure moved here from M3. Details: [`milestones/M2-working-copy.md`](milestones/M2-working-copy.md).
 

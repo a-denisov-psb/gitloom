@@ -35,12 +35,14 @@ Out of scope (later):
 
 ## Milestone acceptance
 
-- [ ] On this repository: modify files, stage a single line, commit, amend, undo the amend, stash with untracked files, pop — all from the UI, results identical to the CLI.
-- [ ] External changes (editor, `cargo build`, `git` in a terminal) appear within 1 s without manual refresh; build output in ignored folders causes no refresh storm.
-- [ ] CI green on Windows, macOS and Linux; a CRLF repository on Windows can be staged by hunk.
-- [ ] Write actions are disabled with a clear tooltip when `git` is missing or too old.
-- [ ] `./scripts/check.sh` green, `CHANGELOG.md`, `docs/UX-PARITY.md`, `docs/DECISIONS.md` up to date.
-- [ ] Released as `v0.3.0` (M2-17).
+- [x] On this repository: modify files, stage a single line, commit, amend, undo the amend, stash with untracked files, pop — all from the UI, results identical to the CLI.
+- [x] External changes (editor, `cargo build`, `git` in a terminal) appear within 1 s without manual refresh; build output in ignored folders causes no refresh storm.
+- [x] CI green on Windows, macOS and Linux; a CRLF repository on Windows can be staged by hunk.
+- [x] Write actions are disabled with a clear tooltip when `git` is missing or too old.
+- [x] `./scripts/check.sh` green, `CHANGELOG.md`, `docs/UX-PARITY.md`, `docs/DECISIONS.md` up to date.
+- [x] Released as `v0.3.0` (M2-17).
+
+> Note (M2-17): the first item was checked step by step in the task notes on scratch repositories (line staging M2-07, commit M2-09, amend and undo M2-12, stash with untracked files and pop M2-11), not as one run on this repository; keyboard commit confirmed by the maintainer on Windows.
 
 ## Dependencies to add
 
@@ -295,7 +297,9 @@ Acceptance:
 - Update `docs/PERFORMANCE.md`.
 - Optional (from M1-15): release or limit gix pack mappings and check allocator retention after repeated refreshes; only if cheap, otherwise propose a follow-up.
 
-### [ ] M2-17 Release v0.3.0
+### [x] M2-17 Release v0.3.0
+
+> Done (2026-10-23): `release/0.3.0`, version bump, changelog, README, ROADMAP, HANDOVER. The CRLF hunk-staging acceptance item is covered by the integration tests, which also ran on Windows (CI and locally); no manual check on a Windows CRLF repository.
 
 Same procedure as M1-16 (`/release`), only when the maintainer asks. After the release Claude Code pushes `develop`; the maintainer pushes `master` and the tag.
 
