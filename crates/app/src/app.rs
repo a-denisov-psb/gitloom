@@ -339,6 +339,10 @@ pub enum Message {
         id: String,
         position: iced::Point,
     },
+    /// Fast-forward a branch that is not checked out to its upstream.
+    PullBranch(String),
+    /// Push a branch that is not checked out (form without upstream).
+    PushBranch(String),
     /// Toolbar Push; `force` uses `--force-with-lease` (after confirmation).
     Push {
         force: bool,
@@ -879,38 +883,53 @@ impl App {
                 };
                 self.run_network(tab, request)
             }
-            None if snapshot.remotes.is_empty() => {
-                self.modal = Some(Modal::info(
-                    "Cannot push",
-                    "This repository has no remote. Add one first (e.g. `git remote add origin <url>`).",
-                ));
-                Task::none()
-            }
-            None => {
-                let remote = if snapshot.remotes.iter().any(|r| r == "origin") {
-                    "origin".to_owned()
-                } else {
-                    snapshot.remotes[0].clone()
-                };
-                self.form = Some(Form {
-                    title: format!("Push {local}"),
-                    text: format!(
-                        "{local} has no upstream branch yet. Push it and set the upstream:"
-                    ),
-                    fields: vec![
-                        FormField::choice("Remote", remote, snapshot.remotes.clone()),
-                        FormField::text("Branch name on the remote", local),
-                    ],
-                    submit: "Push".into(),
-                    action: FormAction::PushSetUpstream {
-                        tab,
-                        local: local.to_owned(),
-                    },
-                    error: None,
-                });
-                iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
-            }
+            None => self.push_setup_form(tab, local.to_owned()),
         }
+    }
+
+    /// Upstream of local branch `local` as `(remote, branch)`.
+    fn branch_upstream(&self, local: &str) -> Option<(String, String)> {
+        let snapshot = &self.active_tab()?.view()?.snapshot;
+        let upstream = snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == local)?
+            .upstream
+            .clone()?;
+        let (remote, branch) = upstream.split_once('/')?;
+        Some((remote.to_owned(), branch.to_owned()))
+    }
+
+    /// Form for the first push of `local`: remote and remote branch name.
+    fn push_setup_form(&mut self, tab: TabId, local: String) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let remotes = view.snapshot.remotes.clone();
+        if remotes.is_empty() {
+            self.modal = Some(Modal::info(
+                "Cannot push",
+                "This repository has no remote. Add one with \"+\" in the REMOTE section.",
+            ));
+            return Task::none();
+        }
+        let remote = if remotes.iter().any(|r| r == "origin") {
+            "origin".to_owned()
+        } else {
+            remotes[0].clone()
+        };
+        self.form = Some(Form {
+            title: format!("Push {local}"),
+            text: format!("{local} has no upstream branch yet. Push it and set the upstream:"),
+            fields: vec![
+                FormField::choice("Remote", remote, remotes),
+                FormField::text("Branch name on the remote", local.clone()),
+            ],
+            submit: "Push".into(),
+            action: FormAction::PushSetUpstream { tab, local },
+            error: None,
+        });
+        iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
     }
 
     /// Form to choose the upstream of `local` among the remote branches.
@@ -1148,11 +1167,23 @@ impl App {
                     return Task::none();
                 }
                 self.form = None;
+                let is_head = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .is_some_and(|v| v.snapshot.head.branch() == Some(local.as_str()));
                 self.run_network(
                     tab,
                     NetworkRequest {
-                        label: "Push".into(),
-                        kind: NetworkKind::Push,
+                        label: if is_head {
+                            "Push".into()
+                        } else {
+                            format!("Push {local}")
+                        },
+                        kind: if is_head {
+                            NetworkKind::Push
+                        } else {
+                            NetworkKind::PushBranch
+                        },
                         args: git_core::push_args(&remote, &local, &branch, true, false),
                         background: false,
                     },
@@ -2056,6 +2087,7 @@ impl App {
                 let writable = self.write_block().is_none();
                 let write_item =
                     |label: &str, shortcut: Option<&str>, message: Message| MenuEntry::Item {
+                        hint: None,
                         label: label.into(),
                         shortcut: shortcut.map(str::to_owned),
                         enabled: writable,
@@ -2297,6 +2329,7 @@ impl App {
                 let writable = self.write_block().is_none();
                 let mut entries = vec![
                     MenuEntry::Item {
+                        hint: None,
                         label: "Fetch all".into(),
                         shortcut: Some("Ctrl+L".into()),
                         enabled: writable,
@@ -2307,6 +2340,7 @@ impl App {
                 for mode in git_core::PullMode::ALL {
                     let mark = if mode == self.pull_mode { "✓ " } else { "" };
                     entries.push(MenuEntry::Item {
+                        hint: None,
                         label: format!("{mark}{}", mode.label()),
                         shortcut: None,
                         enabled: writable,
@@ -2341,31 +2375,22 @@ impl App {
             }
             Message::StashAndCheckout(target) => return self.checkout(target, true),
             Message::CommitContextMenu { id, position } => {
-                let enabled = self.write_block().is_none();
+                let writable = self.write_block().is_none();
+                let message = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.commit(&id))
+                    .map(|c| {
+                        if c.body.is_empty() {
+                            c.summary.clone()
+                        } else {
+                            format!("{}\n\n{}", c.summary, c.body)
+                        }
+                    })
+                    .unwrap_or_default();
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    vec![
-                        MenuEntry::Item {
-                            label: "Checkout this commit".into(),
-                            shortcut: None,
-                            enabled,
-                            message: Box::new(Message::Checkout(CheckoutTarget::Commit(
-                                id.clone(),
-                            ))),
-                        },
-                        MenuEntry::Item {
-                            label: "Create branch here".into(),
-                            shortcut: None,
-                            enabled,
-                            message: Box::new(Message::NewBranchStart(Some(id.clone()))),
-                        },
-                        MenuEntry::Item {
-                            label: "Create tag here".into(),
-                            shortcut: None,
-                            enabled,
-                            message: Box::new(Message::CreateTagStart(id)),
-                        },
-                    ],
+                    crate::menus::commit(&id, &message, writable),
                 ));
             }
             Message::BranchContextMenu {
@@ -2374,62 +2399,28 @@ impl App {
                 position,
             } => {
                 let writable = self.write_block().is_none();
-                let is_head = self
-                    .active_tab()
-                    .and_then(Tab::view)
-                    .is_some_and(|v| v.snapshot.head.branch() == Some(name.as_str()));
-                let item = |label: &str, enabled: bool, message: Message| MenuEntry::Item {
-                    label: label.into(),
-                    shortcut: None,
-                    enabled,
-                    message: Box::new(message),
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
                 };
-                // Completed with checkout, pull, push, upstream, tags in M3-11.
                 let entries = match kind {
                     git_core::RefKind::LocalBranch => {
-                        let has_upstream = self.active_tab().and_then(Tab::view).is_some_and(|v| {
-                            v.snapshot
-                                .refs
-                                .iter()
-                                .any(|r| r.name == name && r.kind == kind && r.upstream.is_some())
-                        });
-                        vec![
-                            item(
-                                "Set upstream…",
-                                writable,
-                                Message::SetUpstreamStart(name.clone()),
-                            ),
-                            item(
-                                "Unset upstream",
-                                writable && has_upstream,
-                                Message::UnsetUpstream(name.clone()),
-                            ),
-                            MenuEntry::Separator,
-                            item("Rename…", writable, Message::RenameStart(name.clone())),
-                            // The checked-out branch cannot be deleted.
-                            item("Delete", writable && !is_head, Message::DeleteBranch(name)),
-                        ]
-                    }
-                    git_core::RefKind::RemoteBranch => vec![item(
-                        "Delete on remote",
-                        writable,
-                        Message::DeleteRemoteBranch(name),
-                    )],
-                    git_core::RefKind::Tag => vec![
-                        item("Push to remote", writable, Message::PushTag(name.clone())),
-                        item("Delete local", writable, Message::DeleteTag(name.clone())),
-                        item(
-                            "Delete on remote",
+                        let local = view
+                            .snapshot
+                            .refs
+                            .iter()
+                            .find(|r| r.kind == kind && r.name == name);
+                        crate::menus::local_branch(crate::menus::LocalBranch {
+                            name: &name,
+                            target: local.map_or("", |r| r.target.as_str()),
+                            is_head: view.snapshot.head.branch() == Some(name.as_str()),
+                            has_upstream: local.is_some_and(|r| r.upstream.is_some()),
                             writable,
-                            Message::DeleteRemoteTag(name.clone()),
-                        ),
-                        MenuEntry::Separator,
-                        item("Copy name", true, Message::CopyToClipboard(name)),
-                    ],
+                        })
+                    }
+                    git_core::RefKind::RemoteBranch => crate::menus::remote_branch(&name, writable),
+                    git_core::RefKind::Tag => crate::menus::tag(&name, writable),
                 };
-                if !entries.is_empty() {
-                    self.context_menu = Some(ContextMenu::new(position, entries));
-                }
+                self.context_menu = Some(ContextMenu::new(position, entries));
             }
             Message::RenameStart(old) => {
                 if let Some(view) = self.active_view_mut() {
@@ -2526,21 +2517,9 @@ impl App {
             }
             Message::RemoteContextMenu { name, position } => {
                 let writable = self.write_block().is_none();
-                let item = |label: &str, message: Message| MenuEntry::Item {
-                    label: label.into(),
-                    shortcut: None,
-                    enabled: writable,
-                    message: Box::new(message),
-                };
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    vec![
-                        item("Fetch", Message::FetchRemote(name.clone())),
-                        MenuEntry::Separator,
-                        item("Edit URL…", Message::EditRemoteUrl(name.clone())),
-                        item("Rename…", Message::RenameRemoteStart(name.clone())),
-                        item("Remove", Message::RemoveRemote(name)),
-                    ],
+                    crate::menus::remote(&name, writable),
                 ));
             }
             Message::FetchRemote(name) => {
@@ -2668,6 +2647,38 @@ impl App {
                 }
             }
             Message::NewBranchSubmit => return self.create_branch(),
+            Message::PullBranch(local) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some((remote, branch)) = self.branch_upstream(&local) else {
+                    return Task::none();
+                };
+                let request = NetworkRequest {
+                    label: format!("Pull {local}"),
+                    kind: NetworkKind::Fetch,
+                    args: git_core::fast_forward_args(&remote, &branch, &local),
+                    background: false,
+                };
+                return self.run_network(tab, request);
+            }
+            Message::PushBranch(local) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                match self.branch_upstream(&local) {
+                    Some((remote, branch)) => {
+                        let request = NetworkRequest {
+                            label: format!("Push {local}"),
+                            kind: NetworkKind::PushBranch,
+                            args: git_core::push_args(&remote, &local, &branch, false, false),
+                            background: false,
+                        };
+                        return self.run_network(tab, request);
+                    }
+                    None => return self.push_setup_form(tab, local),
+                }
+            }
             Message::Push { force } => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     return self.push(tab, force);
@@ -2828,25 +2839,13 @@ impl App {
             }
             Message::StashContextMenu { id, position } => {
                 let writable = self.write_block().is_none();
-                let restorable = writable
-                    && self
-                        .active_tab()
-                        .and_then(Tab::view)
-                        .is_some_and(|v| v.state_block(Guarded::Stash).is_none());
-                let item = |label: &str, enabled: bool, message: Message| MenuEntry::Item {
-                    label: label.into(),
-                    shortcut: None,
-                    enabled,
-                    message: Box::new(message),
-                };
+                let restorable = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| v.state_block(Guarded::Stash).is_none());
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    vec![
-                        item("Apply stash", restorable, Message::StashApply(id.clone())),
-                        item("Pop stash", restorable, Message::StashPop(id.clone())),
-                        MenuEntry::Separator,
-                        item("Delete stash", writable, Message::StashDrop(id)),
-                    ],
+                    crate::menus::stash(&id, writable, restorable),
                 ));
             }
             Message::SummaryChanged(summary) => {
@@ -5907,6 +5906,15 @@ mod tests {
         assert!(app.tabs[0].view().unwrap().new_branch.is_none());
     }
 
+    /// Message of the enabled menu item labelled `label`.
+    fn select_label(menu: &ContextMenu, label: &str) -> Option<Message> {
+        let index = menu
+            .entries
+            .iter()
+            .position(|e| matches!(e, MenuEntry::Item { label: l, .. } if l == label))?;
+        menu.select(index)
+    }
+
     fn branch_menu(app: &mut App, name: &str, kind: git_core::RefKind) -> ContextMenu {
         let _ = app.update(Message::BranchContextMenu {
             name: name.into(),
@@ -5921,14 +5929,16 @@ mod tests {
         let mut app = checkout_app();
         let head = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
         assert!(
-            head.select(4).is_none(),
+            select_label(&head, "Delete").is_none(),
             "the checked-out branch cannot be deleted"
         );
         let other = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
-        assert!(matches!(other.select(4), Some(Message::DeleteBranch(n)) if n == "topic"));
+        assert!(
+            matches!(select_label(&other, "Delete"), Some(Message::DeleteBranch(n)) if n == "topic")
+        );
         let remote = branch_menu(&mut app, "origin/feature", git_core::RefKind::RemoteBranch);
         assert!(
-            matches!(remote.select(0), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
+            matches!(select_label(&remote, "Delete on remote"), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
         );
     }
 
@@ -6106,9 +6116,14 @@ mod tests {
     fn set_and_unset_upstream() {
         let mut app = tag_app(&["origin"]);
         let menu = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
-        assert!(menu.select(1).is_none(), "topic has no upstream to unset");
+        assert!(
+            select_label(&menu, "Unset upstream").is_none(),
+            "topic has no upstream to unset"
+        );
         let main = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
-        assert!(matches!(main.select(1), Some(Message::UnsetUpstream(b)) if b == "main"));
+        assert!(
+            matches!(select_label(&main, "Unset upstream"), Some(Message::UnsetUpstream(b)) if b == "main")
+        );
 
         let _ = app.update(Message::SetUpstreamStart("topic".into()));
         let form = app.form.clone().unwrap();
@@ -6221,6 +6236,29 @@ mod tests {
         let mut app = tag_app(&["origin"]);
         let _ = app.update(Message::FetchRemote("origin".into()));
         assert_eq!(running_args(&app), ["Fetch origin"]);
+    }
+
+    #[test]
+    fn pull_and_push_of_other_branches() {
+        let mut app = tag_app(&["origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for r in &mut snapshot.refs {
+            if r.name == "topic" {
+                r.upstream = Some("origin/topic".into());
+            }
+        }
+        view.snapshot = Arc::new(snapshot);
+        let menu = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
+        assert!(
+            matches!(select_label(&menu, "Pull"), Some(Message::PullBranch(b)) if b == "topic")
+        );
+
+        let _ = app.update(Message::PullBranch("topic".into()));
+        assert_eq!(running_args(&app), ["Pull topic"]);
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::PushBranch("topic".into()));
+        assert!(app.form.is_some(), "no upstream: push form");
     }
 
     #[test]

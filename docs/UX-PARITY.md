@@ -29,7 +29,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Click branch in left panel | Jump to and select its commit | done |
 | Double click local branch | Checkout | done (M3; sidebar and graph pill) |
 | Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
-| Right click commit/branch | Context menu | M3 |
+| Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
 | Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |

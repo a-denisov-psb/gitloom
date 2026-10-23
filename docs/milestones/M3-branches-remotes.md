@@ -193,7 +193,9 @@ Acceptance:
 Acceptance:
 - Integration tests for each operation.
 
-### [ ] M3-11 Context menus
+### [x] M3-11 Context menus
+
+> Done: menus built by pure functions in `crates/app/src/menus.rs` (commit, local branch, remote branch, tag, remote, stash) with the table's items; M4 items visible but disabled with tooltip "Not available yet" (menu entries got an optional hint). Right click in graph rows, ref pills and sidebar entries (branches, tags, remotes, stashes). Local branch Pull/Push of the checked-out branch behave like the toolbar; for other branches Pull fast-forwards (`git fetch <remote> <rb>:<local>`, refused when diverged) and Push goes to the upstream or opens the first-push form; their rejections show the plain error (force push stays reserved for the checked-out branch). Tests: menu rules (checked-out branch, upstream-dependent items, M4 hints, read-only, stash during operations), fast-forward fetch (success and refusal); app tests now select menu items by label. Checked by hand: branch and commit menus complete, "Not available yet" tooltip on M4 items, Pull of a diverged non-checked-out branch refused without changes.
 
 Complete menus using the M2 infrastructure. M4 actions are visible but disabled with tooltip "Not available yet".
 

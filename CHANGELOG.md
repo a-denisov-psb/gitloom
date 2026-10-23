@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Complete context menus on commits (checkout, create branch/tag, copy SHA/message), local branches (checkout, pull, push, upstream, rename, delete, tag, copy name), remote branches, tags, remotes and stashes, in the graph, on ref pills and in the sidebar. Merge, rebase, cherry-pick, revert and reset are shown disabled until a later version. Pull and push also work for branches that are not checked out (pull fast-forwards only).
 - Upstream and remotes: set or unset a branch's upstream from its context menu (also offered when Pull finds no upstream); add remotes with "+" in the REMOTE section; right click a remote to fetch it, edit its URL, rename or remove it. Remotes without fetched branches are listed too.
 - Tags: "Create tag here" in the commit menu (annotated when a message is given); right click a tag to push it, delete it locally or on a remote, or copy its name. With several remotes Gitloom asks which one.
 - Rename and delete branches from their context menu (sidebar and graph): rename inline, optionally renaming the upstream branch on the remote too; delete asks first and offers a force delete for unmerged branches; the checked-out branch cannot be deleted. Remote branches can be deleted on the remote.

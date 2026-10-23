@@ -233,7 +233,10 @@ pub struct LastWrite {
 pub enum NetworkKind {
     Fetch,
     Pull,
+    /// Push of the checked-out branch (rejections offer Pull / force push).
     Push,
+    /// Push of another branch: rejections show the plain error.
+    PushBranch,
 }
 
 /// A running network operation (fetch, pull, push) of a tab.

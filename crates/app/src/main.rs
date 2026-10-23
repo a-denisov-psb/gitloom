@@ -2,6 +2,7 @@ mod app;
 mod askpass;
 mod fetch;
 mod format;
+mod menus;
 mod nav;
 mod overlay;
 mod panes;
