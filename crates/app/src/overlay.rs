@@ -221,6 +221,20 @@ pub enum FormAction {
         tab: crate::app::TabId,
         local: String,
     },
+    /// Make the chosen remote branch the upstream of `local`.
+    SetUpstream {
+        tab: crate::app::TabId,
+        local: String,
+    },
+    /// Add a remote (name, URL).
+    AddRemote { tab: crate::app::TabId },
+    /// Change the URL of remote `name`.
+    SetRemoteUrl {
+        tab: crate::app::TabId,
+        name: String,
+    },
+    /// Rename remote `old`.
+    RenameRemote { tab: crate::app::TabId, old: String },
     /// Create a tag (name, optional message) at commit `target`.
     CreateTag {
         tab: crate::app::TabId,

@@ -47,6 +47,8 @@ pub struct RepoSnapshot {
     pub state: git_core::RepoState,
     /// Names of the configured remotes.
     pub remotes: Vec<String>,
+    /// Fetch URL per remote (name, URL).
+    pub remote_urls: Vec<(String, String)>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
@@ -64,6 +66,11 @@ impl RepoSnapshot {
         let mut snapshot = Self::build(log, head, refs, stashes, working_tree)?;
         snapshot.state = backend.state().map_err(|e| e.to_string())?;
         snapshot.remotes = backend.remotes().map_err(|e| e.to_string())?;
+        for remote in &snapshot.remotes {
+            if let Some(url) = backend.remote_url(remote).map_err(|e| e.to_string())? {
+                snapshot.remote_urls.push((remote.clone(), url));
+            }
+        }
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
         Ok(snapshot)
@@ -177,6 +184,7 @@ impl RepoSnapshot {
             truncated: log.truncated,
             state: git_core::RepoState::Clean,
             remotes: Vec::new(),
+            remote_urls: Vec::new(),
             merge_message: None,
             commit_template: None,
         })
