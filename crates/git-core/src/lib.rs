@@ -39,7 +39,10 @@ pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
     tag_message, unreachable_from_branches, HeadPosition, RefChange,
 };
-pub use merge::{fast_forward_branch, fast_forward_head, merge, merge_blocked, MergeOutcome};
+pub use merge::{
+    fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
+    MergeOutcome,
+};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use network::{

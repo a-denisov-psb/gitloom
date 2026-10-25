@@ -74,8 +74,9 @@ pub struct LocalBranch<'a> {
     pub head_can_fast_forward: bool,
 }
 
-/// "Merge X into Y" and, if possible, "Fast-forward Y to X" for the branch
-/// with full reference name `reference` and display name `name`.
+/// "Merge X into Y", "Rebase Y onto X" and, if possible, "Fast-forward Y
+/// to X" for the branch with full reference name `reference` and display
+/// name `name`.
 fn merge_entries(
     name: &str,
     reference: &str,
@@ -100,6 +101,14 @@ fn merge_entries(
         writable,
         Message::Merge {
             source: reference.into(),
+            autostash: false,
+        },
+    ));
+    entries.push(action(
+        &format!("Rebase {head} onto {name}"),
+        writable,
+        Message::Rebase {
+            onto: reference.into(),
             autostash: false,
         },
     ));
@@ -159,7 +168,6 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
     ];
     entries.extend(merge);
     entries.extend([
-        later("Rebase current branch onto this"),
         MenuEntry::Separator,
         action("Rename…", writable, Message::RenameStart(name.into())),
         // The checked-out branch cannot be deleted.
@@ -230,7 +238,6 @@ pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
         writable,
     ));
     entries.extend([
-        later("Rebase current branch onto this"),
         MenuEntry::Separator,
         action(
             "Delete on remote",
@@ -349,6 +356,10 @@ mod tests {
             Some(Message::Merge { source, autostash: false }) if source == "refs/heads/topic"
         ));
         assert!(message_of(&menu, "Fast-forward main to topic").is_none());
+        assert!(matches!(
+            message_of(&menu, "Rebase main onto topic"),
+            Some(Message::Rebase { onto, autostash: false }) if onto == "refs/heads/topic"
+        ));
         // The checked-out branch offers no merge.
         let head = branch(true, false);
         assert!(!summary(&head).0.iter().any(|l| l.starts_with("Merge")));
@@ -439,7 +450,6 @@ mod tests {
             remote_menu(None, false),
         ] {
             let (_, disabled) = summary(&menu);
-            assert!(!disabled.is_empty());
             for (label, hint) in disabled {
                 if ["Checkout", "Delete", "Pull", "Unset upstream"].contains(&label) {
                     continue;

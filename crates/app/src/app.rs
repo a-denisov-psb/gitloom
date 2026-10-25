@@ -299,6 +299,11 @@ pub enum Message {
         source: String,
         autostash: bool,
     },
+    /// Rebase HEAD onto the branch with full reference name `onto`.
+    Rebase {
+        onto: String,
+        autostash: bool,
+    },
     /// Fast-forward local `branch` (`None`: the checked-out branch) to the
     /// branch with full reference name `source`.
     FastForward {
@@ -1798,8 +1803,9 @@ impl App {
         }
     }
 
-    /// Runs a [`Message::Merge`] or [`Message::FastForward`]; local changes
-    /// that block it lead to the "Stash and merge" dialog.
+    /// Runs a [`Message::Merge`], [`Message::FastForward`] or
+    /// [`Message::Rebase`]; local changes that block it lead to the "Stash
+    /// and merge" (or rebase) dialog.
     fn merge(&mut self, request: Message) -> Task<Message> {
         let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
@@ -1817,6 +1823,7 @@ impl App {
         };
         let (label, touches_worktree) = match &request {
             Message::Merge { source, .. } => (format!("Merge {} into {head}", short(source)), true),
+            Message::Rebase { onto, .. } => (format!("Rebase {head} onto {}", short(onto)), true),
             Message::FastForward {
                 branch: None,
                 source,
@@ -1837,6 +1844,9 @@ impl App {
             Message::Merge { source, autostash } => {
                 // Conflicts are no error: the banner takes over.
                 git_core::merge(git, source, *autostash).map(drop)
+            }
+            Message::Rebase { onto, autostash } => {
+                git_core::rebase(git, onto, *autostash).map(drop)
             }
             Message::FastForward {
                 branch: None,
@@ -2479,7 +2489,11 @@ impl App {
                         if git_core::checkout_blocked(error) {
                             blocked_checkout = checkout;
                         }
-                        if git_core::merge_blocked(error) {
+                        let blocked = match &merge {
+                            Some(Message::Rebase { .. }) => git_core::rebase_blocked(error),
+                            _ => git_core::merge_blocked(error),
+                        };
+                        if blocked {
                             blocked_merge = merge;
                         }
                     }
@@ -3044,7 +3058,7 @@ impl App {
             }
             Message::FormClosed => self.form = None,
             Message::FormSubmit => return self.submit_form(),
-            Message::Merge { .. } | Message::FastForward { .. } => {
+            Message::Merge { .. } | Message::FastForward { .. } | Message::Rebase { .. } => {
                 return self.merge(message);
             }
             Message::ContinueOperation => return self.commit(false),
@@ -3913,9 +3927,18 @@ fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
 /// Local changes would be overwritten by the merge: offer to stash them,
 /// merge and re-apply them (`--autostash`; planning decision M4).
 fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
+    let operation = if matches!(request, Message::Rebase { .. }) {
+        "rebase"
+    } else {
+        "merge"
+    };
     let retry = match request {
         Message::Merge { source, .. } => Message::Merge {
             source,
+            autostash: true,
+        },
+        Message::Rebase { onto, .. } => Message::Rebase {
+            onto,
             autostash: true,
         },
         Message::FastForward { branch, source, .. } => Message::FastForward {
@@ -3926,11 +3949,12 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         _ => return None,
     };
     Some(Modal {
-        title: "Local changes block the merge".into(),
-        text: "Your local changes would be overwritten by the merge. Stash them, merge \
-               and apply them again afterwards? If they conflict with the merged \
-               changes, they stay in the stash list."
-            .into(),
+        title: format!("Local changes block the {operation}"),
+        text: format!(
+            "Your local changes are in the way of the {operation}. Stash them, \
+             {operation} and apply them again afterwards? If they conflict with the \
+             result, they stay in the stash list."
+        ),
         details: Some(error),
         buttons: vec![
             crate::overlay::DialogButton {
@@ -3939,7 +3963,7 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
                 message: None,
             },
             crate::overlay::DialogButton {
-                label: "Stash and merge".into(),
+                label: format!("Stash and {operation}"),
                 kind: crate::overlay::ButtonKind::Primary,
                 message: Some(retry),
             },
@@ -5438,6 +5462,32 @@ mod tests {
         assert!(matches!(
             modal.action(1),
             Some(Message::Merge { source, autostash: true }) if source == "refs/heads/topic"
+        ));
+    }
+
+    #[test]
+    fn blocked_rebase_offers_stash_and_rebase() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Rebase {
+            onto: "refs/remotes/origin/main".into(),
+            autostash: false,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Rebase HEAD onto origin/main")
+        );
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Rebase HEAD onto origin/main".into(),
+            result: Err("error: cannot rebase: You have unstaged changes.".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Local changes block the rebase");
+        assert_eq!(modal.buttons[1].label, "Stash and rebase");
+        assert!(matches!(
+            modal.action(1),
+            Some(Message::Rebase { onto, autostash: true }) if onto == "refs/remotes/origin/main"
         ));
     }
 

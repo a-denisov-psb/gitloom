@@ -1,13 +1,13 @@
-//! Merge and fast-forward (M4-04). Blocking: runs `git`.
+//! Merge, fast-forward (M4-04) and rebase (M4-06). Blocking: runs `git`.
 
 use crate::{Error, GitWriter, Result, RunOptions};
 
-/// How a merge ended.
+/// How a merge or rebase ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeOutcome {
-    /// Fast-forwarded or merge commit created.
-    Merged,
-    /// Stopped with conflicts; the merge is in progress (`MERGE_HEAD`).
+    /// Fast-forwarded, merge commit created, or all commits rebased.
+    Done,
+    /// Stopped with conflicts; the operation is in progress.
     Conflicts,
 }
 
@@ -22,7 +22,7 @@ pub fn merge(git: &dyn GitWriter, rev: &str, autostash: bool) -> Result<MergeOut
     }
     args.push(short_branch(rev));
     match git.run(&args, RunOptions::default()) {
-        Ok(_) => Ok(MergeOutcome::Merged),
+        Ok(_) => Ok(MergeOutcome::Done),
         Err(error) => {
             if merge_in_progress(git)? {
                 Ok(MergeOutcome::Conflicts)
@@ -64,13 +64,46 @@ pub fn fast_forward_branch(git: &dyn GitWriter, branch: &str, source: &str) -> R
     .map(drop)
 }
 
+/// Rebases HEAD onto `onto` (`git rebase`), respecting the user's
+/// `rebase.autoStash`; merge commits are flattened (Git's default).
+/// `autostash` stashes local changes first and re-applies them afterwards.
+pub fn rebase(git: &dyn GitWriter, onto: &str, autostash: bool) -> Result<MergeOutcome> {
+    let mut args = vec!["rebase"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(onto);
+    match git.run(&args, RunOptions::default()) {
+        Ok(_) => Ok(MergeOutcome::Done),
+        Err(error) => {
+            // A step that stopped with conflicts leaves REBASE_HEAD behind.
+            if pseudo_ref_exists(git, "REBASE_HEAD")? {
+                Ok(MergeOutcome::Conflicts)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// True if Git refused to rebase because of local changes.
+pub fn rebase_blocked(stderr: &str) -> bool {
+    stderr.contains("cannot rebase: You have unstaged changes")
+        || stderr.contains("cannot rebase: Your index contains uncommitted changes")
+        || merge_blocked(stderr)
+}
+
 /// True if a merge stopped and waits for its conclusion.
 fn merge_in_progress(git: &dyn GitWriter) -> Result<bool> {
+    pseudo_ref_exists(git, "MERGE_HEAD")
+}
+
+fn pseudo_ref_exists(git: &dyn GitWriter, name: &str) -> Result<bool> {
     let read = RunOptions {
         read_only: true,
         ..RunOptions::default()
     };
-    match git.run(&["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], read) {
+    match git.run(&["rev-parse", "--verify", "--quiet", name], read) {
         Ok(_) => Ok(true),
         Err(Error::Command { code: Some(1), .. }) => Ok(false),
         Err(error) => Err(error),

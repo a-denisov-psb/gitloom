@@ -185,3 +185,22 @@ fn resolving_in_the_conflict_model_then_continuing() {
         assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "topic", "{operation:?}");
     }
 }
+
+#[test]
+fn rebase_with_a_resolved_conflict() {
+    let repo = diverged();
+    repo.checkout("topic");
+    let cli = backend(&repo);
+    assert_eq!(
+        git_core::rebase(&cli, "refs/heads/main", false).unwrap(),
+        git_core::MergeOutcome::Conflicts
+    );
+    resolve(&repo);
+    cli.continue_operation(Operation::Rebase, "topic change resolved\n")
+        .unwrap();
+    assert_eq!(state(&repo), RepoState::Clean);
+    assert_eq!(message(&repo, "HEAD"), "topic change resolved");
+    assert_eq!(message(&repo, "HEAD~1"), "topic first");
+    assert_eq!(message(&repo, "HEAD~2"), "main change");
+    assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "resolved");
+}
