@@ -182,10 +182,12 @@ impl DiffView {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum CenterView {
     Graph,
     Diff(Box<DiffView>),
+    /// Conflict resolution view of one file (M4-05).
+    Conflict(Box<crate::conflict::ConflictView>),
 }
 
 /// Vertical scroll state of the graph list (pixels).
@@ -556,6 +558,12 @@ impl RepoView {
         self.suppress_watch = false;
         self.error = None;
         self.prefill_message();
+        // A resolved (or no longer conflicted) file closes its conflict view.
+        if let CenterView::Conflict(conflict) = &self.center {
+            if !self.conflicted_files().contains(&conflict.path.as_str()) {
+                self.center = CenterView::Graph;
+            }
+        }
     }
 
     /// More than one commit is selected (Ctrl/Shift).

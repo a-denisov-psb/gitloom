@@ -1,5 +1,6 @@
 mod app;
 mod askpass;
+mod conflict;
 mod fetch;
 mod format;
 mod menus;
