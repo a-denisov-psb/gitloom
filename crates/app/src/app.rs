@@ -270,7 +270,12 @@ pub enum Message {
     /// Toolbar Pull (`None`: the current mode) or a mode from the dropdown,
     /// which becomes the button's mode.
     Pull(Option<git_core::PullMode>),
-    /// Abort the merge or rebase a failed pull left behind.
+    /// Continue the operation in progress with the commit panel's message
+    /// (banner button; the commit button does the same).
+    ContinueOperation,
+    /// Skip the current commit of a rebase or cherry-pick.
+    SkipOperation,
+    /// Abort the operation in progress (banner, failed pull dialog).
     AbortOperation,
     /// Double click on a branch, or "Checkout this commit" (asks first).
     Checkout(CheckoutTarget),
@@ -1710,6 +1715,22 @@ impl App {
         }
         let message = view.commit_message();
         let amend = view.amend;
+        // During an operation the commit button continues it (`--continue`).
+        if let Some(operation) = view.snapshot.state.kind().filter(|_| !amend) {
+            let label = format!("Continue {}", operation.command());
+            let task = self.run_write(tab, label, move |git| {
+                if stage_all {
+                    git.stage_all()?;
+                }
+                git.continue_operation(operation, &message)
+            });
+            if let Some(view) = self.active_view_mut() {
+                if view.busy.is_some() {
+                    view.clear_message_after_write = true;
+                }
+            }
+            return task;
+        }
         let label = if amend { "Amend" } else { "Commit" };
         let task = self.run_undoable(tab, label, move |git| {
             if stage_all {
@@ -1724,6 +1745,38 @@ impl App {
                 before,
                 after,
             })))
+        });
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                view.clear_message_after_write = true;
+            }
+        }
+        task
+    }
+
+    /// Skips the current commit (`skip`) or aborts the operation in progress.
+    /// The message in the commit panel belonged to that step and is cleared.
+    fn skip_or_abort(&mut self, skip: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(operation) = self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.snapshot.state.kind())
+        else {
+            return Task::none();
+        };
+        if skip && !operation.can_skip() {
+            return Task::none();
+        }
+        let verb = if skip { "Skip" } else { "Abort" };
+        let task = self.run_write(tab, format!("{verb} {}", operation.command()), move |git| {
+            if skip {
+                git.skip_operation(operation)
+            } else {
+                git.abort_operation(operation)
+            }
         });
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
@@ -2857,24 +2910,9 @@ impl App {
             }
             Message::FormClosed => self.form = None,
             Message::FormSubmit => return self.submit_form(),
-            Message::AbortOperation => {
-                let Some(tab) = self.active_tab().map(|t| t.id) else {
-                    return Task::none();
-                };
-                let state = self
-                    .active_tab()
-                    .and_then(Tab::view)
-                    .map(|v| v.snapshot.state.clone());
-                return match state {
-                    Some(git_core::RepoState::Merging { .. }) => {
-                        self.run_write(tab, "Abort merge", |git| git.abort_merge())
-                    }
-                    Some(git_core::RepoState::Rebasing { .. }) => {
-                        self.run_write(tab, "Abort rebase", |git| git.abort_rebase())
-                    }
-                    _ => Task::none(),
-                };
-            }
+            Message::ContinueOperation => return self.commit(false),
+            Message::SkipOperation => return self.skip_or_abort(true),
+            Message::AbortOperation => return self.skip_or_abort(false),
             Message::AutoFetchDue(seq) => {
                 if seq == self.auto_fetch_seq {
                     self.auto_fetch_at = None;
@@ -3711,9 +3749,9 @@ fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
     Modal {
         title: "Pull stopped with conflicts".into(),
         text: format!(
-            "The {operation} stopped because of conflicting changes. Resolving conflicts \
-             in Gitloom comes in a later version: resolve them in a terminal or editor, \
-             or abort the {operation} to get back to the state before the pull."
+            "The {operation} stopped because of conflicting changes. Resolve the \
+             conflicts, stage the files and continue, or abort the {operation} to get \
+             back to the state before the pull."
         ),
         details: Some(error),
         buttons: vec![
@@ -3909,6 +3947,8 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
 /// Why committing is not possible right now, if it is not.
 pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     let tree = &view.snapshot.working_tree;
+    // Continuing an operation may commit nothing new (e.g. a resolved rebase step).
+    let continues = view.snapshot.state.kind().is_some() && !view.amend;
     let merging = view.snapshot.merge_message.is_some();
     let has_changes = !tree.staged.is_empty() || (stage_all && !tree.unstaged.is_empty());
     let state = if view.amend {
@@ -3916,9 +3956,12 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     } else {
         Guarded::Commit
     };
+    let conflicts = view.conflicted_files();
     if let Some(reason) = view.state_block(state) {
         Some(reason)
-    } else if !has_changes && !merging && !view.amend {
+    } else if continues && !conflicts.is_empty() && !stage_all {
+        Some(unresolved_conflicts(&conflicts))
+    } else if !has_changes && !continues && !merging && !view.amend {
         // Amending may only change the message.
         Some("Stage files to commit".into())
     } else if view.summary.trim().is_empty() {
@@ -3926,6 +3969,21 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Tooltip for a blocked Continue: which files still have conflicts.
+pub fn unresolved_conflicts(paths: &[&str]) -> String {
+    const SHOWN: usize = 5;
+    let mut list = paths
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if paths.len() > SHOWN {
+        list.push_str(&format!(" and {} more", paths.len() - SHOWN));
+    }
+    format!("Resolve and stage the conflicted files first: {list}")
 }
 
 /// True if HEAD, any ref target or upstream, or the stash list differ from `snapshot`.
@@ -4980,18 +5038,134 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rebase_in_progress_blocks_committing() {
-        let app = app_in_state(git_core::RepoState::Rebasing {
+    fn rebasing() -> git_core::RepoState {
+        git_core::RepoState::Rebasing {
             branch: Some("topic".into()),
             onto: None,
             step: None,
-        });
+        }
+    }
+
+    /// Marks `paths` as conflicted in the working tree of the first tab.
+    fn with_conflicts(app: &mut App, paths: &[&str]) {
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut tree = view.snapshot.working_tree.clone();
+        for path in paths {
+            tree.unstaged.push(git_core::FileChange {
+                path: (*path).into(),
+                kind: git_core::ChangeKind::Conflicted,
+                old_path: None,
+            });
+        }
+        view.snapshot = Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+    }
+
+    #[test]
+    fn commit_button_continues_the_operation() {
+        for (state, label) in [
+            (rebasing(), "Continue rebase"),
+            (merging(), "Continue merge"),
+            (
+                git_core::RepoState::CherryPicking { commit: None },
+                "Continue cherry-pick",
+            ),
+            (
+                git_core::RepoState::Reverting { commit: None },
+                "Continue revert",
+            ),
+        ] {
+            let mut app = app_in_state(state);
+            let view = app.tabs[0].view_mut().unwrap();
+            // A resolved step may have nothing staged.
+            let tree = git_core::WorkingTree::default();
+            view.snapshot = Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+            assert!(commit_blocker(view, false).is_none(), "{label}");
+            let _ = app.update(Message::CommitRequested);
+            let view = app.tabs[0].view().unwrap();
+            assert_eq!(view.busy.as_deref(), Some(label));
+            assert!(view.clear_message_after_write);
+        }
+    }
+
+    #[test]
+    fn banner_continue_needs_resolved_conflicts_and_a_message() {
+        let mut app = app_in_state(rebasing());
+        with_conflicts(&mut app, &["b.txt", "c.txt"]);
         let view = app.tabs[0].view().unwrap();
         assert_eq!(
             commit_blocker(view, false).as_deref(),
-            Some("Cannot commit while a rebase is in progress")
+            Some("Resolve and stage the conflicted files first: b.txt, c.txt")
         );
+        let _ = app.update(Message::ContinueOperation);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+
+        let mut app = app_in_state(rebasing());
+        app.tabs[0].view_mut().unwrap().summary.clear();
+        let _ = app.update(Message::ContinueOperation);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Enter a commit summary");
+    }
+
+    #[test]
+    fn unresolved_conflicts_lists_at_most_five_files() {
+        let paths = ["a", "b", "c", "d", "e", "f", "g"];
+        assert_eq!(
+            unresolved_conflicts(&paths),
+            "Resolve and stage the conflicted files first: a, b, c, d, e and 2 more"
+        );
+    }
+
+    #[test]
+    fn skip_only_for_rebase_and_cherry_pick_abort_for_all() {
+        for (state, skip) in [
+            (rebasing(), Some("Skip rebase")),
+            (
+                git_core::RepoState::CherryPicking { commit: None },
+                Some("Skip cherry-pick"),
+            ),
+            (merging(), None),
+            (git_core::RepoState::Reverting { commit: None }, None),
+        ] {
+            let mut app = app_in_state(state.clone());
+            let _ = app.update(Message::SkipOperation);
+            let view = app.tabs[0].view().unwrap();
+            assert_eq!(view.busy.as_deref(), skip, "{state:?}");
+
+            let mut app = app_in_state(state.clone());
+            let _ = app.update(Message::AbortOperation);
+            let view = app.tabs[0].view().unwrap();
+            let abort = format!("Abort {}", state.operation().unwrap());
+            assert_eq!(view.busy.as_deref(), Some(abort.as_str()));
+            assert!(view.clear_message_after_write);
+        }
+    }
+
+    #[test]
+    fn each_new_operation_message_prefills_the_panel() {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.state = rebasing();
+        snapshot.merge_message = Some(
+            "First step
+"
+            .into(),
+        );
+        view.apply_snapshot(Arc::new(snapshot.clone()));
+        assert_eq!(view.summary, "First step");
+        // Continue cleared the panel; the rebase stopped at the next commit.
+        view.summary.clear();
+        snapshot.merge_message = Some(
+            "Second step
+"
+            .into(),
+        );
+        view.apply_snapshot(Arc::new(snapshot.clone()));
+        assert_eq!(view.summary, "Second step");
+        // The same message does not refill a field the user emptied.
+        view.summary.clear();
+        view.apply_snapshot(Arc::new(snapshot));
+        assert!(view.summary.is_empty());
     }
 
     #[test]

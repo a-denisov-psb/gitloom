@@ -311,7 +311,7 @@ pub struct RepoView {
     /// Commit description.
     pub description: iced::widget::text_editor::Content,
     /// The fields were filled from `MERGE_MSG` for the current merge.
-    pub merge_prefilled: bool,
+    pub merge_prefilled: Option<String>,
     /// "Amend previous commit" is checked.
     pub amend: bool,
     /// Runs write operations through the `git` executable.
@@ -416,7 +416,8 @@ impl RepoView {
         let state = &self.snapshot.state;
         let operation = state.operation()?;
         let blocked = match action {
-            Guarded::Commit => !state.concluded_by_commit(),
+            // Committing continues the operation (M4-03).
+            Guarded::Commit => false,
             Guarded::Amend | Guarded::Stash | Guarded::MoveHead => true,
         };
         blocked.then(|| {
@@ -428,6 +429,17 @@ impl RepoView {
             };
             format!("Cannot {verb} while a {operation} is in progress")
         })
+    }
+
+    /// Paths with unresolved conflicts, sorted.
+    pub fn conflicted_files(&self) -> Vec<&str> {
+        self.snapshot
+            .working_tree
+            .unstaged
+            .iter()
+            .filter(|f| f.kind == git_core::ChangeKind::Conflicted)
+            .map(|f| f.path.as_str())
+            .collect()
     }
 
     /// HEAD is already part of its upstream branch (amending rewrites pushed history).
@@ -444,17 +456,18 @@ impl RepoView {
     pub fn prefill_message(&mut self) {
         let empty = self.summary.trim().is_empty() && self.description.text().trim().is_empty();
         match &self.snapshot.merge_message {
-            Some(message) if !self.merge_prefilled => {
+            // Each new message (e.g. the next stopped rebase step) prefills once.
+            Some(message) if self.merge_prefilled.as_ref() != Some(message) => {
                 if empty {
                     let (summary, description) = split_message(&strip_comments(message));
                     self.summary = summary;
                     self.description = iced::widget::text_editor::Content::with_text(&description);
                 }
-                self.merge_prefilled = true;
+                self.merge_prefilled = Some(message.clone());
             }
             Some(_) => {}
             None => {
-                self.merge_prefilled = false;
+                self.merge_prefilled = None;
                 if empty {
                     if let Some(template) = &self.snapshot.commit_template {
                         self.description = iced::widget::text_editor::Content::with_text(
@@ -488,7 +501,7 @@ impl RepoView {
             error: None,
             summary: String::new(),
             description: iced::widget::text_editor::Content::new(),
-            merge_prefilled: false,
+            merge_prefilled: None,
             amend: false,
             writer,
             busy: None,

@@ -42,7 +42,7 @@ pub use network::{
 };
 pub use patch::{build_patch, PatchDirection};
 pub use refname::check_branch_name;
-pub use state::{locked_file, RepoState};
+pub use state::{locked_file, Operation, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;
@@ -421,8 +421,8 @@ pub trait GitBackend: Send + Sync {
     /// Operation in progress (merge, rebase, cherry-pick, revert).
     fn state(&self) -> Result<RepoState>;
 
-    /// Prepared message (`MERGE_MSG`) of a merge, cherry-pick or revert in
-    /// progress, if one is running.
+    /// Prepared message (`MERGE_MSG`) of the operation in progress, if one is
+    /// running; for a stopped rebase step the message of the commit being applied.
     fn merge_message(&self) -> Result<Option<String>>;
 
     /// Working tree content of `path` as Git stores it (filters applied);

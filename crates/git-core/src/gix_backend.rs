@@ -486,10 +486,16 @@ impl GitBackend for GixBackend {
     fn merge_message(&self) -> Result<Option<String>> {
         let repo = self.local();
         let git_dir = repo.git_dir();
-        if !crate::state::detect(git_dir).concluded_by_commit() {
-            return Ok(None);
-        }
-        Ok(std::fs::read_to_string(git_dir.join("MERGE_MSG")).ok())
+        let read = |name: &str| std::fs::read_to_string(git_dir.join(name)).ok();
+        Ok(match crate::state::detect(git_dir) {
+            RepoState::Clean => None,
+            // A stopped rebase step has MERGE_MSG after a conflict, otherwise
+            // only the message of the commit being applied.
+            RepoState::Rebasing { .. } => {
+                read("MERGE_MSG").or_else(|| read("rebase-merge/message"))
+            }
+            _ => read("MERGE_MSG"),
+        })
     }
 
     fn worktree_content(&self, path: &str) -> Result<Option<Vec<u8>>> {

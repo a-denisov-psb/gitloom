@@ -144,28 +144,40 @@ fn notice_banner(notice: &str) -> Element<'_, Message> {
     .into()
 }
 
-/// Operation in progress, like GitKraken's "Merging X into Y" bar. Abort
-/// and continue arrive with M4 and are shown disabled.
+/// Operation in progress, like GitKraken's "Merging X into Y" bar, with
+/// Continue (uses the commit panel's message), Skip and Abort.
 fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
-    let git_state = &view.snapshot.state;
-    let hint = if git_state.concluded_by_commit() {
-        "Resolve conflicts, stage them and commit to conclude."
+    let Some(operation) = view.snapshot.state.kind() else {
+        return space::horizontal().into();
+    };
+    let conflicts = !view.conflicted_files().is_empty();
+    let hint = if conflicts {
+        "Resolve conflicts and stage them, then continue."
     } else {
-        "Resolve conflicts and stage them, then continue in a terminal."
+        "Check the message in the commit panel, then continue."
     };
-    let disabled = |label: &'static str| {
-        panel::with_tooltip(
-            button(text(label).size(12))
-                .padding([3, 10])
-                .style(button::secondary)
-                .into(),
-        )
+    let idle = view.write_block.is_none() && view.busy.is_none();
+    let action = |label: &'static str, style: fn(&iced::Theme, button::Status) -> button::Style| {
+        button(text(label).size(12)).padding([3, 10]).style(style)
     };
-    let mut actions = row![].spacing(6);
-    if !git_state.concluded_by_commit() {
-        actions = actions.push(disabled("Continue"));
+    let blocker = crate::app::commit_blocker(view, false);
+    let continue_button = action("Continue", button::primary)
+        .on_press_maybe((idle && blocker.is_none()).then_some(Message::ContinueOperation));
+    let continue_button: Element<'_, Message> = match (&view.write_block, blocker) {
+        (Some(_), _) => panel::write_tooltip(continue_button.into(), view),
+        (None, Some(reason)) => panel::with_tooltip_text(continue_button.into(), reason),
+        (None, None) => continue_button.into(),
+    };
+    let mut actions = row![continue_button].spacing(6);
+    if operation.can_skip() {
+        actions = actions.push(
+            action("Skip", button::secondary)
+                .on_press_maybe(idle.then_some(Message::SkipOperation)),
+        );
     }
-    actions = actions.push(disabled("Abort"));
+    actions = actions.push(
+        action("Abort", button::danger).on_press_maybe(idle.then_some(Message::AbortOperation)),
+    );
     container(
         row![
             text(state).color(theme::TEXT),

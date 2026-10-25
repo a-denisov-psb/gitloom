@@ -82,27 +82,44 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
         view.snapshot.branch_label()
     );
 
+    // Conflicts get their own section above the unstaged files (M4-03).
+    let (conflicted, unstaged_files): (Vec<_>, Vec<_>) = tree
+        .unstaged
+        .iter()
+        .partition(|f| f.kind == git_core::ChangeKind::Conflicted);
+    let conflicts = (!conflicted.is_empty()).then(|| {
+        file_section(
+            format!("Conflicted Files ({})", conflicted.len()),
+            // Staging a file marks it resolved; the conflict view comes in M4-05.
+            space::horizontal().into(),
+            conflicted
+                .iter()
+                .map(|file| file_row(view, file, DiffKind::Unstaged)),
+        )
+    });
+
+    let has_unstaged = !unstaged_files.is_empty();
     let unstaged = file_section(
-        format!("Unstaged Files ({})", tree.unstaged.len()),
+        format!("Unstaged Files ({})", unstaged_files.len()),
         row![
             all_button(
                 view,
                 "Discard all",
                 button::danger,
-                !tree.unstaged.is_empty(),
+                has_unstaged,
                 Message::Discard(DiscardTarget::All),
             ),
             all_button(
                 view,
                 "Stage all changes",
                 button::success,
-                !tree.unstaged.is_empty(),
+                has_unstaged,
                 Message::StageAll,
             ),
         ]
         .spacing(6)
         .into(),
-        tree.unstaged.iter().map(|file| {
+        unstaged_files.into_iter().map(|file| {
             let kind = if file.kind == git_core::ChangeKind::Untracked {
                 DiffKind::Untracked
             } else {
@@ -126,13 +143,12 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
             .map(|file| file_row(view, file, DiffKind::Staged)),
     );
 
-    column![
-        container(text(header)).padding([10, 12]),
-        unstaged,
-        staged,
-        commit_box(view)
-    ]
-    .into()
+    column![container(text(header)).padding([10, 12])]
+        .push(conflicts)
+        .push(unstaged)
+        .push(staged)
+        .push(commit_box(view))
+        .into()
 }
 
 /// Commit box, read-only until committing arrives in M2.
@@ -180,14 +196,10 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     }
 
     let staged = view.snapshot.working_tree.staged.len();
-    let concludes = view
-        .snapshot
-        .state
-        .operation()
-        .filter(|_| view.snapshot.state.concluded_by_commit());
-    let label = match (view.amend, concludes, staged) {
+    let continues = view.snapshot.state.operation();
+    let label = match (view.amend, continues, staged) {
         (true, _, _) => "Amend previous commit".to_string(),
-        (false, Some(operation), _) => format!("Commit and conclude {operation}"),
+        (false, Some(operation), _) => format!("Continue {operation}"),
         (false, None, 1) => "Commit changes to 1 file".to_string(),
         (false, None, n) => format!("Commit changes to {n} files"),
     };
@@ -225,7 +237,9 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     ]
     .spacing(8)
     .padding(12);
-    if matches!(view.snapshot.head, git_core::Head::Detached { .. }) {
+    // A rebase always runs on a detached HEAD; the warning would be noise.
+    let rebasing = matches!(view.snapshot.state, git_core::RepoState::Rebasing { .. });
+    if matches!(view.snapshot.head, git_core::Head::Detached { .. }) && !rebasing {
         content = content.push(
             text("You are in detached HEAD; create a branch to keep your commits.")
                 .size(11)
