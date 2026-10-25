@@ -4,8 +4,8 @@
 mod support;
 
 use git_core::{
-    fast_forward_branch, fast_forward_head, merge, merge_blocked, CliBackend, Error,
-    GitBackend as _, GixBackend, MergeOutcome, RepoState,
+    fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
+    CliBackend, Error, GitBackend as _, GitWriter as _, GixBackend, MergeOutcome, RepoState,
 };
 use support::TestRepo;
 
@@ -39,7 +39,7 @@ fn merge_fast_forwards_when_possible() {
     repo.checkout("main");
     assert_eq!(
         merge(&cli(&repo), "topic", false).unwrap(),
-        MergeOutcome::Merged
+        MergeOutcome::Done
     );
     assert_eq!(repo.head(), tip);
 }
@@ -54,7 +54,7 @@ fn merge_creates_a_merge_commit_for_diverged_branches() {
     repo.checkout("main");
     assert_eq!(
         merge(&cli(&repo), "refs/heads/topic", false).unwrap(),
-        MergeOutcome::Merged
+        MergeOutcome::Done
     );
     assert_eq!(repo.parents("HEAD"), [main, topic]);
     assert_eq!(
@@ -167,4 +167,75 @@ fn fast_forward_branch_refuses_the_checked_out_branch() {
     assert!(fast_forward_branch(&cli(&repo), "main", "refs/heads/ahead").is_err());
     assert_eq!(repo.head(), main);
     assert_eq!(rev(&repo, "ahead"), ahead);
+}
+
+/// `topic` (checked out) has "topic 1" (b.txt) and "topic 2" (a.txt);
+/// `main` changed a.txt after the fork.
+fn rebase_setup() -> TestRepo {
+    let repo = repo();
+    repo.branch("topic");
+    repo.commit("a.txt", "main\n", "main");
+    repo.checkout("topic");
+    repo.commit("b.txt", "b\n", "topic 1");
+    repo.commit("c.txt", "c\n", "topic 2");
+    repo
+}
+
+fn subjects(repo: &TestRepo, range: &str) -> Vec<String> {
+    repo.git(&["log", "--format=%s", range])
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn rebase_replays_commits_onto_the_target() {
+    let repo = rebase_setup();
+    assert_eq!(
+        rebase(&cli(&repo), "refs/heads/main", false).unwrap(),
+        MergeOutcome::Done
+    );
+    assert_eq!(subjects(&repo, "main..topic"), ["topic 2", "topic 1"]);
+    assert_eq!(repo.parents("HEAD~1"), [rev(&repo, "main")]);
+    assert_eq!(state(&repo), RepoState::Clean);
+}
+
+#[test]
+fn conflicting_rebase_stops_and_can_be_aborted() {
+    let repo = rebase_setup();
+    repo.commit("a.txt", "topic\n", "topic 3");
+    let before = repo.head();
+    assert_eq!(
+        rebase(&cli(&repo), "main", false).unwrap(),
+        MergeOutcome::Conflicts
+    );
+    assert!(matches!(state(&repo), RepoState::Rebasing { .. }));
+    cli(&repo)
+        .abort_operation(git_core::Operation::Rebase)
+        .unwrap();
+    assert_eq!(state(&repo), RepoState::Clean);
+    assert_eq!(repo.head(), before);
+}
+
+#[test]
+fn local_changes_block_the_rebase_unless_autostashed() {
+    let repo = rebase_setup();
+    repo.write("b.txt", "local\n");
+    match rebase(&cli(&repo), "main", false) {
+        Err(Error::Command { stderr, .. }) => assert!(rebase_blocked(&stderr), "{stderr}"),
+        other => panic!("unexpected {other:?}"),
+    }
+    repo.git(&["add", "b.txt"]);
+    let error = rebase(&cli(&repo), "main", false).unwrap_err();
+    assert!(rebase_blocked(&error.to_string()), "{error}");
+
+    assert_eq!(
+        rebase(&cli(&repo), "main", true).unwrap(),
+        MergeOutcome::Done
+    );
+    assert_eq!(repo.parents("HEAD~1"), [rev(&repo, "main")]);
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("b.txt")).unwrap(),
+        "local\n"
+    );
 }
