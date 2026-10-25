@@ -133,7 +133,9 @@ Acceptance: integration tests for ff, merge commit, conflict, fast-forward of a 
 
 Acceptance: unit tests for the conflict model (overlapping hunks, line picks from both sides, CRLF, no trailing newline); integration test resolve → continue.
 
-### [ ] M4-06 Rebase
+### [x] M4-06 Rebase
+
+> Done: `git_core::{rebase, rebase_blocked}` (`git rebase [--autostash] <ref>`, user's `rebase.autoStash` respected; a stop with conflicts — `REBASE_HEAD` — returns `MergeOutcome::Conflicts`, renamed `Merged` → `Done`). Menus: "Rebase Y onto X" next to merge for local (not checked out) and remote branches, replacing the disabled entry. Dirty tree: Git refuses ("cannot rebase: You have unstaged changes" / "Your index contains uncommitted changes") → "Local changes block the rebase" → "Stash and rebase" with `--autostash`. Tests: git-core (clean rebase, conflict + abort, blocked by unstaged and staged changes, autostash), `crates/app/tests/sequencer.rs` (rebase with a conflict resolved, continue with message), menus, app (blocked dialog). Checked by hand: sidebar menu on `main` while `topic` is checked out → "Rebase topic onto main" → linear history.
 
 - Branch context menu "Rebase <current> onto <branch>" (`git rebase <branch>`).
 - Stops on conflicts → conflict view → continue/skip/abort (M4-03).
