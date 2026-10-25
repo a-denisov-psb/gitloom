@@ -30,7 +30,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click local branch | Checkout | done (M3; sidebar and graph pill) |
 | Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
 | Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
-| Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
+| Drag branch onto branch | Menu: Fast-forward, Merge, Rebase, Interactive rebase | M4 (verify in GitKraken: dropping onto a branch that is not checked out — disabled or automatic checkout?) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
@@ -51,6 +51,9 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
+| Conflicted file | Opens conflict view (ours, theirs, output) | M4 |
+| Interactive rebase | Panel with actions per commit, reorder by drag | M4 (verify in GitKraken: list order newest or oldest on top) |
+| Multi-select commits | Ctrl+click, Shift+click | M4 |
 
 ## Keyboard shortcuts
 

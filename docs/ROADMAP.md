@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M4 – Merge, rebase, conflicts** (version 0.5.0): task-level plan to be prepared with the maintainer; no milestone file yet.
+**M4 – Merge, rebase, conflicts** → [`milestones/M4-merge-rebase.md`](milestones/M4-merge-rebase.md)
 
 ## Vision
 
@@ -16,7 +16,7 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M1 | 0.2.0 | Real repository (read-only) and lane graph | Done |
 | M2 | 0.3.0 | Working copy: stage, commit, stash | Done |
 | M3 | 0.4.0 | Branches and remotes | Done |
-| M4 | 0.5.0 | Merge, rebase, conflicts, undo | Next (planning) |
+| M4 | 0.5.0 | Merge, rebase, conflicts, undo | In progress |
 | M5 | 0.6.0 | Productivity parity | Planned |
 | M6 | 1.0.0 | Release readiness | Planned |
 
@@ -40,10 +40,7 @@ Checkout (local, remote → tracking branch, detached HEAD), create/rename/delet
 
 ### M4 – Merge, rebase, conflicts
 
-- Merge, rebase, interactive rebase, cherry-pick (multi), revert, reset (soft, mixed, hard)
-- Conflict resolution view (ours, theirs, output)
-- Full undo/redo for supported actions
-- Drag and drop a branch onto another branch → merge/rebase menu (moved from M3)
+Merge and fast-forward, rebase and interactive rebase (pick, reword, squash, fixup, drop, reorder), cherry-pick (one or many), revert, reset soft/mixed/hard, a conflict resolution view (ours, theirs, editable output), continue/skip/abort for running operations, drag and drop of branches, multi-selection in the graph and undo/redo for all of them. Gitloom acts as Git's editor, so no command waits for a terminal. Details: [`milestones/M4-merge-rebase.md`](milestones/M4-merge-rebase.md).
 
 ### M5 – Productivity parity
 
