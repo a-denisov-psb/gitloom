@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-25
+
 ### Added
 
 - Detached HEAD: the commit panel reminds you to create a branch, and leaving a detached HEAD with commits that are on no branch or tag asks first, offering "Create branch".

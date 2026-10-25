@@ -20,27 +20,27 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M2, version 0.3.0)
+## Current state (end of M3, version 0.4.0)
 
-Done (M2-01 … M2-17, see the notes in `docs/milestones/M2-working-copy.md`; M1 in `docs/milestones/M1-real-repository.md`):
+Done (M3-01 … M3-15, see the notes in `docs/milestones/M3-branches-remotes.md`; M1/M2 in their milestone files):
 
-- `git-core`: `GixBackend` for all reads (now with filter-aware working tree diffs, operation state detection, partial clone detection); `CliBackend` / `GitWriter` for all writes through the `git` executable (stage, unstage, apply patches, discard with snapshots, commit, amend, stash, undo primitives, lazy fetch of missing blobs).
-- `git-graph`: topological order, lane layout as vertical runs (ADR-011), dashed edges for stashes and WIP, optional `LaneHints` lane groups (prepared for the Git flow layout).
-- `app`: file watcher with incremental status refresh, staging by file/hunk/line, discard (all, file, hunk, lines; "Discard all" asks about staged changes), commit box with template and merge conclusion, amend, stash/pop/apply/delete with stashes in the graph, undo/redo, operation banner (merge/rebase/cherry-pick/revert), lock retry dialog, modal and context menu infrastructure.
-- Measurements: `docs/PERFORMANCE.md` (M1 and M2 sections).
-- Branches: `master` with `v0.1.0`, `v0.2.0`, `v0.3.0`; `develop` (default branch on GitHub).
+- `git-core`: reads via `GixBackend` (reopens when `.git/config` changes; remotes, remote URLs, stash parts, operation state); writes via `CliBackend` / `GitWriter`: staging, discard, commit, stash, checkout, branches, tags, upstream and remote management; `run_network` with progress parsing and process tree cancel; askpass (`GITLOOM_ASKPASS`, ADR-019); undoable `RefChange`s.
+- `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
+- `app`: everything from M2 plus fetch/auto-fetch (one timer, ADR-020), pull modes, push with upstream setup and force-with-lease, checkout by double click, inline branch create/rename, tags, remotes, complete context menus (`menus.rs`, M4 actions disabled), undo for ref changes, detached HEAD guard, askpass window, generic form overlay.
+- Measurements: `docs/PERFORMANCE.md` (M1, M2, M3 sections).
+- Branches: `master` with `v0.1.0` … `v0.4.0`; `develop` (default branch on GitHub).
 
 Verified:
 
-- `./scripts/check.sh` green on Linux; CI green on Windows, macOS, Linux and MSRV 1.88 (maintainer).
-- Maintainer on Windows: all shortcuts, keyboard commit, no console window flashing.
-- UI checked by hand through WSLg (screenshots, synthetic mouse and, since M2-01, keyboard input).
+- `./scripts/check.sh` green on Linux, clippy for the Windows target; Windows test binaries run locally where noted.
+- M3 walkthrough on Linux against the GitHub remote of this repo (see the M3-14 note); GitHub left clean.
+- UI checked by hand through WSLg (synthetic mouse and keyboard; keyboard input was unreliable at times, gaps are maintainer to-dos).
 
 Not done / known limitations:
 
-- Checkout, branches, tags, fetch/pull/push: M3. Merge/rebase actions and conflict resolution: M4 (the operation banner shows Abort/Continue disabled).
+- Merge/rebase/cherry-pick/revert/reset actions, conflict resolution, drag and drop of branches: M4 (menus show them disabled).
+- Real credential prompts (GCM on Windows, SSH passphrase on Linux) and the Windows run of the M2/M3 walkthroughs are open maintainer checks.
 - Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
-- Rebase state was only verified by integration tests (`git rebase` is blocked in Claude Code's sandbox).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
 - Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
