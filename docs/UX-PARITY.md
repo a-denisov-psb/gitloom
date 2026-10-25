@@ -48,7 +48,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
-| Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
+| Merge in progress | Banner in the tab with Continue/Abort (Skip for rebase and cherry-pick); the commit button becomes "Continue <operation>" | done (M2-09, M2-13, M4-03); also rebase, cherry-pick, revert; Continue is disabled while conflicts are unresolved (tooltip lists the files) |
+| Conflicted files | "Conflicted Files" section above "Unstaged Files" | done (M4-03) |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 | Conflicted file | Opens conflict view (ours, theirs, output) | M4 |
@@ -127,10 +128,11 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | "Discard all" with staged changes asks whether to discard them too ("Keep staged" is the default) | Maintainer decision (HANDOVER question 8); staged work is never lost by accident |
 | Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
-| While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
+| While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled | Prevents breaking the operation; Git itself refuses some of these (amend during a merge) |
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
-| A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | Conflict resolution comes in M4; until then the user is not left in a half-finished state without a way back |
+| A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | The user is not left in a half-finished state without a way back; resolving and continuing works from the banner |
+| The commit message of a rebase step is editable before Continue (prefilled with the original message) | Git asks for the message on `rebase --continue` after a conflict; the commit panel answers instead of a terminal editor |
 | Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
