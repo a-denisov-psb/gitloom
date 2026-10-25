@@ -364,8 +364,8 @@ pub enum Message {
     },
     FormSubmit,
     FormClosed,
-    /// Periodic check for due auto-fetches.
-    AutoFetchTick(std::time::Instant),
+    /// The auto-fetch timer with sequence number `seq` fired.
+    AutoFetchDue(u64),
     Undo,
     Redo,
     /// Toolbar "Stash": stash all changes including untracked files.
@@ -424,6 +424,10 @@ pub struct App {
     pub window_size: iced::Size,
     /// Mode of the toolbar Pull button (persisted in the session).
     pub pull_mode: git_core::PullMode,
+    /// When the pending auto-fetch timer fires, and its sequence number
+    /// (older timers are ignored).
+    auto_fetch_at: Option<std::time::Instant>,
+    auto_fetch_seq: u64,
     /// Keyboard modifiers held right now (for Shift/Ctrl clicks).
     modifiers: keyboard::Modifiers,
     /// Where the session is stored; `None` disables persistence (tests).
@@ -457,6 +461,8 @@ impl App {
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
             pull_mode: git_core::PullMode::default(),
+            auto_fetch_at: None,
+            auto_fetch_seq: 0,
             modifiers: keyboard::Modifiers::default(),
             session_path: session_path.clone(),
             session_loaded: false,
@@ -1283,17 +1289,7 @@ impl App {
             .tabs
             .iter()
             .filter_map(|tab| {
-                let view = tab.view()?;
-                let state = crate::fetch::TabState {
-                    last_fetch: view.last_fetch,
-                    busy: view.busy.is_some(),
-                    operation_in_progress: !view.snapshot.state.is_clean(),
-                    has_remotes: view
-                        .snapshot
-                        .refs
-                        .iter()
-                        .any(|r| r.kind == git_core::RefKind::RemoteBranch),
-                };
+                let state = auto_fetch_state(tab.view()?);
                 crate::fetch::auto_fetch_due(now, interval, state).then_some(tab.id)
             })
             .collect();
@@ -2047,7 +2043,35 @@ impl App {
         // The active tab may have changed or finished loading; details load lazily.
         let details = self.load_details();
         let scroll = self.restore_scroll();
-        Task::batch([task, details, scroll, self.persist()])
+        let timer = self.schedule_auto_fetch();
+        Task::batch([task, details, scroll, self.persist(), timer])
+    }
+
+    /// Starts a timer for the next auto-fetch check unless one is pending
+    /// for that time or earlier (see [`crate::fetch::next_check`]).
+    fn schedule_auto_fetch(&mut self) -> Task<Message> {
+        let now = std::time::Instant::now();
+        let tabs: Vec<crate::fetch::TabState> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| tab.view().map(auto_fetch_state))
+            .collect();
+        let Some(next) = crate::fetch::next_check(now, self.session.auto_fetch_minutes, &tabs)
+        else {
+            self.auto_fetch_at = None;
+            return Task::none();
+        };
+        if self.auto_fetch_at.is_some_and(|at| at <= next) {
+            return Task::none();
+        }
+        self.auto_fetch_at = Some(next);
+        self.auto_fetch_seq += 1;
+        let seq = self.auto_fetch_seq;
+        // Created lazily: the timer needs the runtime that runs the task.
+        Task::perform(
+            async move { tokio::time::sleep_until(tokio::time::Instant::from_std(next)).await },
+            move |()| Message::AutoFetchDue(seq),
+        )
     }
 
     /// Re-applies the stored offset when a different graph or diff became visible.
@@ -2828,7 +2852,12 @@ impl App {
                     _ => Task::none(),
                 };
             }
-            Message::AutoFetchTick(now) => return self.auto_fetch(now),
+            Message::AutoFetchDue(seq) => {
+                if seq == self.auto_fetch_seq {
+                    self.auto_fetch_at = None;
+                    return self.auto_fetch(std::time::Instant::now());
+                }
+            }
             Message::CancelNetwork(tab) => {
                 if let Some(op) = self
                     .tab_mut(tab)
@@ -3399,7 +3428,6 @@ impl App {
             [
                 event::listen_with(global_event),
                 window::close_requests().map(Message::CloseRequested),
-                iced::time::every(crate::fetch::TICK).map(Message::AutoFetchTick),
             ]
             .into_iter()
             .chain(watchers),
@@ -3669,6 +3697,20 @@ fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
             },
         ],
         default: Some(0),
+    }
+}
+
+/// What the auto-fetch scheduler needs to know about a tab.
+fn auto_fetch_state(view: &RepoView) -> crate::fetch::TabState {
+    crate::fetch::TabState {
+        last_fetch: view.last_fetch,
+        busy: view.busy.is_some(),
+        operation_in_progress: !view.snapshot.state.is_clean(),
+        has_remotes: view
+            .snapshot
+            .refs
+            .iter()
+            .any(|r| r.kind == git_core::RefKind::RemoteBranch),
     }
 }
 
@@ -5666,13 +5708,11 @@ mod tests {
     fn auto_fetch_runs_when_due() {
         let mut app = app_with_remote();
         let opened = app.tabs[0].view().unwrap().last_fetch;
-        let _ = app.update(Message::AutoFetchTick(
-            opened + std::time::Duration::from_secs(60),
-        ));
+        let _ = app.auto_fetch(opened + std::time::Duration::from_secs(60));
         assert!(app.tabs[0].view().unwrap().busy.is_none(), "not due yet");
 
         let later = opened + std::time::Duration::from_secs(5 * 60);
-        let _ = app.update(Message::AutoFetchTick(later));
+        let _ = app.auto_fetch(later);
         let view = app.tabs[0].view().unwrap();
         assert_eq!(view.busy.as_deref(), Some("Auto-fetch"));
         assert!(view.network.as_ref().is_some_and(|op| op.background));
@@ -5681,9 +5721,7 @@ mod tests {
         // Off when the interval is 0.
         let mut app = app_with_remote();
         app.session.auto_fetch_minutes = 0;
-        let _ = app.update(Message::AutoFetchTick(
-            later + std::time::Duration::from_secs(3600),
-        ));
+        let _ = app.auto_fetch(later + std::time::Duration::from_secs(3600));
         assert!(app.tabs[0].view().unwrap().busy.is_none());
     }
 
@@ -6493,6 +6531,28 @@ mod tests {
         });
         assert!(app.modal.is_none());
         assert_eq!(running_args(&app), ["Checkout topic"]);
+    }
+
+    #[test]
+    fn one_timer_for_the_next_auto_fetch() {
+        let mut app = app_with_remote();
+        let opened = app.tabs[0].view().unwrap().last_fetch;
+        let _ = app.update(Message::Refresh);
+        let due = opened + std::time::Duration::from_secs(5 * 60);
+        assert_eq!(app.auto_fetch_at, Some(due));
+        let seq = app.auto_fetch_seq;
+
+        // Further messages keep the pending timer.
+        let _ = app.update(Message::Refresh);
+        assert_eq!(app.auto_fetch_seq, seq);
+        // A stale timer is ignored.
+        let _ = app.update(Message::AutoFetchDue(seq - 1));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+
+        // Off: no timer.
+        app.session.auto_fetch_minutes = 0;
+        let _ = app.update(Message::Refresh);
+        assert_eq!(app.auto_fetch_at, None);
     }
 
     #[test]
