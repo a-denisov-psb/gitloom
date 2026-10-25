@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::{
     diff, ChangeKind, Commit, DiffRequest, Error, FileChange, FileDiff, GitBackend, Head, Log, Oid,
-    RefKind, Reference, RepoState, Result, Stash, WorkingTree,
+    RefKind, Reference, RepoState, Result, Stash, StashChanges, WorkingTree,
 };
 
 /// Static sample repository for UI development without a real repo.
@@ -144,6 +144,14 @@ impl GitBackend for MockBackend {
         ])
     }
 
+    fn remotes(&self) -> Result<Vec<String>> {
+        Ok(vec!["origin".into(), "upstream".into()])
+    }
+
+    fn remote_url(&self, name: &str) -> Result<Option<String>> {
+        Ok(Some(format!("https://example.com/{name}.git")))
+    }
+
     fn stashes(&self) -> Result<Vec<Stash>> {
         Ok(vec![Stash {
             index: 0,
@@ -190,6 +198,10 @@ impl GitBackend for MockBackend {
                 old_path: None,
             })
             .collect())
+    }
+
+    fn stash_changes(&self, _id: &str) -> Result<StashChanges> {
+        Ok(StashChanges::default())
     }
 
     fn commit_template(&self) -> Result<Option<String>> {

@@ -12,23 +12,34 @@ mod gix_backend;
 mod history;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
+mod network;
 mod patch;
+mod refname;
 mod state;
 mod watch;
 
 pub use cli_backend::{
-    detect_git, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter, RunOptions,
-    MIN_GIT_VERSION,
+    branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
+    GitVersion, GitWriter, RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
 };
 pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
     FileSnapshot, IndexSnapshot,
 };
 pub use gix_backend::GixBackend;
-pub use history::{head_commit, move_head, restore_snapshot};
+pub use history::{
+    branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
+    tag_message, unreachable_from_branches, HeadPosition, RefChange,
+};
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
+pub use network::{
+    delete_remote_branch_args, delete_remote_tag_args, fast_forward_args, fetch_remote_args,
+    parse_progress, push_args, push_rejection, push_tag_args, rename_remote_branch_args,
+    CancelToken, Progress, PullMode, PushRejection,
+};
 pub use patch::{build_patch, PatchDirection};
+pub use refname::check_branch_name;
 pub use state::{locked_file, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
 
@@ -208,6 +219,43 @@ pub enum DiffKind {
     Unstaged,
     /// Nothing against the working tree.
     Untracked,
+    /// One part of a stash entry (see [`StashChanges`]).
+    Stash { id: Oid, part: StashPart },
+}
+
+/// Part of a stash entry, like the sections of the working copy view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StashPart {
+    /// Index (second parent) against HEAD (first parent).
+    Staged,
+    /// Stashed working tree (the stash commit) against the index.
+    Unstaged,
+    /// Untracked files (third parent, `git stash -u`) against nothing.
+    Untracked,
+}
+
+/// Everything a stash entry contains, split like the working copy view.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StashChanges {
+    pub staged: Vec<FileChange>,
+    pub unstaged: Vec<FileChange>,
+    pub untracked: Vec<FileChange>,
+}
+
+impl StashChanges {
+    /// Number of distinct paths over all parts.
+    pub fn file_count(&self) -> usize {
+        let mut paths: Vec<&str> = self
+            .staged
+            .iter()
+            .chain(&self.unstaged)
+            .chain(&self.untracked)
+            .map(|f| f.path.as_str())
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        paths.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,6 +328,8 @@ pub enum Error {
         partial_clone: bool,
     },
     Backend(String),
+    /// The user cancelled a running command.
+    Cancelled,
     /// A `git` command failed.
     Command {
         command: String,
@@ -304,6 +354,7 @@ impl fmt::Display for Error {
                 write!(f, "Object {id} is missing from the repository")
             }
             Error::Backend(msg) => write!(f, "Git error: {msg}"),
+            Error::Cancelled => write!(f, "Cancelled"),
             Error::Command {
                 command,
                 code,
@@ -343,12 +394,21 @@ pub trait GitBackend: Send + Sync {
     /// Local branches, remote branches (without `*/HEAD`) and tags.
     fn references(&self) -> Result<Vec<Reference>>;
 
+    /// Names of the configured remotes, sorted.
+    fn remotes(&self) -> Result<Vec<String>>;
+
+    /// Fetch URL of remote `name`, if configured.
+    fn remote_url(&self, name: &str) -> Result<Option<String>>;
+
     fn stashes(&self) -> Result<Vec<Stash>>;
 
     fn working_tree(&self) -> Result<WorkingTree>;
 
     /// Files changed by a commit compared to its first parent, sorted by path.
     fn commit_changes(&self, id: &str) -> Result<Vec<FileChange>>;
+
+    /// Staged, unstaged and untracked changes of the stash commit `id`.
+    fn stash_changes(&self, id: &str) -> Result<StashChanges>;
 
     /// Line diff of one file.
     fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;

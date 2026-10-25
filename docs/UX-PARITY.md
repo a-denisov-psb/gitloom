@@ -27,10 +27,15 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Click WIP | Staging area right | done |
 | Click file in panel | Diff in center | done (M1) |
 | Click branch in left panel | Jump to and select its commit | done |
-| Double click local branch | Checkout | M3 |
-| Double click remote branch | Create tracking branch and checkout | M3 |
-| Right click commit/branch | Context menu | M3 |
-| Drag branch onto branch | Merge/rebase menu | M3 |
+| Double click local branch | Checkout | done (M3; sidebar and graph pill) |
+| Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
+| Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
+| Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
+| Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
+| Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
+| Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
+| Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu) |
+| Auto-fetch | Periodic fetch in the background | done (M3, every 5 min, `auto_fetch_minutes` in the session file) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
@@ -38,6 +43,10 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
+| Right click remote | Fetch, Edit URL, Rename, Remove | done (M3) |
+| "+" in the remote section | Add a remote (name, URL) | done (M3) |
+| Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
+| Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
@@ -51,8 +60,8 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Create branch | Ctrl+B | M3 |
-| Fetch all | Ctrl+L | M3 |
+| Create branch | Ctrl+B | done (M3) |
+| Fetch all | Ctrl+L | done (M3) |
 | Stage current file | S | done (M2) |
 | Stage all files | Ctrl+Shift+S | done (M2) |
 | Unstage current file | U | done (M2) |
@@ -69,7 +78,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), rest M4 |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), rest M4 |
 
 ### Command palette and search
 
@@ -118,4 +127,6 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
+| Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
+| A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | Conflict resolution comes in M4; until then the user is not left in a half-finished state without a way back |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

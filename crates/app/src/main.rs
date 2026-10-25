@@ -1,5 +1,8 @@
 mod app;
+mod askpass;
+mod fetch;
 mod format;
+mod menus;
 mod nav;
 mod overlay;
 mod panes;
@@ -16,6 +19,16 @@ use std::path::PathBuf;
 use app::App;
 
 fn main() -> iced::Result {
+    // Started by Git or SSH to ask for credentials (ADR-019).
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let marker = std::env::var_os(git_core::ASKPASS_ENV).is_some();
+    if let Some(prompt) = askpass::prompt_from_args(&args, marker) {
+        return askpass::main(prompt);
+    }
+
     // `gitloom [PATH]...` opens each path in its own tab.
     let paths: Vec<PathBuf> = std::env::args_os()
         .skip(1)

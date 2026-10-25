@@ -14,15 +14,21 @@
 pub mod context_area;
 mod diff;
 mod graph;
-mod overlays;
+pub(crate) mod overlays;
 pub(crate) mod panel;
 mod sidebar;
 mod start;
-mod statusbar;
+pub(crate) mod statusbar;
 mod tabs;
 mod toolbar;
 
 pub use graph::reveal_offset;
+
+/// Id of the inline new-branch input in the graph.
+pub const NEW_BRANCH_INPUT: &str = "new-branch-input";
+
+/// Id of the inline rename input in the sidebar.
+pub const RENAME_INPUT: &str = "rename-input";
 
 use iced::widget::{button, column, container, pane_grid, row, space, text};
 use iced::{Element, Fill};
@@ -51,6 +57,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut layers = vec![base];
     if let Some(menu) = &app.context_menu {
         layers.push(overlays::context_menu(menu, app.window_size));
+    }
+    if let Some(form) = &app.form {
+        layers.push(overlays::form(form));
     }
     if let Some(modal) = &app.modal {
         layers.push(overlays::modal(modal));
@@ -84,7 +93,7 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
             centered(content)
         }
         TabState::Ready(view) => {
-            let mut content = column![toolbar::view(view)].spacing(1);
+            let mut content = column![toolbar::view(view, app.pull_mode)].spacing(1);
             if let Some(state) = view.snapshot.state_banner() {
                 content = content.push(state_banner(view, state));
             }

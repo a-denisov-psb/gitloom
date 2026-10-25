@@ -287,6 +287,28 @@ pub fn state_banner(_: &Theme) -> container::Style {
     }
 }
 
+/// Inline text input (e.g. new branch name); red border on an error.
+pub fn inline_input(
+    error: bool,
+) -> impl Fn(&Theme, iced::widget::text_input::Status) -> iced::widget::text_input::Style {
+    move |theme, status| {
+        let mut style = iced::widget::text_input::default(theme, status);
+        if error {
+            style.border = style.border.color(DANGER).width(1);
+        }
+        style
+    }
+}
+
+/// Small dropdown arrow next to a toolbar button.
+pub fn dropdown_arrow(_: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(TEXT_MUTED),
+        border: Border::default().rounded(3),
+        ..container::Style::default()
+    }
+}
+
 /// Dimmed backdrop behind a modal dialog.
 pub fn backdrop(_: &Theme) -> container::Style {
     filled(Color::BLACK.scale_alpha(0.55))

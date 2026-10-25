@@ -51,7 +51,7 @@ impl ToolbarAction {
     }
 }
 
-pub fn view(view: &RepoView) -> Element<'_, Message> {
+pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Message> {
     let pickers = row![
         picker("repository", view.name().to_owned()),
         picker("branch", view.snapshot.branch_label()),
@@ -62,10 +62,10 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
         action(view, ToolbarAction::Undo),
         action(view, ToolbarAction::Redo),
         divider(),
-        action(view, ToolbarAction::Pull),
-        action(view, ToolbarAction::Push),
+        row![pull_button(view, pull_mode), pull_dropdown()].align_y(iced::Center),
+        push_button(view),
         divider(),
-        action(view, ToolbarAction::Branch),
+        branch_button(view),
         action(view, ToolbarAction::Stash),
         action(view, ToolbarAction::Pop),
     ]
@@ -159,6 +159,95 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         (ToolbarAction::Terminal, _) => with_tooltip(button.into()),
         _ => write_tooltip(button.into(), view),
     }
+}
+
+/// Pull in the current mode; the tooltip names the mode.
+fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Message> {
+    let content = column![
+        text(ToolbarAction::Pull.glyph()).size(16),
+        text(ToolbarAction::Pull.label()).size(11)
+    ]
+    .spacing(1)
+    .align_x(iced::Center);
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    with_tooltip_text(
+        button
+            .on_press_maybe(view.busy.is_none().then_some(Message::Pull(None)))
+            .into(),
+        mode.label().to_owned(),
+    )
+}
+
+/// New branch at the selected commit (inline input, Ctrl+B).
+fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
+    let content = column![
+        text(ToolbarAction::Branch.glyph()).size(16),
+        text(ToolbarAction::Branch.label()).size(11)
+    ]
+    .spacing(1)
+    .align_x(iced::Center);
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    with_tooltip_text(
+        button
+            .on_press_maybe(view.busy.is_none().then_some(Message::NewBranchStart(None)))
+            .into(),
+        "Create a branch at the selected commit (Ctrl+B)".to_owned(),
+    )
+}
+
+/// Push the current branch; the tooltip names the target.
+fn push_button<'a>(view: &RepoView) -> Element<'a, Message> {
+    let content = column![
+        text(ToolbarAction::Push.glyph()).size(16),
+        text(ToolbarAction::Push.label()).size(11)
+    ]
+    .spacing(1)
+    .align_x(iced::Center);
+    let button = button(content)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat);
+    if view.write_block.is_some() {
+        return write_tooltip(button.into(), view);
+    }
+    let tooltip = match view.snapshot.head_upstream() {
+        Some((local, Some((remote, branch)))) => format!("Push {local} to {remote}/{branch}"),
+        Some((local, None)) => format!("Push {local} and set its upstream"),
+        None => "Check out a branch to push".to_owned(),
+    };
+    with_tooltip_text(
+        button
+            .on_press_maybe(
+                view.busy
+                    .is_none()
+                    .then_some(Message::Push { force: false }),
+            )
+            .into(),
+        tooltip,
+    )
+}
+
+/// Arrow next to Pull that opens the Pull menu (Fetch all, pull modes).
+fn pull_dropdown<'a>() -> Element<'a, Message> {
+    let arrow = container(text("▾").size(12))
+        .padding([12, 4])
+        .style(theme::dropdown_arrow);
+    crate::ui::context_area::click_area(
+        iced::widget::mouse_area(arrow).interaction(iced::mouse::Interaction::Pointer),
+        Message::PullMenu,
+    )
 }
 
 fn divider<'a>() -> Element<'a, Message> {

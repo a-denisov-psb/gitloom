@@ -35,7 +35,16 @@ pub enum Loadable<T> {
 #[derive(Debug, Clone)]
 pub struct CommitDetails {
     pub id: String,
-    pub changes: Loadable<Vec<FileChange>>,
+    pub changes: Loadable<DetailChanges>,
+}
+
+/// Files shown in the details panel of a graph row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DetailChanges {
+    /// Commit against its first parent.
+    Commit(Vec<FileChange>),
+    /// Stash entry, split into staged, unstaged and untracked parts.
+    Stash(git_core::StashChanges),
 }
 
 #[derive(Debug, Clone)]
@@ -101,7 +110,7 @@ impl DiffView {
         match self.request.kind {
             git_core::DiffKind::Unstaged | git_core::DiffKind::Untracked => Some(false),
             git_core::DiffKind::Staged => Some(true),
-            git_core::DiffKind::Commit(_) => None,
+            git_core::DiffKind::Commit(_) | git_core::DiffKind::Stash { .. } => None,
         }
     }
 
@@ -219,6 +228,69 @@ pub struct LastWrite {
     pub clears_message: bool,
 }
 
+/// What a network operation does (decides how its result is handled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkKind {
+    Fetch,
+    Pull,
+    /// Push of the checked-out branch (rejections offer Pull / force push).
+    Push,
+    /// Push of another branch: rejections show the plain error.
+    PushBranch,
+}
+
+/// A running network operation (fetch, pull, push) of a tab.
+#[derive(Debug, Clone)]
+pub struct NetworkOp {
+    pub label: String,
+    pub kind: NetworkKind,
+    /// Latest progress update, if Git reported one.
+    pub progress: Option<git_core::Progress>,
+    pub cancel: git_core::CancelToken,
+    /// Started automatically (auto-fetch); yields to user operations.
+    pub background: bool,
+}
+
+/// A network command to run, with its display label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkRequest {
+    pub label: String,
+    pub kind: NetworkKind,
+    pub args: Vec<String>,
+    pub background: bool,
+}
+
+/// Inline input for a new branch in the graph (toolbar Branch, Ctrl+B).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewBranch {
+    /// Commit the branch starts at.
+    pub start: String,
+    /// Graph row showing the input: a commit id, or `None` for the WIP row.
+    pub row: Option<String>,
+    pub name: String,
+    /// Shown at the input; from instant validation or from Git.
+    pub error: Option<String>,
+    /// Creation is running; on failure the input stays open with the error.
+    pub submitted: bool,
+}
+
+/// Inline rename of a local branch in the sidebar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameBranch {
+    pub old: String,
+    pub name: String,
+    pub error: Option<String>,
+    /// The rename is running; on failure the input stays open with the error.
+    pub submitted: bool,
+}
+
+/// Operation waiting for a cancelled background operation to end.
+#[derive(Clone)]
+pub enum Queued {
+    Write(LastWrite),
+    Network(NetworkRequest),
+}
+
 pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
@@ -255,6 +327,30 @@ pub struct RepoView {
     /// Clear the commit message when the running write (a commit) succeeds.
     pub clear_message_after_write: bool,
     pub last_write: Option<LastWrite>,
+    /// Last fetch (or when the tab was opened), for auto-fetch.
+    pub last_fetch: std::time::Instant,
+    /// An auto-fetch error was shown; further ones stay quiet until a fetch works.
+    pub fetch_error_shown: bool,
+    /// Inline new-branch input, if open.
+    pub new_branch: Option<NewBranch>,
+    /// Inline branch rename in the sidebar, if open.
+    pub rename: Option<RenameBranch>,
+    /// Network operation that follows the running write if it succeeds
+    /// (e.g. renaming the remote branch after the local rename).
+    pub then_network: Option<NetworkRequest>,
+    /// Branch of the running plain delete, to offer a force delete if Git
+    /// says it is not merged.
+    pub pending_delete: Option<String>,
+    /// Target of the running checkout, to offer "Stash and checkout" if
+    /// local changes block it.
+    pub pending_checkout: Option<crate::app::CheckoutTarget>,
+    /// Error of a failed pull, shown once the refresh tells whether it
+    /// stopped in a conflict (Git reports merge conflicts on stdout).
+    pub pull_failure: Option<String>,
+    /// Running network operation, shown in the status bar with Cancel.
+    pub network: Option<NetworkOp>,
+    /// Starts once the running (cancelled) background operation finished.
+    pub queued: Option<Queued>,
     /// Undoable actions, most recent last.
     pub undo: Vec<crate::undo::UndoAction>,
     /// Undone actions that can be redone, most recent last.
@@ -369,8 +465,12 @@ impl RepoView {
 
     pub fn new(backend: Arc<dyn GitBackend>, snapshot: Arc<RepoSnapshot>) -> Self {
         let selection = restore_selection(None, &snapshot);
-        let writer: Arc<dyn git_core::GitWriter> =
-            Arc::new(git_core::CliBackend::new(backend.path()));
+        let mut cli = git_core::CliBackend::new(backend.path());
+        // Gitloom itself answers credential prompts (ADR-019).
+        if let Ok(exe) = std::env::current_exe() {
+            cli = cli.with_askpass(exe);
+        }
+        let writer: Arc<dyn git_core::GitWriter> = Arc::new(cli);
         let mut view = Self {
             backend,
             snapshot,
@@ -394,6 +494,16 @@ impl RepoView {
             reload_diff: false,
             clear_message_after_write: false,
             last_write: None,
+            last_fetch: std::time::Instant::now(),
+            fetch_error_shown: false,
+            new_branch: None,
+            rename: None,
+            then_network: None,
+            pending_delete: None,
+            pending_checkout: None,
+            pull_failure: None,
+            network: None,
+            queued: None,
             undo: Vec::new(),
             redo: Vec::new(),
             graph_scroll_id: iced::widget::Id::unique(),

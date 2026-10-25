@@ -56,6 +56,27 @@ impl Modal {
         }
     }
 
+    /// Plain message with a Close button.
+    pub fn info(title: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            text: text.into(),
+            details: None,
+            buttons: vec![DialogButton {
+                label: "Close".into(),
+                kind: ButtonKind::Primary,
+                message: None,
+            }],
+            default: Some(0),
+        }
+    }
+
+    /// Replaces the summary line, e.g. with a hint how to fix the error.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = text.into();
+        self
+    }
+
     /// Operation failed because another process holds a Git lock. The lock
     /// is never removed automatically; the user retries or deletes it.
     pub fn locked(label: &str, lock: &str, retry: Message) -> Self {
@@ -155,6 +176,95 @@ impl Modal {
     }
 }
 
+/// Input of a [`Form`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldKind {
+    Text,
+    /// One of the given values (pick list).
+    Choice(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormField {
+    pub label: String,
+    pub value: String,
+    pub kind: FieldKind,
+}
+
+impl FormField {
+    pub fn text(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            kind: FieldKind::Text,
+        }
+    }
+
+    pub fn choice(
+        label: impl Into<String>,
+        value: impl Into<String>,
+        options: Vec<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            kind: FieldKind::Choice(options),
+        }
+    }
+}
+
+/// What submitting a [`Form`] does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormAction {
+    /// Push local branch `local` of tab `tab` and make the target its upstream.
+    PushSetUpstream {
+        tab: crate::app::TabId,
+        local: String,
+    },
+    /// Make the chosen remote branch the upstream of `local`.
+    SetUpstream {
+        tab: crate::app::TabId,
+        local: String,
+    },
+    /// Add a remote (name, URL).
+    AddRemote { tab: crate::app::TabId },
+    /// Change the URL of remote `name`.
+    SetRemoteUrl {
+        tab: crate::app::TabId,
+        name: String,
+    },
+    /// Rename remote `old`.
+    RenameRemote { tab: crate::app::TabId, old: String },
+    /// Create a tag (name, optional message) at commit `target`.
+    CreateTag {
+        tab: crate::app::TabId,
+        target: String,
+    },
+    /// Push tag `tag` to the chosen remote.
+    PushTag { tab: crate::app::TabId, tag: String },
+    /// Delete tag `tag` on the chosen remote.
+    DeleteRemoteTag { tab: crate::app::TabId, tag: String },
+}
+
+/// Modal dialog with inputs (e.g. remote and branch name for a first push).
+#[derive(Debug, Clone)]
+pub struct Form {
+    pub title: String,
+    pub text: String,
+    pub fields: Vec<FormField>,
+    pub submit: String,
+    pub action: FormAction,
+    /// Validation message shown above the buttons.
+    pub error: Option<String>,
+}
+
+impl Form {
+    /// Trimmed value of field `index` (empty if out of range).
+    pub fn value(&self, index: usize) -> &str {
+        self.fields.get(index).map_or("", |f| f.value.trim())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MenuEntry {
     Item {
@@ -163,6 +273,8 @@ pub enum MenuEntry {
         shortcut: Option<String>,
         enabled: bool,
         message: Box<Message>,
+        /// Tooltip, e.g. "Not available yet" on disabled future actions.
+        hint: Option<String>,
     },
     Separator,
 }
@@ -174,6 +286,7 @@ impl MenuEntry {
             shortcut: None,
             enabled: true,
             message: Box::new(message),
+            hint: None,
         }
     }
 }
@@ -186,7 +299,7 @@ pub struct ContextMenu {
 }
 
 /// Approximate menu size used to keep it inside the window.
-pub const MENU_WIDTH: f32 = 220.0;
+pub const MENU_WIDTH: f32 = 260.0;
 pub const MENU_ITEM_HEIGHT: f32 = 26.0;
 pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
 
@@ -249,6 +362,7 @@ mod tests {
                     shortcut: Some("D".into()),
                     enabled: false,
                     message: Box::new(Message::Refresh),
+                    hint: None,
                 },
             ],
         )

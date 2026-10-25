@@ -30,6 +30,46 @@ pub struct Session {
     /// Index into `tabs`.
     pub active: usize,
     pub panes: PaneRatios,
+    /// Auto-fetch interval in minutes; 0 turns it off (UI in M5).
+    #[serde(default = "default_auto_fetch")]
+    pub auto_fetch_minutes: u32,
+    /// Mode of the toolbar Pull button (last one chosen in its dropdown).
+    #[serde(default)]
+    pub pull_mode: PullModeSetting,
+}
+
+/// [`git_core::PullMode`] as stored in the session file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PullModeSetting {
+    #[default]
+    FastForwardIfPossible,
+    FastForwardOnly,
+    Rebase,
+}
+
+impl From<PullModeSetting> for git_core::PullMode {
+    fn from(mode: PullModeSetting) -> Self {
+        match mode {
+            PullModeSetting::FastForwardIfPossible => Self::FastForwardIfPossible,
+            PullModeSetting::FastForwardOnly => Self::FastForwardOnly,
+            PullModeSetting::Rebase => Self::Rebase,
+        }
+    }
+}
+
+impl From<git_core::PullMode> for PullModeSetting {
+    fn from(mode: git_core::PullMode) -> Self {
+        match mode {
+            git_core::PullMode::FastForwardIfPossible => Self::FastForwardIfPossible,
+            git_core::PullMode::FastForwardOnly => Self::FastForwardOnly,
+            git_core::PullMode::Rebase => Self::Rebase,
+        }
+    }
+}
+
+fn default_auto_fetch() -> u32 {
+    crate::fetch::DEFAULT_INTERVAL_MINUTES
 }
 
 impl Default for Session {
@@ -40,6 +80,8 @@ impl Default for Session {
             tabs: Vec::new(),
             active: 0,
             panes: PaneRatios::default(),
+            auto_fetch_minutes: default_auto_fetch(),
+            pull_mode: PullModeSetting::default(),
         }
     }
 }

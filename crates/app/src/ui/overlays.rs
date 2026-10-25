@@ -1,12 +1,15 @@
 //! Rendering of the modal dialog and the context menu above the window.
 
 use iced::widget::{
-    button, column, container, mouse_area, opaque, row, scrollable, space, text, Column,
+    button, column, container, mouse_area, opaque, pick_list, row, scrollable, space, text,
+    text_input, Column,
 };
 use iced::{Element, Fill, Font, Length, Padding};
 
 use crate::app::Message;
-use crate::overlay::{ButtonKind, ContextMenu, MenuEntry, Modal, MENU_ITEM_HEIGHT, MENU_WIDTH};
+use crate::overlay::{
+    ButtonKind, ContextMenu, FieldKind, Form, MenuEntry, Modal, MENU_ITEM_HEIGHT, MENU_WIDTH,
+};
 use crate::theme;
 use crate::ui::muted;
 
@@ -16,6 +19,8 @@ const DIALOG_WIDTH: f32 = 520.0;
 pub fn modal(modal: &Modal) -> Element<'_, Message> {
     let mut content = column![text(&modal.title).size(17), text(&modal.text)].spacing(12);
     if let Some(details) = &modal.details {
+        // Git indents file lists with tabs, which the font has no glyph for.
+        let details = details.replace('\t', "    ");
         content = content.push(
             container(
                 scrollable(
@@ -59,6 +64,72 @@ pub fn modal(modal: &Modal) -> Element<'_, Message> {
     )
 }
 
+/// Id of the first input of a form, focused when the form opens.
+pub const FORM_FIRST_INPUT: &str = "form-first-input";
+
+/// Form dialog: labelled inputs, validation message, Cancel and submit.
+pub fn form(form: &Form) -> Element<'_, Message> {
+    let mut content = column![text(&form.title).size(17)].spacing(12);
+    if !form.text.is_empty() {
+        content = content.push(text(&form.text));
+    }
+    let mut first_text = true;
+    for (index, field) in form.fields.iter().enumerate() {
+        let input: Element<'_, Message> = match &field.kind {
+            FieldKind::Text => {
+                let mut input = text_input("", &field.value)
+                    .on_input(move |value| Message::FormInput {
+                        field: index,
+                        value,
+                    })
+                    .on_submit(Message::FormSubmit)
+                    .padding(6);
+                if first_text {
+                    input = input.id(FORM_FIRST_INPUT);
+                    first_text = false;
+                }
+                input.into()
+            }
+            FieldKind::Choice(options) => {
+                pick_list(options.clone(), Some(field.value.clone()), move |value| {
+                    Message::FormInput {
+                        field: index,
+                        value,
+                    }
+                })
+                .width(Fill)
+                .into()
+            }
+        };
+        content = content.push(column![muted(&field.label).size(12), input].spacing(4));
+    }
+    if let Some(error) = &form.error {
+        content = content.push(text(error).size(12).color(theme::DANGER));
+    }
+    content = content.push(
+        row![
+            space::horizontal(),
+            button(text("Cancel"))
+                .on_press(Message::FormClosed)
+                .padding([6, 14])
+                .style(button::secondary),
+            button(text(&form.submit))
+                .on_press(Message::FormSubmit)
+                .padding([6, 14])
+                .style(button::primary),
+        ]
+        .spacing(8),
+    );
+    let dialog = container(content)
+        .width(DIALOG_WIDTH)
+        .padding(20)
+        .style(theme::dialog);
+    opaque(
+        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
+            .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
 /// Menu at its origin; a click anywhere else closes it.
 pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Message> {
     let origin = menu.origin(window);
@@ -74,19 +145,27 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
                 label,
                 shortcut,
                 enabled,
+                hint,
                 ..
             } => {
-                let mut line = row![text(label).size(13), space::horizontal()];
+                // Items never wrap: a wrapped label would overlap the next item.
+                let mut line = row![
+                    text(label).size(13).wrapping(text::Wrapping::None),
+                    space::horizontal()
+                ];
                 if let Some(shortcut) = shortcut {
                     line = line.push(muted(shortcut).size(11));
                 }
-                button(line.align_y(iced::Center))
+                let item = button(line.align_y(iced::Center))
                     .on_press_maybe(enabled.then_some(Message::MenuSelected(index)))
                     .height(MENU_ITEM_HEIGHT)
                     .padding([4, 10])
                     .width(Fill)
-                    .style(theme::menu_item)
-                    .into()
+                    .style(theme::menu_item);
+                match hint {
+                    Some(hint) => crate::ui::panel::with_tooltip_text(item.into(), hint.clone()),
+                    None => item.into(),
+                }
             }
         }
     }));

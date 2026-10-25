@@ -25,10 +25,19 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     };
 
     let local: Vec<_> = refs_of(RefKind::LocalBranch)
-        .map(|r| ref_item(r, &r.name, 1))
+        .map(|r| match &repo.rename {
+            Some(rename) if rename.old == r.name => rename_input(rename),
+            _ => ref_item(r, &r.name, 1),
+        })
         .collect();
 
     let mut by_remote: BTreeMap<&str, Vec<&Reference>> = BTreeMap::new();
+    // Remotes without fetched branches are listed too.
+    for remote in &repo.snapshot.remotes {
+        if matches(remote) || needle.is_empty() {
+            by_remote.entry(remote.as_str()).or_default();
+        }
+    }
     for r in refs_of(RefKind::RemoteBranch) {
         by_remote
             .entry(r.remote().unwrap_or("?"))
@@ -39,7 +48,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let remote: Vec<_> = by_remote
         .into_iter()
         .flat_map(|(name, refs)| {
-            std::iter::once(group_label(name))
+            std::iter::once(remote_label(name))
                 .chain(refs.into_iter().map(|r| ref_item(r, r.local_name(), 2)))
         })
         .collect();
@@ -70,7 +79,14 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
 
     let sections = column![
         section(repo, Section::Local, "LOCAL", local.len(), local),
-        section(repo, Section::Remote, "REMOTE", remote_count, remote),
+        section_with_action(
+            repo,
+            Section::Remote,
+            "REMOTE",
+            remote_count,
+            remote,
+            Some(("+", "Add remote", Message::AddRemoteStart)),
+        ),
         section(repo, Section::Tags, "TAGS", tags.len(), tags),
         section(repo, Section::Stashes, "STASHES", stashes.len(), stashes),
         submodules(),
@@ -101,22 +117,45 @@ fn section<'a>(
     count: usize,
     items: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    section_with_action(repo, section, title, count, items, None)
+}
+
+/// Section with an optional small action button in the header (e.g. "+").
+fn section_with_action<'a>(
+    repo: &RepoView,
+    section: Section,
+    title: &'a str,
+    count: usize,
+    items: Vec<Element<'a, Message>>,
+    action: Option<(&'a str, &'a str, Message)>,
+) -> Element<'a, Message> {
     let collapsed = repo.collapsed.contains(&section);
     let arrow = if collapsed { "▸" } else { "▾" };
 
-    let header = button(
-        row![
-            text(arrow).width(INDENT),
-            text(title).size(11),
-            space::horizontal(),
-            text(count.to_string()).size(11),
-        ]
-        .align_y(iced::Center),
-    )
-    .on_press(Message::SectionToggled(section))
-    .padding([4, 6])
-    .width(Fill)
-    .style(theme::section_header);
+    let mut line = row![
+        text(arrow).width(INDENT),
+        text(title).size(11),
+        space::horizontal(),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    if let Some((label, tip, message)) = action {
+        let writable = repo.write_block.is_none() && repo.busy.is_none();
+        line = line.push(crate::ui::panel::with_tooltip_text(
+            button(text(label).size(12))
+                .on_press_maybe(writable.then_some(message))
+                .padding([0, 6])
+                .style(theme::flat)
+                .into(),
+            tip.to_owned(),
+        ));
+    }
+    line = line.push(text(count.to_string()).size(11));
+    let header = button(line)
+        .on_press(Message::SectionToggled(section))
+        .padding([4, 6])
+        .width(Fill)
+        .style(theme::section_header);
 
     if collapsed {
         header.into()
@@ -160,7 +199,48 @@ fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element
     }
     let content = content.into();
 
-    list_button(content, depth, Message::RefClicked(reference.name.clone()))
+    let item = list_button(content, depth, Message::RefClicked(reference.name.clone()));
+    let item = match checkout_target(reference) {
+        Some(target) => crate::ui::context_area::double_click_area(item, Message::Checkout(target)),
+        None => item,
+    };
+    let (name, kind) = (reference.name.clone(), reference.kind);
+    crate::ui::context_area::context_area(item, move |position| Message::BranchContextMenu {
+        name: name.clone(),
+        kind,
+        position,
+    })
+}
+
+/// Inline rename input in place of the branch entry; red border on an error.
+fn rename_input(rename: &crate::repo_view::RenameBranch) -> Element<'_, Message> {
+    let field = text_input("Branch name", &rename.name)
+        .id(crate::ui::RENAME_INPUT)
+        .on_input(Message::RenameInput)
+        .on_submit(Message::RenameSubmit)
+        .size(13)
+        .padding([2, 4])
+        .style(theme::inline_input(rename.error.is_some()));
+    let field = container(field).padding(iced::Padding::from([1, 6]).left(6.0 + INDENT));
+    match &rename.error {
+        Some(error) => column![field, text(error.clone()).size(11).color(theme::DANGER)]
+            .spacing(2)
+            .into(),
+        None => field.into(),
+    }
+}
+
+/// Double click checks out branches (remote ones as tracking branch).
+fn checkout_target(reference: &Reference) -> Option<crate::app::CheckoutTarget> {
+    match reference.kind {
+        git_core::RefKind::LocalBranch => {
+            Some(crate::app::CheckoutTarget::Local(reference.name.clone()))
+        }
+        git_core::RefKind::RemoteBranch => {
+            Some(crate::app::CheckoutTarget::Remote(reference.name.clone()))
+        }
+        git_core::RefKind::Tag => None,
+    }
 }
 
 /// `↑2 ↓1` style badge; nothing when in sync or without upstream.
@@ -174,10 +254,16 @@ pub fn ahead_behind_badge(ahead_behind: Option<(usize, usize)>) -> Option<String
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-fn group_label<'a>(name: &'a str) -> Element<'a, Message> {
-    container(muted(name))
+/// Remote name above its branches; right click opens the remote menu.
+fn remote_label<'a>(name: &'a str) -> Element<'a, Message> {
+    let label = container(muted(name))
         .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT))
-        .into()
+        .width(Fill);
+    let name = name.to_owned();
+    crate::ui::context_area::context_area(label, move |position| Message::RemoteContextMenu {
+        name: name.clone(),
+        position,
+    })
 }
 
 fn list_button<'a>(

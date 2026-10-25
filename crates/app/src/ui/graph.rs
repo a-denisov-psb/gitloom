@@ -189,8 +189,12 @@ pub fn graph_row(
             muted(format!("✓ {}", tree.staged.len())),
         ]
         .spacing(12);
+        let refs: Element<'_, Message> = match &repo.new_branch {
+            Some(input) if input.row.is_none() => new_branch_input(input),
+            _ => text("").into(),
+        };
         let content = row![
-            cell(text(""), COL_REFS),
+            cell(refs, COL_REFS),
             cell(graph_cell(layout_row, Node::Wip), graph_width),
             cell(summary, Fill),
         ];
@@ -221,11 +225,12 @@ pub fn graph_row(
     };
 
     let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
+    let refs_cell: Element<'_, Message> = match &repo.new_branch {
+        Some(input) if input.row.as_deref() == Some(commit.id.as_str()) => new_branch_input(input),
+        _ => ref_pills(ref_labels(&refs, &snapshot.head, commit)),
+    };
     let mut content = row![
-        cell(
-            ref_pills(ref_labels(&refs, &snapshot.head, commit)),
-            COL_REFS
-        ),
+        cell(refs_cell, COL_REFS),
         cell(graph_cell(layout_row, node), graph_width),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
@@ -254,14 +259,40 @@ pub fn graph_row(
         color,
         Message::CommitSelected(commit.id.clone()),
     );
+    let id = commit.id.clone();
     if is_stash {
-        let id = commit.id.clone();
         crate::ui::context_area::context_area(row, move |position| Message::StashContextMenu {
             id: id.clone(),
             position,
         })
     } else {
-        row
+        crate::ui::context_area::context_area(row, move |position| Message::CommitContextMenu {
+            id: id.clone(),
+            position,
+        })
+    }
+}
+
+/// Inline input for a new branch (GitKraken); an error shows as red border
+/// and tooltip.
+fn new_branch_input(input: &crate::repo_view::NewBranch) -> Element<'_, Message> {
+    let field = iced::widget::text_input("New branch name", &input.name)
+        .id(crate::ui::NEW_BRANCH_INPUT)
+        .on_input(Message::NewBranchInput)
+        .on_submit(Message::NewBranchSubmit)
+        .size(12)
+        .padding([1, 4])
+        .style(theme::inline_input(input.error.is_some()));
+    match &input.error {
+        Some(error) => tooltip(
+            field,
+            container(text(error.clone()).size(12))
+                .padding([4, 8])
+                .style(theme::tooltip),
+            tooltip::Position::Bottom,
+        )
+        .into(),
+        None => field.into(),
     }
 }
 
@@ -272,6 +303,8 @@ pub struct RefLabel {
     pub kind: LabelKind,
     /// The checked-out branch (or the detached HEAD marker).
     pub head: bool,
+    /// Double click on the pill checks this out.
+    pub checkout: Option<crate::app::CheckoutTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,6 +327,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                 text: "HEAD".into(),
                 kind: LabelKind::DetachedHead,
                 head: true,
+                checkout: None,
             });
         }
     }
@@ -326,6 +360,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
             text,
             kind: LabelKind::Local,
             head: local.is_head,
+            checkout: Some(crate::app::CheckoutTarget::Local(local.name.clone())),
         });
     }
     for kind in [RefKind::RemoteBranch, RefKind::Tag] {
@@ -340,6 +375,8 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                         LabelKind::Remote
                     },
                     head: false,
+                    checkout: (kind == RefKind::RemoteBranch)
+                        .then(|| crate::app::CheckoutTarget::Remote(reference.name.clone())),
                 });
             }
         }
@@ -376,15 +413,54 @@ fn pill<'a>(label: &RefLabel) -> Element<'a, Message> {
         LabelKind::Tag => RefKind::Tag,
         LabelKind::DetachedHead => RefKind::LocalBranch,
     };
-    container(
+    let pill = container(
         text(label.text.clone())
             .size(12)
             .wrapping(text::Wrapping::None),
     )
     .padding([1, 6])
     .clip(true)
-    .style(theme::ref_pill(kind, label.head))
-    .into()
+    .style(theme::ref_pill(kind, label.head));
+    let pill: Element<'_, Message> = match &label.checkout {
+        Some(target) => {
+            crate::ui::context_area::double_click_area(pill, Message::Checkout(target.clone()))
+        }
+        None => pill.into(),
+    };
+    // Right click on a branch pill opens the branch menu, not the commit menu.
+    match &label.checkout {
+        Some(crate::app::CheckoutTarget::Local(name)) => {
+            let name = name.clone();
+            crate::ui::context_area::context_area(pill, move |position| {
+                Message::BranchContextMenu {
+                    name: name.clone(),
+                    kind: RefKind::LocalBranch,
+                    position,
+                }
+            })
+        }
+        Some(crate::app::CheckoutTarget::Remote(name)) => {
+            let name = name.clone();
+            crate::ui::context_area::context_area(pill, move |position| {
+                Message::BranchContextMenu {
+                    name: name.clone(),
+                    kind: RefKind::RemoteBranch,
+                    position,
+                }
+            })
+        }
+        _ if label.kind == LabelKind::Tag => {
+            let name = label.text.clone();
+            crate::ui::context_area::context_area(pill, move |position| {
+                Message::BranchContextMenu {
+                    name: name.clone(),
+                    kind: RefKind::Tag,
+                    position,
+                }
+            })
+        }
+        _ => pill,
+    }
 }
 
 fn cell<'a>(

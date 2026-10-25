@@ -20,27 +20,27 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M2, version 0.3.0)
+## Current state (end of M3, version 0.4.0)
 
-Done (M2-01 … M2-17, see the notes in `docs/milestones/M2-working-copy.md`; M1 in `docs/milestones/M1-real-repository.md`):
+Done (M3-01 … M3-15, see the notes in `docs/milestones/M3-branches-remotes.md`; M1/M2 in their milestone files):
 
-- `git-core`: `GixBackend` for all reads (now with filter-aware working tree diffs, operation state detection, partial clone detection); `CliBackend` / `GitWriter` for all writes through the `git` executable (stage, unstage, apply patches, discard with snapshots, commit, amend, stash, undo primitives, lazy fetch of missing blobs).
-- `git-graph`: topological order, lane layout as vertical runs (ADR-011), dashed edges for stashes and WIP, optional `LaneHints` lane groups (prepared for the Git flow layout).
-- `app`: file watcher with incremental status refresh, staging by file/hunk/line, discard (all, file, hunk, lines; "Discard all" asks about staged changes), commit box with template and merge conclusion, amend, stash/pop/apply/delete with stashes in the graph, undo/redo, operation banner (merge/rebase/cherry-pick/revert), lock retry dialog, modal and context menu infrastructure.
-- Measurements: `docs/PERFORMANCE.md` (M1 and M2 sections).
-- Branches: `master` with `v0.1.0`, `v0.2.0`, `v0.3.0`; `develop` (default branch on GitHub).
+- `git-core`: reads via `GixBackend` (reopens when `.git/config` changes; remotes, remote URLs, stash parts, operation state); writes via `CliBackend` / `GitWriter`: staging, discard, commit, stash, checkout, branches, tags, upstream and remote management; `run_network` with progress parsing and process tree cancel; askpass (`GITLOOM_ASKPASS`, ADR-019); undoable `RefChange`s.
+- `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
+- `app`: everything from M2 plus fetch/auto-fetch (one timer, ADR-020), pull modes, push with upstream setup and force-with-lease, checkout by double click, inline branch create/rename, tags, remotes, complete context menus (`menus.rs`, M4 actions disabled), undo for ref changes, detached HEAD guard, askpass window, generic form overlay.
+- Measurements: `docs/PERFORMANCE.md` (M1, M2, M3 sections).
+- Branches: `master` with `v0.1.0` … `v0.4.0`; `develop` (default branch on GitHub).
 
 Verified:
 
-- `./scripts/check.sh` green on Linux; CI green on Windows, macOS, Linux and MSRV 1.88 (maintainer).
-- Maintainer on Windows: all shortcuts, keyboard commit, no console window flashing.
-- UI checked by hand through WSLg (screenshots, synthetic mouse and, since M2-01, keyboard input).
+- `./scripts/check.sh` green on Linux, clippy for the Windows target; Windows test binaries run locally where noted.
+- M3 walkthrough on Linux against the GitHub remote of this repo (see the M3-14 note); GitHub left clean.
+- UI checked by hand through WSLg (synthetic mouse and keyboard; keyboard input was unreliable at times, gaps are maintainer to-dos).
 
 Not done / known limitations:
 
-- Checkout, branches, tags, fetch/pull/push: M3. Merge/rebase actions and conflict resolution: M4 (the operation banner shows Abort/Continue disabled).
+- Merge/rebase/cherry-pick/revert/reset actions, conflict resolution, drag and drop of branches: M4 (menus show them disabled).
+- Real credential prompts (GCM on Windows, SSH passphrase on Linux) and the Windows run of the M2/M3 walkthroughs are open maintainer checks.
 - Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
-- Rebase state was only verified by integration tests (`git rebase` is blocked in Claude Code's sandbox).
 - Icons are Unicode placeholders (M5); remote markers on pills are text.
 - Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
@@ -56,6 +56,13 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] M2-02: on Windows, check that no console window flashes up when Gitloom runs `git` (first visible with staging, M2-06).
 - [x] M2-09: commit once through the commit box with the keyboard (type a summary, Ctrl+Enter); keyboard input cannot be injected in my WSLg test setup.
 - [x] M2-01: run the app natively on Windows (`cargo run -p gitloom -- <repo>`) and check the shortcuts (checklist sent 2026-10-23, based on `docs/UX-PARITY.md`); report findings. First run: only shortcuts allowed in text fields worked; second run: all but Shift+J/K; both fixed on `develop`, please re-check Shift+J/K.
+
+- [ ] M3-02 (once fetch/push exist, M3-03/M3-05): HTTPS with Git Credential Manager on Windows and SSH with a passphrase-protected key on Linux; a missing credential must show Gitloom's prompt window. Also check that Esc closes the prompt window (keyboard input did not reach it in my WSLg session; Cancel/OK/Yes by mouse verified).
+- [ ] M3-07: create a branch with the keyboard: select a commit, Ctrl+B, type a name (an invalid one shows a red border with the reason), Enter creates and checks it out, Esc cancels. Keyboard input was unreliable in my WSLg session (input, validation and typing verified; Enter only by tests).
+- [x] M3-08: rename a branch with the keyboard (verified in the M3-14 walkthrough against GitHub): right click a local branch → Rename… → edit the name → Enter; for a branch with an upstream choose "Rename remote too" and check the remote. (Menu, input, delete, force delete and remote delete verified by mouse; keyboard input did not reach the window in my session.)
+- [ ] M3-10: add a remote with "+" in the REMOTE section (type name and URL) and rename a remote from its context menu (type the new name). Set/unset upstream, Edit URL (prefilled), Fetch and Remove were verified by mouse; typing did not reach the window reliably in my session.
+- [ ] M3-14: repeat the M3 walkthrough on Windows against the GitHub remote, on a throwaway branch (e.g. `e2e-windows`) and a throwaway tag: Fetch all, create branch (Ctrl+B), push with upstream, pull (fast-forward), push rejected → Force push (once without and once after a fetch), create/push/delete tag, rename branch incl. remote, delete remote and local branch, checkout of a remote branch; finally check that GitHub has no leftovers.
+- [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 
 ## Environment notes
 

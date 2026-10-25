@@ -14,9 +14,21 @@ pub enum UndoAction {
         before: Option<String>,
         after: String,
     },
+    /// Checkout, branch or tag change (M3-12).
+    Ref(git_core::RefChange),
 }
 
 impl UndoAction {
+    /// Undoing or redoing it moves HEAD (blocked during merge/rebase).
+    pub fn moves_head(&self) -> bool {
+        matches!(
+            self,
+            Self::Commit { .. }
+                | Self::Ref(git_core::RefChange::Checkout { .. })
+                | Self::Ref(git_core::RefChange::CreateBranch { .. })
+        )
+    }
+
     /// Shown in the Undo/Redo tooltips, e.g. "Commit abc1234".
     pub fn label(&self) -> String {
         match self {
@@ -26,6 +38,7 @@ impl UndoAction {
                 if *amend { "Amend" } else { "Commit" },
                 &after[..after.len().min(7)]
             ),
+            Self::Ref(change) => change.label(),
         }
     }
 }
@@ -59,5 +72,12 @@ mod tests {
             after: "1234567890".into(),
         };
         assert_eq!(amend.label(), "Amend 1234567");
+        let rename = UndoAction::Ref(git_core::RefChange::RenameBranch {
+            old: "a".into(),
+            new: "b".into(),
+        });
+        assert_eq!(rename.label(), "Rename branch a → b");
+        assert!(!rename.moves_head());
+        assert!(commit.moves_head());
     }
 }

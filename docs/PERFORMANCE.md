@@ -42,6 +42,18 @@ Same machine and repository. Release builds.
 
 - **Watcher feedback loop**: batches consisting only of access events were still classified; classifying opens `.git/info/exclude`, which produced the next access event, about three times per second (0.48 % CPU, one tokio worker). Access events are now dropped in the watcher callback.
 
+## M3: branches and remotes (task M3-14)
+
+| Metric | Result | How |
+|---|---|---|
+| Network runner overhead (fetch of 300 commits from a local remote) | **102.3 ms** vs. 99.6 ms plain `git fetch --quiet` (≈ 3 ms incl. ~400 progress updates per fetch) | `cargo test -p git-core --release --test perf network_runner -- --ignored --nocapture` |
+| Idle CPU with auto-fetch on (5 min), repository with a GitHub remote | **0.02 %** over 120 s (was 0.30 % with a 30 s tick, see below) | `/proc/<pid>/stat` incl. children, release build, software rendering (llvmpipe) |
+| Auto-fetch every minute against GitHub (SSH) | 0.29 % over 130 s with two fetches ≈ 0.19 s CPU per fetch including the `git`/`ssh` processes | same |
+
+### Fixed in M3-14
+
+- **Auto-fetch tick**: a subscription firing every 30 s made iced redraw the window each time; with software rendering (llvmpipe, no GPU in WSLg) that cost 0.3 % CPU at idle. Auto-fetch now arms one timer for the next due fetch (`fetch::next_check`, retry after 60 s when a tab was busy).
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |

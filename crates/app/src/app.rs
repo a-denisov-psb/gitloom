@@ -2,15 +2,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use git_core::{DiffRequest, FileChange, GitBackend, GixBackend};
+use git_core::{DiffRequest, GitBackend, GixBackend};
 use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
-use crate::overlay::{ContextMenu, MenuEntry, Modal};
+use crate::overlay::{ContextMenu, Form, FormAction, FormField, MenuEntry, Modal};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, Guarded, LastWrite, Loadable, RepoView, Section, Selection,
-    WatchState, WriteOp,
+    CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkKind, NetworkOp,
+    NetworkRequest, Queued, RepoView, Section, Selection, WatchState, WriteOp,
 };
 use crate::session::{self, Session};
 use crate::shortcuts::{self, Shortcut};
@@ -43,6 +43,17 @@ pub enum DiscardTarget {
     Hunk(usize),
     /// Selected lines of the shown diff.
     Lines,
+}
+
+/// What to check out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckoutTarget {
+    /// Local branch by name.
+    Local(String),
+    /// Remote branch by full name (`origin/topic`): its local tracking branch.
+    Remote(String),
+    /// Commit id (detached HEAD).
+    Commit(String),
 }
 
 /// Which list a file row belongs to.
@@ -193,7 +204,7 @@ pub enum Message {
     CommitChangesLoaded {
         tab: TabId,
         id: String,
-        result: Result<Vec<FileChange>, String>,
+        result: Result<DetailChanges, String>,
     },
     SessionLoaded(session::Loaded),
     WatcherStarted(TabId),
@@ -245,6 +256,116 @@ pub enum Message {
     },
     /// Run the last write of the tab again (after a lock error).
     RetryWrite(TabId),
+    /// Progress of the tab's running network operation.
+    NetworkProgress {
+        tab: TabId,
+        progress: git_core::Progress,
+    },
+    /// Status bar "Cancel" of the tab's network operation.
+    CancelNetwork(TabId),
+    /// "Fetch all" (Pull dropdown, Ctrl+L) in the active tab.
+    FetchAll,
+    /// Pull dropdown opened at the cursor.
+    PullMenu(iced::Point),
+    /// Toolbar Pull (`None`: the current mode) or a mode from the dropdown,
+    /// which becomes the button's mode.
+    Pull(Option<git_core::PullMode>),
+    /// Abort the merge or rebase a failed pull left behind.
+    AbortOperation,
+    /// Double click on a branch, or "Checkout this commit" (asks first).
+    Checkout(CheckoutTarget),
+    CheckoutConfirmed(CheckoutTarget),
+    /// Checkout after the detached HEAD check (nothing would be lost).
+    CheckoutChecked(CheckoutTarget),
+    /// Result of looking for commits only reachable from a detached HEAD.
+    DetachedChecked {
+        tab: TabId,
+        target: CheckoutTarget,
+        result: Result<Vec<String>, String>,
+    },
+    /// Local changes blocked the checkout: stash them, then check out.
+    StashAndCheckout(CheckoutTarget),
+    /// Open the inline new-branch input at commit `Some(id)` or at the
+    /// selection (`None`: selected commit, or HEAD for the WIP row).
+    NewBranchStart(Option<String>),
+    NewBranchInput(String),
+    NewBranchSubmit,
+    /// Right click on a branch (sidebar entry or graph pill).
+    BranchContextMenu {
+        name: String,
+        kind: git_core::RefKind,
+        position: iced::Point,
+    },
+    /// Inline rename of a local branch.
+    RenameStart(String),
+    RenameInput(String),
+    RenameSubmit,
+    /// Run the rename; `remote` also renames the upstream branch.
+    RenameConfirmed {
+        remote: bool,
+    },
+    /// Ask before deleting a local branch.
+    DeleteBranch(String),
+    DeleteBranchConfirmed {
+        name: String,
+        force: bool,
+    },
+    /// Ask before deleting a remote branch (full name, e.g. `origin/topic`).
+    DeleteRemoteBranch(String),
+    DeleteRemoteBranchConfirmed(String),
+    /// Form to choose the upstream branch of a local branch.
+    SetUpstreamStart(String),
+    UnsetUpstream(String),
+    /// "+" in the remote section: form for name and URL.
+    AddRemoteStart,
+    /// Right click on a remote in the sidebar.
+    RemoteContextMenu {
+        name: String,
+        position: iced::Point,
+    },
+    FetchRemote(String),
+    EditRemoteUrl(String),
+    RenameRemoteStart(String),
+    /// Ask before removing a remote.
+    RemoveRemote(String),
+    RemoveRemoteConfirmed(String),
+    /// Form for a new tag at commit `id`.
+    CreateTagStart(String),
+    /// Push a tag (asks for the remote if there are several).
+    PushTag(String),
+    /// Ask before deleting a local tag.
+    DeleteTag(String),
+    DeleteTagConfirmed(String),
+    /// Ask before deleting a tag on a remote.
+    DeleteRemoteTag(String),
+    DeleteRemoteTagConfirmed {
+        remote: String,
+        tag: String,
+    },
+    /// Right click on a commit row.
+    CommitContextMenu {
+        id: String,
+        position: iced::Point,
+    },
+    /// Fast-forward a branch that is not checked out to its upstream.
+    PullBranch(String),
+    /// Push a branch that is not checked out (form without upstream).
+    PushBranch(String),
+    /// Toolbar Push; `force` uses `--force-with-lease` (after confirmation).
+    Push {
+        force: bool,
+    },
+    /// Ask before a force push.
+    ForcePushRequested,
+    /// Input of field `field` of the open form changed.
+    FormInput {
+        field: usize,
+        value: String,
+    },
+    FormSubmit,
+    FormClosed,
+    /// The auto-fetch timer with sequence number `seq` fired.
+    AutoFetchDue(u64),
     Undo,
     Redo,
     /// Toolbar "Stash": stash all changes including untracked files.
@@ -296,9 +417,17 @@ pub struct App {
     pub notice: Option<String>,
     /// Open modal dialog; blocks the rest of the window.
     pub modal: Option<Modal>,
+    /// Open form dialog (inputs); below a modal, above everything else.
+    pub form: Option<Form>,
     pub context_menu: Option<ContextMenu>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
+    /// Mode of the toolbar Pull button (persisted in the session).
+    pub pull_mode: git_core::PullMode,
+    /// When the pending auto-fetch timer fires, and its sequence number
+    /// (older timers are ignored).
+    auto_fetch_at: Option<std::time::Instant>,
+    auto_fetch_seq: u64,
     /// Keyboard modifiers held right now (for Shift/Ctrl clicks).
     modifiers: keyboard::Modifiers,
     /// Where the session is stored; `None` disables persistence (tests).
@@ -328,8 +457,12 @@ impl App {
             git: None,
             notice: None,
             modal: None,
+            form: None,
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
+            pull_mode: git_core::PullMode::default(),
+            auto_fetch_at: None,
+            auto_fetch_seq: 0,
             modifiers: keyboard::Modifiers::default(),
             session_path: session_path.clone(),
             session_loaded: false,
@@ -415,9 +548,13 @@ impl App {
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
             return Task::none();
         };
-        if let Some(running) = &view.busy {
-            let message = format!("Please wait: {running} is still running");
-            self.status = message;
+        if view.busy.is_some() {
+            let pending = LastWrite {
+                label: label.clone(),
+                op,
+                clears_message: false,
+            };
+            self.status = yield_or_wait(view, Queued::Write(pending));
             return Task::none();
         }
         view.busy = Some(label.clone());
@@ -438,6 +575,727 @@ impl App {
         )
     }
 
+    /// Runs a network command (fetch, pull, push) in tab `tab` with progress
+    /// and Cancel in the status bar. Network operations are write operations
+    /// (ADR-020); a background one (auto-fetch) yields to user operations.
+    pub fn run_network(&mut self, tab: TabId, request: NetworkRequest) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            if !request.background {
+                self.status = reason;
+            }
+            return Task::none();
+        }
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        if view.busy.is_some() {
+            // Auto-fetch never waits; it runs again at its next interval.
+            if !request.background {
+                self.status = yield_or_wait(view, Queued::Network(request));
+            }
+            return Task::none();
+        }
+        let cancel = git_core::CancelToken::new();
+        // An old "Cancelled" or failure notice would be misleading now.
+        if !request.background {
+            self.status.clear();
+        }
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        view.busy = Some(request.label.clone());
+        view.suppress_watch = true;
+        view.network = Some(NetworkOp {
+            label: request.label.clone(),
+            kind: request.kind,
+            progress: None,
+            cancel: cancel.clone(),
+            background: request.background,
+        });
+        let writer = Arc::clone(&view.writer);
+        Task::run(network_stream(tab, writer, request, cancel), |message| {
+            message
+        })
+    }
+
+    /// Fetches all remotes of tab `tab`; `background` for auto-fetch.
+    fn fetch(&mut self, tab: TabId, background: bool) -> Task<Message> {
+        let task = self.run_network(tab, crate::fetch::fetch_all(background));
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.network.is_some() || view.queued.is_some() {
+                view.last_fetch = std::time::Instant::now();
+            }
+        }
+        task
+    }
+
+    /// Opens the inline new-branch input (see [`Message::NewBranchStart`]).
+    fn start_new_branch(&mut self, at: Option<String>) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            self.status = reason;
+            return Task::none();
+        }
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let snapshot = Arc::clone(&view.snapshot);
+        let at = at.or_else(|| view.selected_commit().map(str::to_owned));
+        let (start, row) = match at {
+            Some(id) if snapshot.is_stash(&id) => {
+                self.status = "Branches cannot start at a stash".into();
+                return Task::none();
+            }
+            Some(id) => (id.clone(), Some(id)),
+            None => match snapshot.head.target() {
+                // The WIP row stands for HEAD.
+                Some(head) if snapshot.has_wip => (head.to_owned(), None),
+                Some(head) => (head.to_owned(), Some(head.to_owned())),
+                None => {
+                    self.status = "Create the first commit before creating branches".into();
+                    return Task::none();
+                }
+            },
+        };
+        view.new_branch = Some(crate::repo_view::NewBranch {
+            start,
+            row,
+            name: String::new(),
+            error: None,
+            submitted: false,
+        });
+        iced::widget::operation::focus(crate::ui::NEW_BRANCH_INPUT)
+    }
+
+    /// Validates the inline rename; a branch with an upstream asks whether
+    /// the remote branch is renamed too.
+    fn submit_rename(&mut self) -> Task<Message> {
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let names = local_branch_names(&view.snapshot);
+        let snapshot = Arc::clone(&view.snapshot);
+        let Some(rename) = view.rename.as_mut() else {
+            return Task::none();
+        };
+        let name = rename.name.trim().to_owned();
+        if name == rename.old {
+            view.rename = None;
+            return Task::none();
+        }
+        if let Some(problem) = rename_problem(&rename.old, &name, &names) {
+            rename.error = Some(problem);
+            return Task::none();
+        }
+        rename.name = name.clone();
+        let old = rename.old.clone();
+        let upstream = snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == old)
+            .and_then(|r| r.upstream.clone());
+        match upstream {
+            Some(upstream) => {
+                self.modal = Some(Modal {
+                    title: "Rename branch".into(),
+                    text: format!(
+                        "{old} tracks {upstream}. Rename the remote branch to {name} too? \
+                         Others using {upstream} would have to switch."
+                    ),
+                    details: None,
+                    buttons: vec![
+                        crate::overlay::DialogButton {
+                            label: "Cancel".into(),
+                            kind: crate::overlay::ButtonKind::Secondary,
+                            message: None,
+                        },
+                        crate::overlay::DialogButton {
+                            label: "Local only".into(),
+                            kind: crate::overlay::ButtonKind::Secondary,
+                            message: Some(Message::RenameConfirmed { remote: false }),
+                        },
+                        crate::overlay::DialogButton {
+                            label: "Rename remote too".into(),
+                            kind: crate::overlay::ButtonKind::Primary,
+                            message: Some(Message::RenameConfirmed { remote: true }),
+                        },
+                    ],
+                    default: Some(1),
+                });
+                Task::none()
+            }
+            None => self.rename_branch(false),
+        }
+    }
+
+    /// Runs the inline rename; `remote` renames the upstream branch afterwards.
+    fn rename_branch(&mut self, remote: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(rename) = view.rename.clone() else {
+            return Task::none();
+        };
+        let upstream = view
+            .snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == rename.old)
+            .and_then(|r| r.upstream.clone());
+        let follow_up = upstream
+            .filter(|_| remote)
+            .and_then(|up| {
+                up.split_once('/')
+                    .map(|(r, b)| (r.to_owned(), b.to_owned()))
+            })
+            .map(|(remote, old_branch)| NetworkRequest {
+                label: format!("Rename {remote}/{old_branch}"),
+                kind: NetworkKind::Push,
+                args: git_core::rename_remote_branch_args(&remote, &rename.name, &old_branch),
+                background: false,
+            });
+        let (old, new) = (rename.old.clone(), rename.name.clone());
+        let task = self.run_undoable(tab, format!("Rename branch {old}"), move |git| {
+            git.rename_branch(&old, &new)?;
+            Ok(Some(History::Push(UndoAction::Ref(
+                git_core::RefChange::RenameBranch {
+                    old: old.clone(),
+                    new: new.clone(),
+                },
+            ))))
+        });
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                if let Some(rename) = view.rename.as_mut() {
+                    rename.submitted = true;
+                }
+                view.then_network = follow_up;
+            }
+        }
+        task
+    }
+
+    /// Creates the branch typed in the inline input and checks it out.
+    fn create_branch(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let names = local_branch_names(&view.snapshot);
+        let Some(input) = view.new_branch.as_mut() else {
+            return Task::none();
+        };
+        let name = input.name.trim().to_owned();
+        if let Some(problem) = branch_name_problem(&name, &names) {
+            input.error = Some(problem);
+            return Task::none();
+        }
+        let start = input.start.clone();
+        let label = format!("Create branch {name}");
+        let task = self.run_undoable(tab, label, move |git| {
+            let from = git_core::head_position(git)?;
+            git.create_branch(&name, &start)?;
+            Ok(from.map(|from| {
+                History::Push(UndoAction::Ref(git_core::RefChange::CreateBranch {
+                    name: name.clone(),
+                    target: start.clone(),
+                    from,
+                }))
+            }))
+        });
+        if let Some(view) = self.active_view_mut() {
+            let running = view.busy.is_some();
+            if let Some(input) = view.new_branch.as_mut() {
+                input.submitted = running;
+            }
+        }
+        task
+    }
+
+    /// Checks out `target` in the active tab; `stash_first` stashes local
+    /// changes (including untracked files) before, and leaves the stash.
+    fn checkout(&mut self, target: CheckoutTarget, stash_first: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let snapshot = &view.snapshot;
+        let local_exists = |name: &str| {
+            snapshot
+                .refs
+                .iter()
+                .any(|r| r.kind == git_core::RefKind::LocalBranch && r.name == name)
+        };
+        // (label, local branch to switch to, remote ref to track, commit to detach at)
+        let (label, switch, track, detach) = match &target {
+            CheckoutTarget::Local(name) => {
+                if snapshot.head.branch() == Some(name.as_str()) {
+                    self.status = format!("Already on {name}");
+                    return Task::none();
+                }
+                (format!("Checkout {name}"), Some(name.clone()), None, None)
+            }
+            CheckoutTarget::Remote(full) => {
+                let local = full
+                    .split_once('/')
+                    .map_or(full.as_str(), |(_, branch)| branch)
+                    .to_owned();
+                if snapshot.head.branch() == Some(local.as_str()) {
+                    self.status = format!("Already on {local}");
+                    return Task::none();
+                }
+                // An existing branch with the same name is reused (GitKraken).
+                if local_exists(&local) {
+                    (format!("Checkout {local}"), Some(local), None, None)
+                } else {
+                    (
+                        format!("Checkout {full}"),
+                        None,
+                        Some((local, full.clone())),
+                        None,
+                    )
+                }
+            }
+            CheckoutTarget::Commit(id) => (
+                format!("Checkout {}", &id[..id.len().min(7)]),
+                None,
+                None,
+                Some(id.clone()),
+            ),
+        };
+        let stash_message = format!("Gitloom: before {}", label.to_lowercase());
+        let task = self.run_undoable(tab, label, move |git| {
+            if stash_first {
+                git.stash_push(Some(&stash_message))?;
+            }
+            let from = git_core::head_position(git)?;
+            match (&switch, &track, &detach) {
+                (Some(branch), _, _) => git.switch_branch(branch)?,
+                (_, Some((local, remote)), _) => git.switch_tracking(local, remote)?,
+                (_, _, Some(id)) => git.switch_detached(id)?,
+                _ => {}
+            }
+            // A new tracking branch stays when the checkout is undone.
+            let to = git_core::head_position(git)?;
+            Ok(from.zip(to).map(|(from, to)| {
+                History::Push(UndoAction::Ref(git_core::RefChange::Checkout { from, to }))
+            }))
+        });
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.busy.is_some() {
+                view.pending_checkout = Some(target);
+            }
+        }
+        task
+    }
+
+    /// Pushes the current branch of tab `tab` to its upstream; without one,
+    /// a form asks for remote and branch name and sets the upstream.
+    fn push(&mut self, tab: TabId, force: bool) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let snapshot = Arc::clone(&view.snapshot);
+        let Some((local, upstream)) = snapshot.head_upstream() else {
+            self.modal = Some(Modal::info(
+                "Cannot push",
+                "HEAD is detached. Create or check out a branch to push.",
+            ));
+            return Task::none();
+        };
+        match upstream {
+            Some((remote, branch)) => {
+                let request = NetworkRequest {
+                    label: if force { "Force push" } else { "Push" }.into(),
+                    kind: NetworkKind::Push,
+                    args: git_core::push_args(&remote, local, &branch, false, force),
+                    background: false,
+                };
+                self.run_network(tab, request)
+            }
+            None => self.push_setup_form(tab, local.to_owned()),
+        }
+    }
+
+    /// Upstream of local branch `local` as `(remote, branch)`.
+    fn branch_upstream(&self, local: &str) -> Option<(String, String)> {
+        let snapshot = &self.active_tab()?.view()?.snapshot;
+        let upstream = snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == local)?
+            .upstream
+            .clone()?;
+        let (remote, branch) = upstream.split_once('/')?;
+        Some((remote.to_owned(), branch.to_owned()))
+    }
+
+    /// Form for the first push of `local`: remote and remote branch name.
+    fn push_setup_form(&mut self, tab: TabId, local: String) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let remotes = view.snapshot.remotes.clone();
+        if remotes.is_empty() {
+            self.modal = Some(Modal::info(
+                "Cannot push",
+                "This repository has no remote. Add one with \"+\" in the REMOTE section.",
+            ));
+            return Task::none();
+        }
+        let remote = if remotes.iter().any(|r| r == "origin") {
+            "origin".to_owned()
+        } else {
+            remotes[0].clone()
+        };
+        self.form = Some(Form {
+            title: format!("Push {local}"),
+            text: format!("{local} has no upstream branch yet. Push it and set the upstream:"),
+            fields: vec![
+                FormField::choice("Remote", remote, remotes),
+                FormField::text("Branch name on the remote", local.clone()),
+            ],
+            submit: "Push".into(),
+            action: FormAction::PushSetUpstream { tab, local },
+            error: None,
+        });
+        iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
+    }
+
+    /// Form to choose the upstream of `local` among the remote branches.
+    fn set_upstream_form(&mut self, local: String) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let remote_branches: Vec<String> = view
+            .snapshot
+            .refs
+            .iter()
+            .filter(|r| r.kind == git_core::RefKind::RemoteBranch)
+            .map(|r| r.name.clone())
+            .collect();
+        if remote_branches.is_empty() {
+            self.modal = Some(Modal::info(
+                "No remote branches",
+                "There is no remote branch to track. Fetch a remote, or push the branch to \
+                 create it on the remote.",
+            ));
+            return Task::none();
+        }
+        let current = view
+            .snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == local)
+            .and_then(|r| r.upstream.clone());
+        let same_name = format!("origin/{local}");
+        // A gone upstream (deleted on the remote) is no valid choice.
+        let default = current
+            .filter(|c| remote_branches.contains(c))
+            .or_else(|| remote_branches.iter().find(|b| **b == same_name).cloned())
+            .unwrap_or_else(|| remote_branches[0].clone());
+        self.form = Some(Form {
+            title: format!("Set upstream of {local}"),
+            text: "Pull and push of this branch use the upstream branch.".into(),
+            fields: vec![FormField::choice(
+                "Upstream branch",
+                default,
+                remote_branches,
+            )],
+            submit: "Set upstream".into(),
+            action: FormAction::SetUpstream { tab, local },
+            error: None,
+        });
+        Task::none()
+    }
+
+    /// Push (`delete == false`) or remote delete of tag `tag`: one remote
+    /// runs directly (delete after a confirmation), several ask in a form.
+    fn tag_remote_action(&mut self, tag: String, delete: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let remotes = self
+            .active_tab()
+            .and_then(Tab::view)
+            .map(|v| v.snapshot.remotes.clone())
+            .unwrap_or_default();
+        match remotes.as_slice() {
+            [] => {
+                self.modal = Some(Modal::info(
+                    "No remote",
+                    "This repository has no remote to push tags to.",
+                ));
+                Task::none()
+            }
+            [remote] if delete => {
+                self.modal = Some(Modal::confirm(
+                    "Delete remote tag",
+                    format!("Delete the tag {tag} on {remote}?"),
+                    "Delete",
+                    true,
+                    Message::DeleteRemoteTagConfirmed {
+                        remote: remote.clone(),
+                        tag,
+                    },
+                ));
+                Task::none()
+            }
+            [remote] => self.run_network(tab, push_tag_request(remote, &tag)),
+            _ => {
+                let default = if remotes.iter().any(|r| r == "origin") {
+                    "origin".to_owned()
+                } else {
+                    remotes[0].clone()
+                };
+                let (title, submit, action) = if delete {
+                    (
+                        format!("Delete tag {tag} on a remote"),
+                        "Delete",
+                        FormAction::DeleteRemoteTag { tab, tag },
+                    )
+                } else {
+                    (
+                        format!("Push tag {tag}"),
+                        "Push",
+                        FormAction::PushTag { tab, tag },
+                    )
+                };
+                self.form = Some(Form {
+                    title,
+                    text: String::new(),
+                    fields: vec![FormField::choice("Remote", default, remotes)],
+                    submit: submit.into(),
+                    action,
+                    error: None,
+                });
+                Task::none()
+            }
+        }
+    }
+
+    /// Validates and runs the open form.
+    fn submit_form(&mut self) -> Task<Message> {
+        let Some(action) = self.form.as_ref().map(|f| f.action.clone()) else {
+            return Task::none();
+        };
+        let remotes: Vec<String> = match &action {
+            FormAction::AddRemote { tab } | FormAction::RenameRemote { tab, .. } => self
+                .tab_mut(*tab)
+                .and_then(|t| t.view())
+                .map(|v| v.snapshot.remotes.clone())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let Some(form) = self.form.as_mut() else {
+            return Task::none();
+        };
+        match form.action.clone() {
+            FormAction::SetUpstream { tab, local } => {
+                let upstream = form.value(0).to_owned();
+                self.form = None;
+                self.run_write(tab, format!("Set upstream of {local}"), move |git| {
+                    git.set_upstream(&local, &upstream)
+                })
+            }
+            FormAction::AddRemote { tab } => {
+                let (name, url) = (form.value(0).to_owned(), form.value(1).to_owned());
+                if let Some(problem) = remote_name_problem(&name, &remotes) {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                if url.is_empty() {
+                    form.error = Some("Enter the URL of the remote repository".into());
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Add remote {name}"), move |git| {
+                    git.add_remote(&name, &url)
+                })
+            }
+            FormAction::SetRemoteUrl { tab, name } => {
+                let url = form.value(0).to_owned();
+                if url.is_empty() {
+                    form.error = Some("Enter the URL of the remote repository".into());
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Edit URL of {name}"), move |git| {
+                    git.set_remote_url(&name, &url)
+                })
+            }
+            FormAction::RenameRemote { tab, old } => {
+                let new = form.value(0).to_owned();
+                if new == old {
+                    self.form = None;
+                    return Task::none();
+                }
+                let others: Vec<String> = remotes.into_iter().filter(|r| *r != old).collect();
+                if let Some(problem) = remote_name_problem(&new, &others) {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_write(tab, format!("Rename remote {old}"), move |git| {
+                    git.rename_remote(&old, &new)
+                })
+            }
+            FormAction::CreateTag { tab, target } => {
+                let name = form.value(0).to_owned();
+                let message = form.value(1).to_owned();
+                let tags: Vec<String> = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .map(|v| {
+                        v.snapshot
+                            .refs
+                            .iter()
+                            .filter(|r| r.kind == git_core::RefKind::Tag)
+                            .map(|r| r.name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let Some(form) = self.form.as_mut() else {
+                    return Task::none();
+                };
+                if let Some(problem) = git_core::check_branch_name(&name) {
+                    form.error = Some(
+                        problem
+                            .replace("Branch names", "Tag names")
+                            .replace("branch name", "tag name"),
+                    );
+                    return Task::none();
+                }
+                if tags.contains(&name) {
+                    form.error = Some(format!("A tag named \"{name}\" already exists"));
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_undoable(tab, format!("Create tag {name}"), move |git| {
+                    let message = (!message.is_empty()).then(|| message.clone());
+                    git.create_tag(&name, &target, message.as_deref())?;
+                    Ok(Some(History::Push(UndoAction::Ref(
+                        git_core::RefChange::CreateTag {
+                            name: name.clone(),
+                            target: target.clone(),
+                            message,
+                        },
+                    ))))
+                })
+            }
+            FormAction::PushTag { tab, tag } => {
+                let remote = form.value(0).to_owned();
+                self.form = None;
+                self.run_network(tab, push_tag_request(&remote, &tag))
+            }
+            FormAction::DeleteRemoteTag { tab, tag } => {
+                let remote = form.value(0).to_owned();
+                self.form = None;
+                self.run_network(tab, delete_remote_tag_request(&remote, &tag))
+            }
+            FormAction::PushSetUpstream { tab, local } => {
+                let remote = form.value(0).to_owned();
+                let branch = form.value(1).to_owned();
+                if remote.is_empty() || branch.is_empty() {
+                    form.error = Some("Choose a remote and enter a branch name.".into());
+                    return Task::none();
+                }
+                self.form = None;
+                let is_head = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .is_some_and(|v| v.snapshot.head.branch() == Some(local.as_str()));
+                self.run_network(
+                    tab,
+                    NetworkRequest {
+                        label: if is_head {
+                            "Push".into()
+                        } else {
+                            format!("Push {local}")
+                        },
+                        kind: if is_head {
+                            NetworkKind::Push
+                        } else {
+                            NetworkKind::PushBranch
+                        },
+                        args: git_core::push_args(&remote, &local, &branch, true, false),
+                        background: false,
+                    },
+                )
+            }
+        }
+    }
+
+    /// Pulls the current branch of tab `tab` in the current pull mode.
+    fn pull(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        if let Some((local, None)) = view.snapshot.head_upstream() {
+            let local = local.to_owned();
+            self.modal = Some(Modal {
+                title: "Cannot pull".into(),
+                text: format!(
+                    "{local} has no upstream branch, so there is nothing to pull from. \
+                     Set an upstream branch, or push the branch first."
+                ),
+                details: None,
+                buttons: vec![
+                    crate::overlay::DialogButton {
+                        label: "Close".into(),
+                        kind: crate::overlay::ButtonKind::Secondary,
+                        message: None,
+                    },
+                    crate::overlay::DialogButton {
+                        label: "Set upstream".into(),
+                        kind: crate::overlay::ButtonKind::Primary,
+                        message: Some(Message::SetUpstreamStart(local)),
+                    },
+                ],
+                default: Some(1),
+            });
+            return Task::none();
+        }
+        if let Some(problem) = pull_blocker(&view.snapshot) {
+            self.modal = Some(Modal::info("Cannot pull", problem));
+            return Task::none();
+        }
+        let request = NetworkRequest {
+            label: self.pull_mode.label().into(),
+            ..crate::fetch::pull(self.pull_mode)
+        };
+        let task = self.run_network(tab, request);
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.network.is_some() {
+                view.last_fetch = std::time::Instant::now();
+            }
+        }
+        task
+    }
+
+    /// Starts an auto-fetch in every tab where one is due.
+    fn auto_fetch(&mut self, now: std::time::Instant) -> Task<Message> {
+        let interval = self.session.auto_fetch_minutes;
+        let due: Vec<TabId> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                let state = auto_fetch_state(tab.view()?);
+                crate::fetch::auto_fetch_due(now, interval, state).then_some(tab.id)
+            })
+            .collect();
+        Task::batch(due.into_iter().map(|tab| self.fetch(tab, true)))
+    }
+
     /// Applies the loaded session: restores tabs and panes, then opens pending paths.
     fn restore(&mut self, loaded: session::Loaded) -> Task<Message> {
         let session::Loaded { session, notice } = loaded;
@@ -445,6 +1303,7 @@ impl App {
         if let Some(notice) = notice {
             self.status = notice;
         }
+        self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
         let mut tasks = Vec::new();
         if !session.tabs.is_empty() {
@@ -482,6 +1341,8 @@ impl App {
             tabs,
             active,
             panes: self.panes.ratios,
+            auto_fetch_minutes: self.session.auto_fetch_minutes,
+            pull_mode: self.pull_mode.into(),
         }
     }
 
@@ -630,6 +1491,8 @@ impl App {
                     return self.stage_file(file, false);
                 }
             }
+            Shortcut::FetchAll => return self.update(Message::FetchAll),
+            Shortcut::CreateBranch => return self.update(Message::NewBranchStart(None)),
             Shortcut::Undo => return self.undo_redo(true),
             Shortcut::Redo => return self.undo_redo(false),
             Shortcut::Commit => return self.commit(false),
@@ -653,7 +1516,13 @@ impl App {
                 return iced::widget::operation::focus(FILTER_INPUT);
             }
             Shortcut::Close => {
-                if self.modal.take().is_some() || self.context_menu.take().is_some() {
+                if self.modal.take().is_some()
+                    || self.context_menu.take().is_some()
+                    || self.form.take().is_some()
+                    || self
+                        .active_view_mut()
+                        .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
+                {
                     return Task::none();
                 }
                 if let Some(view) = self.active_view_mut() {
@@ -665,6 +1534,8 @@ impl App {
                     if let Some(message) = modal.default_action() {
                         return self.update(message);
                     }
+                } else if self.form.is_some() {
+                    return self.update(Message::FormSubmit);
                 }
             }
         }
@@ -856,7 +1727,7 @@ impl App {
             return Task::none();
         }
         let stack = if undo { &view.undo } else { &view.redo };
-        if let Some(UndoAction::Commit { .. }) = stack.last() {
+        if stack.last().is_some_and(UndoAction::moves_head) {
             if let Some(reason) = view.state_block(Guarded::MoveHead) {
                 self.status = reason;
                 return Task::none();
@@ -885,6 +1756,10 @@ impl App {
                         before,
                         after,
                     }
+                }
+                UndoAction::Ref(change) => {
+                    change.apply(git, undo)?;
+                    UndoAction::Ref(change)
                 }
                 UndoAction::Discard { label, snapshot } => {
                     // Restoring returns the replaced state, which reverts the restore.
@@ -1054,7 +1929,7 @@ impl App {
                 .iter()
                 .find(|f| f.path == diff.request.path)
                 .map(|f| (f.clone(), false)),
-            git_core::DiffKind::Commit(_) => None,
+            git_core::DiffKind::Commit(_) | git_core::DiffKind::Stash { .. } => None,
         }
     }
 
@@ -1097,7 +1972,10 @@ impl App {
                 let refs = backend.references().map_err(|e| e.to_string())?;
                 let stashes = backend.stashes().map_err(|e| e.to_string())?;
                 let state = backend.state().map_err(|e| e.to_string())?;
-                Ok(refs_changed(&snapshot, &head, &refs, &stashes) || state != snapshot.state)
+                let remotes = backend.remotes().map_err(|e| e.to_string())?;
+                Ok(refs_changed(&snapshot, &head, &refs, &stashes)
+                    || state != snapshot.state
+                    || remotes != snapshot.remotes)
             }),
             move |changed| Message::RefsChecked { tab: id, changed },
         )
@@ -1124,8 +2002,17 @@ impl App {
         });
         let backend = Arc::clone(&view.backend);
         let commit = id.clone();
+        let is_stash = view.snapshot.is_stash(&id);
         Task::perform(
-            blocking(move || backend.commit_changes(&commit).map_err(|e| e.to_string())),
+            blocking(move || {
+                // A stash keeps staged changes and untracked files in extra parents.
+                let changes = if is_stash {
+                    backend.stash_changes(&commit).map(DetailChanges::Stash)
+                } else {
+                    backend.commit_changes(&commit).map(DetailChanges::Commit)
+                };
+                changes.map_err(|e| e.to_string())
+            }),
             move |result| Message::CommitChangesLoaded {
                 tab: tab_id,
                 id: id.clone(),
@@ -1156,7 +2043,35 @@ impl App {
         // The active tab may have changed or finished loading; details load lazily.
         let details = self.load_details();
         let scroll = self.restore_scroll();
-        Task::batch([task, details, scroll, self.persist()])
+        let timer = self.schedule_auto_fetch();
+        Task::batch([task, details, scroll, self.persist(), timer])
+    }
+
+    /// Starts a timer for the next auto-fetch check unless one is pending
+    /// for that time or earlier (see [`crate::fetch::next_check`]).
+    fn schedule_auto_fetch(&mut self) -> Task<Message> {
+        let now = std::time::Instant::now();
+        let tabs: Vec<crate::fetch::TabState> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| tab.view().map(auto_fetch_state))
+            .collect();
+        let Some(next) = crate::fetch::next_check(now, self.session.auto_fetch_minutes, &tabs)
+        else {
+            self.auto_fetch_at = None;
+            return Task::none();
+        };
+        if self.auto_fetch_at.is_some_and(|at| at <= next) {
+            return Task::none();
+        }
+        self.auto_fetch_at = Some(next);
+        self.auto_fetch_seq += 1;
+        let seq = self.auto_fetch_seq;
+        // Created lazily: the timer needs the runtime that runs the task.
+        Task::perform(
+            async move { tokio::time::sleep_until(tokio::time::Instant::from_std(next)).await },
+            move |()| Message::AutoFetchDue(seq),
+        )
     }
 
     /// Re-applies the stored offset when a different graph or diff became visible.
@@ -1237,6 +2152,7 @@ impl App {
                 let writable = self.write_block().is_none();
                 let write_item =
                     |label: &str, shortcut: Option<&str>, message: Message| MenuEntry::Item {
+                        hint: None,
                         label: label.into(),
                         shortcut: shortcut.map(str::to_owned),
                         enabled: writable,
@@ -1318,8 +2234,67 @@ impl App {
                     .apply_diff_lines(|diff, h, l| diff.selection.contains(&(h as u32, l as u32)))
             }
             Message::WriteFinished { tab, label, result } => {
+                let mut queued = None;
+                // `Some(show_notice)` for an auto-fetch: its errors appear once
+                // in the status bar (until a fetch works again), never as a dialog.
+                let mut background = None;
+                let mut pull = false;
+                let mut push = false;
+                let mut blocked_checkout = None;
+                let mut inline_error = false;
+                let mut not_merged = None;
+                let mut then_network = None;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
+                    if let Some(op) = view.network.take() {
+                        // Network operations are not undoable; what was undone
+                        // before them cannot be redone safely.
+                        if !op.background && result.is_ok() {
+                            view.redo.clear();
+                        }
+                        if op.background {
+                            background = Some(result.is_err() && !view.fetch_error_shown);
+                            view.fetch_error_shown = result.is_err();
+                        }
+                        pull = op.kind == NetworkKind::Pull;
+                        push = op.kind == NetworkKind::Push;
+                    }
+                    queued = view.queued.take();
+                    // A rename: close the input, or show Git's error there.
+                    if let Some(rename) = view.rename.as_mut().filter(|r| r.submitted) {
+                        rename.submitted = false;
+                        match &result {
+                            Ok(_) => view.rename = None,
+                            Err(error) => {
+                                rename.error = Some(error.clone());
+                                inline_error = true;
+                            }
+                        }
+                    }
+                    // A plain delete refused because the branch is not merged.
+                    if let (Some(name), Err(error)) = (view.pending_delete.take(), &result) {
+                        if git_core::branch_not_merged(error) {
+                            not_merged = Some(name);
+                        }
+                    }
+                    then_network = view.then_network.take().filter(|_| result.is_ok());
+                    // A new branch: close the input, or show Git's error there.
+                    if let Some(input) = view.new_branch.as_mut().filter(|i| i.submitted) {
+                        input.submitted = false;
+                        match &result {
+                            Ok(_) => view.new_branch = None,
+                            Err(error) => {
+                                input.error = Some(error.clone());
+                                inline_error = true;
+                            }
+                        }
+                    }
+                    let checkout = view.pending_checkout.take();
+                    if let Err(error) = &result {
+                        if git_core::checkout_blocked(error) {
+                            blocked_checkout = checkout;
+                        }
+                    }
                     match &result {
                         Ok(Some(History::Push(action))) => {
                             view.undo.push(action.clone());
@@ -1342,13 +2317,555 @@ impl App {
                         view.amend = false;
                     }
                 }
-                if let Err(error) = result {
-                    self.modal = Some(match git_core::locked_file(&error) {
-                        Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
-                        None => Modal::error(format!("{label} failed"), error),
+                match result {
+                    // Cancelled by the user or by a queued operation: no dialog.
+                    Err(error) if error == git_core::Error::Cancelled.to_string() => {
+                        if queued.is_none() {
+                            self.status = format!("{label}: Cancelled");
+                        }
+                    }
+                    Err(_) if inline_error => {}
+                    Err(error) if not_merged.is_some() => {
+                        if let Some(name) = not_merged {
+                            self.modal = Some(not_merged_dialog(error, name));
+                        }
+                    }
+                    Err(error) if blocked_checkout.is_some() => {
+                        if let Some(target) = blocked_checkout {
+                            self.modal = Some(checkout_blocked_dialog(error, target));
+                        }
+                    }
+                    Err(error) if push && git_core::push_rejection(&error).is_some() => {
+                        self.modal = Some(push_rejected_dialog(error));
+                    }
+                    // Decided after the refresh: conflict dialog or error dialog.
+                    Err(error) if pull => {
+                        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                            view.pull_failure = Some(error);
+                        }
+                    }
+                    Err(error) if background.is_some() => {
+                        if background == Some(true) {
+                            let reason = error.lines().last().unwrap_or_default();
+                            self.status = format!("{label} failed: {reason}");
+                        }
+                    }
+                    Err(error) => {
+                        self.modal = Some(match git_core::locked_file(&error) {
+                            Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
+                            None => match auth_hint(&error) {
+                                Some(hint) => {
+                                    Modal::error(format!("{label} failed"), error).with_text(hint)
+                                }
+                                None => Modal::error(format!("{label} failed"), error),
+                            },
+                        });
+                    }
+                    Ok(_) => {}
+                }
+                let refresh = self.refresh(tab);
+                if let Some(request) = then_network {
+                    return Task::batch([refresh, self.run_network(tab, request)]);
+                }
+                let next = match queued {
+                    Some(Queued::Write(write)) => {
+                        let clears = write.clears_message;
+                        let task = self.start_write(tab, write.label, write.op);
+                        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                            view.clear_message_after_write = clears && view.busy.is_some();
+                        }
+                        task
+                    }
+                    Some(Queued::Network(request)) => self.run_network(tab, request),
+                    None => Task::none(),
+                };
+                return Task::batch([refresh, next]);
+            }
+            Message::NetworkProgress { tab, progress } => {
+                if let Some(op) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.network.as_mut())
+                {
+                    op.progress = Some(progress);
+                }
+            }
+            Message::FetchAll => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.fetch(tab, false);
+                }
+            }
+            Message::PullMenu(position) => {
+                let writable = self.write_block().is_none();
+                let mut entries = vec![
+                    MenuEntry::Item {
+                        hint: None,
+                        label: "Fetch all".into(),
+                        shortcut: Some("Ctrl+L".into()),
+                        enabled: writable,
+                        message: Box::new(Message::FetchAll),
+                    },
+                    MenuEntry::Separator,
+                ];
+                for mode in git_core::PullMode::ALL {
+                    let mark = if mode == self.pull_mode { "✓ " } else { "" };
+                    entries.push(MenuEntry::Item {
+                        hint: None,
+                        label: format!("{mark}{}", mode.label()),
+                        shortcut: None,
+                        enabled: writable,
+                        message: Box::new(Message::Pull(Some(mode))),
                     });
                 }
-                return self.refresh(tab);
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::Pull(mode) => {
+                if let Some(mode) = mode {
+                    self.pull_mode = mode;
+                }
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.pull(tab);
+                }
+            }
+            // Leaving a detached HEAD first checks for commits on no branch.
+            Message::Checkout(target) => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let tab = self.tabs[self.active].id;
+                if !matches!(view.snapshot.head, git_core::Head::Detached { .. }) {
+                    return self.update(Message::CheckoutChecked(target));
+                }
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::unreachable_from_branches(writer.as_ref())
+                            .map_err(|e| e.to_string())
+                    }),
+                    move |result| Message::DetachedChecked {
+                        tab,
+                        target: target.clone(),
+                        result,
+                    },
+                );
+            }
+            Message::DetachedChecked {
+                tab,
+                target,
+                result,
+            } => {
+                let head = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .and_then(|v| v.snapshot.head.target().map(str::to_owned));
+                match (result, head) {
+                    (Ok(orphans), _) if orphans.is_empty() => {
+                        return self.update(Message::CheckoutChecked(target))
+                    }
+                    (Ok(orphans), Some(head)) => {
+                        self.modal = Some(leave_detached_dialog(orphans.len(), head, target));
+                    }
+                    (Ok(_), None) => return self.update(Message::CheckoutChecked(target)),
+                    (Err(error), _) => {
+                        self.modal = Some(Modal::error("Checkout failed", error));
+                    }
+                }
+            }
+            Message::CheckoutChecked(CheckoutTarget::Commit(id)) => {
+                let short = id[..id.len().min(7)].to_owned();
+                self.modal = Some(Modal::confirm(
+                    "Checkout commit",
+                    format!(
+                        "Check out {short}? HEAD will be detached: new commits do not belong to \
+                         any branch until you create one."
+                    ),
+                    "Checkout",
+                    false,
+                    Message::CheckoutConfirmed(CheckoutTarget::Commit(id)),
+                ));
+            }
+            Message::CheckoutChecked(target) | Message::CheckoutConfirmed(target) => {
+                return self.checkout(target, false)
+            }
+            Message::StashAndCheckout(target) => return self.checkout(target, true),
+            Message::CommitContextMenu { id, position } => {
+                let writable = self.write_block().is_none();
+                let message = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.commit(&id))
+                    .map(|c| {
+                        if c.body.is_empty() {
+                            c.summary.clone()
+                        } else {
+                            format!("{}\n\n{}", c.summary, c.body)
+                        }
+                    })
+                    .unwrap_or_default();
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    crate::menus::commit(&id, &message, writable),
+                ));
+            }
+            Message::BranchContextMenu {
+                name,
+                kind,
+                position,
+            } => {
+                let writable = self.write_block().is_none();
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let entries = match kind {
+                    git_core::RefKind::LocalBranch => {
+                        let local = view
+                            .snapshot
+                            .refs
+                            .iter()
+                            .find(|r| r.kind == kind && r.name == name);
+                        crate::menus::local_branch(crate::menus::LocalBranch {
+                            name: &name,
+                            target: local.map_or("", |r| r.target.as_str()),
+                            is_head: view.snapshot.head.branch() == Some(name.as_str()),
+                            has_upstream: local.is_some_and(|r| r.upstream.is_some()),
+                            writable,
+                        })
+                    }
+                    git_core::RefKind::RemoteBranch => crate::menus::remote_branch(&name, writable),
+                    git_core::RefKind::Tag => crate::menus::tag(&name, writable),
+                };
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::RenameStart(old) => {
+                if let Some(view) = self.active_view_mut() {
+                    view.rename = Some(crate::repo_view::RenameBranch {
+                        name: old.clone(),
+                        old,
+                        error: None,
+                        submitted: false,
+                    });
+                    return iced::widget::operation::focus(crate::ui::RENAME_INPUT);
+                }
+            }
+            Message::RenameInput(name) => {
+                if let Some(view) = self.active_view_mut() {
+                    let names = local_branch_names(&view.snapshot);
+                    if let Some(rename) = view.rename.as_mut() {
+                        rename.error = rename_problem(&rename.old, &name, &names);
+                        rename.name = name;
+                    }
+                }
+            }
+            Message::RenameSubmit => return self.submit_rename(),
+            Message::RenameConfirmed { remote } => return self.rename_branch(remote),
+            Message::DeleteBranch(name) => {
+                self.modal = Some(Modal::confirm(
+                    "Delete branch",
+                    format!("Delete the local branch {name}?"),
+                    "Delete",
+                    true,
+                    Message::DeleteBranchConfirmed { name, force: false },
+                ));
+            }
+            Message::DeleteBranchConfirmed { name, force } => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let branch = name.clone();
+                let task = self.run_undoable(tab, format!("Delete branch {name}"), move |git| {
+                    let target = git_core::ref_commit(git, &format!("refs/heads/{branch}"))?;
+                    let upstream = git_core::branch_upstream(git, &branch)?;
+                    git.delete_branch(&branch, force)?;
+                    Ok(target.map(|target| {
+                        History::Push(UndoAction::Ref(git_core::RefChange::DeleteBranch {
+                            name: branch.clone(),
+                            target,
+                            upstream,
+                        }))
+                    }))
+                });
+                if let Some(view) = self.active_view_mut() {
+                    if view.busy.is_some() && !force {
+                        view.pending_delete = Some(name);
+                    }
+                }
+                return task;
+            }
+            Message::DeleteRemoteBranch(full) => {
+                self.modal = Some(Modal::confirm(
+                    "Delete remote branch",
+                    format!("Delete {full} on the remote? Others may still use it."),
+                    "Delete",
+                    true,
+                    Message::DeleteRemoteBranchConfirmed(full),
+                ));
+            }
+            Message::DeleteRemoteBranchConfirmed(full) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some((remote, branch)) = full.split_once('/') else {
+                    return Task::none();
+                };
+                let request = NetworkRequest {
+                    label: format!("Delete {full}"),
+                    kind: NetworkKind::Push,
+                    args: git_core::delete_remote_branch_args(remote, branch),
+                    background: false,
+                };
+                return self.run_network(tab, request);
+            }
+            Message::SetUpstreamStart(local) => return self.set_upstream_form(local),
+            Message::UnsetUpstream(local) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let branch = local.clone();
+                    return self.run_write(tab, format!("Unset upstream of {local}"), move |git| {
+                        git.unset_upstream(&branch)
+                    });
+                }
+            }
+            Message::AddRemoteStart => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: "Add remote".into(),
+                    text: "Nothing is fetched yet; use Fetch afterwards.".into(),
+                    fields: vec![FormField::text("Name", ""), FormField::text("URL", "")],
+                    submit: "Add remote".into(),
+                    action: FormAction::AddRemote { tab },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::RemoteContextMenu { name, position } => {
+                let writable = self.write_block().is_none();
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    crate::menus::remote(&name, writable),
+                ));
+            }
+            Message::FetchRemote(name) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let request = NetworkRequest {
+                        label: format!("Fetch {name}"),
+                        kind: NetworkKind::Fetch,
+                        args: git_core::fetch_remote_args(&name),
+                        background: false,
+                    };
+                    return self.run_network(tab, request);
+                }
+            }
+            Message::EditRemoteUrl(name) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let url = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| {
+                        v.snapshot
+                            .remote_urls
+                            .iter()
+                            .find(|(n, _)| *n == name)
+                            .map(|(_, u)| u.clone())
+                    })
+                    .unwrap_or_default();
+                self.form = Some(Form {
+                    title: format!("Edit URL of {name}"),
+                    text: String::new(),
+                    fields: vec![FormField::text("URL", url)],
+                    submit: "Save".into(),
+                    action: FormAction::SetRemoteUrl { tab, name },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::RenameRemoteStart(old) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: format!("Rename remote {old}"),
+                    text: "Remote-tracking branches and upstreams follow the new name.".into(),
+                    fields: vec![FormField::text("Name", old.clone())],
+                    submit: "Rename".into(),
+                    action: FormAction::RenameRemote { tab, old },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::RemoveRemote(name) => {
+                self.modal = Some(Modal::confirm(
+                    "Remove remote",
+                    format!(
+                        "Remove the remote {name}? Its remote-tracking branches are removed \
+                         too; nothing changes on the server."
+                    ),
+                    "Remove",
+                    true,
+                    Message::RemoveRemoteConfirmed(name),
+                ));
+            }
+            Message::RemoveRemoteConfirmed(name) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let remote = name.clone();
+                    return self.run_write(tab, format!("Remove remote {name}"), move |git| {
+                        git.remove_remote(&remote)
+                    });
+                }
+            }
+            Message::CreateTagStart(target) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: format!("Create tag at {}", &target[..target.len().min(7)]),
+                    text: String::new(),
+                    fields: vec![
+                        FormField::text("Tag name", ""),
+                        FormField::text("Message (optional; makes an annotated tag)", ""),
+                    ],
+                    submit: "Create tag".into(),
+                    action: FormAction::CreateTag { tab, target },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::PushTag(tag) => return self.tag_remote_action(tag, false),
+            Message::DeleteRemoteTag(tag) => return self.tag_remote_action(tag, true),
+            Message::DeleteTag(tag) => {
+                self.modal = Some(Modal::confirm(
+                    "Delete tag",
+                    format!("Delete the local tag {tag}? Tags on remotes stay."),
+                    "Delete",
+                    true,
+                    Message::DeleteTagConfirmed(tag),
+                ));
+            }
+            Message::DeleteTagConfirmed(tag) => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    let name = tag.clone();
+                    return self.run_undoable(tab, format!("Delete tag {tag}"), move |git| {
+                        let target = git_core::ref_commit(git, &format!("refs/tags/{name}"))?;
+                        let message = git_core::tag_message(git, &name)?;
+                        git.delete_tag(&name)?;
+                        Ok(target.map(|target| {
+                            History::Push(UndoAction::Ref(git_core::RefChange::DeleteTag {
+                                name: name.clone(),
+                                target,
+                                message,
+                            }))
+                        }))
+                    });
+                }
+            }
+            Message::DeleteRemoteTagConfirmed { remote, tag } => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_network(tab, delete_remote_tag_request(&remote, &tag));
+                }
+            }
+            Message::NewBranchStart(at) => return self.start_new_branch(at),
+            Message::NewBranchInput(name) => {
+                if let Some(view) = self.active_view_mut() {
+                    let names: Vec<String> = local_branch_names(&view.snapshot);
+                    if let Some(input) = view.new_branch.as_mut() {
+                        // Instant feedback while typing; empty input shows no error yet.
+                        input.error = (!name.is_empty())
+                            .then(|| branch_name_problem(&name, &names))
+                            .flatten();
+                        input.name = name;
+                    }
+                }
+            }
+            Message::NewBranchSubmit => return self.create_branch(),
+            Message::PullBranch(local) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some((remote, branch)) = self.branch_upstream(&local) else {
+                    return Task::none();
+                };
+                let request = NetworkRequest {
+                    label: format!("Pull {local}"),
+                    kind: NetworkKind::Fetch,
+                    args: git_core::fast_forward_args(&remote, &branch, &local),
+                    background: false,
+                };
+                return self.run_network(tab, request);
+            }
+            Message::PushBranch(local) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                match self.branch_upstream(&local) {
+                    Some((remote, branch)) => {
+                        let request = NetworkRequest {
+                            label: format!("Push {local}"),
+                            kind: NetworkKind::PushBranch,
+                            args: git_core::push_args(&remote, &local, &branch, false, false),
+                            background: false,
+                        };
+                        return self.run_network(tab, request);
+                    }
+                    None => return self.push_setup_form(tab, local),
+                }
+            }
+            Message::Push { force } => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.push(tab, force);
+                }
+            }
+            Message::ForcePushRequested => {
+                self.modal = Some(Modal::confirm(
+                    "Force push",
+                    "Overwrite the remote branch with your local branch? Commits on the remote \
+                     that you do not have are lost. The push is refused if the remote changed \
+                     since your last fetch (--force-with-lease).",
+                    "Force push",
+                    true,
+                    Message::Push { force: true },
+                ));
+            }
+            Message::FormInput { field, value } => {
+                if let Some(field) = self.form.as_mut().and_then(|f| f.fields.get_mut(field)) {
+                    field.value = value;
+                }
+            }
+            Message::FormClosed => self.form = None,
+            Message::FormSubmit => return self.submit_form(),
+            Message::AbortOperation => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let state = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|v| v.snapshot.state.clone());
+                return match state {
+                    Some(git_core::RepoState::Merging { .. }) => {
+                        self.run_write(tab, "Abort merge", |git| git.abort_merge())
+                    }
+                    Some(git_core::RepoState::Rebasing { .. }) => {
+                        self.run_write(tab, "Abort rebase", |git| git.abort_rebase())
+                    }
+                    _ => Task::none(),
+                };
+            }
+            Message::AutoFetchDue(seq) => {
+                if seq == self.auto_fetch_seq {
+                    self.auto_fetch_at = None;
+                    return self.auto_fetch(std::time::Instant::now());
+                }
+            }
+            Message::CancelNetwork(tab) => {
+                if let Some(op) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.network.as_ref())
+                {
+                    op.cancel.cancel();
+                }
             }
             Message::RetryWrite(tab) => {
                 let Some(last) = self
@@ -1459,25 +2976,13 @@ impl App {
             }
             Message::StashContextMenu { id, position } => {
                 let writable = self.write_block().is_none();
-                let restorable = writable
-                    && self
-                        .active_tab()
-                        .and_then(Tab::view)
-                        .is_some_and(|v| v.state_block(Guarded::Stash).is_none());
-                let item = |label: &str, enabled: bool, message: Message| MenuEntry::Item {
-                    label: label.into(),
-                    shortcut: None,
-                    enabled,
-                    message: Box::new(message),
-                };
+                let restorable = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| v.state_block(Guarded::Stash).is_none());
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    vec![
-                        item("Apply stash", restorable, Message::StashApply(id.clone())),
-                        item("Pop stash", restorable, Message::StashPop(id.clone())),
-                        MenuEntry::Separator,
-                        item("Delete stash", writable, Message::StashDrop(id)),
-                    ],
+                    crate::menus::stash(&id, writable, restorable),
                 ));
             }
             Message::SummaryChanged(summary) => {
@@ -1870,6 +3375,7 @@ impl App {
                 }
                 let id = tab.id;
                 let mut reload = false;
+                let mut pull_failure = None;
                 if let Some(view) = tab.view_mut() {
                     match result {
                         Ok(snapshot) => view.apply_snapshot(snapshot),
@@ -1879,6 +3385,13 @@ impl App {
                         }
                     }
                     reload = view.reload_diff;
+                    pull_failure = view
+                        .pull_failure
+                        .take()
+                        .map(|error| (error, view.snapshot.state.clone()));
+                }
+                if let Some((error, state)) = pull_failure {
+                    self.modal = Some(pull_failed_dialog(error, &state));
                 }
                 if reload {
                     return Task::batch([self.reload_diff(id), self.load_details()]);
@@ -1936,6 +3449,342 @@ fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
         iced::widget::operation::AbsoluteOffset {
             x: None,
             y: Some(offset),
+        },
+    )
+}
+
+/// Why `name` cannot name a new remote: invalid or already used.
+fn remote_name_problem(name: &str, existing: &[String]) -> Option<String> {
+    if name.contains('/') {
+        return Some("Remote names cannot contain \"/\"".into());
+    }
+    if let Some(problem) = git_core::check_branch_name(name) {
+        return Some(
+            problem
+                .replace("Branch names", "Remote names")
+                .replace("a branch name", "a remote name"),
+        );
+    }
+    existing
+        .iter()
+        .any(|r| r == name)
+        .then(|| format!("A remote named \"{name}\" already exists"))
+}
+
+fn push_tag_request(remote: &str, tag: &str) -> NetworkRequest {
+    NetworkRequest {
+        label: format!("Push tag {tag}"),
+        kind: NetworkKind::Push,
+        args: git_core::push_tag_args(remote, tag),
+        background: false,
+    }
+}
+
+fn delete_remote_tag_request(remote: &str, tag: &str) -> NetworkRequest {
+    NetworkRequest {
+        label: format!("Delete tag {tag} on {remote}"),
+        kind: NetworkKind::Push,
+        args: git_core::delete_remote_tag_args(remote, tag),
+        background: false,
+    }
+}
+
+fn local_branch_names(snapshot: &RepoSnapshot) -> Vec<String> {
+    snapshot
+        .refs
+        .iter()
+        .filter(|r| r.kind == git_core::RefKind::LocalBranch)
+        .map(|r| r.name.clone())
+        .collect()
+}
+
+/// Why `old` cannot be renamed to `name`: invalid or taken by another branch.
+fn rename_problem(old: &str, name: &str, existing: &[String]) -> Option<String> {
+    let others: Vec<String> = existing.iter().filter(|b| *b != old).cloned().collect();
+    branch_name_problem(name.trim(), &others)
+}
+
+/// `git branch -d` refused: offer a force delete.
+fn not_merged_dialog(error: String, name: String) -> Modal {
+    Modal {
+        title: "Branch not merged".into(),
+        text: format!(
+            "{name} has commits that are not merged into the current branch or its \
+             upstream. Deleting it loses them (they can only be found in the reflog)."
+        ),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Force delete".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::DeleteBranchConfirmed { name, force: true }),
+            },
+        ],
+        default: Some(0),
+    }
+}
+
+/// Why `name` cannot be used for a new branch: invalid or already taken.
+fn branch_name_problem(name: &str, existing: &[String]) -> Option<String> {
+    if let Some(problem) = git_core::check_branch_name(name) {
+        return Some(problem.to_owned());
+    }
+    existing
+        .iter()
+        .any(|b| b == name)
+        .then(|| format!("A branch named \"{name}\" already exists"))
+}
+
+/// Leaving a detached HEAD with commits on no branch: offer to create a
+/// branch at HEAD first (GitKraken warns the same way).
+fn leave_detached_dialog(count: usize, head: String, target: CheckoutTarget) -> Modal {
+    let (commits, them) = if count == 1 {
+        ("1 commit is".to_owned(), "it")
+    } else if count >= 100 {
+        ("100 or more commits are".to_owned(), "them")
+    } else {
+        (format!("{count} commits are"), "them")
+    };
+    let they = if count == 1 { "it" } else { "they" };
+    Modal {
+        title: "Leave detached HEAD".into(),
+        text: format!(
+            "{commits} not on any branch or tag. After leaving, {they} can only be found in \
+             the reflog. Create a branch to keep {them}?"
+        ),
+        details: None,
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Leave anyway".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::CheckoutChecked(target)),
+            },
+            crate::overlay::DialogButton {
+                label: "Create branch".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(Message::NewBranchStart(Some(head))),
+            },
+        ],
+        default: Some(2),
+    }
+}
+
+/// Local changes would be overwritten by the checkout: offer to stash them
+/// first (planning decision M3; the stash is not popped automatically).
+fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
+    Modal {
+        title: "Local changes block the checkout".into(),
+        text: "Your local changes would be overwritten by the checkout. Stash them \
+               (including untracked files) and check out? The stash stays in the list; \
+               apply or pop it later."
+            .into(),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Stash and checkout".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(Message::StashAndCheckout(target)),
+            },
+        ],
+        default: Some(1),
+    }
+}
+
+/// Dialog for a rejected push: the remote has commits we do not have
+/// (offer Pull or a force push), or a force push lost its lease.
+fn push_rejected_dialog(error: String) -> Modal {
+    if git_core::push_rejection(&error) == Some(git_core::PushRejection::StaleLease) {
+        return Modal::error("Force push refused", error).with_text(
+            "The remote branch changed since your last fetch, so the force push was refused \
+             to keep those commits. Fetch and check the changes first.",
+        );
+    }
+    Modal {
+        title: "Push rejected".into(),
+        text: "The remote branch has commits that you do not have. Pull them first, or \
+               overwrite the remote branch with a force push."
+            .into(),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Force push".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::ForcePushRequested),
+            },
+            crate::overlay::DialogButton {
+                label: "Pull".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(Message::Pull(None)),
+            },
+        ],
+        default: Some(2),
+    }
+}
+
+/// Why the current branch cannot be pulled, if it cannot.
+fn pull_blocker(snapshot: &RepoSnapshot) -> Option<&'static str> {
+    match &snapshot.head {
+        git_core::Head::Detached { .. } => {
+            Some("HEAD is detached. Check out a branch to pull its upstream branch.")
+        }
+        git_core::Head::Unborn { .. } => Some("The current branch has no commits yet."),
+        git_core::Head::Branch { name, .. } => {
+            let upstream = snapshot
+                .refs
+                .iter()
+                .find(|r| r.kind == git_core::RefKind::LocalBranch && &r.name == name)
+                .and_then(|r| r.upstream.as_ref());
+            // "Set upstream" follows with upstream management (M3-10).
+            upstream.is_none().then_some(
+                "The current branch has no upstream branch, so there is nothing to pull from. \
+                 Set an upstream branch first (e.g. by pushing the branch).",
+            )
+        }
+    }
+}
+
+/// Dialog after a failed pull: a conflict left a merge or rebase behind
+/// (resolution comes with M4, abort is offered), or a plain error.
+fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
+    let operation = match state {
+        git_core::RepoState::Merging { .. } => "merge",
+        git_core::RepoState::Rebasing { .. } => "rebase",
+        _ => {
+            return match auth_hint(&error) {
+                Some(hint) => Modal::error("Pull failed", error).with_text(hint),
+                None => Modal::error("Pull failed", error),
+            }
+        }
+    };
+    Modal {
+        title: "Pull stopped with conflicts".into(),
+        text: format!(
+            "The {operation} stopped because of conflicting changes. Resolving conflicts \
+             in Gitloom comes in a later version: resolve them in a terminal or editor, \
+             or abort the {operation} to get back to the state before the pull."
+        ),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Close".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: format!("Abort {operation}"),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::AbortOperation),
+            },
+        ],
+        default: Some(0),
+    }
+}
+
+/// What the auto-fetch scheduler needs to know about a tab.
+fn auto_fetch_state(view: &RepoView) -> crate::fetch::TabState {
+    crate::fetch::TabState {
+        last_fetch: view.last_fetch,
+        busy: view.busy.is_some(),
+        operation_in_progress: !view.snapshot.state.is_clean(),
+        has_remotes: view
+            .snapshot
+            .refs
+            .iter()
+            .any(|r| r.kind == git_core::RefKind::RemoteBranch),
+    }
+}
+
+/// Hint for authentication failures in Git's output (ADR-019).
+fn auth_hint(error: &str) -> Option<&'static str> {
+    let lower = error.to_lowercase();
+    if lower.contains("host key verification failed") {
+        Some("The server's SSH host key was not accepted. Check the host and confirm its key, then try again.")
+    } else if lower.contains("permission denied (publickey") {
+        Some("The server rejected your SSH key. Check that the key is added to your account and loaded in ssh-agent (or protected by a passphrase Gitloom can ask for).")
+    } else if lower.contains("authentication failed")
+        || lower.contains("could not read username")
+        || lower.contains("could not read password")
+        || lower.contains("invalid username or password")
+    {
+        Some("Authentication failed. Check your credentials or your Git credential helper (e.g. Git Credential Manager); Gitloom does not store passwords.")
+    } else {
+        None
+    }
+}
+
+/// Called while a write runs: a running background network operation is
+/// cancelled and `next` starts after it; otherwise the user has to wait.
+/// Returns the status message.
+fn yield_or_wait(view: &mut RepoView, next: Queued) -> String {
+    match &view.network {
+        Some(op) if op.background => {
+            op.cancel.cancel();
+            view.queued = Some(next);
+            format!("Stopping {}…", op.label)
+        }
+        _ => {
+            let running = view.busy.clone().unwrap_or_default();
+            format!("Please wait: {running} is still running")
+        }
+    }
+}
+
+/// Runs a network command off the UI thread and emits its progress
+/// updates, then [`Message::WriteFinished`].
+fn network_stream(
+    tab: TabId,
+    writer: Arc<dyn git_core::GitWriter>,
+    request: NetworkRequest,
+    cancel: git_core::CancelToken,
+) -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(
+        64,
+        async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            use iced::futures::{SinkExt as _, StreamExt as _};
+
+            let (sender, mut updates) = iced::futures::channel::mpsc::unbounded();
+            let NetworkRequest { label, args, .. } = request;
+            let work = tokio::task::spawn_blocking(move || {
+                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                writer
+                    .run_network(&args, &cancel, &mut |progress| {
+                        let _ = sender.unbounded_send(progress);
+                    })
+                    .map(|_| None)
+                    .map_err(|e| e.to_string())
+            });
+            // The sender is dropped when the command ends, which ends this loop.
+            while let Some(progress) = updates.next().await {
+                let _ = output
+                    .send(Message::NetworkProgress { tab, progress })
+                    .await;
+            }
+            let result = work
+                .await
+                .unwrap_or_else(|e| Err(format!("Background task failed: {e}")));
+            let _ = output
+                .send(Message::WriteFinished { tab, label, result })
+                .await;
         },
     )
 }
@@ -2021,14 +3870,15 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     }
 }
 
-/// True if HEAD, any ref target or the stash list differ from `snapshot`.
+/// True if HEAD, any ref target or upstream, or the stash list differ from `snapshot`.
 fn refs_changed(
     snapshot: &RepoSnapshot,
     head: &git_core::Head,
     refs: &[git_core::Reference],
     stashes: &[git_core::Stash],
 ) -> bool {
-    let key = |r: &git_core::Reference| (r.name.clone(), r.kind, r.target.clone());
+    let key =
+        |r: &git_core::Reference| (r.name.clone(), r.kind, r.target.clone(), r.upstream.clone());
     let old: std::collections::HashSet<_> = snapshot.refs.iter().map(key).collect();
     let new: std::collections::HashSet<_> = refs.iter().map(key).collect();
     let stash_ids = |s: &[git_core::Stash]| s.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
@@ -3673,6 +5523,1036 @@ mod tests {
         op.focusable(None, iced::Rectangle::default(), &mut Field(true));
         op.focusable(None, iced::Rectangle::default(), &mut Field(false));
         assert_eq!(answer(&op), Some(true));
+    }
+
+    fn fetch_request(background: bool) -> NetworkRequest {
+        crate::fetch::fetch_all(background)
+    }
+
+    #[test]
+    fn network_operation_shows_progress_and_cancels_quietly() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.run_network(tab, fetch_request(false));
+        let progress = git_core::Progress {
+            phase: "Receiving objects".into(),
+            percent: Some(45),
+        };
+        let _ = app.update(Message::NetworkProgress { tab, progress });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Fetch"));
+        let op = view.network.as_ref().unwrap();
+        assert_eq!(
+            crate::ui::statusbar::network_label(op),
+            "⟳ Fetch: Receiving objects 45%"
+        );
+
+        let _ = app.update(Message::CancelNetwork(tab));
+        assert!(op_cancelled(&app));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Fetch".into(),
+            result: Err(git_core::Error::Cancelled.to_string()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.network.is_none() && view.busy.is_none());
+        assert!(app.modal.is_none(), "no error dialog after cancel");
+        assert_eq!(app.status, "Fetch: Cancelled");
+    }
+
+    fn op_cancelled(app: &App) -> bool {
+        app.tabs[0]
+            .view()
+            .unwrap()
+            .network
+            .as_ref()
+            .is_some_and(|op| op.cancel.is_cancelled())
+    }
+
+    #[test]
+    fn user_operation_cancels_auto_fetch_and_runs_afterwards() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.run_network(tab, fetch_request(true));
+        let _ = app.update(Message::Stage(file("a")));
+        assert!(op_cancelled(&app), "auto-fetch is stopped");
+        assert!(app.tabs[0].view().unwrap().queued.is_some());
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Fetch".into(),
+            result: Err(git_core::Error::Cancelled.to_string()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Stage a"), "queued write runs");
+        assert!(view.queued.is_none());
+        assert!(!app.status.contains("Cancelled"));
+    }
+
+    #[test]
+    fn auto_fetch_never_interrupts_or_waits() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Stage(file("a")));
+        let _ = app.run_network(tab, fetch_request(true));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Stage a"));
+        assert!(view.network.is_none() && view.queued.is_none());
+
+        // A user fetch while a user write runs has to wait (no queue).
+        let _ = app.run_network(tab, fetch_request(false));
+        assert!(app.status.starts_with("Please wait"));
+        assert!(app.tabs[0].view().unwrap().queued.is_none());
+    }
+
+    #[test]
+    fn author_line_skips_the_separator_without_email() {
+        let with = crate::ui::panel::author_line("a@example.com", 0);
+        assert!(with.starts_with("a@example.com · authored "), "{with}");
+        let without = crate::ui::panel::author_line("", 0);
+        assert!(without.starts_with("authored "), "{without}");
+        assert!(!without.contains('·'));
+    }
+
+    #[test]
+    fn stash_details_keep_their_sections() {
+        let mut app = ready_app(&["s"]);
+        let tab = app.tabs[0].id;
+        let view = app.tabs[0].view_mut().unwrap();
+        view.selection = Some(Selection::Commit("s".into()));
+        view.details = Some(CommitDetails {
+            id: "s".into(),
+            changes: Loadable::Loading,
+        });
+        let untracked = git_core::FileChange {
+            path: "new.txt".into(),
+            kind: git_core::ChangeKind::Untracked,
+            old_path: None,
+        };
+        let changes = git_core::StashChanges {
+            untracked: vec![untracked],
+            ..Default::default()
+        };
+        let _ = app.update(Message::CommitChangesLoaded {
+            tab,
+            id: "s".into(),
+            result: Ok(DetailChanges::Stash(changes.clone())),
+        });
+        let details = app.tabs[0].view().unwrap().details.clone().unwrap();
+        assert_eq!(
+            details.changes,
+            Loadable::Ready(DetailChanges::Stash(changes))
+        );
+    }
+
+    #[test]
+    fn authentication_errors_get_a_hint() {
+        assert!(
+            auth_hint("fatal: Authentication failed for 'https://github.com/a/b.git/'")
+                .is_some_and(|h| h.contains("credential helper"))
+        );
+        assert!(auth_hint("git@github.com: Permission denied (publickey).")
+            .is_some_and(|h| h.contains("SSH key")));
+        assert!(auth_hint("Host key verification failed.").is_some_and(|h| h.contains("host key")));
+        assert_eq!(auth_hint("fatal: couldn't find remote ref main"), None);
+
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Fetch".into(),
+            result: Err("fatal: Authentication failed for 'https://x/'".into()),
+        });
+        let modal = app.modal.unwrap();
+        assert!(modal.text.contains("credential helper"));
+        assert_eq!(
+            modal.details.as_deref(),
+            Some("fatal: Authentication failed for 'https://x/'")
+        );
+    }
+
+    /// Staging app whose repository has a remote branch.
+    fn app_with_remote() -> App {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs.push(git_core::Reference {
+            name: "origin/main".into(),
+            kind: git_core::RefKind::RemoteBranch,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn fetch_all_by_shortcut_and_menu() {
+        let mut app = app_with_remote();
+        let _ = app.update(checked(Shortcut::FetchAll, false));
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Fetch"));
+
+        let mut app = app_with_remote();
+        let _ = app.update(Message::PullMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.clone().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::FetchAll)));
+        assert!(matches!(
+            menu.select(4),
+            Some(Message::Pull(Some(git_core::PullMode::Rebase)))
+        ));
+    }
+
+    #[test]
+    fn auto_fetch_runs_when_due() {
+        let mut app = app_with_remote();
+        let opened = app.tabs[0].view().unwrap().last_fetch;
+        let _ = app.auto_fetch(opened + std::time::Duration::from_secs(60));
+        assert!(app.tabs[0].view().unwrap().busy.is_none(), "not due yet");
+
+        let later = opened + std::time::Duration::from_secs(5 * 60);
+        let _ = app.auto_fetch(later);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Auto-fetch"));
+        assert!(view.network.as_ref().is_some_and(|op| op.background));
+        assert!(view.last_fetch > opened);
+
+        // Off when the interval is 0.
+        let mut app = app_with_remote();
+        app.session.auto_fetch_minutes = 0;
+        let _ = app.auto_fetch(later + std::time::Duration::from_secs(3600));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn auto_fetch_errors_are_quiet_and_shown_once() {
+        let mut app = app_with_remote();
+        let tab = app.tabs[0].id;
+        let fail = |app: &mut App| {
+            let _ = app.fetch(tab, true);
+            let _ = app.update(Message::WriteFinished {
+                tab,
+                label: "Auto-fetch".into(),
+                result: Err(
+                    "fatal: unable to access 'https://x/': Could not resolve host: x".into(),
+                ),
+            });
+        };
+        fail(&mut app);
+        assert!(app.modal.is_none(), "no dialog for auto-fetch");
+        assert!(app
+            .status
+            .starts_with("Auto-fetch failed: fatal: unable to access"));
+        app.status.clear();
+        fail(&mut app);
+        assert!(app.status.is_empty(), "the same failure stays quiet");
+    }
+
+    /// Remote app whose `main` tracks `origin/main`.
+    fn app_with_upstream() -> App {
+        let mut app = app_with_remote();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "main".into(),
+            target: "c".into(),
+        };
+        snapshot.refs.push(git_core::Reference {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "c".into(),
+            is_head: true,
+            upstream: Some("origin/main".into()),
+            ahead_behind: Some((0, 1)),
+        });
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn pull_uses_the_chosen_mode_and_remembers_it() {
+        let mut app = app_with_upstream();
+        let _ = app.update(Message::Pull(Some(git_core::PullMode::Rebase)));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Pull (rebase)"));
+        assert_eq!(app.pull_mode, git_core::PullMode::Rebase);
+        assert_eq!(
+            app.current_session().pull_mode,
+            crate::session::PullModeSetting::Rebase,
+            "persisted"
+        );
+    }
+
+    #[test]
+    fn pull_without_upstream_explains_why() {
+        let mut app = app_with_remote();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "topic".into(),
+            target: "c".into(),
+        };
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::Pull(None));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        let modal = app.modal.unwrap();
+        assert_eq!(modal.title, "Cannot pull");
+        assert!(modal.text.contains("no upstream"));
+    }
+
+    #[test]
+    fn failed_pull_shows_conflict_or_error_after_refresh() {
+        for (state, conflict) in [
+            (
+                git_core::RepoState::Merging {
+                    merge_head: "x".into(),
+                },
+                true,
+            ),
+            (git_core::RepoState::Clean, false),
+        ] {
+            let mut app = app_with_upstream();
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::Pull(None));
+            let _ = app.update(Message::WriteFinished {
+                tab,
+                label: "Pull (fast-forward if possible)".into(),
+                result: Err("git pull failed".into()),
+            });
+            assert!(app.modal.is_none(), "decided after the refresh");
+
+            let mut snapshot = (*app.tabs[0].view().unwrap().snapshot).clone();
+            snapshot.state = state;
+            let generation = app.tabs[0].generation;
+            let _ = app.update(Message::SnapshotLoaded {
+                tab,
+                generation,
+                result: Ok(Arc::new(snapshot)),
+            });
+            let modal = app.modal.clone().unwrap();
+            if conflict {
+                assert_eq!(modal.title, "Pull stopped with conflicts");
+                assert!(matches!(modal.action(1), Some(Message::AbortOperation)));
+                assert!(modal.default_action().is_none(), "Enter only closes");
+            } else {
+                assert_eq!(modal.title, "Pull failed");
+            }
+        }
+    }
+
+    fn running_args(app: &App) -> Vec<String> {
+        // The request is consumed by the task; the label tells what started.
+        app.tabs[0]
+            .view()
+            .unwrap()
+            .busy
+            .clone()
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn push_goes_to_the_upstream() {
+        let mut app = app_with_upstream();
+        let _ = app.update(Message::Push { force: false });
+        assert_eq!(running_args(&app), ["Push"]);
+        assert!(app.form.is_none());
+    }
+
+    #[test]
+    fn first_push_asks_for_remote_and_branch() {
+        let mut app = app_with_remote();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "topic".into(),
+            target: "c".into(),
+        };
+        snapshot.remotes = vec!["backup".into(), "origin".into()];
+        view.snapshot = Arc::new(snapshot);
+
+        let _ = app.update(Message::Push { force: false });
+        let form = app.form.clone().expect("push form");
+        assert_eq!(form.value(0), "origin", "origin preferred");
+        assert_eq!(form.value(1), "topic");
+
+        let _ = app.update(Message::FormInput {
+            field: 1,
+            value: "  ".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(
+            app.form.as_ref().unwrap().error.is_some(),
+            "empty name refused"
+        );
+        let _ = app.update(Message::FormInput {
+            field: 1,
+            value: "feature/topic".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Push"]);
+    }
+
+    #[test]
+    fn rejected_push_offers_pull_or_force_push() {
+        let mut app = app_with_upstream();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Push { force: false });
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Push".into(),
+            result: Err(" ! [rejected]        main -> main (fetch first)".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Push rejected");
+        assert!(matches!(modal.default_action(), Some(Message::Pull(None))));
+        assert!(matches!(modal.action(1), Some(Message::ForcePushRequested)));
+
+        let _ = app.update(Message::ModalAction(1));
+        let confirm = app.modal.clone().unwrap();
+        assert_eq!(confirm.title, "Force push");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Force push"]);
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Force push".into(),
+            result: Err(" ! [rejected]        main -> main (stale info)".into()),
+        });
+        assert_eq!(app.modal.unwrap().title, "Force push refused");
+    }
+
+    /// Upstream app with an extra local branch `topic` and remote branch `origin/feature`.
+    fn checkout_app() -> App {
+        let mut app = app_with_upstream();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for (name, kind) in [
+            ("topic", git_core::RefKind::LocalBranch),
+            ("origin/topic", git_core::RefKind::RemoteBranch),
+            ("origin/feature", git_core::RefKind::RemoteBranch),
+        ] {
+            snapshot.refs.push(git_core::Reference {
+                name: name.into(),
+                kind,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn checkout_targets() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::Checkout(CheckoutTarget::Local("main".into())));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Already on main");
+
+        let _ = app.update(Message::Checkout(CheckoutTarget::Local("topic".into())));
+        assert_eq!(running_args(&app), ["Checkout topic"]);
+
+        // A remote branch whose local branch exists switches to that branch.
+        let mut app = checkout_app();
+        let _ = app.update(Message::Checkout(CheckoutTarget::Remote(
+            "origin/topic".into(),
+        )));
+        assert_eq!(running_args(&app), ["Checkout topic"]);
+
+        let mut app = checkout_app();
+        let _ = app.update(Message::Checkout(CheckoutTarget::Remote(
+            "origin/feature".into(),
+        )));
+        assert_eq!(running_args(&app), ["Checkout origin/feature"]);
+    }
+
+    #[test]
+    fn commit_checkout_asks_first() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::CommitContextMenu {
+            id: "c".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        let _ = app.update(Message::MenuSelected(0));
+        assert!(matches!(
+            menu.select(0),
+            Some(Message::Checkout(CheckoutTarget::Commit(id))) if id == "c"
+        ));
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Checkout commit");
+        assert!(modal.text.contains("detached"));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Checkout c"]);
+    }
+
+    #[test]
+    fn blocked_checkout_offers_stash_and_checkout() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Checkout(CheckoutTarget::Local("topic".into())));
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Checkout topic".into(),
+            result: Err("error: Your local changes to the following files would be overwritten by checkout:\n\ta.txt".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Local changes block the checkout");
+        assert!(matches!(
+            modal.default_action(),
+            Some(Message::StashAndCheckout(CheckoutTarget::Local(name))) if name == "topic"
+        ));
+        let _ = app.update(Message::Shortcut(Shortcut::Confirm));
+        assert_eq!(running_args(&app), ["Checkout topic"]);
+    }
+
+    #[test]
+    fn new_branch_input_validates_and_creates() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::NewBranchStart(Some("c".into())));
+        let input = app.tabs[0].view().unwrap().new_branch.clone().unwrap();
+        assert_eq!(
+            (input.start.as_str(), input.row.as_deref()),
+            ("c", Some("c"))
+        );
+
+        let _ = app.update(Message::NewBranchInput("bad name".into()));
+        assert!(app.tabs[0]
+            .view()
+            .unwrap()
+            .new_branch
+            .as_ref()
+            .unwrap()
+            .error
+            .is_some());
+        let _ = app.update(Message::NewBranchInput("topic".into()));
+        let _ = app.update(Message::NewBranchSubmit);
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none(), "duplicate refused");
+        assert!(view
+            .new_branch
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+
+        let _ = app.update(Message::NewBranchInput("feature/x".into()));
+        let _ = app.update(Message::NewBranchSubmit);
+        assert_eq!(running_args(&app), ["Create branch feature/x"]);
+
+        // Git's error stays at the input instead of a dialog.
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Create branch feature/x".into(),
+            result: Err("fatal: cannot lock ref".into()),
+        });
+        assert!(app.modal.is_none());
+        let input = app.tabs[0].view().unwrap().new_branch.clone().unwrap();
+        assert_eq!(input.error.as_deref(), Some("fatal: cannot lock ref"));
+
+        let _ = app.update(Message::NewBranchSubmit);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Create branch feature/x".into(),
+            result: Ok(None),
+        });
+        assert!(
+            app.tabs[0].view().unwrap().new_branch.is_none(),
+            "closed on success"
+        );
+    }
+
+    #[test]
+    fn new_branch_from_wip_starts_at_head_and_esc_cancels() {
+        let mut app = checkout_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.snapshot = Arc::new(
+            view.snapshot
+                .with_working_tree(git_core::WorkingTree {
+                    unstaged: vec![file("a")],
+                    staged: Vec::new(),
+                })
+                .unwrap(),
+        );
+        view.selection = Some(Selection::Wip);
+        let _ = app.update(checked(Shortcut::CreateBranch, false));
+        let input = app.tabs[0].view().unwrap().new_branch.clone().unwrap();
+        assert_eq!((input.start.as_str(), input.row), ("c", None));
+
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.tabs[0].view().unwrap().new_branch.is_none());
+    }
+
+    /// Message of the enabled menu item labelled `label`.
+    fn select_label(menu: &ContextMenu, label: &str) -> Option<Message> {
+        let index = menu
+            .entries
+            .iter()
+            .position(|e| matches!(e, MenuEntry::Item { label: l, .. } if l == label))?;
+        menu.select(index)
+    }
+
+    fn branch_menu(app: &mut App, name: &str, kind: git_core::RefKind) -> ContextMenu {
+        let _ = app.update(Message::BranchContextMenu {
+            name: name.into(),
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        app.context_menu.take().unwrap()
+    }
+
+    #[test]
+    fn branch_menu_rules() {
+        let mut app = checkout_app();
+        let head = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
+        assert!(
+            select_label(&head, "Delete").is_none(),
+            "the checked-out branch cannot be deleted"
+        );
+        let other = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
+        assert!(
+            matches!(select_label(&other, "Delete"), Some(Message::DeleteBranch(n)) if n == "topic")
+        );
+        let remote = branch_menu(&mut app, "origin/feature", git_core::RefKind::RemoteBranch);
+        assert!(
+            matches!(select_label(&remote, "Delete on remote"), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
+        );
+    }
+
+    #[test]
+    fn rename_with_upstream_can_rename_the_remote_branch_too() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RenameStart("main".into()));
+        let _ = app.update(Message::RenameInput("topic".into()));
+        assert!(
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .rename
+                .as_ref()
+                .unwrap()
+                .error
+                .is_some(),
+            "taken"
+        );
+        let _ = app.update(Message::RenameInput("trunk".into()));
+        let _ = app.update(Message::RenameSubmit);
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Rename branch");
+        let _ = app.update(Message::ModalAction(2));
+        assert_eq!(running_args(&app), ["Rename branch main"]);
+
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Rename branch main".into(),
+            result: Ok(None),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.rename.is_none());
+        assert_eq!(
+            view.busy.as_deref(),
+            Some("Rename origin/main"),
+            "remote rename follows"
+        );
+    }
+
+    #[test]
+    fn rename_without_upstream_runs_directly() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::RenameStart("topic".into()));
+        let _ = app.update(Message::RenameInput("topic2".into()));
+        let _ = app.update(Message::RenameSubmit);
+        assert!(app.modal.is_none());
+        assert_eq!(running_args(&app), ["Rename branch topic"]);
+    }
+
+    #[test]
+    fn unmerged_delete_offers_force_delete() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DeleteBranch("topic".into()));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete branch topic"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Delete branch topic".into(),
+            result: Err("error: the branch 'topic' is not fully merged".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Branch not merged");
+        assert!(modal.default_action().is_none(), "Enter only closes");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete branch topic"]);
+        assert!(
+            app.tabs[0].view().unwrap().pending_delete.is_none(),
+            "forced"
+        );
+    }
+
+    #[test]
+    fn remote_branch_delete_asks_first() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::DeleteRemoteBranch("origin/feature".into()));
+        assert_eq!(app.modal.clone().unwrap().title, "Delete remote branch");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete origin/feature"]);
+    }
+
+    /// Checkout app with remotes and an existing tag `v1`.
+    fn tag_app(remotes: &[&str]) -> App {
+        let mut app = checkout_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.remotes = remotes.iter().map(|r| r.to_string()).collect();
+        snapshot.refs.push(git_core::Reference {
+            name: "v1".into(),
+            kind: git_core::RefKind::Tag,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn create_tag_form_validates() {
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::CreateTagStart("c".into()));
+        let input = |app: &mut App, field, value: &str| {
+            let _ = app.update(Message::FormInput {
+                field,
+                value: value.into(),
+            });
+        };
+        input(&mut app, 0, "bad name");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .starts_with("Tag names"));
+        input(&mut app, 0, "v1");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+        input(&mut app, 0, "v2");
+        input(&mut app, 1, "Release 2");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Create tag v2"]);
+    }
+
+    #[test]
+    fn tag_menu_and_remote_actions() {
+        let mut app = tag_app(&["origin"]);
+        let menu = branch_menu(&mut app, "v1", git_core::RefKind::Tag);
+        assert!(matches!(menu.select(0), Some(Message::PushTag(t)) if t == "v1"));
+        assert!(matches!(menu.select(4), Some(Message::CopyToClipboard(t)) if t == "v1"));
+
+        // One remote: push runs, remote delete asks.
+        let _ = app.update(Message::PushTag("v1".into()));
+        assert_eq!(running_args(&app), ["Push tag v1"]);
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::DeleteRemoteTag("v1".into()));
+        assert_eq!(app.modal.clone().unwrap().title, "Delete remote tag");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Delete tag v1 on origin"]);
+
+        // Several remotes: a form asks which one.
+        let mut app = tag_app(&["backup", "origin"]);
+        let _ = app.update(Message::PushTag("v1".into()));
+        assert_eq!(app.form.as_ref().unwrap().value(0), "origin");
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: "backup".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Push tag v1"]);
+    }
+
+    fn form_input(app: &mut App, field: usize, value: &str) {
+        let _ = app.update(Message::FormInput {
+            field,
+            value: value.into(),
+        });
+    }
+
+    #[test]
+    fn set_and_unset_upstream() {
+        let mut app = tag_app(&["origin"]);
+        let menu = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
+        assert!(
+            select_label(&menu, "Unset upstream").is_none(),
+            "topic has no upstream to unset"
+        );
+        let main = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
+        assert!(
+            matches!(select_label(&main, "Unset upstream"), Some(Message::UnsetUpstream(b)) if b == "main")
+        );
+
+        let _ = app.update(Message::SetUpstreamStart("topic".into()));
+        let form = app.form.clone().unwrap();
+        assert_eq!(
+            form.value(0),
+            "origin/topic",
+            "same-named remote branch preferred"
+        );
+        let _ = app.update(Message::FormClosed);
+
+        // A gone upstream is not offered as default.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for r in &mut snapshot.refs {
+            if r.name == "main" {
+                r.upstream = Some("origin/gone".into());
+            }
+        }
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::SetUpstreamStart("main".into()));
+        assert_eq!(app.form.clone().unwrap().value(0), "origin/main");
+        let _ = app.update(Message::FormClosed);
+        let _ = app.update(Message::SetUpstreamStart("topic".into()));
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Set upstream of topic"]);
+    }
+
+    #[test]
+    fn pull_without_upstream_offers_set_upstream() {
+        let mut app = tag_app(&["origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "topic".into(),
+            target: "c".into(),
+        };
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::Pull(None));
+        let modal = app.modal.clone().unwrap();
+        assert!(
+            matches!(modal.default_action(), Some(Message::SetUpstreamStart(b)) if b == "topic")
+        );
+    }
+
+    #[test]
+    fn add_remote_validates_name_and_url() {
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::AddRemoteStart);
+        form_input(&mut app, 0, "origin");
+        form_input(&mut app, 1, "https://x/y.git");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+        form_input(&mut app, 0, "a/b");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("/"));
+        form_input(&mut app, 0, "backup");
+        form_input(&mut app, 1, " ");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("URL"));
+        form_input(&mut app, 1, "https://x/y.git");
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Add remote backup"]);
+    }
+
+    #[test]
+    fn remote_menu_actions() {
+        let mut app = tag_app(&["origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.remote_urls = vec![("origin".into(), "https://x/origin.git".into())];
+        view.snapshot = Arc::new(snapshot);
+
+        let _ = app.update(Message::RemoteContextMenu {
+            name: "origin".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::FetchRemote(r)) if r == "origin"));
+        assert!(matches!(menu.select(4), Some(Message::RemoveRemote(r)) if r == "origin"));
+
+        let _ = app.update(Message::EditRemoteUrl("origin".into()));
+        assert_eq!(app.form.as_ref().unwrap().value(0), "https://x/origin.git");
+        let _ = app.update(Message::FormClosed);
+
+        let _ = app.update(Message::RemoveRemote("origin".into()));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Remove remote origin"]);
+
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::FetchRemote("origin".into()));
+        assert_eq!(running_args(&app), ["Fetch origin"]);
+    }
+
+    #[test]
+    fn pull_and_push_of_other_branches() {
+        let mut app = tag_app(&["origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for r in &mut snapshot.refs {
+            if r.name == "topic" {
+                r.upstream = Some("origin/topic".into());
+            }
+        }
+        view.snapshot = Arc::new(snapshot);
+        let menu = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
+        assert!(
+            matches!(select_label(&menu, "Pull"), Some(Message::PullBranch(b)) if b == "topic")
+        );
+
+        let _ = app.update(Message::PullBranch("topic".into()));
+        assert_eq!(running_args(&app), ["Pull topic"]);
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(Message::PushBranch("topic".into()));
+        assert!(app.form.is_some(), "no upstream: push form");
+    }
+
+    fn checkout_change() -> UndoAction {
+        UndoAction::Ref(git_core::RefChange::Checkout {
+            from: git_core::HeadPosition::Branch("main".into()),
+            to: git_core::HeadPosition::Branch("topic".into()),
+        })
+    }
+
+    #[test]
+    fn ref_changes_are_undoable() {
+        let mut app = checkout_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Checkout topic".into(),
+            result: Ok(Some(History::Push(checkout_change()))),
+        });
+        assert_eq!(app.tabs[0].view().unwrap().undo, [checkout_change()]);
+        let _ = app.update(Message::Undo);
+        assert_eq!(running_args(&app), ["Undo Checkout topic"]);
+    }
+
+    #[test]
+    fn checkout_undo_is_blocked_during_a_merge() {
+        let mut app = app_in_state(merging());
+        app.tabs[0].view_mut().unwrap().undo.push(checkout_change());
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert!(app.status.contains("merge"));
+    }
+
+    #[test]
+    fn network_operations_clear_the_redo_stack() {
+        let mut app = app_with_upstream();
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().redo.push(checkout_change());
+        let _ = app.update(Message::Push { force: false });
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Push".into(),
+            result: Ok(None),
+        });
+        assert!(app.tabs[0].view().unwrap().redo.is_empty());
+    }
+
+    /// Checkout app with HEAD detached at "c".
+    fn detached_app() -> App {
+        let mut app = checkout_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Detached { target: "c".into() };
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn leaving_detached_head_checks_for_lost_commits() {
+        let mut app = detached_app();
+        let tab = app.tabs[0].id;
+        let target = CheckoutTarget::Local("topic".into());
+        let _ = app.update(Message::Checkout(target.clone()));
+        assert!(app.tabs[0].view().unwrap().busy.is_none(), "checked first");
+
+        let _ = app.update(Message::DetachedChecked {
+            tab,
+            target: target.clone(),
+            result: Ok(vec!["d2".into(), "d1".into()]),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Leave detached HEAD");
+        assert!(modal.text.starts_with("2 commits are"));
+        assert!(
+            matches!(modal.default_action(), Some(Message::NewBranchStart(Some(h))) if h == "c")
+        );
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Checkout topic"], "leave anyway");
+
+        // Nothing would be lost: checkout right away.
+        let mut app = detached_app();
+        let _ = app.update(Message::DetachedChecked {
+            tab,
+            target,
+            result: Ok(Vec::new()),
+        });
+        assert!(app.modal.is_none());
+        assert_eq!(running_args(&app), ["Checkout topic"]);
+    }
+
+    #[test]
+    fn one_timer_for_the_next_auto_fetch() {
+        let mut app = app_with_remote();
+        let opened = app.tabs[0].view().unwrap().last_fetch;
+        let _ = app.update(Message::Refresh);
+        let due = opened + std::time::Duration::from_secs(5 * 60);
+        assert_eq!(app.auto_fetch_at, Some(due));
+        let seq = app.auto_fetch_seq;
+
+        // Further messages keep the pending timer.
+        let _ = app.update(Message::Refresh);
+        assert_eq!(app.auto_fetch_seq, seq);
+        // A stale timer is ignored.
+        let _ = app.update(Message::AutoFetchDue(seq - 1));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+
+        // Off: no timer.
+        app.session.auto_fetch_minutes = 0;
+        let _ = app.update(Message::Refresh);
+        assert_eq!(app.auto_fetch_at, None);
     }
 
     #[test]
