@@ -7,8 +7,9 @@ use crate::repo_view::{NetworkKind, NetworkRequest};
 /// Default auto-fetch interval in minutes (planning decision M3).
 pub const DEFAULT_INTERVAL_MINUTES: u32 = 5;
 
-/// How often open tabs are checked for a due auto-fetch.
-pub const TICK: Duration = Duration::from_secs(30);
+/// Delay before checking again when a due auto-fetch had to be skipped
+/// (busy tab, merge in progress).
+pub const RETRY: Duration = Duration::from_secs(60);
 
 /// `git fetch --all` (pruning follows the user's `fetch.prune` setting).
 pub fn fetch_all(background: bool) -> NetworkRequest {
@@ -50,6 +51,24 @@ pub fn auto_fetch_due(now: Instant, interval_minutes: u32, tab: TabState) -> boo
         && !tab.operation_in_progress
         && now.duration_since(tab.last_fetch)
             >= Duration::from_secs(u64::from(interval_minutes) * 60)
+}
+
+/// When the next auto-fetch check is needed: the earliest due time of the
+/// tabs, or `now + RETRY` if one is overdue (it was skipped). `None` if
+/// auto-fetch is off or no tab can fetch. A single timer replaces a
+/// periodic tick: every message redraws the window, which costs CPU
+/// with software rendering.
+pub fn next_check(now: Instant, interval_minutes: u32, tabs: &[TabState]) -> Option<Instant> {
+    if interval_minutes == 0 {
+        return None;
+    }
+    let interval = Duration::from_secs(u64::from(interval_minutes) * 60);
+    let due = tabs
+        .iter()
+        .filter(|t| t.has_remotes)
+        .map(|t| t.last_fetch + interval)
+        .min()?;
+    Some(if due <= now { now + RETRY } else { due })
 }
 
 #[cfg(test)]
@@ -97,6 +116,29 @@ mod tests {
             ..state
         };
         assert!(!auto_fetch_due(now, 5, local), "nothing to fetch from");
+    }
+
+    #[test]
+    fn next_check_is_the_earliest_due_time() {
+        let (now, state) = tab(2);
+        let older = TabState {
+            last_fetch: state.last_fetch - Duration::from_secs(60),
+            ..state
+        };
+        // Fetched 2 and 3 minutes ago, every 5 minutes: due in 2 minutes.
+        assert_eq!(
+            next_check(now, 5, &[state, older]),
+            Some(older.last_fetch + Duration::from_secs(300))
+        );
+        assert_eq!(next_check(now, 0, &[state]), None, "off");
+        let local = TabState {
+            has_remotes: false,
+            ..state
+        };
+        assert_eq!(next_check(now, 5, &[local]), None, "nothing to fetch");
+        // Overdue (skipped while busy): retry later instead of spinning.
+        let (late, state) = tab(10);
+        assert_eq!(next_check(late, 5, &[state]), Some(late + RETRY));
     }
 
     #[test]

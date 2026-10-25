@@ -126,3 +126,52 @@ fn stage_hunk_of_a_large_file() {
     });
     eprintln!("{hunks} hunks: diff {diff_time:?}, build patch + git apply --cached {stage_time:?}");
 }
+
+/// Overhead of the network runner (stderr streaming, progress parsing,
+/// cancel polling) against plain `git` for the same fetch from a local remote.
+#[test]
+#[ignore = "manual timing"]
+fn network_runner_overhead() {
+    use git_core::CancelToken;
+    use std::process::Command;
+
+    let remote = TestRepo::new();
+    for i in 0..300 {
+        remote.commit(
+            &format!("f{i}.txt"),
+            &format!("{i}\n").repeat(2000),
+            "Commit",
+        );
+    }
+    let url = remote.path().to_str().unwrap().to_owned();
+    let fresh = || {
+        let local = TestRepo::new();
+        local.git(&["remote", "add", "origin", &url]);
+        local
+    };
+    let plain = median(5, || {
+        let local = fresh();
+        let start = Instant::now();
+        let status = Command::new("git")
+            .args(["fetch", "--quiet", "origin"])
+            .current_dir(local.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        start.elapsed()
+    });
+    let mut updates = 0;
+    let runner = median(5, || {
+        let local = fresh();
+        let cli = CliBackend::new(local.path());
+        let start = Instant::now();
+        cli.run_network(
+            &["fetch", "--progress", "origin"],
+            &CancelToken::new(),
+            &mut |_| updates += 1,
+        )
+        .unwrap();
+        start.elapsed()
+    });
+    eprintln!("fetch of 300 commits: plain git {plain:?}, runner {runner:?} ({updates} progress updates over 5 runs)");
+}
