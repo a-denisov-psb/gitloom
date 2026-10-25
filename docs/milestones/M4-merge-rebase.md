@@ -79,7 +79,9 @@ Until answered, implement the decisions above; adjust afterwards.
 
 ## Tasks
 
-### [ ] M4-01 Multi-selection in the graph
+### [x] M4-01 Multi-selection in the graph
+
+> Done: pure model `crates/app/src/selection.rs` (toggle, range from the anchor, retain after refresh, graph order); `RepoView::multi` next to the primary selection; Ctrl+click (command key on macOS) toggles, Shift+click and Shift+↑/↓ select a range from the anchor, plain clicks and arrows reset; stashes and the WIP row are not selectable. Shift+↑/↓ no longer navigate parent/child (Shift+J/K do; UX-PARITY deviation entry, CHANGELOG "Changed"). Panel with more than one commit: "N commits selected", summaries, "Cherry-pick N commits" and — only for a contiguous first-parent run on HEAD without merges (`contiguous_on_head`) — "Squash N commits", both disabled with "Not available yet" until M4-09/M4-08. Tests: model (toggle, range both directions, no anchor, refresh), app (clicks with modifiers, Shift+arrows, refresh, squash rule). Checked by hand: click + Ctrl+click + Shift+click → 3 commits and panel; Shift+↓ twice → 3 commits; Squash hidden for a selection with a merge and for commits off the first-parent line.
 
 - Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extends (Shift+J/K stay parent/child navigation; document the difference in UX-PARITY).
 - Right panel with several commits: "N commits selected", list of their summaries, actions (cherry-pick, squash if contiguous on the current branch).

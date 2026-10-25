@@ -18,6 +18,7 @@ const NOT_AVAILABLE: &str = "Not available yet";
 
 pub fn view(view: &RepoView) -> Element<'_, Message> {
     let content = match &view.selection {
+        _ if view.is_multi() => multi_selection(view),
         Some(Selection::Wip) => staging(view),
         Some(Selection::Commit(id)) => match view.snapshot.commit(id) {
             Some(commit) => details(view, commit),
@@ -31,6 +32,46 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
         .height(Fill)
         .style(theme::panel)
         .into()
+}
+
+/// Several commits selected: their summaries and the actions for them.
+/// Cherry-pick (M4-09) and squash (M4-08) are enabled in later tasks.
+fn multi_selection(view: &RepoView) -> Element<'_, Message> {
+    let count = view.multi.len();
+    let commits = Column::with_children(view.multi.ids().iter().filter_map(|id| {
+        let commit = view.snapshot.commit(id)?;
+        Some(
+            row![
+                text(short(&commit.id)).font(iced::Font::MONOSPACE).size(12),
+                text(&commit.summary)
+                    .size(13)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(8)
+            .into(),
+        )
+    }))
+    .spacing(4);
+    let action = |label: String| {
+        with_tooltip(
+            button(text(label).size(12))
+                .padding([4, 10])
+                .style(button::secondary)
+                .into(),
+        )
+    };
+    let mut actions = row![action(format!("Cherry-pick {count} commits"))].spacing(8);
+    if crate::repo_view::contiguous_on_head(&view.snapshot, view.multi.ids()) {
+        actions = actions.push(action(format!("Squash {count} commits")));
+    }
+    let content = column![
+        text(format!("{count} commits selected")).size(16),
+        actions,
+        scrollable(commits).height(Fill),
+    ]
+    .spacing(12)
+    .padding(12);
+    content.into()
 }
 
 fn staging(view: &RepoView) -> Element<'_, Message> {

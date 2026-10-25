@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- Select several commits in the graph: Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extend the selection. The right panel lists the selected commits.
+
+### Changed
+
+- Shift+↑/↓ now extend the commit selection; jumping to the first parent or child on the branch stays on Shift+J/K.
+
 ## [0.4.0] - 2026-10-25
 
 ### Added

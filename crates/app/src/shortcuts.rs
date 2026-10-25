@@ -25,6 +25,8 @@ pub enum Shortcut {
     UnstageAll,
     /// Ctrl+L: fetch all remotes.
     FetchAll,
+    /// Shift+↑/↓: extend the commit selection by one row.
+    ExtendSelection(Move),
     /// Ctrl+B: new branch at the selected commit.
     CreateBranch,
     /// Ctrl+Z.
@@ -86,16 +88,17 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::End) if command && !alt => Some(Shortcut::Navigate(Move::Last)),
-        Key::Named(Named::ArrowDown) if plain => Some(Shortcut::Navigate(if shift {
-            Move::FirstParent
+        // Shift+↑/↓ extend the selection (M4-01); Shift+J/K stay parent/child.
+        Key::Named(Named::ArrowDown) if plain => Some(if shift {
+            Shortcut::ExtendSelection(Move::Next)
         } else {
-            Move::Next
-        })),
-        Key::Named(Named::ArrowUp) if plain => Some(Shortcut::Navigate(if shift {
-            Move::Child
+            Shortcut::Navigate(Move::Next)
+        }),
+        Key::Named(Named::ArrowUp) if plain => Some(if shift {
+            Shortcut::ExtendSelection(Move::Previous)
         } else {
-            Move::Previous
-        })),
+            Shortcut::Navigate(Move::Previous)
+        }),
         // iced reports the key without modifiers ("j" for Shift+J, from winit's
         // `key_without_modifiers`); upper case is accepted too (e.g. Caps Lock).
         Key::Character(c) if plain => match (c.to_lowercase().as_str(), shift) {
@@ -208,11 +211,11 @@ mod tests {
         assert_eq!(shortcut(&ch("k"), none), nav(Move::Previous));
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowDown), Modifiers::SHIFT),
-            nav(Move::FirstParent)
+            Some(Shortcut::ExtendSelection(Move::Next))
         );
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowUp), Modifiers::SHIFT),
-            nav(Move::Child)
+            Some(Shortcut::ExtendSelection(Move::Previous))
         );
         // As iced delivers Shift+J: the key without modifiers plus Shift
         // (regression, M2-01 check on Windows).

@@ -53,7 +53,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 | Conflicted file | Opens conflict view (ours, theirs, output) | M4 |
 | Interactive rebase | Panel with actions per commit, reorder by drag | M4 (verify in GitKraken: list order newest or oldest on top) |
-| Multi-select commits | Ctrl+click, Shift+click | M4 |
+| Multi-select commits | Ctrl+click, Shift+click | done (M4-01; also Shift+↑/↓; panel "N commits selected") |
 
 ## Keyboard shortcuts
 
@@ -79,7 +79,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|---|
 | Next / previous item | ↓ / J next (older), ↑ / K previous (newer) | done (M1) |
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
-| Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
+| Next / previous commit in branch | Shift+J (first parent), Shift+K (child on the same branch) | done (M1; Shift+↑/↓ extend the selection since M4-01) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
 | Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), rest M4 |
 
@@ -132,4 +132,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
 | A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | Conflict resolution comes in M4; until then the user is not left in a half-finished state without a way back |
+| Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
