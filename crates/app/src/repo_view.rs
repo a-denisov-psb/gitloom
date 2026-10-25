@@ -295,6 +295,9 @@ pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
     pub selection: Option<Selection>,
+    /// Commits selected with Ctrl/Shift (M4-01); more than one shows the
+    /// multi-selection panel.
+    pub multi: crate::selection::MultiSelection,
     pub details: Option<CommitDetails>,
     pub center: CenterView,
     pub filter: String,
@@ -475,6 +478,7 @@ impl RepoView {
             backend,
             snapshot,
             selection,
+            multi: crate::selection::MultiSelection::default(),
             details: None,
             center: CenterView::Graph,
             filter: String::new(),
@@ -520,6 +524,7 @@ impl RepoView {
     /// Replaces the snapshot after a refresh and keeps the selection if possible.
     pub fn apply_snapshot(&mut self, snapshot: Arc<RepoSnapshot>) {
         self.selection = restore_selection(self.selection.as_ref(), &snapshot);
+        self.multi.retain(&selectable_ids(&snapshot));
         if let Some(details) = &self.details {
             if snapshot.commit(&details.id).is_none() {
                 self.details = None;
@@ -532,6 +537,11 @@ impl RepoView {
         self.prefill_message();
     }
 
+    /// More than one commit is selected (Ctrl/Shift).
+    pub fn is_multi(&self) -> bool {
+        self.multi.len() > 1
+    }
+
     /// Selected commit id, if a commit (not WIP) is selected.
     pub fn selected_commit(&self) -> Option<&str> {
         match &self.selection {
@@ -539,6 +549,47 @@ impl RepoView {
             _ => None,
         }
     }
+}
+
+/// The commits `ids` form an unbroken first-parent chain ending at HEAD's
+/// branch history (squash candidates: contiguous, no merges).
+pub fn contiguous_on_head(snapshot: &RepoSnapshot, ids: &[String]) -> bool {
+    let Some(head) = snapshot.head.target() else {
+        return false;
+    };
+    // Walk HEAD's first-parent chain and look for the selection as one run.
+    let mut chain = Vec::new();
+    let mut current = Some(head.to_owned());
+    while let Some(id) = current {
+        let Some(commit) = snapshot.commit(&id) else {
+            break;
+        };
+        chain.push(id.clone());
+        current = commit.parents.first().cloned();
+        if chain.len() > 10_000 {
+            break;
+        }
+    }
+    let Some(start) = chain.iter().position(|id| ids.contains(id)) else {
+        return false;
+    };
+    let run = &chain[start..(start + ids.len()).min(chain.len())];
+    run.len() == ids.len()
+        && run.iter().all(|id| ids.contains(id))
+        && run
+            .iter()
+            .all(|id| snapshot.commit(id).is_some_and(|c| c.parents.len() <= 1))
+}
+
+/// Commit ids that can be part of a multi-selection, in graph order
+/// (stashes are excluded).
+pub fn selectable_ids(snapshot: &RepoSnapshot) -> Vec<&str> {
+    snapshot
+        .commits
+        .iter()
+        .map(|c| c.id.as_str())
+        .filter(|id| !snapshot.is_stash(id))
+        .collect()
 }
 
 /// Message without `#` comment lines (as Git's editor cleanup would remove them).

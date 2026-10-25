@@ -255,7 +255,7 @@ pub fn graph_row(
 
     let row = row_button(
         content,
-        repo.selected_commit() == Some(commit.id.as_str()),
+        repo.selected_commit() == Some(commit.id.as_str()) || repo.multi.contains(&commit.id),
         color,
         Message::CommitSelected(commit.id.clone()),
     );

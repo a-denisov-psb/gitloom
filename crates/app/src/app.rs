@@ -1477,7 +1477,30 @@ impl App {
                     crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
                 });
                 if let Some(selection) = target {
+                    if let Some(view) = self.active_view_mut() {
+                        match &selection {
+                            Selection::Commit(id) => select_multi(view, id, false, false),
+                            Selection::Wip => view.multi.clear(),
+                        }
+                    }
                     let task = self.select(selection);
+                    return Task::batch([task, self.reveal_selection()]);
+                }
+            }
+            Shortcut::ExtendSelection(step) => {
+                let target = self.active_tab().and_then(Tab::view).and_then(|view| {
+                    crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
+                });
+                // The WIP row and stashes are not part of a multi-selection.
+                if let Some(Selection::Commit(id)) = target {
+                    let Some(view) = self.active_view_mut() else {
+                        return Task::none();
+                    };
+                    if view.snapshot.is_stash(&id) {
+                        return Task::none();
+                    }
+                    select_multi(view, &id, false, true);
+                    let task = self.select(Selection::Commit(id));
                     return Task::batch([task, self.reveal_selection()]);
                 }
             }
@@ -3082,8 +3105,17 @@ impl App {
                     return Task::batch([task, self.reveal_selection()]);
                 }
             }
-            Message::WipSelected => return self.select(Selection::Wip),
+            Message::WipSelected => {
+                if let Some(view) = self.active_view_mut() {
+                    view.multi.clear();
+                }
+                return self.select(Selection::Wip);
+            }
             Message::CommitSelected(id) => {
+                let (toggle, range) = (self.modifiers.command(), self.modifiers.shift());
+                if let Some(view) = self.active_view_mut() {
+                    select_multi(view, &id, toggle, range);
+                }
                 let task = self.select(Selection::Commit(id));
                 return Task::batch([task, self.reveal_selection()]);
             }
@@ -3697,6 +3729,32 @@ fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
             },
         ],
         default: Some(0),
+    }
+}
+
+/// Updates the multi-selection for a click (or keyboard move) on commit
+/// `id`: `toggle` = Ctrl, `range` = Shift, neither = only this commit.
+fn select_multi(view: &mut RepoView, id: &str, toggle: bool, range: bool) {
+    let snapshot = Arc::clone(&view.snapshot);
+    let order = crate::repo_view::selectable_ids(&snapshot);
+    if snapshot.is_stash(id) {
+        view.multi.clear();
+        return;
+    }
+    // The current single selection is where a Ctrl/Shift selection starts.
+    if (toggle || range) && view.multi.is_empty() {
+        if let Some(current) = view.selected_commit().map(str::to_owned) {
+            if order.contains(&current.as_str()) {
+                view.multi.single(&current);
+            }
+        }
+    }
+    if range {
+        view.multi.range(id, &order);
+    } else if toggle {
+        view.multi.toggle(id, &order);
+    } else {
+        view.multi.single(id);
     }
 }
 
@@ -6553,6 +6611,90 @@ mod tests {
         app.session.auto_fetch_minutes = 0;
         let _ = app.update(Message::Refresh);
         assert_eq!(app.auto_fetch_at, None);
+    }
+
+    fn multi_ids(app: &App) -> Vec<String> {
+        app.tabs[0].view().unwrap().multi.ids().to_vec()
+    }
+
+    fn click_with(app: &mut App, id: &str, modifiers: keyboard::Modifiers) {
+        let _ = app.update(Message::ModifiersChanged(modifiers));
+        let _ = app.update(Message::CommitSelected(id.into()));
+        let _ = app.update(Message::ModifiersChanged(keyboard::Modifiers::empty()));
+    }
+
+    #[test]
+    fn ctrl_and_shift_clicks_select_several_commits() {
+        let mut app = ready_app(&["e", "d", "c", "b", "a"]);
+        click_with(&mut app, "d", keyboard::Modifiers::empty());
+        assert_eq!(multi_ids(&app), ["d"]);
+        assert!(!app.tabs[0].view().unwrap().is_multi());
+
+        click_with(&mut app, "b", keyboard::Modifiers::COMMAND);
+        assert_eq!(multi_ids(&app), ["d", "b"]);
+        assert!(app.tabs[0].view().unwrap().is_multi());
+
+        click_with(&mut app, "e", keyboard::Modifiers::SHIFT);
+        assert_eq!(
+            multi_ids(&app),
+            ["e", "d", "c", "b"],
+            "range from the anchor b"
+        );
+
+        click_with(&mut app, "c", keyboard::Modifiers::empty());
+        assert_eq!(multi_ids(&app), ["c"], "plain click resets");
+    }
+
+    #[test]
+    fn shift_arrows_extend_and_plain_arrows_reset() {
+        let mut app = ready_app(&["e", "d", "c", "b", "a"]);
+        click_with(&mut app, "d", keyboard::Modifiers::empty());
+        let _ = app.update(checked(
+            Shortcut::ExtendSelection(crate::nav::Move::Next),
+            false,
+        ));
+        let _ = app.update(checked(
+            Shortcut::ExtendSelection(crate::nav::Move::Next),
+            false,
+        ));
+        assert_eq!(multi_ids(&app), ["d", "c", "b"]);
+        let _ = app.update(checked(
+            Shortcut::ExtendSelection(crate::nav::Move::Previous),
+            false,
+        ));
+        assert_eq!(multi_ids(&app), ["d", "c"]);
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        assert_eq!(multi_ids(&app), ["b"]);
+    }
+
+    #[test]
+    fn multi_selection_survives_refresh() {
+        let mut app = ready_app(&["e", "d", "c", "b", "a"]);
+        click_with(&mut app, "d", keyboard::Modifiers::empty());
+        click_with(&mut app, "b", keyboard::Modifiers::SHIFT);
+        let view = app.tabs[0].view_mut().unwrap();
+        let snapshot = Arc::clone(&view.snapshot);
+        view.apply_snapshot(snapshot);
+        assert_eq!(multi_ids(&app), ["d", "c", "b"]);
+    }
+
+    #[test]
+    fn squash_needs_a_contiguous_run_on_head() {
+        let app = ready_app(&["e", "d", "c", "b", "a"]);
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(crate::repo_view::contiguous_on_head(
+            snapshot,
+            &ids(&["d", "c"])
+        ));
+        assert!(crate::repo_view::contiguous_on_head(
+            snapshot,
+            &ids(&["e", "d", "c"])
+        ));
+        assert!(
+            !crate::repo_view::contiguous_on_head(snapshot, &ids(&["e", "c"])),
+            "gap"
+        );
     }
 
     #[test]
