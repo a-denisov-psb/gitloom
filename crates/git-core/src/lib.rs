@@ -6,6 +6,7 @@
 //! - [`CliBackend`]: write operations via the `git` executable
 
 mod cli_backend;
+mod conflict;
 mod diff;
 mod discard;
 mod editor;
@@ -17,12 +18,16 @@ mod mock;
 mod network;
 mod patch;
 mod refname;
+mod resolve;
 mod state;
 mod watch;
 
 pub use cli_backend::{
     branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
     GitVersion, GitWriter, RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
+};
+pub use conflict::{
+    with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,
 };
 pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
@@ -44,6 +49,10 @@ pub use network::{
 };
 pub use patch::{build_patch, PatchDirection};
 pub use refname::check_branch_name;
+pub use resolve::{
+    conflict_stages, load_conflict, resolve_conflict, resolve_with_side, ConflictContent,
+    ConflictStages, LoadedConflict, StageEntry, WholeFileReason,
+};
 pub use state::{locked_file, Operation, RepoState};
 pub use watch::{classify_git_path, ChangeSet};
 

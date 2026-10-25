@@ -121,6 +121,17 @@ pub trait GitWriter: Send + Sync {
     /// Runs `git` with `args` in the repository root.
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput>;
 
+    /// Runs `git` like [`Self::run`] but returns the exit code (`None` if
+    /// terminated) with the output instead of failing on a non-zero code,
+    /// for commands that report results that way (`git merge-file`).
+    fn run_status(
+        &self,
+        args: &[&str],
+        options: RunOptions<'_>,
+    ) -> Result<(Option<i32>, GitOutput)> {
+        self.run(args, options).map(|output| (Some(0), output))
+    }
+
     /// Runs a command that asks for a todo list or commit messages: Gitloom
     /// acts as Git's editor and answers with `input` (ADR-021). Fails if no
     /// editor program is configured.
@@ -687,6 +698,21 @@ impl GitWriter for CliBackend {
         self.execute(self.command(), args, options)
     }
 
+    fn run_status(
+        &self,
+        args: &[&str],
+        options: RunOptions<'_>,
+    ) -> Result<(Option<i32>, GitOutput)> {
+        let (_, output) = self.execute_raw(self.command(), args, options)?;
+        Ok((
+            output.status.code(),
+            GitOutput {
+                stdout: output.stdout,
+                stderr: output.stderr,
+            },
+        ))
+    }
+
     fn run_editing(
         &self,
         args: &[&str],
@@ -713,12 +739,19 @@ impl GitWriter for CliBackend {
 
 impl CliBackend {
     /// Runs `cmd` (from [`Self::command`]) with `args` in the repository root.
-    fn execute(
+    fn execute(&self, cmd: Command, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
+        let (display, output) = self.execute_raw(cmd, args, options)?;
+        finish(display, output)
+    }
+
+    /// Like [`Self::execute`] without checking the exit code; returns the
+    /// command for messages and the raw output.
+    fn execute_raw(
         &self,
         mut cmd: Command,
         args: &[&str],
         options: RunOptions<'_>,
-    ) -> Result<GitOutput> {
+    ) -> Result<(String, std::process::Output)> {
         cmd.args(args).current_dir(&self.root);
         if options.read_only {
             cmd.env("GIT_OPTIONAL_LOCKS", "0");
@@ -748,12 +781,12 @@ impl CliBackend {
                     return Err(Error::Backend(format!("could not write to {display}: {e}")));
                 }
             }
-            return finish(display, output);
+            return Ok((display, output));
         }
         let output = child
             .wait_with_output()
             .map_err(|e| Error::Backend(format!("could not run {display}: {e}")))?;
-        finish(display, output)
+        Ok((display, output))
     }
 }
 
