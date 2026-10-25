@@ -89,7 +89,9 @@ Until answered, implement the decisions above; adjust afterwards.
 
 Acceptance: unit tests for the selection model (toggle, range, refresh).
 
-### [ ] M4-02 Gitloom as Git editor
+### [x] M4-02 Gitloom as Git editor
+
+> Done: `git_core::editor` (`EditorInput { sequence, messages }`, `editor_call`, `editor_main`) and `GitWriter::run_editing`; `CliBackend::with_editor(exe)` set by the app next to askpass; `main.rs` handles `--git-editor=<kind> <file>` before askpass and iced. Deviation (extension): a queue of messages instead of one prepared file, consumed in order, so an interactive rebase with several rewords/squashes (M4-07) runs in one command. Tests: unit tests (parsing, quoting, todo copy, message order, missing preparation, cleanup) and `crates/app/tests/git_editor.rs` against the real binary (reorder, reword + squash, commit message, missing todo aborts with no rebase left, missing message stops the rebase without hanging, no editor configured). No user-visible change, so no CHANGELOG entry.
 
 - Env flag (e.g. `GITLOOM_EDITOR=1`) plus a path to a prepared file: Gitloom started as editor copies the prepared content into the file Git passes and exits 0; missing preparation → exit 1 (Git aborts cleanly).
 - Used as `GIT_SEQUENCE_EDITOR` (todo list) and `GIT_EDITOR` (commit messages for reword, squash, merge, revert).
