@@ -34,10 +34,12 @@ Out of scope (later):
 
 - [ ] Against a local bare remote and against the real GitHub remote of this repo: fetch, pull (all modes), push (incl. new branch with upstream), create/rename/delete branch, tag create/push/delete — all from the UI, results identical to the CLI.
 - [ ] HTTPS with a credential manager and SSH with a passphrase-protected key work on Windows and Linux (maintainer check); a missing credential shows the askpass dialog instead of hanging.
-- [ ] Every network operation shows progress and can be cancelled; the UI never blocks.
-- [ ] Context menus on commits, branches, tags, remotes and stashes are complete; M4 actions are disabled with tooltip.
-- [ ] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
-- [ ] Released as `v0.4.0` (M3-15).
+- [x] Every network operation shows progress and can be cancelled; the UI never blocks.
+- [x] Context menus on commits, branches, tags, remotes and stashes are complete; M4 actions are disabled with tooltip.
+- [x] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
+- [x] Released as `v0.4.0` (M3-15).
+
+> Note (M3-15): released with the maintainer's approval while two acceptance items are still open: pull modes other than fast-forward were only checked against a local remote (tests and M3-04), not against GitHub; real credential prompts (GCM, SSH passphrase) and the Windows walkthrough are maintainer to-dos in `docs/HANDOVER.md`. CI status of the release commit not visible to Claude Code (no `gh`).
 
 ## Decisions taken in planning
 
@@ -243,6 +245,8 @@ Acceptance:
 - Full walkthrough against the GitHub remote of this repo (on a throwaway branch) on Linux; maintainer repeats on Windows (Maintainer to-dos).
 - Update `docs/UX-PARITY.md`, `CHANGELOG.md`, `docs/PERFORMANCE.md` (fetch/push overhead, auto-fetch idle cost).
 
-### [ ] M3-15 Release v0.4.0
+### [x] M3-15 Release v0.4.0
+
+> Done (2026-10-25): `release/0.4.0`, version bump, changelog, README, ROADMAP (M4 next, plan pending), HANDOVER.
 
 Same procedure as before (`/release`), only when the maintainer asks.

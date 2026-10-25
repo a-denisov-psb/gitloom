@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M3 – Branches and remotes** → [`milestones/M3-branches-remotes.md`](milestones/M3-branches-remotes.md)
+**M4 – Merge, rebase, conflicts** (version 0.5.0): task-level plan to be prepared with the maintainer; no milestone file yet.
 
 ## Vision
 
@@ -15,8 +15,8 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M0 | 0.1.0 | Layout shell | Done |
 | M1 | 0.2.0 | Real repository (read-only) and lane graph | Done |
 | M2 | 0.3.0 | Working copy: stage, commit, stash | Done |
-| M3 | 0.4.0 | Branches and remotes | In progress |
-| M4 | 0.5.0 | Merge, rebase, conflicts, undo | Planned |
+| M3 | 0.4.0 | Branches and remotes | Done |
+| M4 | 0.5.0 | Merge, rebase, conflicts, undo | Next (planning) |
 | M5 | 0.6.0 | Productivity parity | Planned |
 | M6 | 1.0.0 | Release readiness | Planned |
 
@@ -34,7 +34,7 @@ Open any local non-bare repository and see real history with a correct lane grap
 
 The daily loop without a terminal: file watcher, stage/unstage and discard by file, hunk and line, commit and amend, stash with stashes in the graph, undo/redo for commit, amend and discard. All writes go through the new `CliBackend`. Context menu and modal infrastructure moved here from M3. Details: [`milestones/M2-working-copy.md`](milestones/M2-working-copy.md).
 
-### M3 – Branches and remotes
+### M3 – Branches and remotes (done)
 
 Checkout (local, remote → tracking branch, detached HEAD), create/rename/delete branches and tags, fetch (manual and automatic), pull with mode selection, push with upstream setup and force-with-lease, upstream and remote management, context menus on commits, branches, tags and remotes, undo/redo for ref operations. Network operations show progress, can be cancelled and use Gitloom as askpass helper; credentials are never stored. Details: [`milestones/M3-branches-remotes.md`](milestones/M3-branches-remotes.md).
 
