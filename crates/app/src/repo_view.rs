@@ -74,6 +74,8 @@ pub enum Guarded {
     Stash,
     /// Undo or redo of a commit or amend (moves HEAD).
     MoveHead,
+    /// Merge or fast-forward.
+    Merge,
 }
 
 /// How a line click changes the selection.
@@ -347,6 +349,9 @@ pub struct RepoView {
     /// Target of the running checkout, to offer "Stash and checkout" if
     /// local changes block it.
     pub pending_checkout: Option<crate::app::CheckoutTarget>,
+    /// The running merge or fast-forward, repeated with `autostash` if
+    /// local changes block it.
+    pub pending_merge: Option<crate::app::Message>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -418,7 +423,7 @@ impl RepoView {
         let blocked = match action {
             // Committing continues the operation (M4-03).
             Guarded::Commit => false,
-            Guarded::Amend | Guarded::Stash | Guarded::MoveHead => true,
+            Guarded::Amend | Guarded::Stash | Guarded::MoveHead | Guarded::Merge => true,
         };
         blocked.then(|| {
             let verb = match action {
@@ -426,6 +431,7 @@ impl RepoView {
                 Guarded::Amend => "amend",
                 Guarded::Stash => "stash",
                 Guarded::MoveHead => "undo or redo commits",
+                Guarded::Merge => "merge",
             };
             format!("Cannot {verb} while a {operation} is in progress")
         })
@@ -519,6 +525,7 @@ impl RepoView {
             then_network: None,
             pending_delete: None,
             pending_checkout: None,
+            pending_merge: None,
             pull_failure: None,
             network: None,
             queued: None,

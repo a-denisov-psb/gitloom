@@ -111,7 +111,9 @@ Acceptance: integration tests with a prepared todo list and a prepared message; 
 
 Acceptance: integration tests for each state with continue, skip and abort.
 
-### [ ] M4-04 Merge and fast-forward
+### [x] M4-04 Merge and fast-forward
+
+> Done: `git_core::{merge, fast_forward_head, fast_forward_branch, merge_blocked, MergeOutcome}`: `git merge [--autostash] <branch>` (user's ff/autostash config, Git's default message from the short branch name; a conflict returns `Conflicts`, not an error, and the banner takes over), `git merge --ff-only` for the checked-out branch, `git fetch --no-write-fetch-head . <ref>:refs/heads/<branch>` for other branches (Git refuses non-fast-forwards and the checked-out branch). Menus: local branch (not checked out) "Merge X into Y" and "Fast-forward Y to X" if HEAD is a proper ancestor (`RepoSnapshot::is_ancestor` on the loaded history; unknown → offered, Git decides); remote branch the same plus "Fast-forward L to origin/L" for a non-checked-out local branch tracking it. Merging is blocked while an operation is in progress (status message). Dirty tree: "Local changes block the merge" dialog → "Stash and merge" retries with `--autostash` (Git re-applies the stash; on conflict it stays in the stash list). Tests: `crates/git-core/tests/merge.rs` (ff, merge commit incl. remote message, conflict, blocked, autostash, `--ff-only` refusal, fast-forward of a non-checked-out branch, refusal for diverged and checked-out branches), snapshot ancestry, menus, app (blocked dialog → autostash retry, operation guard). Checked by hand: "Fast-forward main to topic" from the sidebar menu; merge with a dirty file → dialog → "Stash and merge" → merge commit, stash re-applied with a conflict and kept in the list (Git's behavior).
 
 - Branch context menu "Merge <branch> into <current>" (`git merge`, respecting user config for ff).
 - "Fast-forward <branch> to <commit>" for branches that are not checked out (`git fetch . <commit>:<branch>` or `update-ref` with ancestry check) and for the current branch (`git merge --ff-only`).

@@ -68,6 +68,42 @@ pub struct LocalBranch<'a> {
     pub is_head: bool,
     pub has_upstream: bool,
     pub writable: bool,
+    /// Checked-out branch name, or "HEAD" when detached.
+    pub head: &'a str,
+    /// HEAD can be fast-forwarded to this branch.
+    pub head_can_fast_forward: bool,
+}
+
+/// "Merge X into Y" and, if possible, "Fast-forward Y to X" for the branch
+/// with full reference name `reference` and display name `name`.
+fn merge_entries(
+    name: &str,
+    reference: &str,
+    head: &str,
+    head_can_fast_forward: bool,
+    writable: bool,
+) -> Vec<MenuEntry> {
+    let mut entries = Vec::new();
+    if head_can_fast_forward {
+        entries.push(action(
+            &format!("Fast-forward {head} to {name}"),
+            writable,
+            Message::FastForward {
+                branch: None,
+                source: reference.into(),
+                autostash: false,
+            },
+        ));
+    }
+    entries.push(action(
+        &format!("Merge {name} into {head}"),
+        writable,
+        Message::Merge {
+            source: reference.into(),
+            autostash: false,
+        },
+    ));
+    entries
 }
 
 pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
@@ -77,6 +113,8 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         is_head,
         has_upstream,
         writable,
+        head,
+        head_can_fast_forward,
     } = branch;
     let (pull, push) = if is_head {
         (Message::Pull(None), Message::Push { force: false })
@@ -86,7 +124,19 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             Message::PushBranch(name.into()),
         )
     };
-    vec![
+    // Merging the checked-out branch into itself makes no sense.
+    let merge = if is_head {
+        Vec::new()
+    } else {
+        merge_entries(
+            name,
+            &format!("refs/heads/{name}"),
+            head,
+            head_can_fast_forward,
+            writable,
+        )
+    };
+    let mut entries = vec![
         action(
             "Checkout",
             writable && !is_head,
@@ -106,7 +156,9 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             Message::UnsetUpstream(name.into()),
         ),
         MenuEntry::Separator,
-        later("Merge into current branch"),
+    ];
+    entries.extend(merge);
+    entries.extend([
         later("Rebase current branch onto this"),
         MenuEntry::Separator,
         action("Rename…", writable, Message::RenameStart(name.into())),
@@ -123,19 +175,61 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         ),
         MenuEntry::Separator,
         action("Copy name", true, Message::CopyToClipboard(name.into())),
-    ]
+    ]);
+    entries
 }
 
-/// Remote branch by full name (`origin/topic`).
-pub fn remote_branch(name: &str, writable: bool) -> Vec<MenuEntry> {
-    vec![
+/// Facts about a remote branch for its menu.
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteBranch<'a> {
+    /// Short name (`origin/topic`).
+    pub name: &'a str,
+    pub writable: bool,
+    /// Checked-out branch name, or "HEAD" when detached.
+    pub head: &'a str,
+    /// HEAD can be fast-forwarded to this branch.
+    pub head_can_fast_forward: bool,
+    /// Local branch tracking this one that is not checked out and can be
+    /// fast-forwarded to it.
+    pub behind_local: Option<&'a str>,
+}
+
+pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
+    let RemoteBranch {
+        name,
+        writable,
+        head,
+        head_can_fast_forward,
+        behind_local,
+    } = branch;
+    let reference = format!("refs/remotes/{name}");
+    let mut entries = vec![
         action(
             "Checkout",
             writable,
             Message::Checkout(CheckoutTarget::Remote(name.into())),
         ),
         MenuEntry::Separator,
-        later("Merge into current branch"),
+    ];
+    if let Some(local) = behind_local {
+        entries.push(action(
+            &format!("Fast-forward {local} to {name}"),
+            writable,
+            Message::FastForward {
+                branch: Some(local.into()),
+                source: reference.clone(),
+                autostash: false,
+            },
+        ));
+    }
+    entries.extend(merge_entries(
+        name,
+        &reference,
+        head,
+        head_can_fast_forward,
+        writable,
+    ));
+    entries.extend([
         later("Rebase current branch onto this"),
         MenuEntry::Separator,
         action(
@@ -144,7 +238,8 @@ pub fn remote_branch(name: &str, writable: bool) -> Vec<MenuEntry> {
             Message::DeleteRemoteBranch(name.into()),
         ),
         action("Copy name", true, Message::CopyToClipboard(name.into())),
-    ]
+    ]);
+    entries
 }
 
 pub fn tag(name: &str, writable: bool) -> Vec<MenuEntry> {
@@ -222,7 +317,76 @@ mod tests {
             is_head,
             has_upstream,
             writable: true,
+            head: "main",
+            head_can_fast_forward: false,
         })
+    }
+
+    fn remote_menu(behind_local: Option<&str>, head_can_fast_forward: bool) -> Vec<MenuEntry> {
+        remote_branch(RemoteBranch {
+            name: "origin/topic",
+            writable: true,
+            head: "main",
+            head_can_fast_forward,
+            behind_local,
+        })
+    }
+
+    fn message_of(menu: &[MenuEntry], label: &str) -> Option<Message> {
+        menu.iter().find_map(|e| match e {
+            MenuEntry::Item {
+                label: l, message, ..
+            } if l == label => Some(message.as_ref().clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn other_branches_merge_into_head() {
+        let menu = branch(false, false);
+        assert!(matches!(
+            message_of(&menu, "Merge topic into main"),
+            Some(Message::Merge { source, autostash: false }) if source == "refs/heads/topic"
+        ));
+        assert!(message_of(&menu, "Fast-forward main to topic").is_none());
+        // The checked-out branch offers no merge.
+        let head = branch(true, false);
+        assert!(!summary(&head).0.iter().any(|l| l.starts_with("Merge")));
+
+        let ahead = local_branch(LocalBranch {
+            name: "topic",
+            target: "c1",
+            is_head: false,
+            has_upstream: false,
+            writable: true,
+            head: "main",
+            head_can_fast_forward: true,
+        });
+        assert!(matches!(
+            message_of(&ahead, "Fast-forward main to topic"),
+            Some(Message::FastForward { branch: None, source, .. }) if source == "refs/heads/topic"
+        ));
+    }
+
+    #[test]
+    fn remote_branch_merges_and_fast_forwards() {
+        let menu = remote_menu(None, false);
+        assert!(matches!(
+            message_of(&menu, "Merge origin/topic into main"),
+            Some(Message::Merge { source, .. }) if source == "refs/remotes/origin/topic"
+        ));
+        assert!(!summary(&menu)
+            .0
+            .iter()
+            .any(|l| l.starts_with("Fast-forward")));
+
+        let menu = remote_menu(Some("topic"), true);
+        assert!(matches!(
+            message_of(&menu, "Fast-forward topic to origin/topic"),
+            Some(Message::FastForward { branch: Some(b), source, .. })
+                if b == "topic" && source == "refs/remotes/origin/topic"
+        ));
+        assert!(message_of(&menu, "Fast-forward main to origin/topic").is_some());
     }
 
     #[test]
@@ -272,7 +436,7 @@ mod tests {
         for menu in [
             commit("c1", "msg", true),
             branch(false, true),
-            remote_branch("origin/topic", true),
+            remote_menu(None, false),
         ] {
             let (_, disabled) = summary(&menu);
             assert!(!disabled.is_empty());
@@ -293,6 +457,8 @@ mod tests {
             is_head: false,
             has_upstream: true,
             writable: false,
+            head: "main",
+            head_can_fast_forward: true,
         });
         assert_eq!(summary(&menu).0, ["Copy name"]);
         assert_eq!(

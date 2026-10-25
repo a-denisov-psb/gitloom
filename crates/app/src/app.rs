@@ -270,6 +270,19 @@ pub enum Message {
     /// Toolbar Pull (`None`: the current mode) or a mode from the dropdown,
     /// which becomes the button's mode.
     Pull(Option<git_core::PullMode>),
+    /// Merge the branch with full reference name `source` into HEAD.
+    /// `autostash`: stash local changes first and re-apply them afterwards.
+    Merge {
+        source: String,
+        autostash: bool,
+    },
+    /// Fast-forward local `branch` (`None`: the checked-out branch) to the
+    /// branch with full reference name `source`.
+    FastForward {
+        branch: Option<String>,
+        source: String,
+        autostash: bool,
+    },
     /// Continue the operation in progress with the commit panel's message
     /// (banner button; the commit button does the same).
     ContinueOperation,
@@ -1754,6 +1767,68 @@ impl App {
         task
     }
 
+    /// Runs a [`Message::Merge`] or [`Message::FastForward`]; local changes
+    /// that block it lead to the "Stash and merge" dialog.
+    fn merge(&mut self, request: Message) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let head = head_name(&view.snapshot).to_owned();
+        let short = |source: &str| {
+            source
+                .strip_prefix("refs/heads/")
+                .or_else(|| source.strip_prefix("refs/remotes/"))
+                .unwrap_or(source)
+                .to_owned()
+        };
+        let (label, touches_worktree) = match &request {
+            Message::Merge { source, .. } => (format!("Merge {} into {head}", short(source)), true),
+            Message::FastForward {
+                branch: None,
+                source,
+                ..
+            } => (format!("Fast-forward {head} to {}", short(source)), true),
+            Message::FastForward {
+                branch: Some(branch),
+                source,
+                ..
+            } => (format!("Fast-forward {branch} to {}", short(source)), false),
+            _ => return Task::none(),
+        };
+        if touches_worktree && self.state_blocked(Guarded::Merge) {
+            return Task::none();
+        }
+        let op = request.clone();
+        let task = self.run_write(tab, label, move |git| match &op {
+            Message::Merge { source, autostash } => {
+                // Conflicts are no error: the banner takes over.
+                git_core::merge(git, source, *autostash).map(drop)
+            }
+            Message::FastForward {
+                branch: None,
+                source,
+                autostash,
+            } => git_core::fast_forward_head(git, source, *autostash),
+            Message::FastForward {
+                branch: Some(branch),
+                source,
+                ..
+            } => git_core::fast_forward_branch(git, branch, source),
+            _ => Ok(()),
+        });
+        if touches_worktree {
+            if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                if view.busy.is_some() {
+                    view.pending_merge = Some(request);
+                }
+            }
+        }
+        task
+    }
+
     /// Skips the current commit (`skip`) or aborts the operation in progress.
     /// The message in the commit panel belonged to that step and is cleared.
     fn skip_or_abort(&mut self, skip: bool) -> Task<Message> {
@@ -2317,6 +2392,7 @@ impl App {
                 let mut pull = false;
                 let mut push = false;
                 let mut blocked_checkout = None;
+                let mut blocked_merge = None;
                 let mut inline_error = false;
                 let mut not_merged = None;
                 let mut then_network = None;
@@ -2366,9 +2442,13 @@ impl App {
                         }
                     }
                     let checkout = view.pending_checkout.take();
+                    let merge = view.pending_merge.take();
                     if let Err(error) = &result {
                         if git_core::checkout_blocked(error) {
                             blocked_checkout = checkout;
+                        }
+                        if git_core::merge_blocked(error) {
+                            blocked_merge = merge;
                         }
                     }
                     match &result {
@@ -2409,6 +2489,11 @@ impl App {
                     Err(error) if blocked_checkout.is_some() => {
                         if let Some(target) = blocked_checkout {
                             self.modal = Some(checkout_blocked_dialog(error, target));
+                        }
+                    }
+                    Err(error) if blocked_merge.is_some() => {
+                        if let Some(request) = blocked_merge {
+                            self.modal = merge_blocked_dialog(error, request);
                         }
                     }
                     Err(error) if push && git_core::push_rejection(&error).is_some() => {
@@ -2599,15 +2684,32 @@ impl App {
                             .refs
                             .iter()
                             .find(|r| r.kind == kind && r.name == name);
+                        let target = local.map_or("", |r| r.target.as_str());
                         crate::menus::local_branch(crate::menus::LocalBranch {
                             name: &name,
-                            target: local.map_or("", |r| r.target.as_str()),
+                            target,
                             is_head: view.snapshot.head.branch() == Some(name.as_str()),
                             has_upstream: local.is_some_and(|r| r.upstream.is_some()),
                             writable,
+                            head: head_name(&view.snapshot),
+                            head_can_fast_forward: view.snapshot.head_can_fast_forward(target),
                         })
                     }
-                    git_core::RefKind::RemoteBranch => crate::menus::remote_branch(&name, writable),
+                    git_core::RefKind::RemoteBranch => {
+                        let snapshot = &view.snapshot;
+                        let target = snapshot
+                            .refs
+                            .iter()
+                            .find(|r| r.kind == kind && r.name == name)
+                            .map_or("", |r| r.target.as_str());
+                        crate::menus::remote_branch(crate::menus::RemoteBranch {
+                            name: &name,
+                            writable,
+                            head: head_name(snapshot),
+                            head_can_fast_forward: snapshot.head_can_fast_forward(target),
+                            behind_local: behind_local(snapshot, &name, target),
+                        })
+                    }
                     git_core::RefKind::Tag => crate::menus::tag(&name, writable),
                 };
                 self.context_menu = Some(ContextMenu::new(position, entries));
@@ -2910,6 +3012,9 @@ impl App {
             }
             Message::FormClosed => self.form = None,
             Message::FormSubmit => return self.submit_form(),
+            Message::Merge { .. } | Message::FastForward { .. } => {
+                return self.merge(message);
+            }
             Message::ContinueOperation => return self.commit(false),
             Message::SkipOperation => return self.skip_or_abort(true),
             Message::AbortOperation => return self.skip_or_abort(false),
@@ -3673,6 +3778,65 @@ fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
         ],
         default: Some(1),
     }
+}
+
+/// Local changes would be overwritten by the merge: offer to stash them,
+/// merge and re-apply them (`--autostash`; planning decision M4).
+fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
+    let retry = match request {
+        Message::Merge { source, .. } => Message::Merge {
+            source,
+            autostash: true,
+        },
+        Message::FastForward { branch, source, .. } => Message::FastForward {
+            branch,
+            source,
+            autostash: true,
+        },
+        _ => return None,
+    };
+    Some(Modal {
+        title: "Local changes block the merge".into(),
+        text: "Your local changes would be overwritten by the merge. Stash them, merge \
+               and apply them again afterwards? If they conflict with the merged \
+               changes, they stay in the stash list."
+            .into(),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Stash and merge".into(),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(retry),
+            },
+        ],
+        default: Some(1),
+    })
+}
+
+/// Name of the checked-out branch for menu labels, "HEAD" when detached.
+fn head_name(snapshot: &RepoSnapshot) -> &str {
+    snapshot.head.branch().unwrap_or("HEAD")
+}
+
+/// Local branch tracking remote branch `name` (at `target`) that is not
+/// checked out and can be fast-forwarded to it.
+fn behind_local<'a>(snapshot: &'a RepoSnapshot, name: &str, target: &str) -> Option<&'a str> {
+    snapshot
+        .refs
+        .iter()
+        .find(|r| {
+            r.kind == git_core::RefKind::LocalBranch
+                && !r.is_head
+                && r.upstream.as_deref() == Some(name)
+                && r.target != target
+                && snapshot.is_ancestor(&r.target, target) != Some(false)
+        })
+        .map(|r| r.name.as_str())
 }
 
 /// Dialog for a rejected push: the remote has commits we do not have
@@ -5104,6 +5268,59 @@ mod tests {
         let _ = app.update(Message::ContinueOperation);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
         assert_eq!(app.status, "Enter a commit summary");
+    }
+
+    #[test]
+    fn blocked_merge_offers_stash_and_merge() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Merge {
+            source: "refs/heads/topic".into(),
+            autostash: false,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Merge topic into HEAD")
+        );
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Merge topic into HEAD".into(),
+            result: Err("error: Your local changes to the following files would be \
+                         overwritten by merge:\n\ta\nPlease commit your changes or stash them"
+                .into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Local changes block the merge");
+        assert!(matches!(
+            modal.action(1),
+            Some(Message::Merge { source, autostash: true }) if source == "refs/heads/topic"
+        ));
+    }
+
+    #[test]
+    fn merging_is_blocked_during_an_operation_but_fast_forwarding_others_is_not() {
+        let mut app = app_in_state(rebasing());
+        let _ = app.update(Message::Merge {
+            source: "refs/heads/topic".into(),
+            autostash: false,
+        });
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Cannot merge while a rebase is in progress");
+
+        let _ = app.update(Message::FastForward {
+            branch: Some("topic".into()),
+            source: "refs/remotes/origin/topic".into(),
+            autostash: false,
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            view.busy.as_deref(),
+            Some("Fast-forward topic to origin/topic")
+        );
+        assert!(
+            view.pending_merge.is_none(),
+            "does not touch the working tree"
+        );
     }
 
     #[test]
