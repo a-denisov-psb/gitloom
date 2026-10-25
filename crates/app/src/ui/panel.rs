@@ -388,7 +388,13 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         path: file.path.clone(),
         old_path: file.old_path.clone(),
     };
-    let selected = matches!(&view.center, CenterView::Diff(diff) if diff.request == request);
+    let selected = match &view.center {
+        CenterView::Diff(diff) => diff.request == request,
+        CenterView::Conflict(conflict) => {
+            file.kind == git_core::ChangeKind::Conflicted && conflict.path == file.path
+        }
+        CenterView::Graph => false,
+    };
 
     let label = match &file.old_path {
         Some(old) => format!("{old} → {}", file.path),
@@ -407,7 +413,11 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         ]
         .align_y(iced::Center),
     )
-    .on_press(Message::DiffOpened(request))
+    .on_press(if file.kind == git_core::ChangeKind::Conflicted {
+        Message::ConflictOpened(file.path.clone())
+    } else {
+        Message::DiffOpened(request)
+    })
     .padding([3, 12])
     .width(Fill)
     .clip(true)

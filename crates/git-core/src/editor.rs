@@ -123,42 +123,60 @@ fn io_error(what: &str, error: io::Error) -> Error {
     Error::Backend(format!("could not {what}: {error}"))
 }
 
+/// New private directory below the system temp dir; removed on drop.
+#[derive(Debug)]
+pub(crate) struct TempDir {
+    dir: PathBuf,
+}
+
+impl TempDir {
+    pub(crate) fn new(prefix: &str) -> Result<Self> {
+        Ok(Self {
+            dir: create_unique_dir(prefix)?,
+        })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.dir
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
 /// Private directory with the prepared content of one command; removed on drop.
 #[derive(Debug)]
 pub(crate) struct PreparedEditor {
-    dir: PathBuf,
+    temp: TempDir,
 }
 
 impl PreparedEditor {
     /// Writes `input` into a new directory below the system temp dir.
     pub(crate) fn new(input: &EditorInput) -> Result<Self> {
         let prepared = Self {
-            dir: create_unique_dir()?,
+            temp: TempDir::new("gitloom-editor")?,
         };
         if let Some(sequence) = &input.sequence {
-            fs::write(prepared.dir.join(SEQUENCE_FILE), sequence)
+            fs::write(prepared.dir().join(SEQUENCE_FILE), sequence)
                 .map_err(|e| io_error("prepare todo list", e))?;
         }
         for (index, message) in input.messages.iter().enumerate() {
             let name = format!("{MESSAGE_PREFIX}{:04}", index + 1);
-            fs::write(prepared.dir.join(name), message)
+            fs::write(prepared.dir().join(name), message)
                 .map_err(|e| io_error("prepare commit message", e))?;
         }
         Ok(prepared)
     }
 
     pub(crate) fn dir(&self) -> &Path {
-        &self.dir
+        self.temp.path()
     }
 }
 
-impl Drop for PreparedEditor {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn create_unique_dir() -> Result<PathBuf> {
+fn create_unique_dir(prefix: &str) -> Result<PathBuf> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let base = std::env::temp_dir();
     let nanos = std::time::SystemTime::now()
@@ -166,15 +184,15 @@ fn create_unique_dir() -> Result<PathBuf> {
         .map_or(0, |d| d.subsec_nanos());
     for _ in 0..100 {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = base.join(format!("gitloom-editor-{}-{n}-{nanos}", std::process::id()));
+        let dir = base.join(format!("{prefix}-{}-{n}-{nanos}", std::process::id()));
         match fs::create_dir(&dir) {
             Ok(()) => return Ok(dir),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(io_error("create editor directory", e)),
+            Err(e) => return Err(io_error("create temporary directory", e)),
         }
     }
     Err(Error::Backend(
-        "could not create editor directory: too many attempts".into(),
+        "could not create temporary directory: too many attempts".into(),
     ))
 }
 

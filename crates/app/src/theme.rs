@@ -254,6 +254,15 @@ pub fn diff_line(
     }
 }
 
+/// Conflict line in the ours (blue) or theirs (orange) panel; picked lines
+/// are stronger.
+pub fn conflict_line(ours: bool, picked: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let color = if ours { ACCENT } else { WARNING };
+        filled(color.scale_alpha(if picked { 0.32 } else { 0.12 }))
+    }
+}
+
 /// Selected segment of a segmented control (diff modes).
 pub fn mode_active(_: &Theme, _: button::Status) -> button::Style {
     button_style(Some(BG_SELECTED), TEXT)

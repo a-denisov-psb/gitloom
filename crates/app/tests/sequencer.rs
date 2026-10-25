@@ -163,3 +163,25 @@ fn abort_restores_the_previous_state() {
         assert_eq!(repo.git(&["status", "--porcelain"]), "", "{operation:?}");
     }
 }
+
+#[test]
+fn resolving_in_the_conflict_model_then_continuing() {
+    for operation in [Operation::Merge, Operation::Rebase, Operation::CherryPick] {
+        let repo = diverged();
+        start(&repo, operation);
+        let cli = backend(&repo);
+        let loaded = git_core::load_conflict(&cli, "a.txt").unwrap();
+        let git_core::ConflictContent::Text(text) = loaded.content else {
+            panic!("expected a text conflict");
+        };
+        let mut picks = git_core::Picks::new(&text);
+        picks.take_all(git_core::Side::Theirs);
+        let output = text.output(&picks, ("ours", "theirs"));
+        git_core::resolve_conflict(&cli, "a.txt", output.as_bytes()).unwrap();
+        cli.continue_operation(operation, "Resolved\n").unwrap();
+        assert_eq!(state(&repo), RepoState::Clean, "{operation:?}");
+        // In a rebase "theirs" is the replayed commit; in a merge or
+        // cherry-pick it is the merged or picked one.
+        assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "topic", "{operation:?}");
+    }
+}

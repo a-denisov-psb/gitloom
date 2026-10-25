@@ -11,6 +11,7 @@
 //! +--------------------------------------------------------------+
 //! ```
 
+mod conflict;
 pub mod context_area;
 mod diff;
 mod graph;
@@ -112,6 +113,7 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
             PaneKind::Center => match &view.center {
                 CenterView::Graph => graph::view(view),
                 CenterView::Diff(diff) => diff::view(view, diff),
+                CenterView::Conflict(conflict) => conflict::view(view, conflict),
             },
             PaneKind::Panel => panel::view(view),
         };

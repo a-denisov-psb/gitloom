@@ -175,6 +175,29 @@ pub enum Message {
         height: f32,
     },
     DiffClosed,
+    /// Open the conflict view for a conflicted file.
+    ConflictOpened(String),
+    ConflictLoaded {
+        tab: TabId,
+        path: String,
+        result: Result<git_core::LoadedConflict, String>,
+    },
+    ConflictToggleLine {
+        hunk: usize,
+        side: git_core::Side,
+        line: usize,
+    },
+    ConflictToggleHunk {
+        hunk: usize,
+        side: git_core::Side,
+    },
+    ConflictTakeAll(git_core::Side),
+    ConflictOutputEdited(iced::widget::text_editor::Action),
+    ConflictResetOutput,
+    /// Save the output as the resolved file and stage it.
+    ConflictSave,
+    /// Take the whole file from one side (binary, delete/modify).
+    ConflictTakeFile(git_core::Side),
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
@@ -1767,6 +1790,14 @@ impl App {
         task
     }
 
+    /// The conflict view of the active tab, if it is open.
+    fn active_conflict(&mut self) -> Option<&mut crate::conflict::ConflictView> {
+        match &mut self.active_view_mut()?.center {
+            CenterView::Conflict(conflict) => Some(conflict),
+            _ => None,
+        }
+    }
+
     /// Runs a [`Message::Merge`] or [`Message::FastForward`]; local changes
     /// that block it lead to the "Stash and merge" dialog.
     fn merge(&mut self, request: Message) -> Task<Message> {
@@ -2232,6 +2263,7 @@ impl App {
             let (is_diff, id, offset) = match &view.center {
                 CenterView::Graph => (false, &view.graph_scroll_id, view.scroll.offset),
                 CenterView::Diff(diff) => (true, &diff.scroll_id, diff.scroll.offset),
+                CenterView::Conflict(_) => return None,
             };
             let task = (offset > 0.0).then(|| scroll_by_id(id.clone(), offset));
             Some(((tab.id, is_diff), task))
@@ -3356,6 +3388,104 @@ impl App {
                     view.center = CenterView::Graph;
                 }
             }
+            Message::ConflictOpened(path) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let labels = conflict_labels(&view.snapshot);
+                view.center = CenterView::Conflict(Box::new(crate::conflict::ConflictView::new(
+                    path.clone(),
+                    labels,
+                )));
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::load_conflict(&*writer, &path)
+                            .map(|loaded| (path, loaded))
+                            .map_err(|e| e.to_string())
+                    }),
+                    move |result| match result {
+                        Ok((path, loaded)) => Message::ConflictLoaded {
+                            tab,
+                            path,
+                            result: Ok(loaded),
+                        },
+                        Err(error) => Message::ConflictLoaded {
+                            tab,
+                            path: String::new(),
+                            result: Err(error),
+                        },
+                    },
+                );
+            }
+            Message::ConflictLoaded { tab, path, result } => {
+                if let Some(CenterView::Conflict(conflict)) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .map(|v| &mut v.center)
+                {
+                    // A failed load has no path; it belongs to the open view.
+                    if path.is_empty() || conflict.path == path {
+                        conflict.set_loaded(result);
+                    }
+                }
+            }
+            Message::ConflictToggleLine { hunk, side, line } => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.toggle_line(hunk, side, line);
+                }
+            }
+            Message::ConflictToggleHunk { hunk, side } => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.toggle_hunk(hunk, side);
+                }
+            }
+            Message::ConflictTakeAll(side) => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.take_all(side);
+                }
+            }
+            Message::ConflictOutputEdited(action) => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.edit(action);
+                }
+            }
+            Message::ConflictResetOutput => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.reset_output();
+                }
+            }
+            Message::ConflictSave => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(conflict) = self.active_conflict() else {
+                    return Task::none();
+                };
+                let path = conflict.path.clone();
+                match conflict.resolved_content() {
+                    Ok(content) => {
+                        return self.run_write(tab, format!("Resolve {path}"), move |git| {
+                            git_core::resolve_conflict(git, &path, content.as_bytes())
+                        });
+                    }
+                    Err(reason) => self.status = reason,
+                }
+            }
+            Message::ConflictTakeFile(side) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(path) = self.active_conflict().map(|c| c.path.clone()) else {
+                    return Task::none();
+                };
+                return self.run_write(tab, format!("Resolve {path}"), move |git| {
+                    git_core::resolve_with_side(git, &path, side)
+                });
+            }
             Message::Retry(id) => {
                 let path = self
                     .tabs
@@ -3816,6 +3946,20 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         ],
         default: Some(1),
     })
+}
+
+/// Marker labels for ours and theirs in the conflict view: the checked-out
+/// branch (or HEAD) and the commit being merged, picked or reverted.
+fn conflict_labels(snapshot: &RepoSnapshot) -> (String, String) {
+    use git_core::RepoState;
+    let ours = head_name(snapshot).to_owned();
+    let theirs = match &snapshot.state {
+        RepoState::Merging { merge_head } => snapshot.commit_name(merge_head),
+        RepoState::CherryPicking { commit: Some(id) }
+        | RepoState::Reverting { commit: Some(id) } => snapshot.commit_name(id),
+        _ => "theirs".into(),
+    };
+    (ours, theirs)
 }
 
 /// Name of the checked-out branch for menu labels, "HEAD" when detached.
@@ -4716,7 +4860,7 @@ mod tests {
         let tab = app.tabs[0].id;
         let diff_state = |app: &App| match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => (diff.diff.clone(), diff.rows.len()),
-            CenterView::Graph => panic!("diff closed"),
+            _ => panic!("diff closed"),
         };
         assert_eq!(diff_state(&app).0, Loadable::Loading);
 
@@ -4760,7 +4904,7 @@ mod tests {
     fn open_diff(app: &App) -> &crate::repo_view::DiffView {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => diff,
-            CenterView::Graph => panic!("no diff"),
+            _ => panic!("no diff"),
         }
     }
 
@@ -4847,7 +4991,7 @@ mod tests {
     fn shown_diff_view(app: &App) -> &crate::repo_view::DiffView {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => diff,
-            CenterView::Graph => panic!("diff closed"),
+            _ => panic!("diff closed"),
         }
     }
 
@@ -5019,7 +5163,7 @@ mod tests {
     fn shown_diff(app: &App) -> Option<DiffRequest> {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => Some(diff.request.clone()),
-            CenterView::Graph => None,
+            _ => None,
         }
     }
 
@@ -5321,6 +5465,79 @@ mod tests {
             view.pending_merge.is_none(),
             "does not touch the working tree"
         );
+    }
+
+    fn conflict_center(app: &App) -> Option<&crate::conflict::ConflictView> {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Conflict(conflict) => Some(conflict),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn conflict_view_opens_loads_and_closes_when_resolved() {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["a.txt"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ConflictOpened("a.txt".into()));
+        let conflict = conflict_center(&app).unwrap();
+        assert_eq!(conflict.loaded, Loadable::Loading);
+        assert_eq!(conflict.labels, ("HEAD".to_string(), "x".to_string()));
+
+        let text = git_core::ConflictText {
+            chunks: vec![git_core::Chunk::Conflict(git_core::ConflictHunk {
+                ours: vec!["o\n".into()],
+                base: vec![],
+                theirs: vec!["t\n".into()],
+            })],
+            eol: "\n",
+        };
+        let _ = app.update(Message::ConflictLoaded {
+            tab,
+            path: "a.txt".into(),
+            result: Ok(git_core::LoadedConflict {
+                path: "a.txt".into(),
+                stages: git_core::ConflictStages::default(),
+                content: git_core::ConflictContent::Text(text),
+            }),
+        });
+        // Saving with an open conflict explains instead of writing.
+        let _ = app.update(Message::ConflictSave);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(
+            app.status,
+            "Pick lines for the remaining conflict, or edit the output"
+        );
+        let _ = app.update(Message::ConflictTakeAll(git_core::Side::Theirs));
+        assert_eq!(conflict_center(&app).unwrap().output.text(), "t\n");
+        let _ = app.update(Message::ConflictSave);
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Resolve a.txt")
+        );
+
+        // The refresh after resolving: no conflict left, the view closes.
+        let view = app.tabs[0].view_mut().unwrap();
+        view.busy = None;
+        let snapshot = view
+            .snapshot
+            .with_working_tree(git_core::WorkingTree::default());
+        view.apply_snapshot(Arc::new(snapshot.unwrap()));
+        assert!(conflict_center(&app).is_none());
+    }
+
+    #[test]
+    fn a_stale_conflict_load_is_ignored() {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["a.txt", "b.txt"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ConflictOpened("b.txt".into()));
+        let _ = app.update(Message::ConflictLoaded {
+            tab,
+            path: "a.txt".into(),
+            result: Err("old".into()),
+        });
+        assert_eq!(conflict_center(&app).unwrap().loaded, Loadable::Loading);
     }
 
     #[test]
