@@ -100,7 +100,9 @@ Acceptance: unit tests for the selection model (toggle, range, refresh).
 
 Acceptance: integration tests with a prepared todo list and a prepared message; missing preparation aborts without hanging.
 
-### [ ] M4-03 Sequencer states: continue, skip, abort
+### [x] M4-03 Sequencer states: continue, skip, abort
+
+> Done: `git_core::Operation` (`RepoState::kind`), `GitWriter::continue_operation(op, message)` / `skip_operation` / `abort_operation` (replaces `abort_merge`/`abort_rebase`). Continue answers Git's editor with the panel message (M4-02); cherry-pick and revert `--continue` commit `MERGE_MSG` without asking, so it is replaced first. `merge_message` now also returns the message of a stopped rebase step (prefill per step). Banner: Continue (disabled with a tooltip listing up to five conflicted files, or the missing summary), Skip (rebase, cherry-pick), Abort; the commit button reads "Continue <operation>" and does the same; "Conflicted Files" section above "Unstaged Files"; the detached HEAD hint is hidden during a rebase. Tests: `crates/app/tests/sequencer.rs` (continue with message, continue with unresolved conflicts, skip, skip refused, abort — for each operation) and app tests (blocking rules, labels, skip/abort per operation, prefill per step). Checked by hand: rebase conflict → resolve → edited summary → banner Continue → rebased with the edited message; cherry-pick conflict → Skip; merge conflict → Continue disabled with tooltip, no Skip, Abort.
 
 - Banner buttons become active: Continue (`--continue`), Skip (rebase/cherry-pick), Abort (`--abort`) for merge, rebase, cherry-pick, revert.
 - Continue requires all conflicts resolved; otherwise disabled with tooltip listing the files.

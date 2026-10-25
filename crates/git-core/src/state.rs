@@ -29,20 +29,51 @@ pub enum RepoState {
     Reverting { commit: Option<Oid> },
 }
 
+/// Kind of a multi-step operation, for `--continue`, `--skip` and `--abort`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    Merge,
+    Rebase,
+    CherryPick,
+    Revert,
+}
+
+impl Operation {
+    /// Git subcommand, also the short name for messages ("cherry-pick").
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+            Self::CherryPick => "cherry-pick",
+            Self::Revert => "revert",
+        }
+    }
+
+    /// `--skip` exists (and is offered) for rebase and cherry-pick.
+    pub fn can_skip(self) -> bool {
+        matches!(self, Self::Rebase | Self::CherryPick)
+    }
+}
+
 impl RepoState {
     pub fn is_clean(&self) -> bool {
         *self == Self::Clean
     }
 
-    /// Short name of the operation, e.g. "merge", for messages.
-    pub fn operation(&self) -> Option<&'static str> {
+    /// Kind of the operation in progress.
+    pub fn kind(&self) -> Option<Operation> {
         match self {
             Self::Clean => None,
-            Self::Merging { .. } => Some("merge"),
-            Self::Rebasing { .. } => Some("rebase"),
-            Self::CherryPicking { .. } => Some("cherry-pick"),
-            Self::Reverting { .. } => Some("revert"),
+            Self::Merging { .. } => Some(Operation::Merge),
+            Self::Rebasing { .. } => Some(Operation::Rebase),
+            Self::CherryPicking { .. } => Some(Operation::CherryPick),
+            Self::Reverting { .. } => Some(Operation::Revert),
         }
+    }
+
+    /// Short name of the operation, e.g. "merge", for messages.
+    pub fn operation(&self) -> Option<&'static str> {
+        self.kind().map(Operation::command)
     }
 
     /// A commit concludes the operation (Git uses the prepared `MERGE_MSG`).

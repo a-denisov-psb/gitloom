@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 
 use crate::editor::{editor_command, EditorInput, EditorKind, PreparedEditor};
 use crate::editor::{EDITOR_DIR_ENV, EDITOR_ENV};
-use crate::{CancelToken, Error, Progress, Result};
+use crate::{CancelToken, Error, Operation, Progress, Result};
 
 /// Oldest supported Git (Ubuntu 22.04 LTS ships 2.34).
 pub const MIN_GIT_VERSION: GitVersion = GitVersion {
@@ -453,15 +453,48 @@ pub trait GitWriter: Send + Sync {
             .map(drop)
     }
 
-    /// Aborts a merge in progress (`git merge --abort`).
-    fn abort_merge(&self) -> Result<()> {
-        self.run(&["merge", "--abort"], RunOptions::default())
+    /// Concludes the current step of `operation` (`git <op> --continue`) with
+    /// `message`. Hooks run as usual. Rebase and merge ask through the editor
+    /// (ADR-021); cherry-pick and revert may commit `MERGE_MSG` without
+    /// asking, so it is replaced first.
+    fn continue_operation(&self, operation: Operation, message: &str) -> Result<()> {
+        if operation != Operation::Rebase {
+            let read = RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            };
+            let git_dir = self.run(&["rev-parse", "--absolute-git-dir"], read)?;
+            let path = Path::new(git_dir.stdout_text().trim_end()).join("MERGE_MSG");
+            std::fs::write(&path, message)
+                .map_err(|e| Error::Backend(format!("could not write {}: {e}", path.display())))?;
+        }
+        let input = EditorInput {
+            sequence: None,
+            messages: vec![message.to_owned()],
+        };
+        self.run_editing(
+            &[operation.command(), "--continue"],
+            &input,
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
+    /// Skips the current commit of a rebase or cherry-pick (`--skip`).
+    fn skip_operation(&self, operation: Operation) -> Result<()> {
+        if !operation.can_skip() {
+            return Err(Error::Backend(format!(
+                "a {} cannot skip commits",
+                operation.command()
+            )));
+        }
+        self.run(&[operation.command(), "--skip"], RunOptions::default())
             .map(drop)
     }
 
-    /// Aborts a rebase in progress (`git rebase --abort`).
-    fn abort_rebase(&self) -> Result<()> {
-        self.run(&["rebase", "--abort"], RunOptions::default())
+    /// Aborts `operation` and restores the state before it (`--abort`).
+    fn abort_operation(&self, operation: Operation) -> Result<()> {
+        self.run(&[operation.command(), "--abort"], RunOptions::default())
             .map(drop)
     }
 

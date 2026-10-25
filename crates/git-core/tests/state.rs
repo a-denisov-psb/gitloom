@@ -63,8 +63,11 @@ fn conflicting_rebase_with_both_backends() {
             },
             "{backend}"
         );
-        // Committing does not conclude a rebase.
-        assert_eq!(merge_message(&repo), None, "{backend}");
+        // The merge backend prepares the message for `--continue`; the
+        // apply backend commits the patch message without asking.
+        let expected =
+            (backend == "--merge").then(|| "Topic change\n\n# Conflicts:\n#\ta.txt\n".to_owned());
+        assert_eq!(merge_message(&repo), expected, "{backend}");
     }
 }
 

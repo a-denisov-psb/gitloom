@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Added
 
 - Select several commits in the graph: Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extend the selection. The right panel lists the selected commits.
+- Continue, Skip and Abort for merges, rebases, cherry-picks and reverts in progress, from the banner or the commit panel ("Continue rebase"); the commit message can be edited before continuing. Conflicted files get their own section in the staging panel.
 
 ### Changed
 
