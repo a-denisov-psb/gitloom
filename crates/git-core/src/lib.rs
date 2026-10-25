@@ -8,6 +8,7 @@
 mod cli_backend;
 mod diff;
 mod discard;
+mod editor;
 mod gix_backend;
 mod history;
 #[cfg(any(test, feature = "mock"))]
@@ -26,6 +27,7 @@ pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
     FileSnapshot, IndexSnapshot,
 };
+pub use editor::{editor_call, editor_main, EditorInput, EditorKind, EDITOR_DIR_ENV, EDITOR_ENV};
 pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,

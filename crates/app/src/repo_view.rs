@@ -469,9 +469,10 @@ impl RepoView {
     pub fn new(backend: Arc<dyn GitBackend>, snapshot: Arc<RepoSnapshot>) -> Self {
         let selection = restore_selection(None, &snapshot);
         let mut cli = git_core::CliBackend::new(backend.path());
-        // Gitloom itself answers credential prompts (ADR-019).
+        // Gitloom itself answers credential prompts (ADR-019) and acts as
+        // Git's editor (ADR-021).
         if let Ok(exe) = std::env::current_exe() {
-            cli = cli.with_askpass(exe);
+            cli = cli.with_askpass(&exe).with_editor(exe);
         }
         let writer: Arc<dyn git_core::GitWriter> = Arc::new(cli);
         let mut view = Self {
