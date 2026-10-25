@@ -193,3 +193,14 @@ Architecture decision records in short form. New entries at the bottom. Change a
   text wins over the checkboxes (with an indicator and "Reset output"). Line endings are
   preserved.
 - Why: matches GitKraken users' expectations and keeps the logic testable outside the UI.
+- Implementation note (M4-05): `git merge-file -p --diff3 --marker-size=31` runs on the
+  stage blobs (written to a temp dir, as stored in the index); the long markers keep
+  conflict markers committed in the file from being parsed as real ones. The output shown
+  to the user uses Git's 7-character markers for open conflicts and, per conflict, the
+  picked lines with ours before theirs. Lines keep their terminators, so CRLF content is
+  reproduced byte for byte; text typed into the output gets the file's line ending. Saving
+  writes the content as a blob, sets it as stage 0 (`update-index --cacheinfo`) and checks
+  it out (`checkout-index`), so checkout filters such as `core.autocrlf` apply. Binary and
+  delete/modify conflicts offer only "take ours/theirs" (`checkout --ours/--theirs` + `add`,
+  or `rm` for the deleting side). `git merge-file` ends both sides of a conflict at the end
+  of a file without trailing newline with a newline; the resolved file then has one.
