@@ -30,6 +30,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click local branch | Checkout | done (M3; sidebar and graph pill) |
 | Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
 | Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
+| Branch context menu: merge | "Merge X into Y"; "Fast-forward Y to X" when possible; remote branch: "Fast-forward L to origin/L" for a local branch behind it | done (M4-04) |
 | Drag branch onto branch | Menu: Fast-forward, Merge, Rebase, Interactive rebase | M4 (verify in GitKraken: dropping onto a branch that is not checked out — disabled or automatic checkout?) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
@@ -132,6 +133,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
+| Merge or fast-forward blocked by local changes offers "Stash and merge" (stash, merge, apply again with `--autostash`) | Planning decision M4 (same pattern as checkout); unlike checkout the stash is applied again automatically, and stays in the list only if applying it conflicts |
 | A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | The user is not left in a half-finished state without a way back; resolving and continuing works from the banner |
 | The commit message of a rebase step is editable before Continue (prefilled with the original message) | Git asks for the message on `rebase --continue` after a conflict; the commit panel answers instead of a terminal editor |
 | Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
