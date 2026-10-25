@@ -18,6 +18,7 @@ tokio = { version = "1.53", features = ["rt", "time"] }
 
 [dev-dependencies]
 git-core = { path = "../git-core", features = ["mock"] }
+tempfile = "3.27"
 
 [lints]
 workspace = true

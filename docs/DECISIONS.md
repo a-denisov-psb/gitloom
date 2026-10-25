@@ -149,6 +149,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   environment variable `GITLOOM_ASKPASS=1`, which `CliBackend` sets for its Git processes;
   `gitloom --askpass "<prompt>"` works as well. Password/passphrase/PIN/token prompts are
   masked, SSH host key questions get Yes/No buttons, failures get a hint in the error dialog.
+- Addendum (M4-02): the same executable also acts as Git's editor (ADR-021). Editor calls
+  are recognized by their first argument (`--git-editor=sequence|message <file>`) before
+  askpass mode is checked; `GITLOOM_EDITOR=1` is set for them.
 
 ## ADR-020 Network operations and auto-fetch
 
@@ -171,6 +174,14 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Why: interactive rebase, reword, squash, merge and revert messages need editor input;
   terminal editors would hang a GUI process. Preparing the content in the UI first keeps
   every command non-interactive.
+- Implementation note (M4-02): `GitWriter::run_editing(args, EditorInput)` writes the todo
+  list and a queue of commit messages (`message-0001`, ...) into a private temp directory
+  (`GITLOOM_EDITOR_DIR`, removed afterwards) and sets
+  `GIT_SEQUENCE_EDITOR='<exe>' --git-editor=sequence` and
+  `GIT_EDITOR='<exe>' --git-editor=message` (shell-quoted, since Git runs editors through
+  `sh`; forward slashes on Windows). Each message editor call consumes the next message, so
+  one interactive rebase with several rewords and squashes needs no round trips; an empty
+  queue exits 1. All other commands keep `GIT_EDITOR=:`.
 
 ## ADR-022 Conflict resolution model
 

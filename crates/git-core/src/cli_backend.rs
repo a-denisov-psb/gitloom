@@ -9,6 +9,8 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::editor::{editor_command, EditorInput, EditorKind, PreparedEditor};
+use crate::editor::{EDITOR_DIR_ENV, EDITOR_ENV};
 use crate::{CancelToken, Error, Progress, Result};
 
 /// Oldest supported Git (Ubuntu 22.04 LTS ships 2.34).
@@ -118,6 +120,19 @@ pub struct RunOptions<'a> {
 pub trait GitWriter: Send + Sync {
     /// Runs `git` with `args` in the repository root.
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput>;
+
+    /// Runs a command that asks for a todo list or commit messages: Gitloom
+    /// acts as Git's editor and answers with `input` (ADR-021). Fails if no
+    /// editor program is configured.
+    fn run_editing(
+        &self,
+        args: &[&str],
+        input: &EditorInput,
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
+        let _ = (args, input, options);
+        Err(Error::Backend("no Git editor configured".into()))
+    }
 
     /// Runs a long (network) command: reports progress parsed from stderr
     /// (pass `--progress` in `args`) and stops the process tree when `cancel`
@@ -589,6 +604,8 @@ pub struct CliBackend {
     root: PathBuf,
     /// Program answering credential and host key prompts (ADR-019).
     askpass: Option<PathBuf>,
+    /// Program acting as Git editor for [`GitWriter::run_editing`] (ADR-021).
+    editor: Option<PathBuf>,
 }
 
 impl CliBackend {
@@ -598,6 +615,7 @@ impl CliBackend {
             git: PathBuf::from("git"),
             root: root.into(),
             askpass: None,
+            editor: None,
         }
     }
 
@@ -606,6 +624,14 @@ impl CliBackend {
     /// prompt as only argument, with [`ASKPASS_ENV`] set, and prints the answer.
     pub fn with_askpass(mut self, program: impl Into<PathBuf>) -> Self {
         self.askpass = Some(program.into());
+        self
+    }
+
+    /// Commands run with [`GitWriter::run_editing`] start `program` as
+    /// sequence and message editor (`--git-editor=<kind> <file>`, with
+    /// [`crate::EDITOR_ENV`] set). All other commands never open an editor.
+    pub fn with_editor(mut self, program: impl Into<PathBuf>) -> Self {
+        self.editor = Some(program.into());
         self
     }
 
@@ -625,7 +651,41 @@ impl GitWriter for CliBackend {
     }
 
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
+        self.execute(self.command(), args, options)
+    }
+
+    fn run_editing(
+        &self,
+        args: &[&str],
+        input: &EditorInput,
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
+        let program = self
+            .editor
+            .as_ref()
+            .ok_or_else(|| Error::Backend("no Git editor configured".into()))?;
+        // Removed when this function returns, whatever Git did.
+        let prepared = PreparedEditor::new(input)?;
         let mut cmd = self.command();
+        cmd.env(
+            "GIT_SEQUENCE_EDITOR",
+            editor_command(program, EditorKind::Sequence),
+        )
+        .env("GIT_EDITOR", editor_command(program, EditorKind::Message))
+        .env(EDITOR_ENV, "1")
+        .env(EDITOR_DIR_ENV, prepared.dir());
+        self.execute(cmd, args, options)
+    }
+}
+
+impl CliBackend {
+    /// Runs `cmd` (from [`Self::command`]) with `args` in the repository root.
+    fn execute(
+        &self,
+        mut cmd: Command,
+        args: &[&str],
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
         cmd.args(args).current_dir(&self.root);
         if options.read_only {
             cmd.env("GIT_OPTIONAL_LOCKS", "0");
