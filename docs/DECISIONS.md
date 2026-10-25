@@ -100,6 +100,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   Git command. Not undone: the stash made by "Stash and checkout", the remote side of
   a branch rename; restored annotated tags are new tag objects with the same message.
   Network operations are not undoable and clear the redo stack.
+- Extension (M4 plan): a hard reset is undoable by snapshot: before the reset the index
+  tree (`git write-tree`) and every changed worktree file (blob, `--no-filters`) are
+  recorded; undo restores HEAD, index and files.
 
 ## ADR-015 Context menus and modals in M2
 
@@ -156,3 +159,26 @@ Architecture decision records in short form. New entries at the bottom. Change a
   skipped during merge/rebase states.
 - Note: this is network access by default; it only contacts remotes the user
   configured, so it does not conflict with ADR-009.
+
+## ADR-021 Gitloom as Git editor
+
+- Status: accepted (M4 plan)
+- Decision: Git commands that would open an editor run with `GIT_SEQUENCE_EDITOR` and
+  `GIT_EDITOR` pointing to the Gitloom executable in editor mode (env flag like askpass,
+  ADR-019, plus the path of a prepared file). Editor mode copies the prepared todo list or
+  message into the file Git passes and exits 0; without preparation it exits 1, so Git
+  aborts cleanly. Editor mode never starts a UI.
+- Why: interactive rebase, reword, squash, merge and revert messages need editor input;
+  terminal editors would hang a GUI process. Preparing the content in the UI first keeps
+  every command non-interactive.
+
+## ADR-022 Conflict resolution model
+
+- Status: accepted (M4 plan)
+- Decision: the conflict view follows GitKraken: "ours" top left, "theirs" top right with
+  checkboxes per hunk and line, editable output below. Data comes from index stages 1/2/3;
+  the initial output is `git merge-file -p` (with markers). A pure model in git-core maps
+  hunks and lines of both sides to the output; once the user edits the output, the edited
+  text wins over the checkboxes (with an indicator and "Reset output"). Line endings are
+  preserved.
+- Why: matches GitKraken users' expectations and keeps the logic testable outside the UI.

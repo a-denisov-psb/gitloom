@@ -23,7 +23,10 @@
       "Bash(git push origin feature/:*)",
       "Bash(git push origin --delete feature/:*)",
       "Bash(git push origin develop)",
-      "Bash(git merge --no-ff feature/:*)"
+      "Bash(git merge --no-ff feature/:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run watch:*)"
     ],
     "deny": [
       "Bash(git reset --hard:*)",

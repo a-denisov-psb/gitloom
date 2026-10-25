@@ -64,6 +64,7 @@ Details: `docs/ARCHITECTURE.md`.
 - Merging a feature: when all acceptance criteria are met and `./scripts/check.sh` is green, merge it yourself (`git switch develop && git merge --no-ff feature/...`), push `develop`, delete the feature branch. Ask first only for plan deviations, scope changes or open decisions (ADR-017).
 - Tasks blocked by the maintainer: do everything else, record the open items under "Maintainer to-dos" in `docs/HANDOVER.md`, continue with the next unblocked task.
 - Never commit directly to `master` or `develop`. Never rewrite published history.
+- After pushing `develop`, check the CI run with `gh run watch`; a red run takes priority over the next task.
 - Push feature branches (`git push -u origin feature/...`) and `develop`. Never push `master` or tags; the maintainer does that. Never force-push.
 
 ## Definition of done (per task)

@@ -62,6 +62,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] M3-08: rename a branch with the keyboard (verified in the M3-14 walkthrough against GitHub): right click a local branch → Rename… → edit the name → Enter; for a branch with an upstream choose "Rename remote too" and check the remote. (Menu, input, delete, force delete and remote delete verified by mouse; keyboard input did not reach the window in my session.)
 - [ ] M3-10: add a remote with "+" in the REMOTE section (type name and URL) and rename a remote from its context menu (type the new name). Set/unset upstream, Edit URL (prefilled), Fetch and Remove were verified by mouse; typing did not reach the window reliably in my session.
 - [ ] M3-14: repeat the M3 walkthrough on Windows against the GitHub remote, on a throwaway branch (e.g. `e2e-windows`) and a throwaway tag: Fetch all, create branch (Ctrl+B), push with upstream, pull (fast-forward), push rejected → Force push (once without and once after a fetch), create/push/delete tag, rename branch incl. remote, delete remote and local branch, checkout of a remote branch; finally check that GitHub has no leftovers.
+- [x] Check the CI runs of `master` v0.4.0 (d4f9f4a) and `develop` (2d31663): both green (checked with `gh run list`, 2026-10-25). From now on Claude Code checks CI itself after each push to `develop`.
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 
 ## Environment notes
