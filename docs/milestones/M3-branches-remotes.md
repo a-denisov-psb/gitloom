@@ -236,7 +236,9 @@ Acceptance:
 Acceptance:
 - Integration test for the "unreachable commits" detection.
 
-### [ ] M3-14 End-to-end check and docs
+### [x] M3-14 End-to-end check and docs
+
+> Done: walkthrough on Linux in a fresh clone against the GitHub remote of this repo, throwaway branch `e2e-m3-walkthrough` and tag `e2e/m3/tag` (no CI trigger): Fetch all (SSH, no askpass needed); create branch (name typed via CLI while keyboard input was unavailable); pull without upstream → "Set upstream" dialog; first push with the upstream form; normal push; pull fast-forward after a push from a second clone; diverged push → "Push rejected"; force push without fetch → refused (stale info), the other commit survived; after Fetch all → force push succeeded; annotated tag via form, pushed, deleted on the remote and locally; rename incl. remote via keyboard (Enter → "Rename remote too") → `origin/e2e-m3-walkthrough2` as upstream; checkout of `origin/develop` by double click created the tracking branch; remote delete and local force delete. GitHub was left with only `develop`, `master` and `v0.1.0`…`v0.3.0`. The session was interrupted once (WSLg stopped showing windows until the machine was restarted; the steps after it were repeated). Pull modes other than fast-forward, the askpass window with a real credential prompt and the Windows run are maintainer to-dos. Performance: runner overhead ≈ 3 ms per fetch; fixed an idle cost of 0.3 % CPU caused by the 30 s auto-fetch tick (one timer for the next due fetch now, 0.02 % idle); see `docs/PERFORMANCE.md` → "M3". Test tool note: the scratchpad UI driver types with the X server's keymap, so "-" arrived as "/" (tool issue, not Gitloom).
 
 - Full walkthrough against the GitHub remote of this repo (on a throwaway branch) on Linux; maintainer repeats on Windows (Maintainer to-dos).
 - Update `docs/UX-PARITY.md`, `CHANGELOG.md`, `docs/PERFORMANCE.md` (fetch/push overhead, auto-fetch idle cost).
