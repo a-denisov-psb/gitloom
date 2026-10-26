@@ -153,7 +153,9 @@ Acceptance: integration tests: clean rebase, rebase with conflict resolved, abor
 
 Acceptance: integration tests for reorder, reword, squash (combined message), fixup, drop, conflict during reorder.
 
-### [ ] M4-08 Reword and squash shortcuts
+### [x] M4-08 Reword and squash shortcuts
+
+> Done: `git_core::{reword_commit, squash_commits}` on top of M4-07: HEAD is amended with `commit --amend --only` (staged changes stay out), older commits are reworded by `rebase -i <id>^` with a single reword; squash finds the oldest selected commit (the one whose parent is not selected), checks that the selection is the start of `base..HEAD` and squashes it into one commit, later commits stay picks. Both refuse merges between the commit and HEAD (would be flattened). App: commit menu "Edit commit message" (enabled by `repo_view::rewordable`: HEAD, or linear first-parent history with a parent), multi-selection "Squash N commits" enabled (`repo_view::squashable`), a commit message dialog (`overlay::MessageDialog`, prefilled with the message, or all messages oldest first for squash), "Stash and rebase" for blocking local changes. Tests: integration with the real binary (reword HEAD keeps the index out, reword older, squash keeps later commits, non-contiguous and single selections rejected, commits off the first-parent line or with a merge after them rejected), app (rules, dialog → reword, squash flow). Checked by hand: menu on a root commit → "Edit commit message" disabled; on an older commit → dialog with the full message → Save message → rebased, message kept. Typing and multi-selection (Ctrl/Shift+click) could not be checked by hand (WSLg keyboard; maintainer to-do).
 
 - Commit context menu "Edit commit message": HEAD → amend; older commit on the current branch → interactive rebase with a single reword (no panel).
 - Multi-selection "Squash N commits" (contiguous, on current branch, not containing merges) → interactive rebase with squash, message dialog prefilled with all messages.
