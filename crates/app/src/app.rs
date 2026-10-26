@@ -186,6 +186,14 @@ pub enum Message {
     },
     /// Keep the empty result of a cherry-pick or revert step as a commit.
     CommitEmpty,
+    /// "Reset to this commit": asks for the mode.
+    ResetStart(String),
+    /// Reset HEAD to `id`; a hard reset runs only once `confirmed`.
+    Reset {
+        id: String,
+        mode: git_core::ResetMode,
+        confirmed: bool,
+    },
     /// "Edit commit message": opens the message dialog for commit `id`.
     RewordStart(String),
     /// "Squash N commits" for the multi-selection: opens the message dialog.
@@ -1925,6 +1933,14 @@ impl App {
             ),
             Message::Revert { id, .. } => (format!("Revert {}", &id[..id.len().min(7)]), true),
             Message::CommitEmpty => ("Commit empty".to_string(), false),
+            Message::Reset { id, mode, .. } => (
+                format!(
+                    "{} reset {head} to {}",
+                    mode.label(),
+                    &id[..id.len().min(7)]
+                ),
+                true,
+            ),
             Message::FastForward {
                 branch: None,
                 source,
@@ -1937,7 +1953,12 @@ impl App {
             } => (format!("Fast-forward {branch} to {}", short(source)), false),
             _ => return Task::none(),
         };
-        if touches_worktree && self.state_blocked(Guarded::Merge) {
+        let guard = if matches!(request, Message::Reset { .. }) {
+            Guarded::Reset
+        } else {
+            Guarded::Merge
+        };
+        if touches_worktree && self.state_blocked(guard) {
             return Task::none();
         }
         let op = request.clone();
@@ -1966,6 +1987,7 @@ impl App {
             } => git_core::squash_commits(git, ids, message, *autostash).map(drop),
             Message::CherryPick(ids) => git_core::cherry_pick(git, ids).map(drop),
             Message::Revert { id, mainline } => git_core::revert(git, id, *mainline).map(drop),
+            Message::Reset { id, mode, .. } => git_core::reset(git, id, *mode),
             Message::CommitEmpty => match operation {
                 Some(operation) => git_core::commit_empty(git, operation).map(drop),
                 None => Ok(()),
@@ -2843,6 +2865,10 @@ impl App {
                     .and_then(|v| v.snapshot.commit(&id))
                     .map(full_message)
                     .unwrap_or_default();
+                let head = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map_or_else(|| "HEAD".to_owned(), |v| head_name(&v.snapshot).to_owned());
                 let facts = self
                     .active_tab()
                     .and_then(Tab::view)
@@ -2858,12 +2884,14 @@ impl App {
                             pickable: clean
                                 && snapshot.head.target().is_some_and(|head| head != id),
                             revertable: clean && snapshot.head.target().is_some(),
+                            resettable: clean
+                                && snapshot.head.target().is_some_and(|head| head != id),
                         }
                     })
                     .unwrap_or_default();
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::commit(&id, &message, writable, facts),
+                    crate::menus::commit(&id, &message, writable, facts, &head),
                 ));
             }
             Message::BranchContextMenu {
@@ -3632,6 +3660,24 @@ impl App {
             Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty => {
                 return self.merge(message);
             }
+            Message::ResetStart(id) => {
+                if self.state_blocked(Guarded::Reset) {
+                    return Task::none();
+                }
+                if let Some(view) = self.active_tab().and_then(Tab::view) {
+                    self.modal = Some(reset_dialog(&view.snapshot, &id));
+                }
+            }
+            Message::Reset {
+                id,
+                mode: git_core::ResetMode::Hard,
+                confirmed: false,
+            } => {
+                if let Some(view) = self.active_tab().and_then(Tab::view) {
+                    self.modal = Some(hard_reset_dialog(&view.snapshot, &id));
+                }
+            }
+            Message::Reset { .. } => return self.merge(message),
             Message::RevertStart(id) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -4350,6 +4396,102 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         ],
         default: Some(1),
     })
+}
+
+/// "Reset <branch> to this commit": soft, mixed or hard (confirmed next).
+fn reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
+    use git_core::ResetMode;
+    let head = head_name(snapshot);
+    let short = &id[..id.len().min(7)];
+    let button = |mode: ResetMode, kind| crate::overlay::DialogButton {
+        label: mode.label().into(),
+        kind,
+        message: Some(Message::Reset {
+            id: id.to_owned(),
+            mode,
+            confirmed: false,
+        }),
+    };
+    Modal {
+        title: format!("Reset {head} to {short}"),
+        text: "Soft: keep all changes, staged.\n\
+               Mixed: keep all changes, unstaged.\n\
+               Hard: discard all uncommitted changes (untracked files stay)."
+            .into(),
+        details: None,
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            button(ResetMode::Soft, crate::overlay::ButtonKind::Secondary),
+            button(ResetMode::Mixed, crate::overlay::ButtonKind::Primary),
+            button(ResetMode::Hard, crate::overlay::ButtonKind::Danger),
+        ],
+        default: Some(2),
+    }
+}
+
+/// A hard reset is always confirmed and lists the changes it discards.
+fn hard_reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
+    let head = head_name(snapshot);
+    let short = &id[..id.len().min(7)];
+    let tree = &snapshot.working_tree;
+    let mut lost: Vec<&str> = tree
+        .staged
+        .iter()
+        .chain(&tree.unstaged)
+        .filter(|f| f.kind != git_core::ChangeKind::Untracked)
+        .map(|f| f.path.as_str())
+        .collect();
+    lost.sort_unstable();
+    lost.dedup();
+    let text = if lost.is_empty() {
+        format!("Move {head} to {short} and reset the working tree? There are no uncommitted changes to lose.")
+    } else {
+        format!(
+            "Move {head} to {short} and discard the uncommitted changes to {} file{}? \
+             Untracked files stay.",
+            lost.len(),
+            if lost.len() == 1 { "" } else { "s" }
+        )
+    };
+    let details = (!lost.is_empty()).then(|| {
+        const SHOWN: usize = 20;
+        let mut list = lost
+            .iter()
+            .take(SHOWN)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        if lost.len() > SHOWN {
+            list.push_str(&format!("\n… and {} more", lost.len() - SHOWN));
+        }
+        list
+    });
+    Modal {
+        title: format!("Hard reset {head}"),
+        text,
+        details,
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Hard reset".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::Reset {
+                    id: id.to_owned(),
+                    mode: git_core::ResetMode::Hard,
+                    confirmed: true,
+                }),
+            },
+        ],
+        default: Some(0),
+    }
 }
 
 /// A cherry-pick or revert step has nothing to commit (its changes are
@@ -6304,6 +6446,47 @@ mod tests {
                 Some(Message::CommitEmpty)
             ));
         }
+    }
+
+    #[test]
+    fn reset_asks_for_the_mode_and_confirms_hard() {
+        let mut app = staging_app(&["u.txt"], &["s.txt"]);
+        let _ = app.update(Message::ResetStart("c".into()));
+        let modal = app.modal.take().unwrap();
+        let labels: Vec<_> = modal.buttons.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(labels, ["Cancel", "Soft", "Mixed", "Hard"]);
+
+        let _ = app.update(modal.action(3).unwrap());
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Hard reset HEAD");
+        assert_eq!(modal.details.as_deref(), Some("s.txt\nu.txt"));
+        assert_eq!(modal.default, Some(0), "Cancel is the default");
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+
+        let _ = app.update(modal.action(1).unwrap());
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Hard reset HEAD to c")
+        );
+    }
+
+    #[test]
+    fn soft_reset_runs_directly_and_resets_are_blocked_during_operations() {
+        let mut app = staging_app(&[], &[]);
+        let _ = app.update(Message::Reset {
+            id: "c".into(),
+            mode: git_core::ResetMode::Soft,
+            confirmed: false,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Soft reset HEAD to c")
+        );
+
+        let mut app = app_in_state(merging());
+        let _ = app.update(Message::ResetStart("c".into()));
+        assert!(app.modal.is_none());
+        assert_eq!(app.status, "Cannot reset while a merge is in progress");
     }
 
     #[test]

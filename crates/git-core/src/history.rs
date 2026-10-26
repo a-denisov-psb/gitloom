@@ -103,7 +103,7 @@ fn restore_file(writer: &dyn GitWriter, root: &Path, file: &FileSnapshot) -> Res
 }
 
 #[cfg(unix)]
-fn set_executable(path: &Path, executable: bool) -> Result<()> {
+pub(crate) fn set_executable(path: &Path, executable: bool) -> Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     let metadata = std::fs::metadata(path).map_err(|e| Error::Backend(e.to_string()))?;
     let mut permissions = metadata.permissions();
@@ -121,7 +121,7 @@ fn set_executable(path: &Path, executable: bool) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn set_executable(_path: &Path, _executable: bool) -> Result<()> {
+pub(crate) fn set_executable(_path: &Path, _executable: bool) -> Result<()> {
     Ok(())
 }
 

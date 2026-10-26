@@ -50,6 +50,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Banner in the tab with Continue/Abort (Skip for rebase and cherry-pick); the commit button becomes "Continue <operation>" | done (M2-09, M2-13, M4-03); also rebase, cherry-pick, revert; Continue is disabled while conflicts are unresolved (tooltip lists the files) |
+| Reset | Commit menu "Reset <branch> to this commit" → Soft / Mixed / Hard | done (M4-10) as a dialog with three buttons instead of GitKraken's submenu (the context menu has no submenus); Hard is always confirmed and lists the files whose changes are lost |
 | Cherry-pick and revert | Commit menu "Cherry-pick commit" / "Revert commit"; multi-selection "Cherry-pick N commits" (oldest first) | done (M4-09); a merge commit asks for the parent to revert against; an empty result opens "Skip" / "Commit empty" (verify wording in GitKraken) |
 | Conflicted files | "Conflicted Files" section above "Unstaged Files" | done (M4-03) |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
