@@ -8,6 +8,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - Select several commits in the graph: Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extend the selection. The right panel lists the selected commits.
 - Merge and fast-forward from the branch context menu ("Merge X into Y", "Fast-forward Y to X", and for remote branches "Fast-forward L to origin/L" for a local branch that is behind). Local changes that block a merge can be stashed and re-applied automatically.
+- Interactive rebase: "Interactive rebase from here" in the commit menu opens a panel to pick, reword, squash, fix up, drop and reorder (drag or Alt+↑/↓) the commits; reword and squash messages are edited inline before starting.
 - Rebase from the branch context menu ("Rebase Y onto X"); conflicts stop in the banner and the conflict view, local changes can be stashed and re-applied automatically.
 - Conflict resolution view: click a conflicted file to pick hunks or single lines from "ours" and "theirs", edit the output, then "Save and mark resolved". Binary and delete/modify conflicts take one side's file. Line endings are kept.
 - Continue, Skip and Abort for merges, rebases, cherry-picks and reverts in progress, from the banner or the commit panel ("Continue rebase"); the commit message can be edited before continuing. Conflicted files get their own section in the staging panel.

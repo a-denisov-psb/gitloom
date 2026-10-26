@@ -54,7 +54,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
 | Conflicted file | Opens conflict view (ours, theirs, output) | done (M4-05); with both sides picked in one conflict, ours lines come first (GitKraken keeps the click order) |
-| Interactive rebase | Panel with actions per commit, reorder by drag | M4 (verify in GitKraken: list order newest or oldest on top) |
+| Interactive rebase | Panel with actions per commit, reorder by drag | done (M4-07): commit menu "Interactive rebase from here"; newest on top until the maintainer verifies GitKraken's order; P/R/S/F/D, ↑/↓, Alt+↑/↓ reorder; inline message editors for rewords and squash chains |
 | Multi-select commits | Ctrl+click, Shift+click | done (M4-01; also Shift+↑/↓; panel "N commits selected") |
 
 ## Keyboard shortcuts
