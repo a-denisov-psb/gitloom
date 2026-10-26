@@ -49,10 +49,10 @@ Until answered, implement the decisions above; adjust afterwards.
 
 ## Milestone acceptance
 
-- [ ] On a throwaway branch of this repo: merge with conflict resolved in the conflict view, rebase with a conflict, interactive rebase with reorder/squash/reword/drop, cherry-pick of three commits, revert, reset soft/mixed/hard — each undone and redone once. Results identical to the CLI.
-- [ ] No Git command ever waits for a terminal editor or prompt.
-- [ ] CRLF repository: conflict resolution keeps line endings (Windows CI).
-- [ ] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
+- [ ] (Linux done by mouse in M4-14; keyboard parts and Windows: maintainer to-do) On a throwaway branch of this repo: merge with conflict resolved in the conflict view, rebase with a conflict, interactive rebase with reorder/squash/reword/drop, cherry-pick of three commits, revert, reset soft/mixed/hard — each undone and redone once. Results identical to the CLI.
+- [x] No Git command ever waits for a terminal editor or prompt.
+- [x] CRLF repository: conflict resolution keeps line endings (Windows CI).
+- [x] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
 - [ ] Released as `v0.5.0` (M4-15).
 
 ## Task overview
@@ -212,7 +212,9 @@ Acceptance: integration tests for every undo/redo pair and failing preconditions
 
 Acceptance: integration tests for each case.
 
-### [ ] M4-14 End-to-end check, docs, performance
+### [x] M4-14 End-to-end check, docs, performance
+
+> Done: walkthrough on Linux by mouse on a clone of this repository with throwaway branches: merge `wt-side` into `wt-main` with a conflict resolved in the conflict view (take theirs, save, Continue), rebase with a conflict resolved the same way, interactive rebase with reorder (drag), squash (combined message), reword (prefilled message) and drop, two cherry-picks from the commit menu, revert, reset soft, mixed and hard (with a local change restored by undo) — each undone and redone once; trees (and for the interactive rebase also the messages) identical to the same operations run with the CLI. Not possible in this WSLg session (no keyboard input, no modifiers): cherry-pick of three commits via multi-selection and a typed reword message → maintainer to-do together with the Windows walkthrough. Performance (PERFORMANCE.md "M4"): conflict model of a 5 000-line file 6.6 ms, interactive rebase of 200 commits 0.38 s, both views respond at the 81 ms latency floor of this setup. Two bugs found and fixed: context menus (and drops) in a scrolled graph used content coordinates and appeared off screen; opening any overlay reset the graph scroll position (root widget switched between a bare element and a `Stack`). Both checked by hand in a 200-commit history (no widget-level test harness for iced in the repository).
 
 - Full walkthrough per milestone acceptance on Linux; maintainer repeats on Windows (Maintainer to-dos).
 - Update UX-PARITY, CHANGELOG, PERFORMANCE (conflict view with 5 000-line file, interactive rebase of 200 commits).

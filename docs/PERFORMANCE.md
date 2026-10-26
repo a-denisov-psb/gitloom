@@ -54,6 +54,22 @@ Same machine and repository. Release builds.
 
 - **Auto-fetch tick**: a subscription firing every 30 s made iced redraw the window each time; with software rendering (llvmpipe, no GPU in WSLg) that cost 0.3 % CPU at idle. Auto-fetch now arms one timer for the next due fetch (`fetch::next_check`, retry after 60 s when a tab was busy).
 
+## M4: merge, rebase, conflicts (task M4-14)
+
+Release builds, same machine. Interaction latencies are measured from the synthetic click to the first changed pixels (X11 screenshot polling); the same method gives **81 ms for a plain sidebar click**, the floor of this WSLg/llvmpipe setup.
+
+| Metric | Result | How |
+|---|---|---|
+| Conflict model, 5 000-line file with 500 conflicts | load (`ls-files -u`, 3 blobs, `git merge-file`, parse) **6.6 ms**; take all theirs + output **0.18 ms** | `cargo test -p git-core --release --test perf conflict_of_a_5000 -- --ignored --nocapture` |
+| Conflict view of that file in the app | opening and toggling a line or "Take all theirs": **81–82 ms**, i.e. no measurable cost above the floor | by hand, release build |
+| Interactive rebase of 200 commits (19 squashes, 10 rewords, one reorder) | loading the commits **2.7 ms**; `rebase -i` with Gitloom as editor (29 message calls) **0.38 s** | `cargo test -p gitloom --release --test perf -- --ignored --nocapture` |
+| Interactive rebase panel with 200 commits | opening and changing actions: **82–84 ms** (floor) | by hand, release build |
+
+### Fixed in M4-14
+
+- **Context menus in a scrolled graph** appeared off screen: inside a scrolled `scrollable`, iced passes the cursor in content coordinates. `context_area`/`drag_area` now add the translation iced hands to `overlay()` at the start of every update.
+- **Scroll position reset when a menu opened**: the root switched between a bare widget and a `Stack` when an overlay appeared, so iced rebuilt the widget tree and dropped the graph's scroll state; the root is now always a `Stack`.
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |

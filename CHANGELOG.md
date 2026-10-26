@@ -23,6 +23,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - Shift+↑/↓ now extend the commit selection; jumping to the first parent or child on the branch stays on Shift+J/K.
 
+### Fixed
+
+- Right click on a commit in a scrolled graph opened its menu off screen (and a drop from a scrolled graph likewise); opening a menu or dialog no longer resets the graph's scroll position.
+
 ## [0.4.0] - 2026-10-25
 
 ### Added
