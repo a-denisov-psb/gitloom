@@ -746,10 +746,6 @@ fn table() -> Vec<Action> {
                 | A::OpenTerminal
                 | A::OpenFileManager
                 | A::ExternalDiff
-                | A::Fullscreen
-                | A::ZoomIn
-                | A::ZoomOut
-                | A::ZoomReset
         ) {
             action.requires = Requires::NotYet;
         }

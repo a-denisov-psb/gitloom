@@ -32,6 +32,8 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
+/// Short status bar messages (zoom level) disappear after this time.
+const STATUS_FLASH: Duration = Duration::from_secs(2);
 /// Settings changes are written after this quiet period.
 const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
@@ -291,6 +293,10 @@ pub enum Message {
     Refresh,
     Shortcut(Shortcut),
     SettingsLoaded(settings::Loaded),
+    /// The status bar message number `seq` may disappear now.
+    StatusExpired(u64),
+    /// Zoom buttons in Preferences → Appearance.
+    ZoomTo(u32),
     /// Light or dark mode of the operating system (start and changes).
     SystemTheme(iced::theme::Mode),
     ThemeChosen(settings::ThemeChoice),
@@ -587,8 +593,13 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
-    /// Current window size, used to keep menus inside the window.
-    pub window_size: iced::Size,
+    /// Last reported window size, in logical pixels of `window_scale`;
+    /// use [`App::window_size`].
+    window_size: iced::Size,
+    /// Scale factor when `window_size` was reported.
+    window_scale: f32,
+    /// Number of the last flashed status message.
+    status_seq: u64,
     /// Mode of the toolbar Pull button (persisted in the session).
     pub pull_mode: git_core::PullMode,
     /// When the pending auto-fetch timer fires, and its sequence number
@@ -636,6 +647,8 @@ impl App {
             context_menu: None,
             shortcut_list: None,
             window_size: iced::Size::new(1400.0, 860.0),
+            window_scale: 1.0,
+            status_seq: 0,
             pull_mode: git_core::PullMode::default(),
             auto_fetch_at: None,
             auto_fetch_seq: 0,
@@ -1672,7 +1685,18 @@ impl App {
             || self.message_dialog.is_some()
             || self.shortcut_list.is_some()
             || self.settings_page.is_some();
-        if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
+        // Zoom and fullscreen change nothing in the overlay's content.
+        if overlay_open
+            && !matches!(
+                shortcut,
+                Shortcut::Close
+                    | Shortcut::Confirm
+                    | Shortcut::ZoomIn
+                    | Shortcut::ZoomOut
+                    | Shortcut::ZoomReset
+                    | Shortcut::Fullscreen
+            )
+        {
             return Task::none();
         }
         if let Some(reason) = shortcut.static_block() {
@@ -1784,11 +1808,32 @@ impl App {
             | Shortcut::FileHistory
             | Shortcut::OpenTerminal
             | Shortcut::OpenFileManager
-            | Shortcut::ExternalDiff
-            | Shortcut::Fullscreen
-            | Shortcut::ZoomIn
-            | Shortcut::ZoomOut
-            | Shortcut::ZoomReset => {}
+            | Shortcut::ExternalDiff => {}
+            Shortcut::ZoomIn => {
+                return self.set_zoom(settings::zoom_step(
+                    self.settings.appearance.zoom_percent,
+                    true,
+                ))
+            }
+            Shortcut::ZoomOut => {
+                return self.set_zoom(settings::zoom_step(
+                    self.settings.appearance.zoom_percent,
+                    false,
+                ))
+            }
+            Shortcut::ZoomReset => return self.set_zoom(settings::ZOOM_DEFAULT),
+            Shortcut::Fullscreen => {
+                return window::latest().and_then(|id| {
+                    window::mode(id).then(move |mode| {
+                        let next = if mode == window::Mode::Fullscreen {
+                            window::Mode::Windowed
+                        } else {
+                            window::Mode::Fullscreen
+                        };
+                        window::set_mode(id, next)
+                    })
+                });
+            }
             Shortcut::Settings => return self.open_settings(),
             Shortcut::Close => {
                 if self.modal.take().is_some()
@@ -2665,9 +2710,49 @@ impl App {
         }
         self.settings_save_seq += 1;
         let seq = self.settings_save_seq;
-        Task::perform(tokio::time::sleep(SETTINGS_SAVE_DEBOUNCE), move |()| {
-            Message::SettingsSaveDue(seq)
-        })
+        Task::perform(
+            async { tokio::time::sleep(SETTINGS_SAVE_DEBOUNCE).await },
+            move |()| Message::SettingsSaveDue(seq),
+        )
+    }
+
+    /// Window scale from the zoom setting (M5-04).
+    pub fn scale_factor(&self) -> f32 {
+        self.settings.appearance.zoom_percent as f32 / 100.0
+    }
+
+    /// Window size in the current zoom's logical pixels (menus are kept
+    /// inside it).
+    pub fn window_size(&self) -> iced::Size {
+        let ratio = self.window_scale / self.scale_factor();
+        iced::Size::new(
+            self.window_size.width * ratio,
+            self.window_size.height * ratio,
+        )
+    }
+
+    /// Applies a zoom level, stores it and names it in the status bar.
+    fn set_zoom(&mut self, percent: u32) -> Task<Message> {
+        let percent = settings::clamp_zoom(percent);
+        let text = format!("Zoom {percent} %");
+        let flash = self.flash_status(text);
+        if percent == self.settings.appearance.zoom_percent {
+            return flash;
+        }
+        self.settings.appearance.zoom_percent = percent;
+        Task::batch([flash, self.save_settings()])
+    }
+
+    /// Shows `text` in the status bar for a moment.
+    fn flash_status(&mut self, text: String) -> Task<Message> {
+        self.status = text;
+        self.status_seq += 1;
+        let seq = self.status_seq;
+        // Created lazily: the timer needs the runtime that runs the task.
+        Task::perform(
+            async { tokio::time::sleep(STATUS_FLASH).await },
+            move |()| Message::StatusExpired(seq),
+        )
     }
 
     fn open_settings(&mut self) -> Task<Message> {
@@ -2775,6 +2860,12 @@ impl App {
             }
             Message::SettingsOpened => return self.open_settings(),
             Message::SystemTheme(mode) => self.system_theme = mode,
+            Message::StatusExpired(seq) => {
+                if seq == self.status_seq {
+                    self.status.clear();
+                }
+            }
+            Message::ZoomTo(percent) => return self.set_zoom(percent),
             Message::ThemeChosen(choice) => {
                 if self.settings.appearance.theme != choice {
                     self.settings.appearance.theme = choice;
@@ -2897,7 +2988,10 @@ impl App {
                 self.status = "Copied to the clipboard".into();
                 return iced::clipboard::write(text);
             }
-            Message::WindowResized(size) => self.window_size = size,
+            Message::WindowResized(size) => {
+                self.window_size = size;
+                self.window_scale = self.scale_factor();
+            }
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
             Message::DiffLineClicked(row) => {
                 let mode = if self.modifiers.shift() {
@@ -6007,6 +6101,49 @@ mod tests {
         let _ = app.update(Message::SettingsOpened);
         let _ = app.update(Message::EscapeCaptured);
         assert!(app.settings_page.is_none());
+    }
+
+    #[test]
+    fn zoom_shortcuts_step_persist_and_flash() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::ZoomIn, false));
+        assert_eq!(app.settings.appearance.zoom_percent, 110);
+        assert!((app.scale_factor() - 1.1).abs() < 1e-6);
+        assert_eq!(app.status, "Zoom 110 %");
+        let seq = app.status_seq;
+        let _ = app.update(Message::StatusExpired(seq));
+        assert!(app.status.is_empty());
+
+        for _ in 0..20 {
+            let _ = app.update(checked(Shortcut::ZoomIn, false));
+        }
+        assert_eq!(app.settings.appearance.zoom_percent, 200);
+        // Zoom also works while the settings view is open.
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(checked(Shortcut::ZoomReset, false));
+        assert_eq!(app.settings.appearance.zoom_percent, 100);
+        for _ in 0..20 {
+            let _ = app.update(checked(Shortcut::ZoomOut, false));
+        }
+        assert_eq!(app.settings.appearance.zoom_percent, 70);
+        let _ = app.update(Message::ZoomTo(120));
+        assert_eq!(app.settings.appearance.zoom_percent, 120);
+        // An older flash does not clear a newer message.
+        let old = app.status_seq;
+        let _ = app.update(Message::ZoomTo(130));
+        let _ = app.update(Message::StatusExpired(old));
+        assert_eq!(app.status, "Zoom 130 %");
+    }
+
+    #[test]
+    fn window_size_follows_the_zoom() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::WindowResized(iced::Size::new(1000.0, 800.0)));
+        assert_eq!(app.window_size(), iced::Size::new(1000.0, 800.0));
+        let _ = app.update(Message::ZoomTo(200));
+        assert_eq!(app.window_size(), iced::Size::new(500.0, 400.0));
+        let _ = app.update(Message::WindowResized(iced::Size::new(600.0, 400.0)));
+        assert_eq!(app.window_size(), iced::Size::new(600.0, 400.0));
     }
 
     #[test]

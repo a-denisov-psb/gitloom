@@ -155,11 +155,7 @@ fn appearance(app: &App) -> Element<'_, Message> {
             ),
             system_note,
         ),
-        field(
-            "Zoom",
-            not_yet(format!("{} %", appearance.zoom_percent)),
-            "Ctrl+= / Ctrl+- / Ctrl+0",
-        ),
+        field("Zoom", zoom(appearance.zoom_percent), zoom_note()),
         field(
             "Load avatars from Gravatar",
             not_yet(if appearance.avatars { "On" } else { "Off" }.to_owned()),
@@ -168,6 +164,34 @@ fn appearance(app: &App) -> Element<'_, Message> {
     ]
     .spacing(18)
     .into()
+}
+
+fn zoom<'a>(percent: u32) -> Element<'a, Message> {
+    use crate::settings::{zoom_step, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN};
+    let step = |label: &'static str, target: u32, enabled: bool| {
+        button(text(label))
+            .on_press_maybe(enabled.then_some(Message::ZoomTo(target)))
+            .padding([5, 12])
+            .style(button::secondary)
+    };
+    row![
+        step("−", zoom_step(percent, false), percent > ZOOM_MIN),
+        text(format!("{percent} %")).width(60).align_x(iced::Center),
+        step("+", zoom_step(percent, true), percent < ZOOM_MAX),
+        step("Reset", ZOOM_DEFAULT, percent != ZOOM_DEFAULT),
+    ]
+    .spacing(6)
+    .align_y(iced::Center)
+    .into()
+}
+
+/// "Ctrl+= / Ctrl+- / Ctrl+0" for this platform.
+fn zoom_note() -> &'static str {
+    if crate::actions::MAC {
+        "⌘= / ⌘- / ⌘0; F11 toggles fullscreen."
+    } else {
+        "Ctrl+= / Ctrl+- / Ctrl+0; F11 toggles fullscreen."
+    }
 }
 
 fn tool_label(choice: &ToolChoice) -> String {

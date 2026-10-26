@@ -74,7 +74,7 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             theme: ThemeChoice::Dark,
-            zoom_percent: 100,
+            zoom_percent: ZOOM_DEFAULT,
             avatars: false,
         }
     }
@@ -174,6 +174,7 @@ pub fn parse(text: &str) -> Result<Settings, ParseError> {
         .general
         .auto_fetch_minutes
         .min(MAX_AUTO_FETCH_MINUTES);
+    settings.appearance.zoom_percent = clamp_zoom(settings.appearance.zoom_percent);
     Ok(settings)
 }
 
@@ -259,6 +260,31 @@ fn legacy_auto_fetch(session: &Path) -> Option<u32> {
 /// Writes atomically (temp file, then rename).
 pub fn save(path: &Path, json: &str) -> io::Result<()> {
     crate::session::save(path, json)
+}
+
+/// Zoom range and step in percent (M5-04).
+pub const ZOOM_MIN: u32 = 70;
+pub const ZOOM_MAX: u32 = 200;
+pub const ZOOM_STEP: u32 = 10;
+pub const ZOOM_DEFAULT: u32 = 100;
+
+/// Next zoom level up or down, snapped to the 10 % grid and kept in range.
+pub fn zoom_step(percent: u32, up: bool) -> u32 {
+    let snapped = clamp_zoom(percent) / ZOOM_STEP * ZOOM_STEP;
+    let next = if up {
+        snapped + ZOOM_STEP
+    } else if snapped < clamp_zoom(percent) {
+        // Between two steps (edited file): down goes to the lower one.
+        snapped
+    } else {
+        snapped.saturating_sub(ZOOM_STEP)
+    };
+    clamp_zoom(next)
+}
+
+/// Zoom level within [`ZOOM_MIN`]..=[`ZOOM_MAX`].
+pub fn clamp_zoom(percent: u32) -> u32 {
+    percent.clamp(ZOOM_MIN, ZOOM_MAX)
 }
 
 /// Parses the auto-fetch interval typed in the settings view.
@@ -398,6 +424,32 @@ mod tests {
         assert!(!path.with_extension("json.tmp").exists());
         assert_eq!(load(&path, None).settings, sample());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn zoom_steps_and_bounds() {
+        assert_eq!(zoom_step(100, true), 110);
+        assert_eq!(zoom_step(100, false), 90);
+        assert_eq!(zoom_step(70, false), 70, "lower bound");
+        assert_eq!(zoom_step(200, true), 200, "upper bound");
+        assert_eq!(zoom_step(190, true), 200);
+        assert_eq!(zoom_step(80, false), 70);
+        // Off-grid values from an edited file snap to the grid.
+        assert_eq!(zoom_step(125, true), 130);
+        assert_eq!(zoom_step(125, false), 120);
+        assert_eq!(zoom_step(20, true), 80, "out of range is clamped first");
+        assert_eq!(zoom_step(500, false), 190);
+        let mut level = ZOOM_MIN;
+        let mut steps = 0;
+        while level < ZOOM_MAX {
+            level = zoom_step(level, true);
+            steps += 1;
+        }
+        assert_eq!(steps, 13, "70 % to 200 % in 10 % steps");
+        assert_eq!(
+            parse(r#"{"appearance": {"zoom_percent": 900}}"#).map(|s| s.appearance.zoom_percent),
+            Ok(ZOOM_MAX)
+        );
     }
 
     #[test]
