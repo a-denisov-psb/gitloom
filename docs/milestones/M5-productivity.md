@@ -113,7 +113,9 @@ Until answered, implement the decisions above; adjust afterwards.
 
 Acceptance: unit tests: no duplicate shortcut per context, macOS mapping, dispatch of all existing shortcuts (existing shortcut tests stay green); overlay checked by hand.
 
-### [ ] M5-02 Settings file and settings view
+### [x] M5-02 Settings file and settings view
+
+> Done: `settings.rs` (versioned `Settings` with general/appearance/tools, `#[serde(default)]` everywhere so missing and unknown fields fall back to defaults; a file without version counts as version 1, a newer version or a broken value resets to defaults and keeps `settings.json.bak`; atomic writes through `session::save`, debounced 300 ms). Path: `settings.json` next to `session.json`. Migration: without a settings file, `auto_fetch_minutes` is read from the session file and the new file is written once; the session no longer has the field (old files keep it until the next session save, it is not read again). Settings view replaces the tab content (tabs stay visible): General with the auto-fetch input (applies per valid keystroke, invalid input shows the reason, timer restarts), Appearance and External tools with disabled controls ("Not available yet"). Opens with Ctrl+, and the gear button (toolbar right, "Settings"); Esc (also from the focused input) or Close returns; other shortcuts wait while it is open. Tests: defaults, round trip, missing/unknown fields, broken values, newer version, migration (once), corrupted file, input parsing, app (open, apply, invalid, Esc, timer restart, loaded settings). Checked by hand: old session with 9 minutes → settings.json with 9; Ctrl+, → General shows 9; "1x" → red hint; 15 → written to settings.json; Appearance list; Esc back to the graph.
 
 - `settings.rs`: versioned `Settings` (general: auto-fetch interval; appearance: theme, zoom, avatars; external tools: diff tool, merge tool, terminal command), `settings.json` in the config dir, atomic writes, missing/unknown fields → defaults.
 - Migration: `auto_fetch_minutes` is read from the session file once and moved to settings.
