@@ -168,7 +168,9 @@ Acceptance: no Unicode placeholder icons left (list the replaced ones in the tas
 
 Acceptance: unit tests for scorer ordering and palette state (filter, selection wrap, disabled entries not executable, sub-list navigation); filtering 100 000 file paths < 30 ms (release build).
 
-### [ ] M5-07 Commit search
+### [x] M5-07 Commit search
+
+> Done: `search.rs` — `matches` (case-insensitive substring in summary, body, author, email; ASCII queries without allocation per commit, others via `to_lowercase`; SHA prefix from 4 hex digits, prefixes only) and `SearchState` (query, ascending commit indices, current match, request number, jump flag, "n of m", wrap-around steps). The snapshot holds full messages, so bodies are searched. App: Ctrl+F (also from the palette) or the magnifier at the right end of the column header opens the bar above the graph (field, counter, ↑/↓ buttons, ×); typing searches in `spawn_blocking` after 150 ms and jumps to the first match unless the selected commit matches; Enter / Shift+Enter step with wrap-around and scroll the match into view; stale results are dropped; a new snapshot runs the search again without moving the selection; Esc (also from the focused field) closes and keeps the selection. Non-matching rows: faint summary and a faint graph node (lines stay). Tests: match rules (fields, case, trim, SHA length/prefix, non-ASCII, ASCII search edges), state (counter, dimming, steps, kept current), app (jump, steps, wrap, Shift+Enter, kept selection, stale results, cleared query, refresh re-run, Esc). 100 000 commits with bodies: **≤ 12.4 ms** (release, `search_speed`). Checked by hand: magnifier → bar with field, buttons and tooltips. Typing could not be injected (WSLg keyboard) → maintainer to-do (typing, dimming, Enter/Shift+Enter, Esc).
 
 - Search field above the graph per planning decision; magnifier button and Ctrl+F open it, also from the palette.
 - Pure match function over the loaded snapshot: case-insensitive, summary/message, author name and email, SHA prefix (≥ 4 hex characters). If the snapshot holds summaries only, search summaries and note it.

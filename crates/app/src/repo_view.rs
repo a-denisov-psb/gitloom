@@ -324,6 +324,8 @@ pub struct RepoView {
     /// multi-selection panel.
     pub multi: crate::selection::MultiSelection,
     pub details: Option<CommitDetails>,
+    /// Open commit search bar above the graph (M5-07).
+    pub search: Option<crate::search::SearchState>,
     pub center: CenterView,
     pub filter: String,
     pub collapsed: HashSet<Section>,
@@ -548,6 +550,7 @@ impl RepoView {
             backend,
             snapshot,
             selection,
+            search: None,
             multi: crate::selection::MultiSelection::default(),
             details: None,
             center: CenterView::Graph,

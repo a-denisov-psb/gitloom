@@ -21,6 +21,7 @@ pub enum Icon {
     Settings,
     ChevronDown,
     ChevronRight,
+    ChevronUp,
     Check,
     Close,
     Pencil,
@@ -51,7 +52,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -63,6 +64,7 @@ impl Icon {
         Self::Settings,
         Self::ChevronDown,
         Self::ChevronRight,
+        Self::ChevronUp,
         Self::Check,
         Self::Close,
         Self::Pencil,
@@ -108,6 +110,7 @@ impl Icon {
             Self::Settings => lucide!("settings"),
             Self::ChevronDown => lucide!("chevron-down"),
             Self::ChevronRight => lucide!("chevron-right"),
+            Self::ChevronUp => lucide!("chevron-up"),
             Self::Check => lucide!("check"),
             Self::Close => lucide!("x"),
             Self::Pencil => lucide!("pencil"),

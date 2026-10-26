@@ -76,6 +76,7 @@ Release builds, same machine. The full M5 measurement (M5-14) adds the rest.
 
 | Metric | Result | How |
 |---|---|---|
+| Commit search, 100 000 commits with message bodies | **8.7–12.4 ms** (6 queries incl. non-ASCII) | `cargo test --release -p gitloom search_speed -- --ignored --nocapture` |
 | Palette filter, 100 000 file paths | **3.5–8.1 ms** per keystroke (6 queries) | `cargo test --release -p gitloom palette_filter_speed -- --ignored --nocapture` |
 
 ## Memory breakdown (rust-lang/rust)

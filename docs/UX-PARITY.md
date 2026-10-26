@@ -92,7 +92,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Action | Shortcut | Status |
 |---|---|---|
 | Command palette | Ctrl+P | done (M5-06; all actions with shortcuts, disabled ones with the reason; sub-lists for repositories and branch checkout) |
-| Search commits | Ctrl+F | M5 |
+| Search commits | Ctrl+F | done (M5-07; field above the graph, non-matching rows dimmed, n of m, Enter / Shift+Enter; verify in GitKraken: dim or filter) |
 | Open repo via palette | Ctrl+Shift+O | done (M5-06; recent repositories and Browse…) |
 | File history and blame | Ctrl+Shift+H | M5 |
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |

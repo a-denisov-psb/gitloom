@@ -13,6 +13,7 @@ mod palette;
 mod panes;
 mod rebase_panel;
 mod repo_view;
+mod search;
 mod selection;
 mod session;
 mod settings;
