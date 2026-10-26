@@ -330,7 +330,7 @@ mod tests {
             let start = std::time::Instant::now();
             palette.set_query(query.into());
             let elapsed = start.elapsed();
-            println!("{query:>16}: {elapsed:?}, {} shown", palette.shown_count());
+            eprintln!("{query:>16}: {elapsed:?}, {} shown", palette.shown_count());
             worst = worst.max(elapsed);
         }
         assert!(worst.as_millis() < 30, "worst {worst:?}");
