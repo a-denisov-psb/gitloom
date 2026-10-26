@@ -30,9 +30,6 @@ pub struct Session {
     /// Index into `tabs`.
     pub active: usize,
     pub panes: PaneRatios,
-    /// Auto-fetch interval in minutes; 0 turns it off (UI in M5).
-    #[serde(default = "default_auto_fetch")]
-    pub auto_fetch_minutes: u32,
     /// Mode of the toolbar Pull button (last one chosen in its dropdown).
     #[serde(default)]
     pub pull_mode: PullModeSetting,
@@ -68,10 +65,6 @@ impl From<git_core::PullMode> for PullModeSetting {
     }
 }
 
-fn default_auto_fetch() -> u32 {
-    crate::fetch::DEFAULT_INTERVAL_MINUTES
-}
-
 impl Default for Session {
     fn default() -> Self {
         Self {
@@ -80,7 +73,6 @@ impl Default for Session {
             tabs: Vec::new(),
             active: 0,
             panes: PaneRatios::default(),
-            auto_fetch_minutes: default_auto_fetch(),
             pull_mode: PullModeSetting::default(),
         }
     }

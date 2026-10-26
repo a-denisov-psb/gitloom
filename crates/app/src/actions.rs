@@ -750,7 +750,6 @@ fn table() -> Vec<Action> {
                 | A::ZoomIn
                 | A::ZoomOut
                 | A::ZoomReset
-                | A::Settings
         ) {
             action.requires = Requires::NotYet;
         }

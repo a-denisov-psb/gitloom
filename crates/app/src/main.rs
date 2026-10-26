@@ -12,6 +12,7 @@ mod rebase_panel;
 mod repo_view;
 mod selection;
 mod session;
+mod settings;
 mod shortcuts;
 mod snapshot;
 mod theme;

@@ -78,11 +78,33 @@ pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Messa
         actions,
         space::horizontal(),
         action(view, ToolbarAction::Terminal),
+        settings_button(),
     ]
     .padding([4, 12])
     .align_y(iced::Center);
 
     container(content).width(Fill).style(theme::chrome).into()
+}
+
+/// Gear button: opens the settings view (Ctrl+,).
+fn settings_button<'a>() -> Element<'a, Message> {
+    let tip = match crate::actions::ActionId::Settings.shortcut_text() {
+        Some(keys) => format!("Preferences ({keys})"),
+        None => "Preferences".to_owned(),
+    };
+    with_tooltip_text(
+        button(
+            column![text("⚙").size(16), text("Settings").size(11)]
+                .spacing(1)
+                .align_x(iced::Center),
+        )
+        .on_press(Message::SettingsOpened)
+        .padding([3, 10])
+        .width(64)
+        .style(theme::flat)
+        .into(),
+        tip,
+    )
 }
 
 /// Repository / branch picker; the dropdowns follow with checkout (M3).

@@ -1,0 +1,412 @@
+//! User preferences in `<config dir>/settings.json`, separate from the
+//! session state (ADR-023). Missing or unknown fields fall back to defaults;
+//! a broken file is kept as `settings.json.bak`.
+//!
+//! All functions touching the file system are blocking; call them off the UI thread.
+
+use std::io;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+pub const VERSION: u32 = 1;
+pub const FILE_NAME: &str = "settings.json";
+
+/// Longest auto-fetch interval accepted in the settings view (one day).
+pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub version: u32,
+    pub general: General,
+    pub appearance: Appearance,
+    pub tools: ExternalTools,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            version: VERSION,
+            general: General::default(),
+            appearance: Appearance::default(),
+            tools: ExternalTools::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct General {
+    /// Auto-fetch interval in minutes; 0 turns it off.
+    pub auto_fetch_minutes: u32,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self {
+            auto_fetch_minutes: crate::fetch::DEFAULT_INTERVAL_MINUTES,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeChoice {
+    #[default]
+    Dark,
+    Light,
+    /// Follow the operating system.
+    System,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    pub theme: ThemeChoice,
+    /// Window scale in percent (70–200).
+    pub zoom_percent: u32,
+    /// Load avatars from Gravatar (ADR-026); off by default.
+    pub avatars: bool,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: ThemeChoice::Dark,
+            zoom_percent: 100,
+            avatars: false,
+        }
+    }
+}
+
+/// External diff or merge tool.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolChoice {
+    /// Whatever `diff.tool` / `merge.tool` say.
+    #[default]
+    GitConfig,
+    /// A tool by name, passed as `--tool=<name>`.
+    Tool(String),
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalTools {
+    pub diff_tool: ToolChoice,
+    pub merge_tool: ToolChoice,
+    /// Command template with `{path}`; empty means auto-detection.
+    pub terminal_command: String,
+}
+
+/// Category of the settings view (list on the left).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Category {
+    General,
+    Appearance,
+    ExternalTools,
+}
+
+impl Category {
+    pub const ALL: [Self; 3] = [Self::General, Self::Appearance, Self::ExternalTools];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Appearance => "Appearance",
+            Self::ExternalTools => "External tools",
+        }
+    }
+}
+
+/// State of the open settings view.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Page {
+    pub category: Category,
+    /// Text of the auto-fetch input (may be invalid while typing).
+    pub auto_fetch_input: String,
+    /// Why the typed interval is not applied.
+    pub error: Option<String>,
+}
+
+impl Page {
+    pub fn new(settings: &Settings) -> Self {
+        Self {
+            category: Category::General,
+            auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
+            error: None,
+        }
+    }
+
+    pub fn with_category(mut self, category: Category) -> Self {
+        self.category = category;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseError {
+    Invalid(String),
+    UnknownVersion(u64),
+}
+
+/// Parses a settings file; a newer version is rejected.
+pub fn parse(text: &str) -> Result<Settings, ParseError> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| ParseError::Invalid(e.to_string()))?;
+    if !value.is_object() {
+        return Err(ParseError::Invalid("not an object".into()));
+    }
+    // A file without version is read as version 1.
+    let version = value
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(u64::from(VERSION));
+    if version != u64::from(VERSION) {
+        return Err(ParseError::UnknownVersion(version));
+    }
+    let mut settings: Settings =
+        serde_json::from_value(value).map_err(|e| ParseError::Invalid(e.to_string()))?;
+    settings.version = VERSION;
+    settings.general.auto_fetch_minutes = settings
+        .general
+        .auto_fetch_minutes
+        .min(MAX_AUTO_FETCH_MINUTES);
+    Ok(settings)
+}
+
+pub fn to_json(settings: &Settings) -> String {
+    // Serializing plain data cannot fail; fall back to an empty object just in case.
+    serde_json::to_string_pretty(settings).unwrap_or_else(|_| "{}".into())
+}
+
+/// Result of loading the settings at startup.
+#[derive(Debug, Clone)]
+pub struct Loaded {
+    pub settings: Settings,
+    /// One-time message for the user (e.g. the file was broken and reset).
+    pub notice: Option<String>,
+    /// The file has to be written: it did not exist yet (values migrated
+    /// from the session) or was reset.
+    pub write: bool,
+}
+
+/// Reads the settings. Without a settings file, `auto_fetch_minutes` is
+/// taken over from the session file `session` once (ADR-023).
+pub fn load(path: &Path, session: Option<&Path>) -> Loaded {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            let mut settings = Settings::default();
+            if let Some(minutes) = session.and_then(legacy_auto_fetch) {
+                settings.general.auto_fetch_minutes = minutes.min(MAX_AUTO_FETCH_MINUTES);
+            }
+            return Loaded {
+                settings,
+                notice: None,
+                write: true,
+            };
+        }
+        Err(e) => {
+            return Loaded {
+                settings: Settings::default(),
+                notice: Some(format!("Could not read the settings file: {e}")),
+                write: false,
+            }
+        }
+    };
+    match parse(&text) {
+        Ok(settings) => Loaded {
+            settings,
+            notice: None,
+            write: false,
+        },
+        Err(error) => {
+            let backup = path.with_extension("json.bak");
+            let moved = std::fs::rename(path, &backup).is_ok();
+            let reason = match error {
+                ParseError::Invalid(_) => "was unreadable".to_string(),
+                ParseError::UnknownVersion(v) => format!("has unknown version {v}"),
+            };
+            let backup_note = if moved {
+                format!(" A backup was saved as {}.", backup.display())
+            } else {
+                String::new()
+            };
+            Loaded {
+                settings: Settings::default(),
+                notice: Some(format!(
+                    "The settings file {reason}; defaults are used.{backup_note}"
+                )),
+                write: moved,
+            }
+        }
+    }
+}
+
+/// `auto_fetch_minutes` of a session file written before M5-02.
+fn legacy_auto_fetch(session: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(session).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("auto_fetch_minutes")?
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+}
+
+/// Writes atomically (temp file, then rename).
+pub fn save(path: &Path, json: &str) -> io::Result<()> {
+    crate::session::save(path, json)
+}
+
+/// Parses the auto-fetch interval typed in the settings view.
+pub fn parse_auto_fetch(input: &str) -> Result<u32, String> {
+    let input = input.trim();
+    match input.parse::<u32>() {
+        Ok(minutes) if minutes <= MAX_AUTO_FETCH_MINUTES => Ok(minutes),
+        Ok(_) => Err(format!("At most {MAX_AUTO_FETCH_MINUTES} minutes")),
+        Err(_) if input.is_empty() => Err("Enter a number of minutes (0 = off)".into()),
+        Err(_) => Err("Whole minutes only (0 = off)".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("gitloom-settings-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn sample() -> Settings {
+        let mut settings = Settings::default();
+        settings.general.auto_fetch_minutes = 15;
+        settings.appearance.theme = ThemeChoice::Light;
+        settings.appearance.zoom_percent = 120;
+        settings.appearance.avatars = true;
+        settings.tools.diff_tool = ToolChoice::Tool("meld".into());
+        settings.tools.merge_tool = ToolChoice::None;
+        settings.tools.terminal_command = "alacritty --working-directory {path}".into();
+        settings
+    }
+
+    #[test]
+    fn defaults() {
+        let settings = Settings::default();
+        assert_eq!(settings.version, VERSION);
+        assert_eq!(settings.general.auto_fetch_minutes, 5);
+        assert_eq!(settings.appearance.theme, ThemeChoice::Dark);
+        assert_eq!(settings.appearance.zoom_percent, 100);
+        assert!(!settings.appearance.avatars, "avatars are opt-in");
+        assert_eq!(settings.tools.diff_tool, ToolChoice::GitConfig);
+        assert!(settings.tools.terminal_command.is_empty());
+    }
+
+    #[test]
+    fn round_trip() {
+        let settings = sample();
+        assert_eq!(parse(&to_json(&settings)), Ok(settings));
+    }
+
+    #[test]
+    fn missing_and_unknown_fields_fall_back_to_defaults() {
+        let text = r#"{
+            "version": 1,
+            "general": { "auto_fetch_minutes": 0, "future_option": true },
+            "appearance": { "theme": "light" },
+            "something_new": [1, 2]
+        }"#;
+        let settings = parse(text).unwrap();
+        assert_eq!(settings.general.auto_fetch_minutes, 0);
+        assert_eq!(settings.appearance.theme, ThemeChoice::Light);
+        assert_eq!(settings.appearance.zoom_percent, 100);
+        assert_eq!(settings.tools, ExternalTools::default());
+        assert_eq!(parse("{}"), Ok(Settings::default()));
+    }
+
+    #[test]
+    fn broken_values_and_versions_are_rejected() {
+        assert!(matches!(parse("not json"), Err(ParseError::Invalid(_))));
+        assert!(matches!(parse("[1]"), Err(ParseError::Invalid(_))));
+        assert!(matches!(
+            parse(r#"{"appearance": {"zoom_percent": "big"}}"#),
+            Err(ParseError::Invalid(_))
+        ));
+        assert_eq!(
+            parse(r#"{"version": 7}"#),
+            Err(ParseError::UnknownVersion(7))
+        );
+    }
+
+    #[test]
+    fn migration_takes_the_interval_from_the_session_once() {
+        let dir = temp_dir("migrate");
+        let session = dir.join("session.json");
+        std::fs::write(&session, r#"{"version": 1, "auto_fetch_minutes": 12}"#).unwrap();
+        let path = dir.join("settings.json");
+
+        let loaded = load(&path, Some(&session));
+        assert_eq!(loaded.settings.general.auto_fetch_minutes, 12);
+        assert!(loaded.write, "the migrated settings are written");
+        assert!(loaded.notice.is_none());
+
+        // Once the settings file exists, the session is not read again.
+        let mut changed = loaded.settings.clone();
+        changed.general.auto_fetch_minutes = 30;
+        save(&path, &to_json(&changed)).unwrap();
+        let loaded = load(&path, Some(&session));
+        assert_eq!(loaded.settings.general.auto_fetch_minutes, 30);
+        assert!(!loaded.write);
+
+        // Without a session value: defaults.
+        let loaded = load(&dir.join("other.json"), Some(&dir.join("missing.json")));
+        assert_eq!(loaded.settings, Settings::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn corrupted_file_gives_defaults_and_is_kept_as_backup() {
+        let dir = temp_dir("corrupt");
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{ broken").unwrap();
+
+        let loaded = load(&path, None);
+        assert_eq!(loaded.settings, Settings::default());
+        assert!(loaded
+            .notice
+            .is_some_and(|n| n.contains("defaults are used")));
+        assert!(!path.exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("settings.json.bak")).unwrap(),
+            "{ broken"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_then_load() {
+        let dir = temp_dir("save");
+        let path = dir.join("nested").join("settings.json");
+        save(&path, &to_json(&sample())).unwrap();
+        assert!(!path.with_extension("json.tmp").exists());
+        assert_eq!(load(&path, None).settings, sample());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn auto_fetch_input() {
+        assert_eq!(parse_auto_fetch(" 10 "), Ok(10));
+        assert_eq!(parse_auto_fetch("0"), Ok(0));
+        assert!(parse_auto_fetch("").is_err());
+        assert!(parse_auto_fetch("-1").is_err());
+        assert!(parse_auto_fetch("2.5").is_err());
+        assert!(parse_auto_fetch("5000").is_err());
+    }
+}

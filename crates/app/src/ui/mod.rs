@@ -18,6 +18,7 @@ mod graph;
 pub(crate) mod overlays;
 pub(crate) mod panel;
 mod rebase;
+pub(crate) mod settings;
 mod sidebar;
 mod start;
 pub(crate) mod statusbar;
@@ -76,9 +77,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(notice) = &app.notice {
         layout = layout.push(notice_banner(notice));
     }
-    layout = match app.active_tab() {
-        Some(tab) => layout.push(tab_body(app, tab)),
-        None => layout.push(space::vertical()),
+    layout = match (&app.settings_page, app.active_tab()) {
+        (Some(page), _) => layout.push(settings::view(app, page)),
+        (None, Some(tab)) => layout.push(tab_body(app, tab)),
+        (None, None) => layout.push(space::vertical()),
     };
     layout = layout.push(statusbar::view(app));
 
