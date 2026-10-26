@@ -126,7 +126,9 @@ Acceptance: unit tests: no duplicate shortcut per context, macOS mapping, dispat
 
 Acceptance: unit tests for defaults, roundtrip, unknown fields, migration, corrupted file; view checked by hand.
 
-### [ ] M5-03 Theme system: dark and light
+### [x] M5-03 Theme system: dark and light
+
+> Done: `theme.rs` has `ThemePalette` with `DARK` (today's values) and `LIGHT`; every style function takes the palette from the iced theme it gets (`palette(theme)`, by `extended_palette().is_dark`), text colors use `.style(theme::text_*)`, the graph canvas draws with the palette of its theme, and no view uses a color constant any more. Light warning text is darker (#875a00) to reach 4.5:1 on panels. iced 0.14 detects the OS theme (`iced::system::theme()` at start, `system::theme_changes()` subscription), so Appearance offers Dark / Light / System; an unknown mode (`Mode::None`, e.g. WSLg) falls back to Dark and the view says so. The askpass window reads the choice from `settings.json` (System counts as Dark there). Conflict and rebase views got the graph background (they showed the divider color, visible in Light). Tests: contrast of text (all backgrounds) and muted text (graph, panel, chrome) ≥ 4.5 in both palettes, light status colors ≥ 4.5 on panels, lanes ≥ 3:1 and distinct, palette follows the theme, app (choice, system mode, fallback). Screenshots `docs/screenshots/m5-{start,graph,diff,conflict,rebase}-{dark,light}.png`; switching Dark → Light in Preferences applies at once (graph included) and is saved.
 
 - `theme.rs`: constants become a `ThemePalette` (all current colors and lane colors) chosen at runtime; Dark keeps today's values, Light is new.
 - Text, muted text and selected text reach WCAG AA (4.5:1) on their backgrounds in both palettes; lane colors stay distinguishable on the light background.

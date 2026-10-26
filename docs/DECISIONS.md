@@ -255,3 +255,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
   A "System" option is added only if iced 0.14 can detect the OS theme (result recorded
   here by M5-03). Text colors reach WCAG AA contrast in both palettes.
 - Why: light theme parity with GitKraken; one place for colors.
+- Result (M5-03): iced 0.14 reports the OS theme (`iced::system::theme()` and the
+  `system::theme_changes()` subscription, no extra feature), so "System" is offered. When
+  the window system reports no preference (`Mode::None`), Dark is used. Style functions
+  pick the palette from the iced theme they receive (`extended_palette().is_dark`).
