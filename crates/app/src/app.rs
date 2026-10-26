@@ -28,6 +28,9 @@ pub const START_PATH_INPUT: &str = "start-path";
 pub const COMMIT_SUMMARY_INPUT: &str = "commit-summary";
 pub const SHORTCUT_FILTER_INPUT: &str = "shortcut-filter";
 pub const PALETTE_INPUT: &str = "command-palette";
+pub const SEARCH_INPUT: &str = "commit-search";
+/// Typing in the search field waits this long before searching.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// Recently used palette actions remembered (in memory).
 const RECENT_ACTIONS: usize = 8;
 
@@ -325,6 +328,24 @@ pub enum Message {
     /// Enter in the palette query field.
     PaletteSubmit,
     PaletteClosed,
+    /// Ctrl+F or the magnifier: open (or focus) the commit search.
+    SearchOpened,
+    SearchInput(String),
+    SearchDue {
+        tab: TabId,
+        seq: u64,
+    },
+    SearchResult {
+        tab: TabId,
+        seq: u64,
+        matches: Vec<usize>,
+    },
+    /// Enter (Shift+Enter: backwards) in the search field.
+    SearchSubmit,
+    SearchStep {
+        forward: bool,
+    },
+    SearchClosed,
     /// A shortcut after checking whether a text input has focus.
     ShortcutChecked {
         shortcut: Shortcut,
@@ -1838,9 +1859,9 @@ impl App {
                     return self.open_palette(palette::Mode::CheckoutBranch);
                 }
             }
+            Shortcut::SearchCommits => return self.update(Message::SearchOpened),
             // Disabled until their task lands (`static_block` above).
-            Shortcut::SearchCommits
-            | Shortcut::FileHistory
+            Shortcut::FileHistory
             | Shortcut::OpenTerminal
             | Shortcut::OpenFileManager
             | Shortcut::ExternalDiff => {}
@@ -1887,6 +1908,9 @@ impl App {
                     return Task::none();
                 }
                 if let Some(view) = self.active_view_mut() {
+                    if view.search.take().is_some() {
+                        return Task::none();
+                    }
                     view.center = CenterView::Graph;
                 }
             }
@@ -2849,6 +2873,47 @@ impl App {
         }
     }
 
+    /// Searches the loaded commits of tab `tab` off the UI thread; `seq`
+    /// must still be the latest request (`None`: re-run after a refresh).
+    fn run_search(&mut self, tab: TabId, seq: Option<u64>) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let Some(search) = view.search.as_mut() else {
+            return Task::none();
+        };
+        if seq.is_some_and(|seq| seq != search.seq) || !search.active() {
+            return Task::none();
+        }
+        let seq = search.seq;
+        let query = search.query.clone();
+        let commits = Arc::clone(&view.snapshot.commits);
+        Task::perform(
+            blocking(move || Ok(crate::search::matches(&commits, &query))),
+            move |result| Message::SearchResult {
+                tab,
+                seq,
+                matches: result.unwrap_or_default(),
+            },
+        )
+    }
+
+    /// Selects the next (or previous) match and scrolls it into view.
+    fn search_step(&mut self, forward: bool) -> Task<Message> {
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(index) = view.search.as_mut().and_then(|s| s.step(forward)) else {
+            return Task::none();
+        };
+        let Some(id) = view.snapshot.commits.get(index).map(|c| c.id.clone()) else {
+            return Task::none();
+        };
+        select_multi(view, &id, false, false);
+        let task = self.select(Selection::Commit(id));
+        Task::batch([task, self.reveal_selection()])
+    }
+
     /// Drops the pending auto-fetch timer and plans the next one with the
     /// current interval.
     fn restart_auto_fetch(&mut self) -> Task<Message> {
@@ -3071,8 +3136,14 @@ impl App {
                 }
             }
             Message::EscapeCaptured => {
-                if self.palette.take().is_none() && self.shortcut_list.take().is_none() {
-                    self.settings_page = None;
+                if self.palette.take().is_none()
+                    && self.shortcut_list.take().is_none()
+                    && self.settings_page.take().is_none()
+                {
+                    // Esc in the search field closes the search.
+                    if let Some(view) = self.active_view_mut() {
+                        view.search = None;
+                    }
                 }
             }
             Message::BackspacePressed => {
@@ -3097,6 +3168,68 @@ impl App {
             }
             Message::PaletteSubmit => return self.run_palette(),
             Message::PaletteClosed => self.palette = None,
+            Message::SearchOpened => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                view.center = CenterView::Graph;
+                view.search.get_or_insert_with(Default::default);
+                return iced::widget::operation::focus(SEARCH_INPUT);
+            }
+            Message::SearchInput(query) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(search) = self.active_view_mut().and_then(|v| v.search.as_mut()) else {
+                    return Task::none();
+                };
+                search.query = query;
+                search.seq += 1;
+                search.jump = true;
+                let seq = search.seq;
+                if !search.active() {
+                    search.set_matches(Vec::new(), None);
+                    return Task::none();
+                }
+                return Task::perform(
+                    async { tokio::time::sleep(SEARCH_DEBOUNCE).await },
+                    move |()| Message::SearchDue { tab, seq },
+                );
+            }
+            Message::SearchDue { tab, seq } => return self.run_search(tab, Some(seq)),
+            Message::SearchResult { tab, seq, matches } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let selected = view
+                    .selected_commit()
+                    .and_then(|id| view.snapshot.index.get(id).copied());
+                let Some(search) = view.search.as_mut().filter(|s| s.seq == seq) else {
+                    return Task::none();
+                };
+                let any = !matches.is_empty();
+                search.set_matches(matches, selected);
+                // Like GitKraken: typing jumps to the first match, unless the
+                // selected commit matches.
+                let jump = std::mem::take(&mut search.jump);
+                if jump
+                    && any
+                    && search.current.is_none()
+                    && self.active_tab().is_some_and(|t| t.id == tab)
+                {
+                    return self.search_step(true);
+                }
+            }
+            Message::SearchSubmit => {
+                let forward = !self.modifiers.shift();
+                return self.search_step(forward);
+            }
+            Message::SearchStep { forward } => return self.search_step(forward),
+            Message::SearchClosed => {
+                if let Some(view) = self.active_view_mut() {
+                    view.search = None;
+                }
+            }
             Message::FileContextMenu {
                 file,
                 area,
@@ -4828,10 +4961,12 @@ impl App {
                 if let Some(dialog) = empty_pick.flatten() {
                     self.modal = Some(dialog);
                 }
+                // Matches are commit indices: search the new history again.
+                let search = self.run_search(id, None);
                 if reload {
-                    return Task::batch([self.reload_diff(id), self.load_details()]);
+                    return Task::batch([self.reload_diff(id), self.load_details(), search]);
                 }
-                return self.load_details();
+                return Task::batch([self.load_details(), search]);
             }
             Message::CommitChangesLoaded { tab, id, result } => {
                 if let Some(details) = self
@@ -6246,8 +6381,8 @@ mod tests {
     #[test]
     fn actions_of_later_tasks_explain_why_they_do_nothing() {
         let mut app = ready_app(&["c"]);
-        let _ = app.update(checked(Shortcut::SearchCommits, false));
-        assert_eq!(app.status, "Search commits: Not available yet");
+        let _ = app.update(checked(Shortcut::FileHistory, false));
+        assert_eq!(app.status, "File history and blame: Not available yet");
     }
 
     #[test]
@@ -8791,6 +8926,119 @@ mod tests {
             "origin/feature".into(),
         )));
         assert_eq!(running_args(&app), ["Checkout origin/feature"]);
+    }
+
+    /// Ready app whose commits `c0`, `c1`, … have the given summaries.
+    fn search_app(summaries: &[&str]) -> App {
+        let ids: Vec<String> = (0..summaries.len()).map(|i| format!("c{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&refs);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        for (commit, summary) in commits.iter_mut().zip(summaries) {
+            commit.summary = (*summary).to_owned();
+        }
+        snapshot.commits = Arc::new(commits);
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    fn search(app: &App) -> &crate::search::SearchState {
+        app.tabs[0].view().unwrap().search.as_ref().unwrap()
+    }
+
+    /// Runs the search the way the debounced task would.
+    fn search_for(app: &mut App, query: &str) {
+        let _ = app.update(Message::SearchInput(query.into()));
+        let seq = search(app).seq;
+        let matches = crate::search::matches(&app.tabs[0].view().unwrap().snapshot.commits, query);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SearchResult { tab, seq, matches });
+    }
+
+    #[test]
+    fn search_jumps_steps_and_wraps() {
+        let mut app = search_app(&["fix a", "add b", "fix c", "docs", "fix d"]);
+        let _ = app.update(checked(Shortcut::SearchCommits, false));
+        assert!(app.tabs[0].view().unwrap().search.is_some());
+        search_for(&mut app, "fix");
+        // Typing jumps to the first match.
+        assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
+        assert_eq!(search(&app).counter(), "1 of 3");
+        assert!(search(&app).dims(1) && !search(&app).dims(2));
+
+        let _ = app.update(Message::SearchSubmit);
+        assert_eq!(selected(&app), Some(Selection::Commit("c2".into())));
+        let _ = app.update(Message::SearchStep { forward: true });
+        let _ = app.update(Message::SearchStep { forward: true });
+        assert_eq!(
+            selected(&app),
+            Some(Selection::Commit("c0".into())),
+            "wraps"
+        );
+        // Shift+Enter goes back (and wraps to the last match).
+        let _ = app.update(Message::ModifiersChanged(keyboard::Modifiers::SHIFT));
+        let _ = app.update(Message::SearchSubmit);
+        assert_eq!(selected(&app), Some(Selection::Commit("c4".into())));
+        assert_eq!(search(&app).counter(), "3 of 3");
+    }
+
+    #[test]
+    fn search_keeps_a_matching_selection_and_drops_stale_results() {
+        let mut app = search_app(&["fix a", "add b", "fix c"]);
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::SearchOpened);
+        search_for(&mut app, "fix");
+        assert_eq!(selected(&app), Some(Selection::Commit("c2".into())));
+        assert_eq!(search(&app).counter(), "2 of 2");
+
+        // A result for an older query is ignored.
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SearchInput("add".into()));
+        let old = search(&app).seq - 1;
+        let _ = app.update(Message::SearchResult {
+            tab,
+            seq: old,
+            matches: vec![0],
+        });
+        assert_eq!(search(&app).matches, [0, 2], "previous matches stay");
+
+        // Clearing the query clears the matches.
+        let _ = app.update(Message::SearchInput(String::new()));
+        assert!(search(&app).matches.is_empty());
+        assert!(!search(&app).dims(1));
+    }
+
+    #[test]
+    fn search_runs_again_after_a_refresh_and_esc_keeps_the_selection() {
+        let mut app = search_app(&["fix a", "add b", "fix c"]);
+        let _ = app.update(Message::SearchOpened);
+        search_for(&mut app, "fix");
+        let seq = search(&app).seq;
+        // A new snapshot (refresh) starts the same search again (same seq).
+        let tab = app.tabs[0].id;
+        let generation = app.tabs[0].generation;
+        let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+        let _ = app.update(Message::SnapshotLoaded {
+            tab,
+            generation,
+            result: Ok(snapshot),
+        });
+        assert_eq!(search(&app).seq, seq);
+        let _ = app.update(Message::SearchResult {
+            tab,
+            seq,
+            matches: vec![2],
+        });
+        assert_eq!(search(&app).matches, [2]);
+        // The refresh does not move the selection.
+        assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
+        assert_eq!(search(&app).counter(), "0 of 1");
+
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.tabs[0].view().unwrap().search.is_none());
+        assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
     }
 
     fn palette_labels(app: &App) -> Vec<String> {

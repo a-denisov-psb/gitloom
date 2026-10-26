@@ -143,6 +143,11 @@ pub fn text_muted(theme: &Theme) -> text::Style {
     text_with(|p| p.text_muted)(theme)
 }
 
+/// Text of a row dimmed by the commit search.
+pub fn text_faint(theme: &Theme) -> text::Style {
+    text_with(|p| p.text_muted.scale_alpha(0.55))(theme)
+}
+
 pub fn text_accent(theme: &Theme) -> text::Style {
     text_with(|p| p.accent)(theme)
 }

@@ -56,6 +56,20 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         if columns.sha {
             header = header.push(cell(muted("SHA").size(11), COL_SHA));
         }
+        if repo.search.is_none() {
+            let tip = match crate::actions::ActionId::SearchCommits.shortcut_text() {
+                Some(keys) => format!("Search commits ({keys})"),
+                None => "Search commits".to_owned(),
+            };
+            header = header.push(crate::ui::panel::with_tooltip_text(
+                iced::widget::button(icons::tinted(Icon::Search, 13.0, |p| p.text_muted))
+                    .on_press(Message::SearchOpened)
+                    .padding([2, 6])
+                    .style(theme::flat)
+                    .into(),
+                tip,
+            ));
+        }
         let header = container(header.padding([0, ROW_PADDING]).align_y(iced::Center))
             .height(24)
             .align_y(alignment::Vertical::Center)
@@ -85,13 +99,70 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             })
             .height(Fill);
 
-        column![header, list].into()
+        match &repo.search {
+            Some(search) => column![search_bar(search), header, list].into(),
+            None => column![header, list].into(),
+        }
     });
 
     container(table)
         .width(Fill)
         .height(Fill)
         .style(theme::graph)
+        .into()
+}
+
+/// Commit search above the graph (M5-07): query, "n of m", previous/next,
+/// close.
+fn search_bar(search: &crate::search::SearchState) -> Element<'_, Message> {
+    let button = |icon: Icon, message: Message, tip: &str, enabled: bool| {
+        crate::ui::panel::with_tooltip_text(
+            iced::widget::button(icons::button_icon(icon, 14.0, enabled))
+                .on_press_maybe(enabled.then_some(message))
+                .padding([3, 6])
+                .style(theme::flat)
+                .into(),
+            tip.to_owned(),
+        )
+    };
+    let any = !search.matches.is_empty();
+    let content = row![
+        icons::tinted(Icon::Search, 14.0, |p| p.text_muted),
+        iced::widget::text_input(
+            "Search commits: message, author, email or SHA",
+            &search.query
+        )
+        .id(crate::app::SEARCH_INPUT)
+        .on_input(Message::SearchInput)
+        .on_submit(Message::SearchSubmit)
+        .padding([4, 8])
+        .size(13),
+        muted(search.counter()).size(12).width(70),
+        button(
+            Icon::ChevronUp,
+            Message::SearchStep { forward: false },
+            "Previous match (Shift+Enter)",
+            any
+        ),
+        button(
+            Icon::ChevronDown,
+            Message::SearchStep { forward: true },
+            "Next match (Enter)",
+            any
+        ),
+        button(
+            Icon::Close,
+            Message::SearchClosed,
+            "Close search (Esc)",
+            true
+        ),
+    ]
+    .spacing(6)
+    .padding([4, ROW_PADDING])
+    .align_y(iced::Center);
+    container(content)
+        .width(Fill)
+        .style(theme::column_header)
         .into()
 }
 
@@ -205,7 +276,7 @@ pub fn graph_row(
         };
         let content = row![
             cell(refs, COL_REFS),
-            cell(graph_cell(layout_row, Node::Wip), graph_width),
+            cell(graph_cell(layout_row, Node::Wip, false), graph_width),
             cell(summary, Fill),
         ];
         return row_button(
@@ -221,6 +292,8 @@ pub fn graph_row(
         return container(text("")).height(ROW_HEIGHT).into();
     };
     let is_stash = snapshot.is_stash(&commit.id);
+    // Rows that do not match an active search are dimmed (M5-07).
+    let dimmed = repo.search.as_ref().is_some_and(|s| s.dims(index));
     let node = if is_stash {
         Node::Stash
     } else if commit.parents.len() > 1 {
@@ -228,7 +301,9 @@ pub fn graph_row(
     } else {
         Node::Commit(format::initials(&commit.author))
     };
-    let summary = if commit.parents.len() > 1 {
+    let summary = if dimmed {
+        text(&commit.summary).style(theme::text_faint)
+    } else if commit.parents.len() > 1 {
         muted(&commit.summary)
     } else {
         text(&commit.summary)
@@ -244,7 +319,7 @@ pub fn graph_row(
     };
     let mut content = row![
         cell(refs_cell, COL_REFS),
-        cell(graph_cell(layout_row, node), graph_width),
+        cell(graph_cell(layout_row, node, dimmed), graph_width),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
     if columns.author {
@@ -543,10 +618,12 @@ enum Node {
 struct GraphCell {
     row: Row,
     node: Node,
+    /// The commit does not match the search: faint node.
+    dimmed: bool,
 }
 
-fn graph_cell<'a>(row: Row, node: Node) -> Element<'a, Message> {
-    canvas::Canvas::new(GraphCell { row, node })
+fn graph_cell<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
+    canvas::Canvas::new(GraphCell { row, node, dimmed })
         .width(Fill)
         .height(Fill)
         .into()
@@ -600,6 +677,11 @@ impl canvas::Program<Message> for GraphCell {
         }
 
         let color = theme::lane_color(p, self.row.color.0);
+        let color = if self.dimmed {
+            color.scale_alpha(0.3)
+        } else {
+            color
+        };
         match &self.node {
             Node::Wip => {
                 let circle = Path::circle(node, NODE_RADIUS - 2.0);
