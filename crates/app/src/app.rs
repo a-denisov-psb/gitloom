@@ -7,6 +7,7 @@ use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
 use crate::overlay::{ContextMenu, Form, FormAction, FormField, MenuEntry, Modal};
+use crate::palette::{self, Palette};
 use crate::panes::Panes;
 use crate::repo_view::{
     CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkKind, NetworkOp,
@@ -26,6 +27,9 @@ pub const FILTER_INPUT: &str = "sidebar-filter";
 pub const START_PATH_INPUT: &str = "start-path";
 pub const COMMIT_SUMMARY_INPUT: &str = "commit-summary";
 pub const SHORTCUT_FILTER_INPUT: &str = "shortcut-filter";
+pub const PALETTE_INPUT: &str = "command-palette";
+/// Recently used palette actions remembered (in memory).
+const RECENT_ACTIONS: usize = 8;
 
 /// File system events are collected for this long before they are classified.
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -313,6 +317,14 @@ pub enum Message {
     ShortcutListClosed,
     /// Esc taken by a focused text field.
     EscapeCaptured,
+    /// Backspace, also when a text field took it (palette sub-lists).
+    BackspacePressed,
+    PaletteQuery(String),
+    /// Click on palette entry `index` (among the shown ones).
+    PaletteRun(usize),
+    /// Enter in the palette query field.
+    PaletteSubmit,
+    PaletteClosed,
     /// A shortcut after checking whether a text input has focus.
     ShortcutChecked {
         shortcut: Shortcut,
@@ -593,6 +605,10 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
+    /// Open command palette (Ctrl+P).
+    pub palette: Option<Palette>,
+    /// Palette actions used recently, most recent first.
+    recent_actions: Vec<Shortcut>,
     /// Last reported window size, in logical pixels of `window_scale`;
     /// use [`App::window_size`].
     window_size: iced::Size,
@@ -646,6 +662,8 @@ impl App {
             form: None,
             context_menu: None,
             shortcut_list: None,
+            palette: None,
+            recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
             window_scale: 1.0,
             status_seq: 0,
@@ -1679,6 +1697,18 @@ impl App {
     }
 
     fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
+        // The palette's query field has focus: arrows, Enter and Esc
+        // drive the list.
+        if let Some(palette) = &mut self.palette {
+            match shortcut {
+                Shortcut::Close => self.palette = None,
+                Shortcut::Confirm => return self.run_palette(),
+                Shortcut::Navigate(crate::nav::Move::Next) => palette.move_selection(true),
+                Shortcut::Navigate(crate::nav::Move::Previous) => palette.move_selection(false),
+                _ => {}
+            }
+            return Task::none();
+        }
         // An open dialog or menu only reacts to Esc and Enter.
         let overlay_open = self.modal.is_some()
             || self.context_menu.is_some()
@@ -1801,10 +1831,15 @@ impl App {
                 self.shortcut_list = Some(String::new());
                 return iced::widget::operation::focus(SHORTCUT_FILTER_INPUT);
             }
+            Shortcut::CommandPalette => return self.open_palette(palette::Mode::Actions),
+            Shortcut::OpenRepoPalette => return self.open_palette(palette::Mode::OpenRepository),
+            Shortcut::CheckoutBranch => {
+                if self.active_tab().and_then(Tab::view).is_some() {
+                    return self.open_palette(palette::Mode::CheckoutBranch);
+                }
+            }
             // Disabled until their task lands (`static_block` above).
-            Shortcut::CommandPalette
-            | Shortcut::SearchCommits
-            | Shortcut::OpenRepoPalette
+            Shortcut::SearchCommits
             | Shortcut::FileHistory
             | Shortcut::OpenTerminal
             | Shortcut::OpenFileManager
@@ -2694,6 +2729,126 @@ impl App {
         )
     }
 
+    /// Why action `id` cannot run right now (listed disabled in the palette).
+    pub fn action_block(&self, id: Shortcut) -> Option<String> {
+        let action = crate::actions::find(id)?;
+        match action.requires {
+            crate::actions::Requires::NotYet => {
+                return Some(crate::actions::NOT_AVAILABLE.to_owned());
+            }
+            crate::actions::Requires::Repository
+                if self.active_tab().and_then(Tab::view).is_none() =>
+            {
+                return Some("Open a repository first".to_owned());
+            }
+            _ => {}
+        }
+        let in_rebase_panel = self
+            .active_tab()
+            .and_then(Tab::view)
+            .is_some_and(|view| matches!(view.center, CenterView::Rebase(_)));
+        (action.context == crate::actions::Context::RebasePanel && !in_rebase_panel)
+            .then(|| "Only in the interactive rebase panel".to_owned())
+    }
+
+    /// Opens the palette with the list of `mode`.
+    fn open_palette(&mut self, mode: palette::Mode) -> Task<Message> {
+        self.context_menu = None;
+        self.shortcut_list = None;
+        self.palette = Some(Palette::new(mode, self.palette_entries(mode)));
+        iced::widget::operation::focus(PALETTE_INPUT)
+    }
+
+    fn palette_entries(&self, mode: palette::Mode) -> Vec<palette::Entry> {
+        use palette::{Entry, Mode, Target};
+        match mode {
+            Mode::Actions => {
+                let all: Vec<Shortcut> = crate::actions::registry()
+                    .iter()
+                    .map(|a| a.id)
+                    .filter(|id| *id != Shortcut::CommandPalette)
+                    .collect();
+                palette::order_recent(&all, &self.recent_actions)
+                    .into_iter()
+                    .filter_map(crate::actions::find)
+                    .map(|action| {
+                        let target = match action.id {
+                            Shortcut::OpenRepoPalette => Target::Mode(Mode::OpenRepository),
+                            Shortcut::CheckoutBranch => Target::Mode(Mode::CheckoutBranch),
+                            id => Target::Action(id),
+                        };
+                        let mut entry = Entry::new(action.label.clone(), target)
+                            .disabled(self.action_block(action.id));
+                        if let Some(keys) = action.shortcut_label(crate::actions::MAC) {
+                            entry = entry.detail(keys);
+                        }
+                        entry
+                    })
+                    .collect()
+            }
+            Mode::OpenRepository => {
+                let mut entries = vec![Entry::new("Browse…", Target::Browse)];
+                entries.extend(self.session.recent.iter().map(|repo| {
+                    let name = repo.path.file_name().map_or_else(
+                        || repo.path.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    Entry::new(name, Target::OpenRepo(repo.path.clone()))
+                        .detail(repo.path.display().to_string())
+                }));
+                entries
+            }
+            Mode::CheckoutBranch => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Vec::new();
+                };
+                let mut entries = Vec::new();
+                for kind in [
+                    git_core::RefKind::LocalBranch,
+                    git_core::RefKind::RemoteBranch,
+                ] {
+                    for reference in view.snapshot.refs.iter().filter(|r| r.kind == kind) {
+                        let local = kind == git_core::RefKind::LocalBranch;
+                        let target = if local {
+                            CheckoutTarget::Local(reference.name.clone())
+                        } else {
+                            CheckoutTarget::Remote(reference.name.clone())
+                        };
+                        entries.push(
+                            Entry::new(reference.name.clone(), Target::Checkout(target))
+                                .detail(if local { "local" } else { "remote" })
+                                .disabled(reference.is_head.then(|| "Checked out".to_owned())),
+                        );
+                    }
+                }
+                entries
+            }
+            Mode::Files => Vec::new(),
+        }
+    }
+
+    /// Runs the selected palette entry (disabled entries do nothing).
+    fn run_palette(&mut self) -> Task<Message> {
+        let Some(target) = self.palette.as_ref().and_then(Palette::chosen) else {
+            return Task::none();
+        };
+        use palette::Target;
+        if let Target::Mode(mode) = target {
+            return self.open_palette(mode);
+        }
+        self.palette = None;
+        match target {
+            Target::Action(id) => {
+                palette::touch_recent(&mut self.recent_actions, id, RECENT_ACTIONS);
+                self.shortcut(id)
+            }
+            Target::OpenRepo(path) => self.update(Message::OpenRecent(path)),
+            Target::Browse => self.update(Message::OpenRepository),
+            Target::Checkout(target) => self.update(Message::Checkout(target)),
+            Target::File(_) | Target::Mode(_) => Task::none(),
+        }
+    }
+
     /// Drops the pending auto-fetch timer and plans the next one with the
     /// current interval.
     fn restart_auto_fetch(&mut self) -> Task<Message> {
@@ -2916,10 +3071,32 @@ impl App {
                 }
             }
             Message::EscapeCaptured => {
-                if self.shortcut_list.take().is_none() {
+                if self.palette.take().is_none() && self.shortcut_list.take().is_none() {
                     self.settings_page = None;
                 }
             }
+            Message::BackspacePressed => {
+                if self
+                    .palette
+                    .as_mut()
+                    .is_some_and(Palette::leave_on_backspace)
+                {
+                    return self.open_palette(palette::Mode::Actions);
+                }
+            }
+            Message::PaletteQuery(query) => {
+                if let Some(palette) = &mut self.palette {
+                    palette.set_query(query);
+                }
+            }
+            Message::PaletteRun(index) => {
+                if let Some(palette) = &mut self.palette {
+                    palette.select(index);
+                    return self.run_palette();
+                }
+            }
+            Message::PaletteSubmit => return self.run_palette(),
+            Message::PaletteClosed => self.palette = None,
             Message::FileContextMenu {
                 file,
                 area,
@@ -4457,7 +4634,8 @@ impl App {
                 shortcut,
                 text_input_focused,
             } => {
-                if !text_input_focused {
+                // The palette handles arrows itself while its field has focus.
+                if !text_input_focused || self.palette.is_some() {
                     return self.shortcut(shortcut);
                 }
             }
@@ -5483,6 +5661,10 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
         }) if status == event::Status::Ignored => {
             shortcuts::shortcut_with_modified(&key, &modified_key, modifiers).map(Message::Shortcut)
         }
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Backspace),
+            ..
+        }) => Some(Message::BackspacePressed),
         // A focused text field takes the first Esc; overlays with a query
         // field close right away anyway.
         Event::Keyboard(keyboard::Event::KeyPressed {
@@ -6064,8 +6246,8 @@ mod tests {
     #[test]
     fn actions_of_later_tasks_explain_why_they_do_nothing() {
         let mut app = ready_app(&["c"]);
-        let _ = app.update(checked(Shortcut::CommandPalette, false));
-        assert_eq!(app.status, "Command palette: Not available yet");
+        let _ = app.update(checked(Shortcut::SearchCommits, false));
+        assert_eq!(app.status, "Search commits: Not available yet");
     }
 
     #[test]
@@ -8608,6 +8790,88 @@ mod tests {
         let _ = app.update(Message::Checkout(CheckoutTarget::Remote(
             "origin/feature".into(),
         )));
+        assert_eq!(running_args(&app), ["Checkout origin/feature"]);
+    }
+
+    fn palette_labels(app: &App) -> Vec<String> {
+        app.palette
+            .as_ref()
+            .map(|p| p.shown().map(|e| e.label.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn palette_runs_actions_and_remembers_them() {
+        let mut app = checkout_app();
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        assert!(app.palette.is_some());
+        // Every registered action is listed (the palette itself excepted).
+        assert_eq!(
+            app.palette.as_ref().unwrap().shown_count(),
+            crate::actions::registry().len() - 1
+        );
+        let sidebar = app.panes.sidebar_visible;
+        let _ = app.update(Message::PaletteQuery("toggle left".into()));
+        assert_eq!(palette_labels(&app)[0], "Toggle left panel");
+        // Arrows move the selection although the query field has focus.
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), true));
+        let _ = app.update(checked(
+            Shortcut::Navigate(crate::nav::Move::Previous),
+            true,
+        ));
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        assert_ne!(app.panes.sidebar_visible, sidebar);
+
+        // The action used last comes first with an empty query.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        assert_eq!(palette_labels(&app)[0], "Toggle left panel");
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn palette_lists_disabled_actions_with_their_reason() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("fetch all".into()));
+        let palette = app.palette.as_ref().unwrap();
+        let entry = palette.selected_entry().unwrap();
+        assert_eq!(entry.label, "Fetch all");
+        assert_eq!(entry.disabled.as_deref(), Some("Open a repository first"));
+        // Enter on a disabled entry does nothing and keeps the palette.
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_some());
+        let _ = app.update(Message::PaletteQuery("interactive rebase: pick".into()));
+        let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
+        assert!(entry.disabled.is_some());
+    }
+
+    #[test]
+    fn palette_sub_lists() {
+        let mut app = checkout_app();
+        app.session
+            .touch_recent(std::path::Path::new("/repos/other"), 1);
+        let _ = app.update(checked(Shortcut::OpenRepoPalette, false));
+        assert_eq!(palette_labels(&app), ["Browse…", "other"]);
+        // Backspace on the empty query goes back to the actions.
+        let _ = app.update(Message::BackspacePressed);
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::Actions)
+        );
+
+        // "Checkout branch…" opens the branch list; the current one is disabled.
+        let _ = app.update(Message::PaletteQuery("checkout branch".into()));
+        let _ = app.update(Message::PaletteSubmit);
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.mode, palette::Mode::CheckoutBranch);
+        let main = palette.shown().find(|e| e.label == "main").unwrap();
+        assert_eq!(main.disabled.as_deref(), Some("Checked out"));
+        let _ = app.update(Message::PaletteQuery("o/feature".into()));
+        assert_eq!(palette_labels(&app)[0], "origin/feature");
+        let _ = app.update(Message::PaletteRun(0));
+        assert!(app.palette.is_none());
         assert_eq!(running_args(&app), ["Checkout origin/feature"]);
     }
 

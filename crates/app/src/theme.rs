@@ -500,6 +500,17 @@ pub fn menu_separator(theme: &Theme) -> container::Style {
     filled(palette(theme).border)
 }
 
+/// Disabled palette entry: still clickable (it shows its reason), muted.
+pub fn menu_item_disabled(theme: &Theme, status: button::Status) -> button::Style {
+    let p = palette(theme);
+    match status {
+        button::Status::Hovered | button::Status::Pressed => {
+            button_style(Some(p.bg_hover), p.text_muted)
+        }
+        _ => button_style(None, p.text_muted),
+    }
+}
+
 pub fn menu_item(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
     match status {
