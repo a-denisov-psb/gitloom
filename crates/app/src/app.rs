@@ -175,6 +175,27 @@ pub enum Message {
         height: f32,
     },
     DiffClosed,
+    /// A branch drag started on `name`.
+    BranchDragStart {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    BranchDragEnter {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    BranchDragLeave {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    /// Left button released over branch `name`: drops a dragged branch.
+    BranchDropped {
+        name: String,
+        kind: git_core::RefKind,
+        position: iced::Point,
+    },
+    /// Left button released anywhere: a drag not dropped on a branch ends.
+    BranchDragEnd,
     /// Cherry-pick the commits in this order (oldest first) onto HEAD.
     CherryPick(Vec<String>),
     /// "Revert commit": a merge commit asks for the parent first.
@@ -1672,6 +1693,9 @@ impl App {
                     || self.context_menu.take().is_some()
                     || self.form.take().is_some()
                     || self.message_dialog.take().is_some()
+                    || self
+                        .active_view_mut()
+                        .is_some_and(|v| v.drag.take().is_some())
                     || self
                         .active_view_mut()
                         .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
@@ -3660,6 +3684,51 @@ impl App {
             Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty => {
                 return self.merge(message);
             }
+            Message::BranchDragStart { name, kind } => {
+                if let Some(view) = self.active_view_mut() {
+                    view.drag = Some(crate::repo_view::BranchDrag {
+                        source: (name, kind),
+                        target: None,
+                    });
+                }
+            }
+            Message::BranchDragEnter { name, kind } => {
+                if let Some(drag) = self.active_view_mut().and_then(|v| v.drag.as_mut()) {
+                    drag.target = (drag.source != (name.clone(), kind)).then_some((name, kind));
+                }
+            }
+            Message::BranchDragLeave { name, kind } => {
+                if let Some(drag) = self.active_view_mut().and_then(|v| v.drag.as_mut()) {
+                    if drag.targets(&name, kind) {
+                        drag.target = None;
+                    }
+                }
+            }
+            Message::BranchDropped {
+                name,
+                kind,
+                position,
+            } => {
+                let writable = self.write_block().is_none();
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let Some(drag) = view.drag.take() else {
+                    return Task::none();
+                };
+                if drag.source == (name.clone(), kind) || kind == git_core::RefKind::Tag {
+                    return Task::none();
+                }
+                let entries = drop_entries(&view.snapshot, &drag.source, (&name, kind), writable);
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::BranchDragEnd => {
+                if let Some(view) = self.active_view_mut() {
+                    if view.drag.is_some() {
+                        view.drag = None;
+                    }
+                }
+            }
             Message::ResetStart(id) => {
                 if self.state_blocked(Guarded::Reset) {
                     return Task::none();
@@ -4395,6 +4464,39 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
             },
         ],
         default: Some(1),
+    })
+}
+
+/// Menu for dropping branch `source` onto branch `target` (M4-11).
+fn drop_entries(
+    snapshot: &RepoSnapshot,
+    source: &(String, git_core::RefKind),
+    target: (&str, git_core::RefKind),
+    writable: bool,
+) -> Vec<crate::overlay::MenuEntry> {
+    use git_core::RefKind;
+    let commit_of = |name: &str, kind: RefKind| {
+        snapshot
+            .refs
+            .iter()
+            .find(|r| r.name == name && r.kind == kind)
+            .map_or("", |r| r.target.as_str())
+    };
+    let source_commit = commit_of(&source.0, source.1);
+    let target_commit = commit_of(target.0, target.1);
+    let can_fast_forward = target.1 == RefKind::LocalBranch
+        && !target_commit.is_empty()
+        && source_commit != target_commit
+        && snapshot.is_ancestor(target_commit, source_commit) != Some(false);
+    crate::menus::drop_menu(crate::menus::DropFacts {
+        source: &source.0,
+        source_remote: source.1 == RefKind::RemoteBranch,
+        target: target.0,
+        target_remote: target.1 == RefKind::RemoteBranch,
+        target_commit,
+        head: snapshot.head.branch(),
+        can_fast_forward,
+        writable: writable && snapshot.state.is_clean(),
     })
 }
 
@@ -6487,6 +6589,104 @@ mod tests {
         let _ = app.update(Message::ResetStart("c".into()));
         assert!(app.modal.is_none());
         assert_eq!(app.status, "Cannot reset while a merge is in progress");
+    }
+
+    /// History main (checked out) at "m", feature one commit ahead at "f".
+    fn drag_app() -> App {
+        let mut app = app_with_history(&[("f", &["m"]), ("m", &[])]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let branch = |name: &str, target: &str, is_head: bool| git_core::Reference {
+            name: name.into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: target.into(),
+            is_head,
+            upstream: None,
+            ahead_behind: None,
+        };
+        snapshot.refs = vec![branch("main", "m", true), branch("feature", "f", false)];
+        snapshot.head = git_core::Head::Branch {
+            name: "main".into(),
+            target: "m".into(),
+        };
+        view.apply_snapshot(Arc::new(snapshot));
+        app
+    }
+
+    fn local(name: &str) -> (String, git_core::RefKind) {
+        (name.into(), git_core::RefKind::LocalBranch)
+    }
+
+    #[test]
+    fn dragging_a_branch_highlights_targets_and_drops_into_a_menu() {
+        let mut app = drag_app();
+        let (name, kind) = local("feature");
+        let _ = app.update(Message::BranchDragStart {
+            name: name.clone(),
+            kind,
+        });
+        // Over itself: no target.
+        let _ = app.update(Message::BranchDragEnter {
+            name: name.clone(),
+            kind,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().drag.as_ref().unwrap().target,
+            None
+        );
+        let _ = app.update(Message::BranchDragEnter {
+            name: "main".into(),
+            kind,
+        });
+        let _ = app.update(Message::BranchDragLeave {
+            name: name.clone(),
+            kind,
+        });
+        let drag = app.tabs[0].view().unwrap().drag.clone().unwrap();
+        assert!(drag.targets("main", kind), "leaving another entry keeps it");
+
+        let _ = app.update(Message::BranchDropped {
+            name: "main".into(),
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        let _ = app.update(Message::BranchDragEnd);
+        assert!(app.tabs[0].view().unwrap().drag.is_none());
+        assert_eq!(
+            menu_item_enabled(&app, "Fast-forward main to feature"),
+            Some(true)
+        );
+        assert_eq!(
+            menu_item_enabled(&app, "Merge feature into main"),
+            Some(true)
+        );
+        assert_eq!(
+            menu_item_enabled(&app, "Rebase feature onto main"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_release_without_a_drag_or_on_the_source_opens_nothing() {
+        let mut app = drag_app();
+        let (name, kind) = local("feature");
+        let _ = app.update(Message::BranchDropped {
+            name: "main".into(),
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        assert!(app.context_menu.is_none(), "plain click");
+        let _ = app.update(Message::BranchDragStart {
+            name: name.clone(),
+            kind,
+        });
+        let _ = app.update(Message::BranchDropped {
+            name,
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        assert!(app.context_menu.is_none(), "dropped on itself");
+        assert!(app.tabs[0].view().unwrap().drag.is_none());
     }
 
     #[test]

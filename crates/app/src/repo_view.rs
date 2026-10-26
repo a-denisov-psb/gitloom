@@ -65,6 +65,23 @@ pub struct DiffView {
     pub fetched: Vec<String>,
 }
 
+/// A branch being dragged: its name and kind, and the branch under the
+/// pointer (drop target highlight).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchDrag {
+    pub source: (String, git_core::RefKind),
+    pub target: Option<(String, git_core::RefKind)>,
+}
+
+impl BranchDrag {
+    /// `name`/`kind` is highlighted as drop target.
+    pub fn targets(&self, name: &str, kind: git_core::RefKind) -> bool {
+        self.target
+            .as_ref()
+            .is_some_and(|(n, k)| n == name && *k == kind)
+    }
+}
+
 /// Write actions that would break an operation in progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Guarded {
@@ -361,6 +378,8 @@ pub struct RepoView {
     /// A cherry-pick or revert ran: after the next refresh, an empty result
     /// (operation in progress, nothing to commit) opens the empty dialog.
     pub check_empty: bool,
+    /// Branch being dragged onto another one (M4-11).
+    pub drag: Option<BranchDrag>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -555,6 +574,7 @@ impl RepoView {
             pending_checkout: None,
             pending_merge: None,
             check_empty: false,
+            drag: None,
             pull_failure: None,
             network: None,
             queued: None,

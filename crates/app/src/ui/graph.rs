@@ -227,7 +227,10 @@ pub fn graph_row(
     let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
     let refs_cell: Element<'_, Message> = match &repo.new_branch {
         Some(input) if input.row.as_deref() == Some(commit.id.as_str()) => new_branch_input(input),
-        _ => ref_pills(ref_labels(&refs, &snapshot.head, commit)),
+        _ => ref_pills(
+            ref_labels(&refs, &snapshot.head, commit),
+            repo.drag.as_ref(),
+        ),
     };
     let mut content = row![
         cell(refs_cell, COL_REFS),
@@ -385,11 +388,14 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
 }
 
 /// First label as pill; the rest collapse into "+N" with a tooltip listing them.
-fn ref_pills<'a>(labels: Vec<RefLabel>) -> Element<'a, Message> {
+fn ref_pills<'a>(
+    labels: Vec<RefLabel>,
+    drag: Option<&crate::repo_view::BranchDrag>,
+) -> Element<'a, Message> {
     let Some(first) = labels.first() else {
         return text("").into();
     };
-    let mut pills = row![pill(first)].spacing(4).align_y(iced::Center);
+    let mut pills = row![pill(first, drag)].spacing(4).align_y(iced::Center);
     if labels.len() > 1 {
         let rest = Column::with_children(
             labels[1..]
@@ -406,7 +412,7 @@ fn ref_pills<'a>(labels: Vec<RefLabel>) -> Element<'a, Message> {
     pills.into()
 }
 
-fn pill<'a>(label: &RefLabel) -> Element<'a, Message> {
+fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> Element<'a, Message> {
     let kind = match label.kind {
         LabelKind::Local => RefKind::LocalBranch,
         LabelKind::Remote => RefKind::RemoteBranch,
@@ -427,28 +433,23 @@ fn pill<'a>(label: &RefLabel) -> Element<'a, Message> {
         }
         None => pill.into(),
     };
-    // Right click on a branch pill opens the branch menu, not the commit menu.
+    // Right click on a branch pill opens the branch menu, not the commit
+    // menu; branch pills can be dragged onto each other (M4-11).
+    let branch = |pill: Element<'a, Message>, name: &str, kind: RefKind| {
+        let menu_name = name.to_owned();
+        let pill = crate::ui::context_area::context_area(pill, move |position| {
+            Message::BranchContextMenu {
+                name: menu_name.clone(),
+                kind,
+                position,
+            }
+        });
+        let highlight = drag.is_some_and(|d| d.targets(name, kind));
+        crate::ui::draggable_branch(pill, name, kind, highlight)
+    };
     match &label.checkout {
-        Some(crate::app::CheckoutTarget::Local(name)) => {
-            let name = name.clone();
-            crate::ui::context_area::context_area(pill, move |position| {
-                Message::BranchContextMenu {
-                    name: name.clone(),
-                    kind: RefKind::LocalBranch,
-                    position,
-                }
-            })
-        }
-        Some(crate::app::CheckoutTarget::Remote(name)) => {
-            let name = name.clone();
-            crate::ui::context_area::context_area(pill, move |position| {
-                Message::BranchContextMenu {
-                    name: name.clone(),
-                    kind: RefKind::RemoteBranch,
-                    position,
-                }
-            })
-        }
+        Some(crate::app::CheckoutTarget::Local(name)) => branch(pill, name, RefKind::LocalBranch),
+        Some(crate::app::CheckoutTarget::Remote(name)) => branch(pill, name, RefKind::RemoteBranch),
         _ if label.kind == LabelKind::Tag => {
             let name = label.text.clone();
             crate::ui::context_area::context_area(pill, move |position| {

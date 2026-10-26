@@ -8,6 +8,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - Select several commits in the graph: Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extend the selection. The right panel lists the selected commits.
 - Merge and fast-forward from the branch context menu ("Merge X into Y", "Fast-forward Y to X", and for remote branches "Fast-forward L to origin/L" for a local branch that is behind). Local changes that block a merge can be stashed and re-applied automatically.
+- Drag a branch (graph pill or sidebar) onto another branch: fast-forward, merge, rebase or interactive rebase from the menu that opens.
 - Reset the current branch to a commit (soft, mixed or hard) from the commit menu; a hard reset is confirmed and lists the changes that will be lost.
 - Cherry-pick one commit (commit menu) or several (multi-selection, applied oldest first) and revert a commit; merge commits ask for the parent. An empty result offers "Skip" or "Commit empty".
 - "Edit commit message" in the commit menu (HEAD is amended, older commits are reworded by a rebase) and "Squash N commits" for a contiguous multi-selection, both with a message dialog.

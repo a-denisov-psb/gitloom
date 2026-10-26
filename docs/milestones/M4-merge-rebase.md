@@ -182,7 +182,9 @@ Acceptance: integration tests for single, multiple, conflict, empty, revert of a
 
 Acceptance: integration tests for all three modes incl. untracked files (hard reset keeps untracked files, like Git).
 
-### [ ] M4-11 Drag and drop of branches
+### [x] M4-11 Drag and drop of branches
+
+> Done: widgets `drag_area` (never captures events, so click, double click and context menu keep working; a left press plus 4 px of movement starts the drag, enter/leave while the button is down marks the drop target, release over an entry drops) and `release_area` around the window (ends a drag released elsewhere); `RepoView::drag` (`BranchDrag` source/target), graph branch pills and sidebar branches (not tags) are draggable and drop targets, the target is outlined. Drop → menu `menus::drop_menu` per planning decision: "Fast-forward T to S" (local target that is a proper ancestor; works without checkout via M4-04), "Merge S into T" (needs T checked out), "Rebase S onto T" and "Interactive rebase S onto T" (need S checked out; the panel opens with T's commit as base) — otherwise disabled with "Check out <branch> first". Esc or a drop outside cancels. Pending maintainer verification (disabled vs. automatic checkout) unchanged. Tests: menu rules (checked-out target, checked-out source, fast-forward of a branch that is not checked out, remote targets), app drag state (self is no target, leave of another entry keeps the target, drop → menu, plain release and drop on itself open nothing). Checked by hand: sidebar `feature` dropped on `main` → menu with Fast-forward/Merge enabled and rebase items disabled → Fast-forward main to feature; graph pill `other` dropped on the `main` pill (diverged) → no fast-forward, merge enabled.
 
 - Drag a branch pill (graph) or sidebar branch; drop on another branch pill or sidebar branch; drop target highlighted while hovering.
 - Menu per planning decision; Esc or drop outside cancels.

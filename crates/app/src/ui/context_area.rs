@@ -325,3 +325,343 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for DoubleClickArea<'_, Me
         )
     }
 }
+
+/// Wraps a branch entry so it can be dragged onto another one (M4-11).
+/// Never captures events, so clicks, double clicks and context menus of
+/// the content keep working:
+/// - a left press followed by 4 px of movement emits `on_drag_start`;
+/// - while the left button is down, entering or leaving the entry emits
+///   `on_enter` / `on_leave` (drop target highlight);
+/// - releasing the left button over the entry emits `on_drop(position)`.
+pub fn drag_area<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    events: DragEvents<Message>,
+    on_drop: impl Fn(Point) -> Message + 'a,
+) -> Element<'a, Message> {
+    Element::new(DragArea {
+        content: content.into(),
+        events,
+        on_drop: Box::new(on_drop),
+    })
+}
+
+/// Messages of a [`drag_area`].
+pub struct DragEvents<Message> {
+    pub start: Message,
+    pub enter: Message,
+    pub leave: Message,
+}
+
+struct DragArea<'a, Message> {
+    content: Element<'a, Message>,
+    events: DragEvents<Message>,
+    on_drop: Box<dyn Fn(Point) -> Message + 'a>,
+}
+
+#[derive(Default)]
+struct DragState {
+    /// Where the left button went down on this entry.
+    pressed_at: Option<Point>,
+    started: bool,
+    /// The left button is down (pressed anywhere).
+    button_down: bool,
+    hovered: bool,
+}
+
+/// Movement in pixels before a press becomes a drag.
+const DRAG_THRESHOLD: f32 = 4.0;
+
+impl<Message: Clone> Widget<Message, Theme, Renderer> for DragArea<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<DragState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(DragState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        // Seen before the content can capture it; never captured here.
+        let state = tree.state.downcast_mut::<DragState>();
+        let bounds = layout.bounds();
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                state.button_down = true;
+                state.pressed_at = cursor.position_over(bounds);
+                state.started = false;
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if let (Some(pressed), false) = (state.pressed_at, state.started) {
+                    if pressed.distance(*position) > DRAG_THRESHOLD {
+                        state.started = true;
+                        shell.publish(self.events.start.clone());
+                    }
+                }
+                let over = cursor.is_over(bounds);
+                if state.button_down && over != state.hovered {
+                    shell.publish(if over {
+                        self.events.enter.clone()
+                    } else {
+                        self.events.leave.clone()
+                    });
+                }
+                state.hovered = over;
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                state.button_down = false;
+                state.pressed_at = None;
+                state.started = false;
+                if let Some(position) = cursor.position_over(bounds) {
+                    shell.publish((self.on_drop)(position));
+                }
+            }
+            _ => {}
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+/// Wraps the whole window: a left button release anywhere emits
+/// `on_release` after the content handled it (ends a branch drag that was
+/// not dropped on a target).
+pub fn release_area<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_release: Message,
+) -> Element<'a, Message> {
+    Element::new(ReleaseArea {
+        content: content.into(),
+        on_release,
+    })
+}
+
+struct ReleaseArea<'a, Message> {
+    content: Element<'a, Message>,
+    on_release: Message,
+}
+
+impl<Message: Clone> Widget<Message, Theme, Renderer> for ReleaseArea<'_, Message> {
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+        if let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
+            shell.publish(self.on_release.clone());
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}

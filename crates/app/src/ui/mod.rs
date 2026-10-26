@@ -40,6 +40,37 @@ use crate::panes::PaneKind;
 use crate::repo_view::{CenterView, RepoView};
 use crate::theme;
 
+/// Makes a branch entry (graph pill or sidebar row) draggable onto other
+/// branches and a drop target itself; `highlight` outlines it as the
+/// current drop target.
+pub(crate) fn draggable_branch<'a>(
+    content: Element<'a, Message>,
+    name: &str,
+    kind: git_core::RefKind,
+    highlight: bool,
+) -> Element<'a, Message> {
+    let content: Element<'a, Message> = if highlight {
+        container(content).style(theme::drop_target).into()
+    } else {
+        content
+    };
+    let event = |make: fn(String, git_core::RefKind) -> Message| make(name.to_owned(), kind);
+    let drop_name = name.to_owned();
+    context_area::drag_area(
+        content,
+        context_area::DragEvents {
+            start: event(|name, kind| Message::BranchDragStart { name, kind }),
+            enter: event(|name, kind| Message::BranchDragEnter { name, kind }),
+            leave: event(|name, kind| Message::BranchDragLeave { name, kind }),
+        },
+        move |position| Message::BranchDropped {
+            name: drop_name.clone(),
+            kind,
+            position,
+        },
+    )
+}
+
 pub fn view(app: &App) -> Element<'_, Message> {
     let mut layout = column![tabs::view(app)].spacing(1);
     if let Some(notice) = &app.notice {
@@ -56,6 +87,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .height(Fill)
         .style(theme::root)
         .into();
+    // Ends a branch drag released outside a drop target (M4-11).
+    let base = context_area::release_area(base, Message::BranchDragEnd);
     let mut layers = vec![base];
     if let Some(menu) = &app.context_menu {
         layers.push(overlays::context_menu(menu, app.window_size));
