@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
 ### Added
 
 - Select several commits in the graph: Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extend the selection. The right panel lists the selected commits.

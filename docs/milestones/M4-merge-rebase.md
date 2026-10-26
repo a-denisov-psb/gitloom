@@ -53,7 +53,9 @@ Until answered, implement the decisions above; adjust afterwards.
 - [x] No Git command ever waits for a terminal editor or prompt.
 - [x] CRLF repository: conflict resolution keeps line endings (Windows CI).
 - [x] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
-- [ ] Released as `v0.5.0` (M4-15).
+- [x] Released as `v0.5.0` (M4-15).
+
+> Note (M4-15): released with the maintainer's approval while the keyboard parts (cherry-pick of three commits via multi-selection, typed reword message) and the Windows run of the walkthrough are still open maintainer to-dos in `docs/HANDOVER.md`. CI did not run for the planning merge e048618 (GitHub: account billing blocked the jobs); the last code commit on `develop` (e461b48) was green on all platforms, `./scripts/check.sh` green locally on the release branch.
 
 ## Task overview
 
@@ -219,6 +221,8 @@ Acceptance: integration tests for each case.
 - Full walkthrough per milestone acceptance on Linux; maintainer repeats on Windows (Maintainer to-dos).
 - Update UX-PARITY, CHANGELOG, PERFORMANCE (conflict view with 5 000-line file, interactive rebase of 200 commits).
 
-### [ ] M4-15 Release v0.5.0
+### [x] M4-15 Release v0.5.0
+
+> Done (2026-10-26): `release/0.5.0`, version bump, changelog, README, ROADMAP (M5 current), HANDOVER, PLANNING-HANDOVER (history, decisions 4 and 5 settled).
 
 Same procedure as before (`/release`), only when the maintainer asks.
