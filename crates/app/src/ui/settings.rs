@@ -29,7 +29,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
 
     let form = match page.category {
         Category::General => general(page),
-        Category::Appearance => appearance(&app.settings),
+        Category::Appearance => appearance(app),
         Category::ExternalTools => external_tools(&app.settings),
     };
 
@@ -101,7 +101,7 @@ fn general(page: &Page) -> Element<'_, Message> {
     .align_y(iced::Center)]
     .spacing(4);
     if let Some(error) = &page.error {
-        input = input.push(text(error).size(12).color(theme::DANGER));
+        input = input.push(text(error).size(12).style(theme::text_danger));
     }
     field(
         "Auto-fetch interval",
@@ -110,15 +110,51 @@ fn general(page: &Page) -> Element<'_, Message> {
     )
 }
 
-fn appearance(settings: &Settings) -> Element<'_, Message> {
-    let appearance = &settings.appearance;
-    let theme = match appearance.theme {
-        ThemeChoice::Dark => "Dark",
-        ThemeChoice::Light => "Light",
-        ThemeChoice::System => "System",
+/// Segmented control: one button per option, the chosen one highlighted.
+fn segmented<'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    current: T,
+    on_choose: fn(T) -> Message,
+) -> Element<'a, Message> {
+    row(options.iter().map(|&(value, label)| {
+        let chosen = value == current;
+        button(text(label))
+            .on_press(on_choose(value))
+            .padding([5, 14])
+            .style(if chosen {
+                button::primary
+            } else {
+                button::secondary
+            })
+            .into()
+    }))
+    .spacing(4)
+    .into()
+}
+
+fn appearance(app: &App) -> Element<'_, Message> {
+    let appearance = &app.settings.appearance;
+    let system_note = match app.system_theme {
+        iced::theme::Mode::Light => "System: follows the operating system (now light).",
+        iced::theme::Mode::Dark => "System: follows the operating system (now dark).",
+        iced::theme::Mode::None => {
+            "System: the operating system reports no preference here, so Dark is used."
+        }
     };
     column![
-        field("Theme", not_yet(theme.to_owned()), None),
+        field(
+            "Theme",
+            segmented(
+                &[
+                    (ThemeChoice::Dark, "Dark"),
+                    (ThemeChoice::Light, "Light"),
+                    (ThemeChoice::System, "System"),
+                ],
+                appearance.theme,
+                Message::ThemeChosen,
+            ),
+            system_note,
+        ),
         field(
             "Zoom",
             not_yet(format!("{} %", appearance.zoom_percent)),

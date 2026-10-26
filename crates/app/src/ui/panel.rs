@@ -179,10 +179,10 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         .size(11)
         .width(28)
         .align_x(iced::Right)
-        .color(if remaining < 0 {
-            theme::DANGER
+        .style(if remaining < 0 {
+            theme::text_danger
         } else {
-            theme::TEXT_MUTED
+            theme::text_muted
         });
 
     let mut description = text_editor(&view.description)
@@ -257,14 +257,14 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         content = content.push(
             text("You are in detached HEAD; create a branch to keep your commits.")
                 .size(11)
-                .color(theme::WARNING),
+                .style(theme::text_warning),
         );
     }
     if view.amend && view.head_pushed() {
         content = content.push(
             text("HEAD is already pushed; amending rewrites published history.")
                 .size(11)
-                .color(theme::WARNING),
+                .style(theme::text_warning),
         );
     }
     if let Some(hint) = blocker.filter(|_| writable) {
@@ -312,7 +312,7 @@ fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
         Some(Loadable::Ready(DetailChanges::Stash(changes))) => {
             stash_files(view, &commit.id, changes)
         }
-        Some(Loadable::Failed(error)) => text(error).color(theme::DANGER).into(),
+        Some(Loadable::Failed(error)) => text(error).style(theme::text_danger).into(),
         Some(Loadable::Loading) | None => muted("Loading changed files…").into(),
     };
 

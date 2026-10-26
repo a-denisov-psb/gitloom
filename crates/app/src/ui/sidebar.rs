@@ -179,10 +179,7 @@ fn submodules<'a>() -> Element<'a, Message> {
         )
         .padding([4, 6])
         .width(Fill)
-        .style(|_| container::Style {
-            text_color: Some(theme::TEXT_MUTED.scale_alpha(0.6)),
-            ..container::Style::default()
-        })
+        .style(theme::faded)
         .into(),
     )
 }
@@ -195,7 +192,7 @@ fn ref_item<'a>(
 ) -> Element<'a, Message> {
     let marker = if reference.is_head { "✓" } else { "" };
     let mut content = row![
-        text(marker).width(INDENT).color(theme::ACCENT),
+        text(marker).width(INDENT).style(theme::text_accent),
         text(label).wrapping(text::Wrapping::None),
         space::horizontal(),
     ]
@@ -240,9 +237,12 @@ fn rename_input(rename: &crate::repo_view::RenameBranch) -> Element<'_, Message>
         .style(theme::inline_input(rename.error.is_some()));
     let field = container(field).padding(iced::Padding::from([1, 6]).left(6.0 + INDENT));
     match &rename.error {
-        Some(error) => column![field, text(error.clone()).size(11).color(theme::DANGER)]
-            .spacing(2)
-            .into(),
+        Some(error) => column![
+            field,
+            text(error.clone()).size(11).style(theme::text_danger)
+        ]
+        .spacing(2)
+        .into(),
         None => field.into(),
     }
 }

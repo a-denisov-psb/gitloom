@@ -104,7 +104,7 @@ pub fn form(form: &Form) -> Element<'_, Message> {
         content = content.push(column![muted(&field.label).size(12), input].spacing(4));
     }
     if let Some(error) = &form.error {
-        content = content.push(text(error).size(12).color(theme::DANGER));
+        content = content.push(text(error).size(12).style(theme::text_danger));
     }
     content = content.push(
         row![
@@ -154,7 +154,7 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
                 .size(12)
                 .font(Font::MONOSPACE);
             let keys = if block.is_some() {
-                keys.color(theme::TEXT_MUTED)
+                keys.style(theme::text_muted)
             } else {
                 keys
             };
@@ -211,7 +211,7 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
     ]
     .spacing(12);
     if let Some(error) = &dialog.error {
-        content = content.push(text(error).size(12).color(theme::DANGER));
+        content = content.push(text(error).size(12).style(theme::text_danger));
     }
     content = content.push(
         row![

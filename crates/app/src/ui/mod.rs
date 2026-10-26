@@ -155,8 +155,8 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
             PaneKind::Center => match &view.center {
                 CenterView::Graph => graph::view(view),
                 CenterView::Diff(diff) => diff::view(view, diff),
-                CenterView::Conflict(conflict) => conflict::view(view, conflict),
-                CenterView::Rebase(panel) => rebase::view(view, panel),
+                CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
+                CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),
             },
             PaneKind::Panel => panel::view(view),
         };
@@ -169,11 +169,20 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     .into()
 }
 
+/// Center views without a background of their own get the graph's.
+fn with_background(content: Element<'_, Message>) -> Element<'_, Message> {
+    container(content)
+        .width(Fill)
+        .height(Fill)
+        .style(theme::graph)
+        .into()
+}
+
 /// App-wide one-time notice with a dismiss button.
 fn notice_banner(notice: &str) -> Element<'_, Message> {
     container(
         row![
-            text(notice).color(theme::TEXT),
+            text(notice).style(theme::text_normal),
             space::horizontal(),
             button(text("Dismiss").size(12))
                 .on_press(Message::DismissNotice)
@@ -225,7 +234,7 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
     );
     container(
         row![
-            text(state).color(theme::TEXT),
+            text(state).style(theme::text_normal),
             muted(hint).size(12),
             space::horizontal(),
             actions,
@@ -243,7 +252,7 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
 fn banner<'a>(error: &'a str, tab: crate::app::TabId) -> Element<'a, Message> {
     container(
         row![
-            text(error).color(theme::TEXT),
+            text(error).style(theme::text_normal),
             space::horizontal(),
             button(text("Retry").size(12))
                 .on_press(Message::Retry(tab))
@@ -284,7 +293,7 @@ pub fn rows_in_view(
 
 /// Muted secondary text.
 pub(crate) fn muted<'a>(content: impl text::IntoFragment<'a>) -> text::Text<'a> {
-    text(content).color(theme::TEXT_MUTED)
+    text(content).style(theme::text_muted)
 }
 
 /// Single-letter badge for a file change (M, A, D, R, ?, !).
@@ -299,7 +308,7 @@ pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> text::Text<'a> {
         ChangeKind::Conflicted => "!",
     };
     text(letter)
-        .color(theme::change_color(kind))
+        .style(theme::text_change(kind))
         .width(16)
         .font(iced::Font::MONOSPACE)
 }

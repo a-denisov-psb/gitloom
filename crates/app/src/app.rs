@@ -291,6 +291,9 @@ pub enum Message {
     Refresh,
     Shortcut(Shortcut),
     SettingsLoaded(settings::Loaded),
+    /// Light or dark mode of the operating system (start and changes).
+    SystemTheme(iced::theme::Mode),
+    ThemeChosen(settings::ThemeChoice),
     /// Open the settings view (Ctrl+, , gear button, palette).
     SettingsOpened,
     SettingsClosed,
@@ -569,6 +572,8 @@ pub struct App {
     pub settings_page: Option<settings::Page>,
     settings_path: Option<PathBuf>,
     settings_save_seq: u64,
+    /// Light or dark mode of the operating system (`None` if unknown).
+    pub system_theme: iced::theme::Mode,
     /// Result of looking for `git`; `None` until detected.
     pub git: Option<git_core::GitAvailability>,
     /// App-wide one-time notice (e.g. Git missing), dismissible.
@@ -622,6 +627,7 @@ impl App {
                 .as_deref()
                 .map(|path| path.with_file_name(settings::FILE_NAME)),
             settings_save_seq: 0,
+            system_theme: iced::theme::Mode::None,
             git: None,
             notice: None,
             modal: None,
@@ -678,7 +684,8 @@ impl App {
         let detect = Task::perform(blocking(|| Ok(git_core::detect_git())), |result| {
             Message::GitDetected(result.unwrap_or(git_core::GitAvailability::Missing))
         });
-        (app, Task::batch([task, detect]))
+        let system_theme = iced::system::theme().map(Message::SystemTheme);
+        (app, Task::batch([task, detect, system_theme]))
     }
 
     /// Why write actions are blocked, if they are (unknown counts as blocked).
@@ -1574,6 +1581,20 @@ impl App {
             blocking(move || session::save(&path, &json).map_err(|e| e.to_string())),
             Message::Saved,
         )
+    }
+
+    /// Theme of the window: the choice in the settings; "System" follows
+    /// the operating system and falls back to Dark when it is unknown.
+    pub fn theme(&self) -> iced::Theme {
+        crate::theme::app_theme(self.light_theme())
+    }
+
+    pub fn light_theme(&self) -> bool {
+        match self.settings.appearance.theme {
+            settings::ThemeChoice::Dark => false,
+            settings::ThemeChoice::Light => true,
+            settings::ThemeChoice::System => self.system_theme == iced::theme::Mode::Light,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -2753,6 +2774,13 @@ impl App {
                 return Task::batch([save, self.restart_auto_fetch()]);
             }
             Message::SettingsOpened => return self.open_settings(),
+            Message::SystemTheme(mode) => self.system_theme = mode,
+            Message::ThemeChosen(choice) => {
+                if self.settings.appearance.theme != choice {
+                    self.settings.appearance.theme = choice;
+                    return self.save_settings();
+                }
+            }
             Message::SettingsClosed => self.settings_page = None,
             Message::SettingsCategory(category) => {
                 if let Some(page) = &mut self.settings_page {
@@ -4563,6 +4591,7 @@ impl App {
             [
                 event::listen_with(global_event),
                 window::close_requests().map(Message::CloseRequested),
+                iced::system::theme_changes().map(Message::SystemTheme),
             ]
             .into_iter()
             .chain(watchers),
@@ -5978,6 +6007,23 @@ mod tests {
         let _ = app.update(Message::SettingsOpened);
         let _ = app.update(Message::EscapeCaptured);
         assert!(app.settings_page.is_none());
+    }
+
+    #[test]
+    fn theme_choice_and_system_mode() {
+        let mut app = ready_app(&["c"]);
+        assert!(!app.light_theme(), "dark by default");
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
+        assert!(app.light_theme());
+        assert_eq!(app.settings.appearance.theme, settings::ThemeChoice::Light);
+        assert_eq!(crate::theme::palette(&app.theme()), &crate::theme::LIGHT);
+
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::System));
+        assert!(!app.light_theme(), "unknown system mode falls back to dark");
+        let _ = app.update(Message::SystemTheme(iced::theme::Mode::Light));
+        assert!(app.light_theme());
+        let _ = app.update(Message::SystemTheme(iced::theme::Mode::Dark));
+        assert!(!app.light_theme());
     }
 
     #[test]

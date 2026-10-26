@@ -277,9 +277,6 @@ fn pull_dropdown<'a>() -> Element<'a, Message> {
 
 fn divider<'a>() -> Element<'a, Message> {
     container(space::vertical().width(1).height(28))
-        .style(|_| iced::widget::container::Style {
-            background: Some(theme::BORDER.into()),
-            ..Default::default()
-        })
+        .style(theme::divider)
         .into()
 }

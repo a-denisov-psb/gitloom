@@ -100,7 +100,7 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
     let body: Element<'a, Message> = match &diff.diff {
         Loadable::Loading if diff.fetching => centered(muted("Fetching missing content…")),
         Loadable::Loading => centered(muted("Loading diff…")),
-        Loadable::Failed(error) => centered(text(error).color(theme::DANGER)),
+        Loadable::Failed(error) => centered(text(error).style(theme::text_danger)),
         Loadable::Ready(file) => content(repo, diff, file),
     };
 
@@ -184,7 +184,7 @@ fn hunk_header<'a>(
     let mut content = row![text(&hunk.header)
         .font(Font::MONOSPACE)
         .size(TEXT_SIZE)
-        .color(theme::TEXT_MUTED)
+        .style(theme::text_muted)
         .wrapping(text::Wrapping::None)]
     .align_y(iced::Center);
     if let Some(staged) = staged {
@@ -222,7 +222,7 @@ fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
             text(n.map_or_else(String::new, |n| n.to_string()))
                 .font(Font::MONOSPACE)
                 .size(TEXT_SIZE)
-                .color(theme::TEXT_MUTED),
+                .style(theme::text_muted),
         )
         .width(NUMBER_WIDTH)
         .padding([0, 6])
