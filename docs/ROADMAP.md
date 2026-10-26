@@ -4,6 +4,8 @@
 
 **M4 – Merge, rebase, conflicts** → [`milestones/M4-merge-rebase.md`](milestones/M4-merge-rebase.md)
 
+Next: **M5 – Productivity parity** → [`milestones/M5-productivity.md`](milestones/M5-productivity.md) (planned in detail)
+
 ## Vision
 
 A fast, native, open-source Git client that GitKraken users can use without relearning anything: same layout, same interactions, same shortcuts. Leaner than current GitKraken: no accounts, no cloud, no AI, no integrations, no subscription.
@@ -17,10 +19,10 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M2 | 0.3.0 | Working copy: stage, commit, stash | Done |
 | M3 | 0.4.0 | Branches and remotes | Done |
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | In progress |
-| M5 | 0.6.0 | Productivity parity | Planned |
+| M5 | 0.6.0 | Productivity parity | Planned (detailed) |
 | M6 | 1.0.0 | Release readiness | Planned |
 
-Only the current milestone is planned in task-level detail. The next one is detailed when the current one is about to finish.
+Only the current and the next milestone are planned in task-level detail.
 
 ### M0 – Layout shell (done)
 
@@ -44,10 +46,7 @@ Merge and fast-forward, rebase and interactive rebase (pick, reword, squash, fix
 
 ### M5 – Productivity parity
 
-- Command palette, commit search, file history and blame
-- Hide and solo branches
-- Proper icon set (SVG), avatars (opt-in, cached), light and dark theme, zoom
-- Settings view, external diff/merge tool, open in terminal/file manager
+Action registry with shortcut list (Ctrl+/), settings view, light and dark theme, zoom and fullscreen, SVG icon set, command palette, commit search, hide and solo branches, file history and blame, opt-in avatars, external diff/merge tools, open in terminal and file manager. Details: [`milestones/M5-productivity.md`](milestones/M5-productivity.md).
 
 ### M6 – Release readiness (1.0)
 
@@ -70,12 +69,23 @@ Merge and fast-forward, rebase and interactive rebase (pick, reword, squash, fix
 
 ## Ideas backlog
 
-Own ideas that go beyond GitKraken. To be collected and assigned to milestones with the maintainer.
+Own ideas and deferred items. To be assigned to milestones with the maintainer.
 
-- **Git flow graph layout** (after M3): if git flow is initialized (`gitflow.*` config),
+- **Git flow graph layout** (after 1.0): if git flow is initialized (`gitflow.*` config),
   render the graph like the classic git flow diagram: fixed lane groups from left to right
   (master, hotfix/*, release/*, develop, feature/*), one color per branch type.
   Branch membership is inferred from git flow config, first-parent chains of branch tips
   and merge commit messages (to recover deleted feature branches). Toggle in the toolbar;
   falls back to the default layout when git flow is not configured.
   Prepared in M2-15 via `LaneHints`.
+- **Interactive rebase keeps prepared messages after a conflict** (M4 known limitation):
+  today the remaining reword/squash messages are lost when a step stops for a conflict;
+  Git then stops at those steps and Continue uses the prefilled original message.
+- **Revert without changes** (M4 known limitation): Git fails with "nothing to commit";
+  offer "Commit empty" like the empty cherry-pick dialog instead of showing Git's error.
+- **Autostash conflict notice** (M4 known limitation): when re-applying an autostash after
+  merge/rebase conflicts, show a dedicated notice that the stash was kept.
+- **Diff view modes**: inline and split view in addition to the hunk view.
+- **Graph columns**: resizable columns and a column menu like GitKraken's.
+- **Git identity in settings**: edit `user.name` / `user.email` (global and per repository).
+- **Integrated terminal** instead of opening the system terminal.
