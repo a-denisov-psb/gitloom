@@ -39,9 +39,20 @@ pub fn click_area<'a, Message: 'a>(
     })
 }
 
+/// Translation from content to window coordinates, as iced passes it to
+/// `overlay()` at the start of every update. Inside a scrolled `scrollable`
+/// the cursor is in content coordinates; adding this gives the window
+/// position for menus.
+#[derive(Default)]
+struct Translation(Vector);
+
 impl<Message> Widget<Message, Theme, Renderer> for ContextArea<'_, Message> {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::stateless()
+        tree::Tag::of::<Translation>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Translation::default())
     }
 
     fn children(&self) -> Vec<Tree> {
@@ -106,7 +117,8 @@ impl<Message> Widget<Message, Theme, Renderer> for ContextArea<'_, Message> {
         if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event {
             if *button == self.button && cursor.is_over(layout.bounds()) {
                 if let Some(position) = cursor.position() {
-                    shell.publish((self.on_press)(position));
+                    let translation = tree.state.downcast_ref::<Translation>().0;
+                    shell.publish((self.on_press)(position + translation));
                     shell.capture_event();
                 }
             }
@@ -159,6 +171,7 @@ impl<Message> Widget<Message, Theme, Renderer> for ContextArea<'_, Message> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        tree.state.downcast_mut::<Translation>().0 = translation;
         self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
@@ -366,6 +379,8 @@ struct DragState {
     /// The left button is down (pressed anywhere).
     button_down: bool,
     hovered: bool,
+    /// See [`Translation`].
+    translation: Vector,
 }
 
 /// Movement in pixels before a press becomes a drag.
@@ -457,7 +472,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for DragArea<'_, Message> 
                 state.pressed_at = None;
                 state.started = false;
                 if let Some(position) = cursor.position_over(bounds) {
-                    shell.publish((self.on_drop)(position));
+                    shell.publish((self.on_drop)(position + state.translation));
                 }
             }
             _ => {}
@@ -520,6 +535,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for DragArea<'_, Message> 
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        tree.state.downcast_mut::<DragState>().translation = translation;
         self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
