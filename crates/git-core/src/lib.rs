@@ -17,6 +17,7 @@ mod merge;
 mod mock;
 mod network;
 mod patch;
+mod pick;
 mod refname;
 mod resolve;
 mod rewrite;
@@ -53,6 +54,7 @@ pub use network::{
     CancelToken, Progress, PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
+pub use pick::{cherry_pick, commit_empty, revert};
 pub use refname::check_branch_name;
 pub use resolve::{
     conflict_stages, load_conflict, resolve_conflict, resolve_with_side, ConflictContent,

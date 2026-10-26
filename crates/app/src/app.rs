@@ -175,6 +175,17 @@ pub enum Message {
         height: f32,
     },
     DiffClosed,
+    /// Cherry-pick the commits in this order (oldest first) onto HEAD.
+    CherryPick(Vec<String>),
+    /// "Revert commit": a merge commit asks for the parent first.
+    RevertStart(String),
+    Revert {
+        id: String,
+        /// 1-based parent a merge commit is reverted against.
+        mainline: Option<usize>,
+    },
+    /// Keep the empty result of a cherry-pick or revert step as a commit.
+    CommitEmpty,
     /// "Edit commit message": opens the message dialog for commit `id`.
     RewordStart(String),
     /// "Squash N commits" for the multi-selection: opens the message dialog.
@@ -1296,6 +1307,16 @@ impl App {
                 self.form = None;
                 self.run_network(tab, delete_remote_tag_request(&remote, &tag))
             }
+            FormAction::RevertMerge { tab: _, id } => {
+                // "2: abc1234 summary" → parent 2.
+                let mainline = form
+                    .value(0)
+                    .split(':')
+                    .next()
+                    .and_then(|n| n.trim().parse::<usize>().ok());
+                self.form = None;
+                self.merge(Message::Revert { id, mainline })
+            }
             FormAction::PushSetUpstream { tab, local } => {
                 let remote = form.value(0).to_owned();
                 let branch = form.value(1).to_owned();
@@ -1879,6 +1900,7 @@ impl App {
             return Task::none();
         };
         let head = head_name(&view.snapshot).to_owned();
+        let operation = view.snapshot.state.kind();
         let short = |source: &str| {
             source
                 .strip_prefix("refs/heads/")
@@ -1894,6 +1916,15 @@ impl App {
                 (format!("Edit message of {}", &id[..id.len().min(7)]), true)
             }
             Message::SquashCommits { ids, .. } => (format!("Squash {} commits", ids.len()), true),
+            Message::CherryPick(ids) => (
+                match ids.as_slice() {
+                    [id] => format!("Cherry-pick {}", &id[..id.len().min(7)]),
+                    _ => format!("Cherry-pick {} commits", ids.len()),
+                },
+                true,
+            ),
+            Message::Revert { id, .. } => (format!("Revert {}", &id[..id.len().min(7)]), true),
+            Message::CommitEmpty => ("Commit empty".to_string(), false),
             Message::FastForward {
                 branch: None,
                 source,
@@ -1933,6 +1964,12 @@ impl App {
                 message,
                 autostash,
             } => git_core::squash_commits(git, ids, message, *autostash).map(drop),
+            Message::CherryPick(ids) => git_core::cherry_pick(git, ids).map(drop),
+            Message::Revert { id, mainline } => git_core::revert(git, id, *mainline).map(drop),
+            Message::CommitEmpty => match operation {
+                Some(operation) => git_core::commit_empty(git, operation).map(drop),
+                None => Ok(()),
+            },
             Message::FastForward {
                 branch: None,
                 source,
@@ -1945,6 +1982,15 @@ impl App {
             } => git_core::fast_forward_branch(git, branch, source),
             _ => Ok(()),
         });
+        let picks = matches!(
+            request,
+            Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty
+        );
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if picks && view.busy.is_some() {
+                view.check_empty = true;
+            }
+        }
         if touches_worktree {
             if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                 if view.busy.is_some() {
@@ -2809,6 +2855,9 @@ impl App {
                                     head != id && snapshot.is_ancestor(&id, head) == Some(true)
                                 }),
                             rewordable: clean && crate::repo_view::rewordable(snapshot, &id),
+                            pickable: clean
+                                && snapshot.head.target().is_some_and(|head| head != id),
+                            revertable: clean && snapshot.head.target().is_some(),
                         }
                     })
                     .unwrap_or_default();
@@ -3580,6 +3629,47 @@ impl App {
             Message::RewordCommit { .. } | Message::SquashCommits { .. } => {
                 return self.merge(message);
             }
+            Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty => {
+                return self.merge(message);
+            }
+            Message::RevertStart(id) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let Some(commit) = view.snapshot.commit(&id) else {
+                    return Task::none();
+                };
+                if !commit.is_merge() {
+                    return self.merge(Message::Revert { id, mainline: None });
+                }
+                let options: Vec<String> = commit
+                    .parents
+                    .iter()
+                    .enumerate()
+                    .map(|(i, parent)| {
+                        let summary = view
+                            .snapshot
+                            .commit(parent)
+                            .map_or_else(String::new, |c| c.summary.clone());
+                        format!("{}: {} {summary}", i + 1, &parent[..parent.len().min(7)])
+                    })
+                    .collect();
+                let first = options.first().cloned().unwrap_or_default();
+                self.form = Some(Form {
+                    title: format!("Revert merge {}", commit.short_id()),
+                    text: "A merge commit is reverted against one of its parents: the \
+                           changes brought in from the other parents are undone. Usually \
+                           this is parent 1, the branch that was merged into."
+                        .into(),
+                    fields: vec![crate::overlay::FormField::choice("Parent", first, options)],
+                    submit: "Revert".into(),
+                    action: FormAction::RevertMerge { tab, id },
+                    error: None,
+                });
+            }
             Message::RebasePanelOpened(base) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -3957,6 +4047,7 @@ impl App {
                 let id = tab.id;
                 let mut reload = false;
                 let mut pull_failure = None;
+                let mut empty_pick = None;
                 if let Some(view) = tab.view_mut() {
                     match result {
                         Ok(snapshot) => view.apply_snapshot(snapshot),
@@ -3970,9 +4061,15 @@ impl App {
                         .pull_failure
                         .take()
                         .map(|error| (error, view.snapshot.state.clone()));
+                    if view.busy.is_none() && std::mem::take(&mut view.check_empty) {
+                        empty_pick = view.empty_pick().then(|| empty_pick_dialog(&view.snapshot));
+                    }
                 }
                 if let Some((error, state)) = pull_failure {
                     self.modal = Some(pull_failed_dialog(error, &state));
+                }
+                if let Some(dialog) = empty_pick.flatten() {
+                    self.modal = Some(dialog);
                 }
                 if reload {
                     return Task::batch([self.reload_diff(id), self.load_details()]);
@@ -4252,6 +4349,45 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
             },
         ],
         default: Some(1),
+    })
+}
+
+/// A cherry-pick or revert step has nothing to commit (its changes are
+/// already there): skip it, keep it as an empty commit, or abort.
+fn empty_pick_dialog(snapshot: &RepoSnapshot) -> Option<Modal> {
+    let operation = snapshot.state.kind()?;
+    let (title, what) = match operation {
+        git_core::Operation::Revert => ("Empty revert", "Reverting this commit"),
+        _ => ("Empty cherry-pick", "Applying this commit"),
+    };
+    let mut buttons = vec![crate::overlay::DialogButton {
+        label: format!("Abort {}", operation.command()),
+        kind: crate::overlay::ButtonKind::Secondary,
+        message: Some(Message::AbortOperation),
+    }];
+    if operation.can_skip() {
+        buttons.push(crate::overlay::DialogButton {
+            label: "Skip".into(),
+            kind: crate::overlay::ButtonKind::Secondary,
+            message: Some(Message::SkipOperation),
+        });
+    }
+    buttons.push(crate::overlay::DialogButton {
+        label: "Commit empty".into(),
+        kind: crate::overlay::ButtonKind::Primary,
+        message: Some(Message::CommitEmpty),
+    });
+    let default = buttons.len().checked_sub(2);
+    Some(Modal {
+        title: title.into(),
+        text: format!(
+            "{what} changes nothing: its changes are already on {}. Skip it, \
+             or keep it as an empty commit?",
+            snapshot.branch_label()
+        ),
+        details: None,
+        buttons,
+        default,
     })
 }
 
@@ -6053,6 +6189,121 @@ mod tests {
             &view.pending_merge,
             Some(Message::SquashCommits { ids, .. }) if ids.len() == 2
         ));
+    }
+
+    /// Ready app with a history given as `(id, parents)`, newest first;
+    /// HEAD is detached at the first commit.
+    fn app_with_history(history: &[(&str, &[&str])]) -> App {
+        use git_core::{Commit, Head, Log, WorkingTree};
+        let mut app = ready_app(&["x"]);
+        let _ = app.update(git_available());
+        let commits = history
+            .iter()
+            .enumerate()
+            .map(|(i, (id, parents))| Commit {
+                id: id.to_string(),
+                parents: parents.iter().map(|p| p.to_string()).collect(),
+                summary: format!("summary {id}"),
+                body: String::new(),
+                author: String::new(),
+                email: String::new(),
+                author_time: 100 - i as i64,
+                commit_time: 100 - i as i64,
+            })
+            .collect();
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits,
+                truncated: false,
+            },
+            Head::Detached {
+                target: history[0].0.into(),
+            },
+            Vec::new(),
+            Vec::new(),
+            WorkingTree::default(),
+        )
+        .unwrap();
+        app.tabs[0]
+            .view_mut()
+            .unwrap()
+            .apply_snapshot(Arc::new(snapshot));
+        app
+    }
+
+    #[test]
+    fn cherry_pick_and_revert_from_the_commit_menu() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        for (id, pick) in [("c", false), ("b", true)] {
+            let _ = app.update(Message::CommitContextMenu {
+                id: id.into(),
+                position: iced::Point::ORIGIN,
+            });
+            assert_eq!(
+                menu_item_enabled(&app, "Cherry-pick commit"),
+                Some(pick),
+                "{id}"
+            );
+            assert_eq!(menu_item_enabled(&app, "Revert commit"), Some(true), "{id}");
+        }
+        app.context_menu = None;
+        let _ = app.update(Message::RevertStart("b".into()));
+        assert!(app.form.is_none(), "no parent to choose");
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Revert b")
+        );
+        assert!(app.tabs[0].view().unwrap().check_empty);
+    }
+
+    #[test]
+    fn reverting_a_merge_asks_for_the_parent() {
+        let mut app = app_with_history(&[("m", &["p1", "p2"]), ("p2", &["p1"]), ("p1", &[])]);
+        let _ = app.update(Message::RevertStart("m".into()));
+        let form = app.form.as_mut().unwrap();
+        assert_eq!(form.value(0), "1: p1 summary p1");
+        form.fields[0].value = "2: p2 summary p2".into();
+        let _ = app.update(Message::FormSubmit);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Revert m"));
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::Revert { id, mainline: Some(2) }) if id == "m"
+        ));
+    }
+
+    #[test]
+    fn empty_pick_offers_skip_or_commit_empty() {
+        for (state, skip) in [
+            (git_core::RepoState::CherryPicking { commit: None }, true),
+            (git_core::RepoState::Reverting { commit: None }, false),
+        ] {
+            let mut app = ready_app(&["c", "b", "a"]);
+            let _ = app.update(git_available());
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CherryPick(vec!["b".into()]));
+            let view = app.tabs[0].view_mut().unwrap();
+            assert_eq!(view.busy.as_deref(), Some("Cherry-pick b"));
+            view.busy = None;
+            let generation = app.tabs[0].generation;
+            let view = app.tabs[0].view().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            snapshot.state = state.clone();
+            let _ = app.update(Message::SnapshotLoaded {
+                tab,
+                generation,
+                result: Ok(Arc::new(snapshot)),
+            });
+            let modal = app.modal.clone().unwrap();
+            let labels: Vec<_> = modal.buttons.iter().map(|b| b.label.as_str()).collect();
+            assert_eq!(labels.contains(&"Skip"), skip, "{state:?}");
+            assert_eq!(labels.last(), Some(&"Commit empty"));
+            assert!(matches!(
+                modal.buttons.last().and_then(|b| b.message.clone()),
+                Some(Message::CommitEmpty)
+            ));
+        }
     }
 
     #[test]

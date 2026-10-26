@@ -36,6 +36,10 @@ pub struct CommitFacts {
     pub rebase_from: bool,
     /// Its message can be edited (HEAD, or linear history up to HEAD).
     pub rewordable: bool,
+    /// It can be cherry-picked onto HEAD (not HEAD itself, no operation).
+    pub pickable: bool,
+    /// It can be reverted (HEAD exists, no operation).
+    pub revertable: bool,
 }
 
 pub fn commit(id: &str, message: &str, writable: bool, facts: CommitFacts) -> Vec<MenuEntry> {
@@ -66,8 +70,16 @@ pub fn commit(id: &str, message: &str, writable: bool, facts: CommitFacts) -> Ve
             writable && facts.rebase_from,
             Message::RebasePanelOpened(id.into()),
         ),
-        later("Cherry-pick commit"),
-        later("Revert commit"),
+        action(
+            "Cherry-pick commit",
+            writable && facts.pickable,
+            Message::CherryPick(vec![id.into()]),
+        ),
+        action(
+            "Revert commit",
+            writable && facts.revertable,
+            Message::RevertStart(id.into()),
+        ),
         later("Reset to this commit"),
         MenuEntry::Separator,
         action("Copy SHA", true, Message::CopyToClipboard(id.into())),
@@ -478,6 +490,8 @@ mod tests {
                     "Unset upstream",
                     "Interactive rebase from here",
                     "Edit commit message",
+                    "Cherry-pick commit",
+                    "Revert commit",
                 ]
                 .contains(&label)
                 {
@@ -507,7 +521,9 @@ mod tests {
                 false,
                 CommitFacts {
                     rebase_from: true,
-                    rewordable: true
+                    rewordable: true,
+                    pickable: true,
+                    revertable: true,
                 }
             ))
             .0,

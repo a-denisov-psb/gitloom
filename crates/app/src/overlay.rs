@@ -244,6 +244,8 @@ pub enum FormAction {
     PushTag { tab: crate::app::TabId, tag: String },
     /// Delete tag `tag` on the chosen remote.
     DeleteRemoteTag { tab: crate::app::TabId, tag: String },
+    /// Revert merge commit `id` against the chosen parent ("1: …").
+    RevertMerge { tab: crate::app::TabId, id: String },
 }
 
 /// Modal dialog with inputs (e.g. remote and branch name for a first push).
