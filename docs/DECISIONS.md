@@ -204,3 +204,51 @@ Architecture decision records in short form. New entries at the bottom. Change a
   delete/modify conflicts offer only "take ours/theirs" (`checkout --ours/--theirs` + `add`,
   or `rm` for the deleting side). `git merge-file` ends both sides of a conflict at the end
   of a file without trailing newline with a newline; the resolved file then has one.
+
+## ADR-023 Settings file separate from the session
+
+- Status: accepted (M5 plan)
+- Decision: user preferences live in `<config dir>/gitloom/settings.json` (versioned,
+  atomic writes); `session.json` keeps state (tabs, recents, panes, pull mode, hidden
+  and soloed branches). `auto_fetch_minutes` moves from the session to the settings
+  with a one-time migration. A corrupted settings file falls back to defaults and is
+  kept as `settings.json.bak`.
+- Why: preferences and state change at different rates; a broken session must not
+  reset preferences and vice versa.
+
+## ADR-024 Git CLI for file history and blame
+
+- Status: accepted (M5 plan)
+- Decision: file history (`git log --follow`) and blame (`git blame --porcelain`) are
+  read through the Git CLI with `--no-optional-locks`, cancellable by killing the
+  process. All other reads stay on gix (ADR-002).
+- Why: rename following, `.mailmap` and `blame.ignoreRevsFile` then behave exactly like
+  Git; `git` is required since M2 anyway.
+
+## ADR-025 Icon set
+
+- Status: accepted (M5 plan)
+- Decision: Lucide icons (ISC license), vendored as SVG files under
+  `crates/app/assets/icons/` with the license file, embedded at compile time and
+  rendered with iced's `svg` feature, tinted by theme colors. Only icons in use are
+  vendored.
+- Why: permissive license, consistent line style, no runtime dependency; GitKraken
+  assets are not allowed (ADR-005).
+
+## ADR-026 Avatars
+
+- Status: accepted (M5 plan)
+- Decision: avatars are opt-in (off by default, ADR-009). When on, Gitloom requests
+  `https://gravatar.com/avatar/<sha256(email)>?d=404` with `ureq` (rustls, proxy from
+  the environment), caches results and misses for 7 days in the cache dir, runs at most
+  4 requests in parallel and only for visible commits. When off, no HTTP client exists.
+- Why: privacy by default; the hash, not the email, leaves the machine, and the
+  setting says so.
+
+## ADR-027 Theme system
+
+- Status: accepted (M5 plan)
+- Decision: all colors come from a runtime `ThemePalette`; Dark (default) and Light.
+  A "System" option is added only if iced 0.14 can detect the OS theme (result recorded
+  here by M5-03). Text colors reach WCAG AA contrast in both palettes.
+- Why: light theme parity with GitKraken; one place for colors.
