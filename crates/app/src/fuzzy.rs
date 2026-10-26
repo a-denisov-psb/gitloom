@@ -120,7 +120,7 @@ pub fn rank<'a>(query: &str, candidates: impl IntoIterator<Item = &'a str>) -> V
         .filter_map(|(index, candidate)| query.score(candidate).map(|score| (score, index)))
         .collect();
     // Stable: equal scores stay in candidate order.
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|&(score, _)| std::cmp::Reverse(score));
     scored.into_iter().map(|(_, index)| index).collect()
 }
 
