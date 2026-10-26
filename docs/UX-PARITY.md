@@ -31,7 +31,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
 | Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
 | Branch context menu: merge and rebase | "Merge X into Y", "Rebase Y onto X"; "Fast-forward Y to X" when possible; remote branch: "Fast-forward L to origin/L" for a local branch behind it | done (M4-04, M4-06) |
-| Drag branch onto branch | Menu: Fast-forward, Merge, Rebase, Interactive rebase | M4 (verify in GitKraken: dropping onto a branch that is not checked out — disabled or automatic checkout?) |
+| Drag branch onto branch | Menu: Fast-forward, Merge, Rebase, Interactive rebase | done (M4-11): graph pills and sidebar branches, drop target outlined; items that need another checked-out branch are disabled with "Check out <branch> first" (verify in GitKraken: disabled or automatic checkout?) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
