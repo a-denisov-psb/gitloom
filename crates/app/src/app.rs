@@ -24,6 +24,7 @@ const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
 pub const FILTER_INPUT: &str = "sidebar-filter";
 pub const START_PATH_INPUT: &str = "start-path";
 pub const COMMIT_SUMMARY_INPUT: &str = "commit-summary";
+pub const SHORTCUT_FILTER_INPUT: &str = "shortcut-filter";
 
 /// File system events are collected for this long before they are classified.
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -286,6 +287,11 @@ pub enum Message {
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
+    /// Filter of the keyboard shortcut list changed.
+    ShortcutFilterChanged(String),
+    ShortcutListClosed,
+    /// Esc taken by a focused text field.
+    EscapeCaptured,
     /// A shortcut after checking whether a text input has focus.
     ShortcutChecked {
         shortcut: Shortcut,
@@ -556,6 +562,8 @@ pub struct App {
     /// Open commit message dialog (reword, squash).
     pub message_dialog: Option<crate::overlay::MessageDialog>,
     pub context_menu: Option<ContextMenu>,
+    /// Open keyboard shortcut list (Ctrl+/) with its filter text.
+    pub shortcut_list: Option<String>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
     /// Mode of the toolbar Pull button (persisted in the session).
@@ -596,6 +604,7 @@ impl App {
             message_dialog: None,
             form: None,
             context_menu: None,
+            shortcut_list: None,
             window_size: iced::Size::new(1400.0, 860.0),
             pull_mode: git_core::PullMode::default(),
             auto_fetch_at: None,
@@ -1594,9 +1603,17 @@ impl App {
 
     fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
         // An open dialog or menu only reacts to Esc and Enter.
-        let overlay_open =
-            self.modal.is_some() || self.context_menu.is_some() || self.message_dialog.is_some();
+        let overlay_open = self.modal.is_some()
+            || self.context_menu.is_some()
+            || self.message_dialog.is_some()
+            || self.shortcut_list.is_some();
         if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
+            return Task::none();
+        }
+        if let Some(reason) = shortcut.static_block() {
+            if let Some(action) = crate::actions::find(shortcut) {
+                self.status = format!("{}: {reason}", action.label);
+            }
             return Task::none();
         }
         if let Some(panel) = self.active_rebase_panel() {
@@ -1691,9 +1708,27 @@ impl App {
                 }
                 return iced::widget::operation::focus(FILTER_INPUT);
             }
+            Shortcut::ShortcutList => {
+                self.shortcut_list = Some(String::new());
+                return iced::widget::operation::focus(SHORTCUT_FILTER_INPUT);
+            }
+            // Disabled until their task lands (`static_block` above).
+            Shortcut::CommandPalette
+            | Shortcut::SearchCommits
+            | Shortcut::OpenRepoPalette
+            | Shortcut::FileHistory
+            | Shortcut::OpenTerminal
+            | Shortcut::OpenFileManager
+            | Shortcut::ExternalDiff
+            | Shortcut::Fullscreen
+            | Shortcut::ZoomIn
+            | Shortcut::ZoomOut
+            | Shortcut::ZoomReset
+            | Shortcut::Settings => {}
             Shortcut::Close => {
                 if self.modal.take().is_some()
                     || self.context_menu.take().is_some()
+                    || self.shortcut_list.take().is_some()
                     || self.form.take().is_some()
                     || self.message_dialog.take().is_some()
                     || self
@@ -2618,6 +2653,15 @@ impl App {
                 }
             }
             Message::MenuClosed => self.context_menu = None,
+            Message::ShortcutFilterChanged(filter) => {
+                if let Some(list) = &mut self.shortcut_list {
+                    *list = filter;
+                }
+            }
+            Message::ShortcutListClosed => self.shortcut_list = None,
+            Message::EscapeCaptured => {
+                self.shortcut_list = None;
+            }
             Message::FileContextMenu {
                 file,
                 area,
@@ -2904,7 +2948,7 @@ impl App {
                     MenuEntry::Item {
                         hint: None,
                         label: "Fetch all".into(),
-                        shortcut: Some("Ctrl+L".into()),
+                        shortcut: Shortcut::FetchAll.shortcut_text(),
                         enabled: writable,
                         message: Box::new(Message::FetchAll),
                     },
@@ -5169,11 +5213,20 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
         }
-        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-            if status == event::Status::Ignored =>
-        {
-            shortcuts::shortcut(&key, modifiers).map(Message::Shortcut)
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modified_key,
+            modifiers,
+            ..
+        }) if status == event::Status::Ignored => {
+            shortcuts::shortcut_with_modified(&key, &modified_key, modifiers).map(Message::Shortcut)
         }
+        // A focused text field takes the first Esc; overlays with a query
+        // field close right away anyway.
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        }) => Some(Message::EscapeCaptured),
         _ => None,
     }
 }
@@ -5726,6 +5779,31 @@ mod tests {
         assert_eq!(selected(&app), Some(Selection::Commit("c".into())));
         let _ = app.update(checked(Shortcut::NewTab, true));
         assert_eq!(app.tabs.len(), 1);
+    }
+
+    #[test]
+    fn shortcut_list_opens_filters_and_closes() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::ShortcutList, false));
+        assert_eq!(app.shortcut_list.as_deref(), Some(""));
+        let _ = app.update(Message::ShortcutFilterChanged("fetch".into()));
+        assert_eq!(app.shortcut_list.as_deref(), Some("fetch"));
+        // Other shortcuts wait while the list is open; Esc closes it.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.shortcut_list.is_none());
+        // Esc in the focused filter field closes it too.
+        let _ = app.update(checked(Shortcut::ShortcutList, false));
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.shortcut_list.is_none());
+    }
+
+    #[test]
+    fn actions_of_later_tasks_explain_why_they_do_nothing() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        assert_eq!(app.status, "Command palette: Not available yet");
     }
 
     #[test]

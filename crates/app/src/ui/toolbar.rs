@@ -203,7 +203,10 @@ fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
         button
             .on_press_maybe(view.busy.is_none().then_some(Message::NewBranchStart(None)))
             .into(),
-        "Create a branch at the selected commit (Ctrl+B)".to_owned(),
+        match crate::actions::ActionId::CreateBranch.shortcut_text() {
+            Some(keys) => format!("Create a branch at the selected commit ({keys})"),
+            None => "Create a branch at the selected commit".to_owned(),
+        },
     )
 }
 

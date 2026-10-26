@@ -99,6 +99,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(dialog) = &app.message_dialog {
         layers.push(overlays::message_dialog(dialog));
     }
+    if let Some(filter) = &app.shortcut_list {
+        layers.push(overlays::shortcut_list(filter));
+    }
     if let Some(modal) = &app.modal {
         layers.push(overlays::modal(modal));
     }

@@ -1,158 +1,31 @@
 //! Keyboard shortcuts (see `docs/UX-PARITY.md`). Ctrl on Windows/Linux, Cmd on macOS.
 
-use iced::keyboard::{key::Named, Key, Modifiers};
+use iced::keyboard::{Key, Modifiers};
 
-use crate::nav::Move;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shortcut {
-    NewTab,
-    CloseTab,
-    NextTab,
-    PreviousTab,
-    /// Zero-based tab index (Ctrl+1 … Ctrl+9).
-    SwitchTab(usize),
-    OpenRepository,
-    Refresh,
-    ToggleSidebar,
-    TogglePanel,
-    Navigate(Move),
-    FocusFilter,
-    /// S / U: stage or unstage the file whose diff is shown.
-    StageSelected,
-    UnstageSelected,
-    StageAll,
-    UnstageAll,
-    /// Ctrl+L: fetch all remotes.
-    FetchAll,
-    /// Shift+↑/↓: extend the commit selection by one row.
-    ExtendSelection(Move),
-    /// Ctrl+B: new branch at the selected commit.
-    CreateBranch,
-    /// Ctrl+Z.
-    Undo,
-    /// Ctrl+Y or Ctrl+Shift+Z.
-    Redo,
-    /// Ctrl+Enter: commit staged changes.
-    Commit,
-    /// Ctrl+Shift+Enter: stage everything and commit.
-    StageAllAndCommit,
-    /// Ctrl+Shift+M: focus the commit summary.
-    FocusSummary,
-    /// Esc: close the dialog, the menu or the diff view (in that order).
-    Close,
-    /// Enter: confirm the default button of an open dialog.
-    Confirm,
-    /// P / R / F / D in the interactive rebase panel (S arrives as
-    /// `StageSelected` and means squash there).
-    TodoKey(char),
-    /// Alt+↑ / Alt+↓: move the selected row of the interactive rebase panel.
-    Reorder {
-        up: bool,
-    },
-}
-
-impl Shortcut {
-    /// Shortcuts that still work while a text input has focus
-    /// (Enter only acts while a dialog is open).
-    pub fn works_in_text_input(self) -> bool {
-        matches!(
-            self,
-            Self::Close
-                | Self::Confirm
-                | Self::Commit
-                | Self::StageAllAndCommit
-                | Self::FocusSummary
-        )
-    }
-}
+/// Keyboard dispatch works on the registered actions (M5-01).
+pub use crate::actions::ActionId as Shortcut;
 
 /// Maps a key press to a shortcut, if any.
+#[cfg(test)]
 pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
-    let command = modifiers.command();
-    let shift = modifiers.shift();
-    let alt = modifiers.alt();
-    let plain = !command && !alt && !modifiers.logo();
-    // macOS: Cmd+↑ / Cmd+↓ jump to the first / last commit.
-    let mac_jump = cfg!(target_os = "macos") && modifiers.logo() && !alt;
-    match key.as_ref() {
-        Key::Named(Named::F5) if !command && !alt => Some(Shortcut::Refresh),
-        Key::Named(Named::Escape) if plain && !shift => Some(Shortcut::Close),
-        Key::Named(Named::Enter) if plain && !shift => Some(Shortcut::Confirm),
-        Key::Named(Named::Enter) if command && !alt => Some(if shift {
-            Shortcut::StageAllAndCommit
-        } else {
-            Shortcut::Commit
-        }),
-        Key::Character("m" | "M") if command && shift && !alt => Some(Shortcut::FocusSummary),
-        Key::Character("z" | "Z") if command && !alt => Some(if shift {
-            Shortcut::Redo
-        } else {
-            Shortcut::Undo
-        }),
-        Key::Character("y" | "Y") if command && !alt && !shift => Some(Shortcut::Redo),
-        Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
-        Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
-        Key::Named(Named::ArrowUp) if alt && !command && !shift => {
-            Some(Shortcut::Reorder { up: true })
-        }
-        Key::Named(Named::ArrowDown) if alt && !command && !shift => {
-            Some(Shortcut::Reorder { up: false })
-        }
-        Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
-        Key::Named(Named::End) if command && !alt => Some(Shortcut::Navigate(Move::Last)),
-        // Shift+↑/↓ extend the selection (M4-01); Shift+J/K stay parent/child.
-        Key::Named(Named::ArrowDown) if plain => Some(if shift {
-            Shortcut::ExtendSelection(Move::Next)
-        } else {
-            Shortcut::Navigate(Move::Next)
-        }),
-        Key::Named(Named::ArrowUp) if plain => Some(if shift {
-            Shortcut::ExtendSelection(Move::Previous)
-        } else {
-            Shortcut::Navigate(Move::Previous)
-        }),
-        // iced reports the key without modifiers ("j" for Shift+J, from winit's
-        // `key_without_modifiers`); upper case is accepted too (e.g. Caps Lock).
-        Key::Character(c) if plain => match (c.to_lowercase().as_str(), shift) {
-            ("j", false) => Some(Shortcut::Navigate(Move::Next)),
-            ("k", false) => Some(Shortcut::Navigate(Move::Previous)),
-            ("j", true) => Some(Shortcut::Navigate(Move::FirstParent)),
-            ("k", true) => Some(Shortcut::Navigate(Move::Child)),
-            ("s", false) => Some(Shortcut::StageSelected),
-            (key @ ("p" | "r" | "f" | "d"), false) => key.chars().next().map(Shortcut::TodoKey),
-            ("u", false) => Some(Shortcut::UnstageSelected),
-            _ => None,
-        },
-        Key::Character("s" | "S") if command && shift && !alt => Some(Shortcut::StageAll),
-        Key::Character("u" | "U") if command && shift && !alt => Some(Shortcut::UnstageAll),
-        Key::Character("f" | "F") if command && alt => Some(Shortcut::FocusFilter),
-        Key::Named(Named::Tab) if modifiers.control() && !alt => Some(if shift {
-            Shortcut::PreviousTab
-        } else {
-            Shortcut::NextTab
-        }),
-        Key::Character(c) if command && !alt && !shift => match c {
-            "t" | "T" => Some(Shortcut::NewTab),
-            "w" | "W" => Some(Shortcut::CloseTab),
-            "o" | "O" => Some(Shortcut::OpenRepository),
-            "l" | "L" => Some(Shortcut::FetchAll),
-            "b" | "B" => Some(Shortcut::CreateBranch),
-            "j" | "J" => Some(Shortcut::ToggleSidebar),
-            "k" | "K" => Some(Shortcut::TogglePanel),
-            digit => digit
-                .parse::<usize>()
-                .ok()
-                .filter(|n| (1..=9).contains(n))
-                .map(|n| Shortcut::SwitchTab(n - 1)),
-        },
-        _ => None,
-    }
+    crate::actions::action_for_key(key, key, modifiers)
+}
+
+/// Like [`shortcut`], with the key as the layout produces it with Shift
+/// (for Ctrl+/ and Ctrl++ on layouts that need Shift for them).
+pub fn shortcut_with_modified(
+    key: &Key,
+    modified_key: &Key,
+    modifiers: Modifiers,
+) -> Option<Shortcut> {
+    crate::actions::action_for_key(key, modified_key, modifiers)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nav::Move;
+    use iced::keyboard::key::Named;
 
     fn ch(c: &str) -> Key {
         Key::Character(c.into())
@@ -179,7 +52,8 @@ mod tests {
         assert_eq!(shortcut(&ch("o"), cmd), Some(Shortcut::OpenRepository));
         assert_eq!(shortcut(&ch("1"), cmd), Some(Shortcut::SwitchTab(0)));
         assert_eq!(shortcut(&ch("9"), cmd), Some(Shortcut::SwitchTab(8)));
-        assert_eq!(shortcut(&ch("0"), cmd), None);
+        // Ctrl+0 resets the zoom (M5-04).
+        assert_eq!(shortcut(&ch("0"), cmd), Some(Shortcut::ZoomReset));
     }
 
     #[test]
