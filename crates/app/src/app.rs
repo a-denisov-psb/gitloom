@@ -8184,7 +8184,7 @@ mod tests {
         let op = view.network.as_ref().unwrap();
         assert_eq!(
             crate::ui::statusbar::network_label(op),
-            "⟳ Fetch: Receiving objects 45%"
+            "Fetch: Receiving objects 45%"
         );
 
         let _ = app.update(Message::CancelNetwork(tab));

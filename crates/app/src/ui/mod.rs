@@ -182,6 +182,7 @@ fn with_background(content: Element<'_, Message>) -> Element<'_, Message> {
 fn notice_banner(notice: &str) -> Element<'_, Message> {
     container(
         row![
+            crate::icons::tinted(crate::icons::Icon::Info, 15.0, |p| p.warning),
             text(notice).style(theme::text_normal),
             space::horizontal(),
             button(text("Dismiss").size(12))
@@ -234,6 +235,7 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
     );
     container(
         row![
+            crate::icons::tinted(crate::icons::Icon::Merge, 15.0, |p| p.accent),
             text(state).style(theme::text_normal),
             muted(hint).size(12),
             space::horizontal(),
@@ -252,6 +254,7 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
 fn banner<'a>(error: &'a str, tab: crate::app::TabId) -> Element<'a, Message> {
     container(
         row![
+            crate::icons::tinted(crate::icons::Icon::Alert, 15.0, |p| p.danger),
             text(error).style(theme::text_normal),
             space::horizontal(),
             button(text("Retry").size(12))
@@ -296,19 +299,10 @@ pub(crate) fn muted<'a>(content: impl text::IntoFragment<'a>) -> text::Text<'a> 
     text(content).style(theme::text_muted)
 }
 
-/// Single-letter badge for a file change (M, A, D, R, ?, !).
-pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> text::Text<'a> {
-    use git_core::ChangeKind;
-    let letter = match kind {
-        ChangeKind::Added => "A",
-        ChangeKind::Modified => "M",
-        ChangeKind::Deleted => "D",
-        ChangeKind::Renamed => "R",
-        ChangeKind::Untracked => "?",
-        ChangeKind::Conflicted => "!",
-    };
-    text(letter)
-        .style(theme::text_change(kind))
-        .width(16)
-        .font(iced::Font::MONOSPACE)
+/// Icon for a file change (added, modified, deleted, renamed, untracked,
+/// conflicted) in the change's color.
+pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> Element<'a, Message> {
+    container(crate::icons::change_icon(kind, 14.0))
+        .width(20)
+        .into()
 }

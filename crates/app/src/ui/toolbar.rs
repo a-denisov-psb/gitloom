@@ -4,6 +4,7 @@ use iced::widget::{button, column, container, row, space, text};
 use iced::{Element, Fill};
 
 use crate::app::Message;
+use crate::icons::{self, Icon};
 use crate::repo_view::{Guarded, RepoView};
 use crate::theme;
 use crate::ui::muted;
@@ -36,19 +37,47 @@ impl ToolbarAction {
         }
     }
 
-    /// Placeholder glyphs until a proper icon set is added.
-    fn glyph(self) -> &'static str {
+    fn icon(self) -> Icon {
         match self {
-            Self::Undo => "↶",
-            Self::Redo => "↷",
-            Self::Pull => "↓",
-            Self::Push => "↑",
-            Self::Branch => "⑂",
-            Self::Stash => "⊕",
-            Self::Pop => "⊖",
-            Self::Terminal => "›_",
+            Self::Undo => Icon::Undo,
+            Self::Redo => Icon::Redo,
+            Self::Pull => Icon::Pull,
+            Self::Push => Icon::Push,
+            Self::Branch => Icon::Branch,
+            Self::Stash => Icon::Stash,
+            Self::Pop => Icon::Pop,
+            Self::Terminal => Icon::Terminal,
         }
     }
+}
+
+/// Toolbar button: icon above its label; without `on_press` it is disabled
+/// and the icon is dimmed like the label.
+fn tool_button<'a>(
+    icon: Icon,
+    label: &'a str,
+    on_press: Option<Message>,
+) -> iced::widget::Button<'a, Message> {
+    let enabled = on_press.is_some();
+    button(
+        column![
+            icons::button_icon(icon, 18.0, enabled),
+            text(label).size(11)
+        ]
+        .spacing(2)
+        .align_x(iced::Center),
+    )
+    .on_press_maybe(on_press)
+    .padding([3, 10])
+    .width(64)
+    .style(theme::flat)
+}
+
+fn toolbar_button<'a>(
+    action: ToolbarAction,
+    on_press: Option<Message>,
+) -> iced::widget::Button<'a, Message> {
+    tool_button(action.icon(), action.label(), on_press)
 }
 
 pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Message> {
@@ -93,16 +122,7 @@ fn settings_button<'a>() -> Element<'a, Message> {
         None => "Preferences".to_owned(),
     };
     with_tooltip_text(
-        button(
-            column![text("⚙").size(16), text("Settings").size(11)]
-                .spacing(1)
-                .align_x(iced::Center),
-        )
-        .on_press(Message::SettingsOpened)
-        .padding([3, 10])
-        .width(64)
-        .style(theme::flat)
-        .into(),
+        tool_button(Icon::Settings, "Settings", Some(Message::SettingsOpened)).into(),
         tip,
     )
 }
@@ -110,22 +130,26 @@ fn settings_button<'a>() -> Element<'a, Message> {
 /// Repository / branch picker; the dropdowns follow with checkout (M3).
 fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
     with_tooltip(
-        button(column![muted(caption).size(10), text(format!("{value} ▾"))].spacing(1))
-            .padding([3, 8])
-            .style(theme::picker)
-            .into(),
+        button(
+            column![
+                muted(caption).size(10),
+                row![
+                    text(value),
+                    icons::tinted(Icon::ChevronDown, 12.0, |p| p.text_muted)
+                ]
+                .spacing(4)
+                .align_y(iced::Center)
+            ]
+            .spacing(1),
+        )
+        .padding([3, 8])
+        .style(theme::picker)
+        .into(),
     )
 }
 
 fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
-    let content = column![text(action.glyph()).size(16), text(action.label()).size(11)]
-        .spacing(1)
-        .align_x(iced::Center);
-
-    let button = button(content)
-        .padding([3, 10])
-        .width(64)
-        .style(theme::flat);
+    let disabled = || -> Element<'a, Message> { toolbar_button(action, None).into() };
     let writable = view.write_block.is_none() && view.busy.is_none();
     // Undo/Redo name the action in their tooltip.
     if matches!(action, ToolbarAction::Undo | ToolbarAction::Redo) {
@@ -135,23 +159,21 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
             (&view.redo, Message::Redo, "Redo")
         };
         if view.write_block.is_some() {
-            return write_tooltip(button.into(), view);
+            return write_tooltip(disabled(), view);
         }
         if let Some(reason) = stack
             .last()
             .filter(|a| matches!(a, crate::undo::UndoAction::Commit { .. }))
             .and_then(|_| view.state_block(Guarded::MoveHead))
         {
-            return with_tooltip_text(button.into(), reason);
+            return with_tooltip_text(disabled(), reason);
         }
         return match stack.last() {
             Some(last) => with_tooltip_text(
-                button
-                    .on_press_maybe(view.busy.is_none().then_some(message))
-                    .into(),
+                toolbar_button(action, view.busy.is_none().then_some(message)).into(),
                 format!("{verb}: {}", last.label()),
             ),
-            None => with_tooltip_text(button.into(), format!("Nothing to {}", verb.to_lowercase())),
+            None => with_tooltip_text(disabled(), format!("Nothing to {}", verb.to_lowercase())),
         };
     }
     let message = match action {
@@ -168,63 +190,45 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         .filter(|_| matches!(action, ToolbarAction::Stash | ToolbarAction::Pop))
         .filter(|_| view.write_block.is_none())
     {
-        return with_tooltip_text(button.into(), reason);
+        return with_tooltip_text(disabled(), reason);
     }
     match (action, message) {
         (ToolbarAction::Stash | ToolbarAction::Pop, Some(message)) if writable => {
-            button.on_press(message).into()
+            toolbar_button(action, Some(message)).into()
         }
         // Nothing to stash or pop: plain disabled button.
-        (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => {
-            button.into()
-        }
-        (ToolbarAction::Terminal, _) => with_tooltip(button.into()),
-        _ => write_tooltip(button.into(), view),
+        (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => disabled(),
+        (ToolbarAction::Terminal, _) => with_tooltip(disabled()),
+        _ => write_tooltip(disabled(), view),
     }
 }
 
 /// Pull in the current mode; the tooltip names the mode.
 fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Message> {
-    let content = column![
-        text(ToolbarAction::Pull.glyph()).size(16),
-        text(ToolbarAction::Pull.label()).size(11)
-    ]
-    .spacing(1)
-    .align_x(iced::Center);
-    let button = button(content)
-        .padding([3, 10])
-        .width(64)
-        .style(theme::flat);
     if view.write_block.is_some() {
-        return write_tooltip(button.into(), view);
+        return write_tooltip(toolbar_button(ToolbarAction::Pull, None).into(), view);
     }
     with_tooltip_text(
-        button
-            .on_press_maybe(view.busy.is_none().then_some(Message::Pull(None)))
-            .into(),
+        toolbar_button(
+            ToolbarAction::Pull,
+            view.busy.is_none().then_some(Message::Pull(None)),
+        )
+        .into(),
         mode.label().to_owned(),
     )
 }
 
 /// New branch at the selected commit (inline input, Ctrl+B).
 fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
-    let content = column![
-        text(ToolbarAction::Branch.glyph()).size(16),
-        text(ToolbarAction::Branch.label()).size(11)
-    ]
-    .spacing(1)
-    .align_x(iced::Center);
-    let button = button(content)
-        .padding([3, 10])
-        .width(64)
-        .style(theme::flat);
     if view.write_block.is_some() {
-        return write_tooltip(button.into(), view);
+        return write_tooltip(toolbar_button(ToolbarAction::Branch, None).into(), view);
     }
     with_tooltip_text(
-        button
-            .on_press_maybe(view.busy.is_none().then_some(Message::NewBranchStart(None)))
-            .into(),
+        toolbar_button(
+            ToolbarAction::Branch,
+            view.busy.is_none().then_some(Message::NewBranchStart(None)),
+        )
+        .into(),
         match crate::actions::ActionId::CreateBranch.shortcut_text() {
             Some(keys) => format!("Create a branch at the selected commit ({keys})"),
             None => "Create a branch at the selected commit".to_owned(),
@@ -234,18 +238,8 @@ fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
 
 /// Push the current branch; the tooltip names the target.
 fn push_button<'a>(view: &RepoView) -> Element<'a, Message> {
-    let content = column![
-        text(ToolbarAction::Push.glyph()).size(16),
-        text(ToolbarAction::Push.label()).size(11)
-    ]
-    .spacing(1)
-    .align_x(iced::Center);
-    let button = button(content)
-        .padding([3, 10])
-        .width(64)
-        .style(theme::flat);
     if view.write_block.is_some() {
-        return write_tooltip(button.into(), view);
+        return write_tooltip(toolbar_button(ToolbarAction::Push, None).into(), view);
     }
     let tooltip = match view.snapshot.head_upstream() {
         Some((local, Some((remote, branch)))) => format!("Push {local} to {remote}/{branch}"),
@@ -253,21 +247,21 @@ fn push_button<'a>(view: &RepoView) -> Element<'a, Message> {
         None => "Check out a branch to push".to_owned(),
     };
     with_tooltip_text(
-        button
-            .on_press_maybe(
-                view.busy
-                    .is_none()
-                    .then_some(Message::Push { force: false }),
-            )
-            .into(),
+        toolbar_button(
+            ToolbarAction::Push,
+            view.busy
+                .is_none()
+                .then_some(Message::Push { force: false }),
+        )
+        .into(),
         tooltip,
     )
 }
 
 /// Arrow next to Pull that opens the Pull menu (Fetch all, pull modes).
 fn pull_dropdown<'a>() -> Element<'a, Message> {
-    let arrow = container(text("▾").size(12))
-        .padding([12, 4])
+    let arrow = container(icons::tinted(Icon::ChevronDown, 12.0, |p| p.text_muted))
+        .padding([14, 3])
         .style(theme::dropdown_arrow);
     crate::ui::context_area::click_area(
         iced::widget::mouse_area(arrow).interaction(iced::mouse::Interaction::Pointer),

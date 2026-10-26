@@ -7,6 +7,7 @@ use iced::widget::{button, column, container, row, scrollable, space, text, text
 use iced::{Element, Fill};
 
 use crate::app::Message;
+use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Section};
 use crate::theme;
 use crate::ui::muted;
@@ -87,7 +88,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             "REMOTE",
             remote_count,
             remote,
-            Some(("+", "Add remote", Message::AddRemoteStart)),
+            Some((Icon::Plus, "Add remote", Message::AddRemoteStart)),
         ),
         section(repo, Section::Tags, "TAGS", tags.len(), tags),
         section(repo, Section::Stashes, "STASHES", stashes.len(), stashes),
@@ -129,24 +130,36 @@ fn section_with_action<'a>(
     title: &'a str,
     count: usize,
     items: Vec<Element<'a, Message>>,
-    action: Option<(&'a str, &'a str, Message)>,
+    action: Option<(Icon, &'a str, Message)>,
 ) -> Element<'a, Message> {
     let collapsed = repo.collapsed.contains(&section);
-    let arrow = if collapsed { "▸" } else { "▾" };
+    let arrow = if collapsed {
+        Icon::ChevronRight
+    } else {
+        Icon::ChevronDown
+    };
+    let kind = match section {
+        Section::Local => Icon::Local,
+        Section::Remote => Icon::Cloud,
+        Section::Tags => Icon::Tag,
+        Section::Stashes => Icon::Stash,
+        Section::Submodules => Icon::Package,
+    };
 
     let mut line = row![
-        text(arrow).width(INDENT),
+        container(icons::tinted(arrow, 12.0, |p| p.text_muted)).width(INDENT),
+        icons::tinted(kind, 13.0, |p| p.text_muted),
         text(title).size(11),
         space::horizontal(),
     ]
     .spacing(6)
     .align_y(iced::Center);
-    if let Some((label, tip, message)) = action {
+    if let Some((icon, tip, message)) = action {
         let writable = repo.write_block.is_none() && repo.busy.is_none();
         line = line.push(crate::ui::panel::with_tooltip_text(
-            button(text(label).size(12))
+            button(icons::button_icon(icon, 13.0, writable))
                 .on_press_maybe(writable.then_some(message))
-                .padding([0, 6])
+                .padding([1, 5])
                 .style(theme::flat)
                 .into(),
             tip.to_owned(),
@@ -171,10 +184,15 @@ fn submodules<'a>() -> Element<'a, Message> {
     crate::ui::panel::with_tooltip(
         container(
             row![
-                text("▸").width(INDENT),
+                container(icons::tinted(Icon::ChevronRight, 12.0, |p| p
+                    .text_muted
+                    .scale_alpha(0.6)))
+                .width(INDENT),
+                icons::tinted(Icon::Package, 13.0, |p| p.text_muted.scale_alpha(0.6)),
                 text("SUBMODULES").size(11),
                 space::horizontal(),
             ]
+            .spacing(6)
             .align_y(iced::Center),
         )
         .padding([4, 6])
@@ -190,9 +208,13 @@ fn ref_item<'a>(
     label: &'a str,
     depth: u16,
 ) -> Element<'a, Message> {
-    let marker = if reference.is_head { "✓" } else { "" };
+    let marker: Element<'a, Message> = if reference.is_head {
+        icons::tinted(Icon::Check, 13.0, |p| p.accent).into()
+    } else {
+        space::horizontal().width(0).into()
+    };
     let mut content = row![
-        text(marker).width(INDENT).style(theme::text_accent),
+        container(marker).width(INDENT),
         text(label).wrapping(text::Wrapping::None),
         space::horizontal(),
     ]
