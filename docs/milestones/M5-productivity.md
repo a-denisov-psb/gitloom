@@ -137,7 +137,9 @@ Acceptance: unit tests for defaults, roundtrip, unknown fields, migration, corru
 
 Acceptance: unit tests for the contrast ratios of both palettes; screenshots of start screen, graph, staging, diff, conflict view and interactive rebase in both themes.
 
-### [ ] M5-04 Zoom and fullscreen
+### [x] M5-04 Zoom and fullscreen
+
+> Done: `settings::{zoom_step, clamp_zoom}` (70–200 %, 10 % grid, off-grid values from an edited file snap, out-of-range values are clamped on load); `App::scale_factor` feeds iced's `scale_factor`; Ctrl+= / Ctrl++ (also Ctrl+Shift+= and numpad +) / Ctrl+- / Ctrl+0 work also while an overlay or the settings view is open; the level is saved, shown in Appearance (−, value, +, Reset) and flashed in the status bar for 2 s ("Zoom 120 %"). F11 toggles fullscreen via `window::mode`/`set_mode` (not persisted). `App::window_size()` converts the last reported window size to the current zoom (iced sends no resize when only the scale changes), so menus are clamped correctly. Found by hand: at 200 % a menu that fits neither below nor above the cursor jumped to the top; `ContextMenu::origin` now keeps it as low as the window allows. Tests: steps and bounds, app (shortcuts, persistence, flash expiry, zoom while settings open, window size), menu origin without room. Checked by hand at 200 % and 70 % on this repository and a small one: wheel-scrolled graph, right click → menu at the cursor; branch pill dragged onto another → merge/rebase menu at the drop point; F11 → 2560×1440 and back; Ctrl+= → 110 % saved.
 
 - Ctrl+= (also Ctrl++ and numpad +), Ctrl+-, Ctrl+0: 70 %–200 % in 10 % steps via the iced scale factor; persisted in settings, shown in Appearance and briefly in the status bar ("Zoom 120 %").
 - F11 toggles fullscreen.
