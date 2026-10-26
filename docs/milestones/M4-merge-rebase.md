@@ -162,7 +162,9 @@ Acceptance: integration tests for reorder, reword, squash (combined message), fi
 
 Acceptance: integration tests for both, incl. rejection of non-contiguous selections.
 
-### [ ] M4-09 Cherry-pick and revert
+### [x] M4-09 Cherry-pick and revert
+
+> Done: `git_core::{cherry_pick, revert, commit_empty}` (`git cherry-pick <ids…>` in the given order, `git revert --no-edit [-m N]`; a stop leaves `CHERRY_PICK_HEAD`/`REVERT_HEAD` and returns `Conflicts`; "Commit empty" = `commit --allow-empty --no-edit`, then `--continue` while the sequencer has steps left). App: commit menu "Cherry-pick commit" (not for HEAD) and "Revert commit", multi-selection "Cherry-pick N commits" (oldest first), revert of a merge → form with the parents (default parent 1), blocked during an operation; after a cherry-pick or revert the next refresh checks for an empty result (operation in progress, no conflicts, nothing staged or changed) → dialog "Abort" / "Skip" (cherry-pick only) / "Commit empty". Tests: git-core integration (single, several in order, conflict + abort, empty → skip and → commit empty with the next commit following, revert, revert of a merge with and without mainline, conflicting revert), app (menu rules, merge revert form → mainline 2, empty dialog for cherry-pick and revert). Checked by hand: cherry-pick of a commit whose change is already on main → "Empty cherry-pick" dialog → Commit empty → empty commit with the original message; menu on HEAD: cherry-pick and interactive rebase disabled. Note (→ M4-13): reverting a commit without changes fails in Git itself ("nothing to commit", no state left); Gitloom shows Git's error.
 
 - Cherry-pick one or many selected commits (applied oldest first).
 - Revert one commit; merge commits ask for the mainline parent (`-m`).
