@@ -168,17 +168,25 @@ fn appearance(app: &App) -> Element<'_, Message> {
 
 fn zoom<'a>(percent: u32) -> Element<'a, Message> {
     use crate::settings::{zoom_step, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN};
-    let step = |label: &'static str, target: u32, enabled: bool| {
-        button(text(label))
+    let step = |label: Element<'a, Message>, target: u32, enabled: bool| {
+        button(label)
             .on_press_maybe(enabled.then_some(Message::ZoomTo(target)))
             .padding([5, 12])
             .style(button::secondary)
     };
     row![
-        step("−", zoom_step(percent, false), percent > ZOOM_MIN),
+        step(
+            crate::icons::icon(crate::icons::Icon::Minus, 14.0).into(),
+            zoom_step(percent, false),
+            percent > ZOOM_MIN
+        ),
         text(format!("{percent} %")).width(60).align_x(iced::Center),
-        step("+", zoom_step(percent, true), percent < ZOOM_MAX),
-        step("Reset", ZOOM_DEFAULT, percent != ZOOM_DEFAULT),
+        step(
+            crate::icons::icon(crate::icons::Icon::Plus, 14.0).into(),
+            zoom_step(percent, true),
+            percent < ZOOM_MAX
+        ),
+        step(text("Reset").into(), ZOOM_DEFAULT, percent != ZOOM_DEFAULT),
     ]
     .spacing(6)
     .align_y(iced::Center)

@@ -42,7 +42,6 @@ Not done / known limitations:
 - M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict notice): ROADMAP ideas backlog (open question 9).
 - Real credential prompts (GCM on Windows, SSH passphrase on Linux), keyboard parts of the M3/M4 walkthroughs and the Windows runs of M2–M4 are open maintainer checks.
 - Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
-- Icons are Unicode placeholders (M5-05); remote markers on pills are text.
 - Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
 ## Maintainer to-dos

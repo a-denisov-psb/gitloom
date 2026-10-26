@@ -4,6 +4,7 @@ mod askpass;
 mod conflict;
 mod fetch;
 mod format;
+mod icons;
 mod menus;
 mod nav;
 mod overlay;

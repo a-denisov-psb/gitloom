@@ -82,10 +82,14 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
         .push(
             row![
                 modes,
-                button(text("×").size(15))
-                    .on_press(Message::DiffClosed)
-                    .padding([0, 8])
-                    .style(theme::flat),
+                crate::ui::panel::with_tooltip_text(
+                    button(crate::icons::icon(crate::icons::Icon::Close, 15.0))
+                        .on_press(Message::DiffClosed)
+                        .padding([2, 6])
+                        .style(theme::flat)
+                        .into(),
+                    "Close diff (Esc)".to_owned(),
+                ),
             ]
             .spacing(12),
         )

@@ -155,13 +155,6 @@ pub fn text_danger(theme: &Theme) -> text::Style {
     text_with(|p| p.danger)(theme)
 }
 
-/// Text in the color of a file change kind.
-pub fn text_change(kind: ChangeKind) -> impl Fn(&Theme) -> text::Style {
-    move |theme| text::Style {
-        color: Some(change_color(palette(theme), kind)),
-    }
-}
-
 /// Root background; visible through 1px gaps it acts as divider lines.
 pub fn root(theme: &Theme) -> container::Style {
     filled(palette(theme).border)

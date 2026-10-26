@@ -114,7 +114,7 @@ fn entry_row(panel: &RebasePanel, index: usize) -> Element<'_, Message> {
     let dropped = entry.action == TodoAction::Drop;
     let melded = matches!(entry.action, TodoAction::Squash | TodoAction::Fixup);
     let mut label = row![
-        text("⋮⋮").style(theme::text_muted),
+        crate::icons::tinted(crate::icons::Icon::Grip, 14.0, |p| p.text_muted),
         text(&entry.id[..entry.id.len().min(7)])
             .font(Font::MONOSPACE)
             .size(12)

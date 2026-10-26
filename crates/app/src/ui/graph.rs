@@ -14,6 +14,7 @@ use iced::{alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, 
 
 use crate::app::Message;
 use crate::format;
+use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Selection};
 use crate::theme;
 use crate::ui::muted;
@@ -183,12 +184,21 @@ pub fn graph_row(
 
     if snapshot.has_wip && row_index == 0 {
         let tree = &snapshot.working_tree;
+        let count = |icon: Icon, n: usize| {
+            row![
+                icons::tinted(icon, 12.0, |p| p.text_muted),
+                muted(n.to_string())
+            ]
+            .spacing(4)
+            .align_y(iced::Center)
+        };
         let summary = row![
             muted("// WIP"),
-            muted(format!("✎ {}", tree.unstaged.len())),
-            muted(format!("✓ {}", tree.staged.len())),
+            count(Icon::Pencil, tree.unstaged.len()),
+            count(Icon::Check, tree.staged.len()),
         ]
-        .spacing(12);
+        .spacing(12)
+        .align_y(iced::Center);
         let refs: Element<'_, Message> = match &repo.new_branch {
             Some(input) if input.row.is_none() => new_branch_input(input),
             _ => text("").into(),
@@ -302,12 +312,26 @@ fn new_branch_input(input: &crate::repo_view::NewBranch) -> Element<'_, Message>
 /// What a reference pill shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefLabel {
+    /// Branch or tag name ("HEAD" for a detached HEAD).
     pub text: String,
+    /// Remotes with a same-named branch on the same commit (combined pill).
+    pub remotes: Vec<String>,
     pub kind: LabelKind,
     /// The checked-out branch (or the detached HEAD marker).
     pub head: bool,
     /// Double click on the pill checks this out.
     pub checkout: Option<crate::app::CheckoutTarget>,
+}
+
+impl RefLabel {
+    /// Name plus the remotes of a combined pill: "main (origin, upstream)".
+    pub fn description(&self) -> String {
+        if self.remotes.is_empty() {
+            self.text.clone()
+        } else {
+            format!("{} ({})", self.text, self.remotes.join(", "))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +352,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
         if *target == commit.id {
             labels.push(RefLabel {
                 text: "HEAD".into(),
+                remotes: Vec::new(),
                 kind: LabelKind::DetachedHead,
                 head: true,
                 checkout: None,
@@ -353,14 +378,9 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                 remotes.extend(remote.remote().map(str::to_owned));
             }
         }
-        let check = if local.is_head { "✓ " } else { "" };
-        let text = if remotes.is_empty() {
-            format!("{check}{}", local.name)
-        } else {
-            format!("{check}{} · {}", local.name, remotes.join(", "))
-        };
         labels.push(RefLabel {
-            text,
+            text: local.name.clone(),
+            remotes,
             kind: LabelKind::Local,
             head: local.is_head,
             checkout: Some(crate::app::CheckoutTarget::Local(local.name.clone())),
@@ -372,6 +392,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                 used[j] = true;
                 labels.push(RefLabel {
                     text: reference.name.clone(),
+                    remotes: Vec::new(),
                     kind: if kind == RefKind::Tag {
                         LabelKind::Tag
                     } else {
@@ -400,7 +421,7 @@ fn ref_pills<'a>(
         let rest = Column::with_children(
             labels[1..]
                 .iter()
-                .map(|label| text(label.text.clone()).size(12).into()),
+                .map(|label| text(label.description()).size(12).into()),
         )
         .spacing(2);
         pills = pills.push(tooltip(
@@ -419,14 +440,30 @@ fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> El
         LabelKind::Tag => RefKind::Tag,
         LabelKind::DetachedHead => RefKind::LocalBranch,
     };
-    let pill = container(
+    let mut content = row![].spacing(4).align_y(iced::Center);
+    if label.head && label.kind == LabelKind::Local {
+        content = content.push(icons::icon(Icon::Check, 11.0));
+    }
+    content = content.push(
         text(label.text.clone())
             .size(12)
             .wrapping(text::Wrapping::None),
-    )
-    .padding([1, 6])
-    .clip(true)
-    .style(theme::ref_pill(kind, label.head));
+    );
+    if !label.remotes.is_empty() {
+        // GitKraken shows a remote icon on combined pills; the names are
+        // in the tooltip.
+        content = content.push(tooltip(
+            icons::tinted(Icon::Cloud, 12.0, |p| p.text_muted),
+            container(text(label.remotes.join(", ")).size(12))
+                .padding([4, 8])
+                .style(theme::tooltip),
+            tooltip::Position::Bottom,
+        ));
+    }
+    let pill = container(content)
+        .padding([1, 6])
+        .clip(true)
+        .style(theme::ref_pill(kind, label.head));
     let pill: Element<'_, Message> = match &label.checkout {
         Some(target) => {
             crate::ui::context_area::double_click_area(pill, Message::Checkout(target.clone()))
@@ -679,15 +716,10 @@ mod tests {
         ];
         let refs: Vec<&Reference> = refs.iter().collect();
         let labels = ref_labels(&refs, &on_branch(), &commit());
-        assert_eq!(
-            texts(&labels),
-            [
-                "✓ main · origin, upstream",
-                "feature",
-                "origin/other",
-                "v1.0"
-            ]
-        );
+        assert_eq!(texts(&labels), ["main", "feature", "origin/other", "v1.0"]);
+        assert_eq!(labels[0].remotes, ["origin", "upstream"]);
+        assert_eq!(labels[0].description(), "main (origin, upstream)");
+        assert_eq!(labels[1].description(), "feature");
         assert!(labels[0].head);
         assert_eq!(labels[3].kind, LabelKind::Tag);
     }

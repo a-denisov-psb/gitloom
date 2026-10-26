@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Added
 
 - Keyboard shortcut list (Ctrl+/): all shortcuts grouped like GitKraken's, with a filter.
+- Icons (Lucide) in the toolbar, sidebar, graph, file lists and banners instead of text symbols; a combined local/remote pill shows a cloud icon with the remote names as tooltip.
 - Zoom (Ctrl+= / Ctrl+- / Ctrl+0, 70–200 %, remembered) and fullscreen (F11).
 - Light theme: Preferences → Appearance → Dark, Light or System (follows the operating system).
 - Preferences (Ctrl+, or the gear button): the auto-fetch interval can be changed (0 turns it off). Preferences are stored in `settings.json` next to the session; the interval set before is taken over.
