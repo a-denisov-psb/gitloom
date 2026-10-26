@@ -96,8 +96,8 @@ One line per milestone: version, date, scope, notable deviations.
 | M1 Real repository (read-only) + lane graph | 0.2.0 | 2026-10-21 | `git-graph` (topo order, lanes), `GixBackend` (log/refs/stashes/status/diffs), async loading, open flow, session restore, virtualized graph, keyboard, diff view, demo data removed, performance work | Start screen path input as fallback for missing folder dialogs (ADR-010); J/K direction confirmed by maintainer |
 | M2 Working copy | 0.3.0 | 2026-10-23 | File watcher, stage/unstage/discard by file, hunk and line, commit and amend, stashes in the graph, undo/redo, `CliBackend`, context menu and modal infrastructure (moved from M3), `LaneHints` (M2-15) | Discard asks for confirmation also for hunks and lines; "Discard all" asks whether to discard staged changes too; partial clones show renames as delete + add when blobs are missing |
 | M3 Branches and remotes | 0.4.0 | 2026-10-25 | Checkout, branch/tag create/rename/delete, fetch (manual + auto), pull modes, push incl. force-with-lease, upstream and remote management, context menus, undo/redo for ref operations, progress + cancel, Gitloom as askpass helper | Askpass mode detected via `GITLOOM_ASKPASS` env (ADR-019); credentials never stored |
-| M4 Merge, rebase, conflicts, undo | 0.5.0 (in progress, M4-14 open on 2026-10-26) | – | Merge/ff, rebase and interactive rebase, cherry-pick, revert, reset, conflict resolution view, continue/skip/abort, drag and drop, multi-selection, undo/redo; Gitloom as Git's editor | Shift+↑/↓ select ranges instead of parent/child navigation; reset uses a mode dialog instead of a submenu; hard reset is undoable via a snapshot; editor input is a message queue |
-| M5 Productivity parity | 0.6.0 | – | Planned: palette, search, blame, icons, themes | – |
+| M4 Merge, rebase, conflicts, undo | 0.5.0 | 2026-10-26 | Merge/ff, rebase and interactive rebase, cherry-pick, revert, reset, conflict resolution view, continue/skip/abort, drag and drop, multi-selection, undo/redo; Gitloom as Git's editor | Shift+↑/↓ select ranges instead of parent/child navigation; reset uses a mode dialog instead of a submenu; hard reset is undoable via a snapshot; editor input is a message queue; released with keyboard parts and the Windows walkthrough still open (maintainer to-dos); three known limitations moved to the backlog |
+| M5 Productivity parity | 0.6.0 | – | In progress, planned in detail (`docs/milestones/M5-productivity.md`): action registry, settings, themes, zoom, icons, palette, search, hide/solo, file history, blame, avatars, external tools, terminal | – |
 | M6 Release readiness | 1.0.0 | – | Planned: installers, signing, update check | – |
 
 ## 6. Pending changes
@@ -106,6 +106,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 
 - `LaneHints` preparation: done as M2-15 (`docs/ARCHITECTURE.md`, "Lane groups").
 - Backlog entry "Git flow graph layout": in `docs/ROADMAP.md` → "Ideas backlog".
+- M5 detailed plan (2026-10-26): `docs/milestones/M5-productivity.md`, ADR-023 … ADR-027, ROADMAP backlog entries.
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -118,18 +119,17 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 | 1 | Final project name ("Gitloom" is a working title) | Open |
 | 2 | Confirm license (MIT OR Apache-2.0) | Open |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
-| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | Open |
-| 5 | M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict without notice): keep or plan follow-ups? | Open (`docs/HANDOVER.md` → Open questions #9) |
+| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0 |
+| 5 | M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict without notice): keep or plan follow-ups? | decided 2026-10-26: backlog (ROADMAP) |
 | 6 | Verify in GitKraken whether the interactive rebase list shows the newest commit on top (Gitloom does) | Open, maintainer to-do M4-07 |
 
 Questions raised by Claude Code during implementation are tracked in `docs/HANDOVER.md` → "Open questions"; check it at the start of every planning session.
 
 ## 8. Suggested next planning steps
 
-1. Check M4 progress in the repo and review what Claude Code delivered.
-2. Settle open decisions 4 and 5.
+1. M5 is being implemented (`docs/milestones/M5-productivity.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed.
+2. Answer the M5 maintainer verification items (milestone file) as the related tasks come up.
 3. Collect the maintainer's own ideas; place them in the roadmap.
-4. When M4 approaches its end: detail M5 to the same level as M4 (tasks, dependencies, acceptance criteria, dependencies to add, UX parity references).
 
 ## 9. Document map
 

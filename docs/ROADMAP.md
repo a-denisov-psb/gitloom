@@ -2,9 +2,7 @@
 
 ## Current milestone
 
-**M4 – Merge, rebase, conflicts** → [`milestones/M4-merge-rebase.md`](milestones/M4-merge-rebase.md)
-
-Next: **M5 – Productivity parity** → [`milestones/M5-productivity.md`](milestones/M5-productivity.md) (planned in detail)
+**M5 – Productivity parity** → [`milestones/M5-productivity.md`](milestones/M5-productivity.md)
 
 ## Vision
 
@@ -18,8 +16,8 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M1 | 0.2.0 | Real repository (read-only) and lane graph | Done |
 | M2 | 0.3.0 | Working copy: stage, commit, stash | Done |
 | M3 | 0.4.0 | Branches and remotes | Done |
-| M4 | 0.5.0 | Merge, rebase, conflicts, undo | In progress |
-| M5 | 0.6.0 | Productivity parity | Planned (detailed) |
+| M4 | 0.5.0 | Merge, rebase, conflicts, undo | Done |
+| M5 | 0.6.0 | Productivity parity | In progress |
 | M6 | 1.0.0 | Release readiness | Planned |
 
 Only the current and the next milestone are planned in task-level detail.
@@ -40,7 +38,7 @@ The daily loop without a terminal: file watcher, stage/unstage and discard by fi
 
 Checkout (local, remote → tracking branch, detached HEAD), create/rename/delete branches and tags, fetch (manual and automatic), pull with mode selection, push with upstream setup and force-with-lease, upstream and remote management, context menus on commits, branches, tags and remotes, undo/redo for ref operations. Network operations show progress, can be cancelled and use Gitloom as askpass helper; credentials are never stored. Details: [`milestones/M3-branches-remotes.md`](milestones/M3-branches-remotes.md).
 
-### M4 – Merge, rebase, conflicts
+### M4 – Merge, rebase, conflicts (done)
 
 Merge and fast-forward, rebase and interactive rebase (pick, reword, squash, fixup, drop, reorder), cherry-pick (one or many), revert, reset soft/mixed/hard, a conflict resolution view (ours, theirs, editable output), continue/skip/abort for running operations, drag and drop of branches, multi-selection in the graph and undo/redo for all of them. Gitloom acts as Git's editor, so no command waits for a terminal. Details: [`milestones/M4-merge-rebase.md`](milestones/M4-merge-rebase.md).
 
