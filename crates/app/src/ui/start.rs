@@ -52,7 +52,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let content = column![
         text("Gitloom").size(22),
         open,
-        muted("Ctrl+O").size(11),
+        muted(
+            crate::actions::ActionId::OpenRepository
+                .shortcut_text()
+                .unwrap_or_default()
+        )
+        .size(11),
         path,
         container(muted("Recent repositories")).padding([12, 0]),
         recent,

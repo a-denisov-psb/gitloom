@@ -110,7 +110,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Toggle left panel | Ctrl+J | done (M1) |
 | Toggle commit detail panel | Ctrl+K | done (M1) |
 | Close current panel | Esc | done (M1, diff view) |
-| Keyboard shortcut list | Ctrl+/ | M5 |
+| Keyboard shortcut list | Ctrl+/ | done (M5-01; grouped by category, with a filter) |
 
 ### Tabs
 

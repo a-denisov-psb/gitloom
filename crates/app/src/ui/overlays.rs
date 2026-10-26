@@ -130,6 +130,75 @@ pub fn form(form: &Form) -> Element<'_, Message> {
     )
 }
 
+/// Keyboard shortcut list (Ctrl+/): all registered shortcuts grouped by
+/// category, with a filter; actions of later tasks are marked disabled.
+pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
+    use crate::actions::{self, MAC};
+
+    let mut rows = Column::new().spacing(2);
+    let groups = actions::shortcut_rows(filter, MAC);
+    if groups.is_empty() {
+        rows = rows.push(muted("No matching shortcut"));
+    }
+    for (category, entries) in groups {
+        rows = rows.push(
+            container(text(category.title()).size(13)).padding(Padding::default().top(8).bottom(2)),
+        );
+        for action in entries {
+            let block = action.id.static_block();
+            let mut label = row![text(&action.label).size(13)].spacing(8);
+            if let Some(reason) = block {
+                label = label.push(muted(reason).size(11));
+            }
+            let keys = text(action.shortcut_labels(MAC))
+                .size(12)
+                .font(Font::MONOSPACE);
+            let keys = if block.is_some() {
+                keys.color(theme::TEXT_MUTED)
+            } else {
+                keys
+            };
+            rows = rows.push(
+                row![label, space::horizontal(), keys]
+                    .align_y(iced::Center)
+                    .padding([2, 4]),
+            );
+        }
+    }
+    let content = column![
+        row![
+            text("Keyboard shortcuts").size(17),
+            space::horizontal(),
+            button(text("Close"))
+                .on_press(Message::ShortcutListClosed)
+                .padding([4, 12])
+                .style(button::secondary),
+        ]
+        .align_y(iced::Center),
+        text_input("Filter shortcuts", filter)
+            .id(crate::app::SHORTCUT_FILTER_INPUT)
+            .on_input(Message::ShortcutFilterChanged)
+            .padding(6),
+        scrollable(rows.padding(Padding::default().right(12))).height(Fill),
+    ]
+    .spacing(12);
+    let dialog = container(content)
+        .width(DIALOG_WIDTH + 80.0)
+        .max_height(640)
+        .padding(20)
+        .style(theme::dialog);
+    // Clicks inside the list must not reach the backdrop, which closes it.
+    opaque(
+        mouse_area(
+            container(opaque(dialog))
+                .center(Fill)
+                .style(theme::backdrop),
+        )
+        .on_press(Message::ShortcutListClosed)
+        .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
 /// Menu at its origin; a click anywhere else closes it.
 /// Commit message dialog (reword, squash).
 pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Message> {

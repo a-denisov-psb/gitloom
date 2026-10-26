@@ -102,7 +102,9 @@ Until answered, implement the decisions above; adjust afterwards.
 
 ## Tasks
 
-### [ ] M5-01 Action registry and shortcut list
+### [x] M5-01 Action registry and shortcut list
+
+> Done: `actions.rs` holds `ActionId` (the former `Shortcut` enum, kept as an alias) and the registry with label, category, context (global, graph, staging, text field, plus "rebase panel" for P/R/S/F/D and Alt+↑/↓), chords and availability; `shortcuts.rs` maps keys through it. Chords match Shift exactly (Shift+F5, Shift+Ctrl+Home and Ctrl+Alt+Shift+F no longer trigger; nothing in UX-PARITY uses them). Punctuation that needs Shift on the layout is matched by the shifted key (Ctrl+/ on a German keyboard, Ctrl++). Ctrl+/ opens "Keyboard shortcuts" (grouped, filter, Esc closes even from the focused filter); M5 actions are listed and refused with "Not available yet" in the status bar. Menu and tooltip shortcut texts come from the registry. Tests: no duplicate chord per context (both platforms), every chord dispatches to its action (both platforms), macOS labels (⌘, ⇧, ⌥, ⌃), shifted punctuation, list filter, app (open, filter, Esc, disabled action). Checked by hand: Ctrl+/ → list, typing "zoom"/"tab" filters, Esc closes.
 
 - `actions.rs`: `ActionId` plus a table with label, category (the UX-PARITY sections: Repo actions, Navigation, Command palette and search, Interface, Tabs), context (global, graph, staging, text field), default shortcut (Ctrl → ⌘ on macOS) and an enabled rule returning the reason when disabled.
 - Existing shortcut handling (`shortcuts.rs`) dispatches through the registry; behavior unchanged.

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- Keyboard shortcut list (Ctrl+/): all shortcuts grouped like GitKraken's, with a filter.
+
 ## [0.5.0] - 2026-10-26
 
 ### Added
