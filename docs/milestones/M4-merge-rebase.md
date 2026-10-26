@@ -201,7 +201,9 @@ Acceptance: unit tests for the menu rules (fast-forward possible, which branch m
 
 Acceptance: integration tests for every undo/redo pair and failing preconditions.
 
-### [ ] M4-13 Edge cases and robustness
+### [x] M4-13 Edge cases and robustness
+
+> Done: (1) failing hooks during Continue: Git's error is shown, the operation stays in progress and the commit message stays in the panel (tested for merge, cherry-pick and revert; `git rebase` runs no commit-msg hook for replayed commits); (2) rebase over merges: `RepoSnapshot::merges_between` counts the merges a rebase would flatten; "Rebase Y onto X" (menu, drag and drop) asks first ("Rebase flattens merges", `Message::Rebase { confirmed }`), the interactive rebase panel shows how many merges it drops; (3) operations during auto-fetch: the auto-fetch yields (existing ADR-013 path); merge/rebase/pick requests queued behind it no longer leave their blocked/empty-check flags for the fetch's `WriteFinished`, and the interactive rebase panel still closes; (4) conflicts with a version larger than 2 MB (`MAX_CONFLICT_SIZE`) load as `WholeFileReason::TooLarge` → take ours/theirs. Known limitations noted earlier in M4-07/M4-09 are recorded as open question 9 in HANDOVER (no scope change). Tests: sequencer (failing hook keeps the state, continue works without it), resolve (large conflict → whole file), app (flatten confirmation incl. `merges_between`, auto-fetch yields and the merge waits). Checked by hand: "Rebase main onto feature" with a merge on main → confirmation names one merge commit.
 
 - Hooks failing during continue → error dialog, state kept.
 - Rebase of a branch with merge commits: Git's default (merges flattened); show a hint in the confirmation.

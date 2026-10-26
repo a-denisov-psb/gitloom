@@ -208,3 +208,16 @@ fn unknown_path_is_not_found() {
         Err(git_core::Error::NotFound(_))
     ));
 }
+
+#[test]
+fn large_conflicts_take_a_whole_side() {
+    let big = |line: &str| line.repeat(git_core::MAX_CONFLICT_SIZE / line.len() + 1);
+    let repo = conflict("big.txt", &big("base\n"), &big("ours\n"), &big("theirs\n"));
+    let cli = CliBackend::new(repo.path());
+    assert_eq!(
+        load_conflict(&cli, "big.txt").unwrap().content,
+        ConflictContent::WholeFile(WholeFileReason::TooLarge)
+    );
+    resolve_with_side(&cli, "big.txt", Side::Ours).unwrap();
+    assert_eq!(unmerged(&repo), "");
+}

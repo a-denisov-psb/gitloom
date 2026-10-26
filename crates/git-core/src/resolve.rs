@@ -36,7 +36,12 @@ pub enum WholeFileReason {
     DeletedOnOneSide { ours_deleted: bool },
     /// Binary content or not valid UTF-8.
     Binary,
+    /// A version is larger than 2 MB (M4-13).
+    TooLarge,
 }
+
+/// Versions larger than this are only resolved by taking a whole side.
+pub const MAX_CONFLICT_SIZE: usize = 2 * 1024 * 1024;
 
 /// A conflicted file as the conflict view needs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +128,14 @@ pub fn load_conflict(git: &dyn GitWriter, path: &str) -> Result<LoadedConflict> 
     let base = blob(git, stages.base.as_ref())?;
     let ours = blob(git, stages.ours.as_ref())?;
     let theirs = blob(git, stages.theirs.as_ref())?;
+    if [&base, &ours, &theirs]
+        .iter()
+        .any(|data| data.len() > MAX_CONFLICT_SIZE)
+    {
+        return Ok(loaded(ConflictContent::WholeFile(
+            WholeFileReason::TooLarge,
+        )));
+    }
     if [&base, &ours, &theirs].iter().any(|data| is_binary(data)) {
         return Ok(loaded(ConflictContent::WholeFile(WholeFileReason::Binary)));
     }

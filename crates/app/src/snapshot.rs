@@ -352,6 +352,35 @@ impl RepoSnapshot {
         complete.then_some(false)
     }
 
+    /// Merge commits reachable from `head` but not from `base` (flattened
+    /// by a rebase onto `base`), judged from the loaded history.
+    pub fn merges_between(&self, base: &str, head: &str) -> usize {
+        let mut excluded = std::collections::HashSet::new();
+        let mut stack = vec![base];
+        while let Some(id) = stack.pop() {
+            if excluded.insert(id) {
+                if let Some(commit) = self.commit(id) {
+                    stack.extend(commit.parents.iter().map(String::as_str));
+                }
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![head];
+        let mut merges = 0;
+        while let Some(id) = stack.pop() {
+            if excluded.contains(id) || !seen.insert(id) {
+                continue;
+            }
+            if let Some(commit) = self.commit(id) {
+                if commit.is_merge() {
+                    merges += 1;
+                }
+                stack.extend(commit.parents.iter().map(String::as_str));
+            }
+        }
+        merges
+    }
+
     /// The checked-out branch (or detached HEAD) can be fast-forwarded to
     /// `target`: HEAD is a proper ancestor (unknown counts as possible; Git
     /// checks again).

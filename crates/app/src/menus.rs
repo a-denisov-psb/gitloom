@@ -141,6 +141,7 @@ fn merge_entries(
         Message::Rebase {
             onto: reference.into(),
             autostash: false,
+            confirmed: false,
         },
     ));
     entries
@@ -365,6 +366,7 @@ pub fn drop_menu(facts: DropFacts<'_>) -> Vec<MenuEntry> {
         Message::Rebase {
             onto: reference(target, target_remote),
             autostash: false,
+            confirmed: false,
         },
     ));
     entries.push(needs_checkout(
@@ -485,7 +487,7 @@ mod tests {
         assert!(message_of(&menu, "Fast-forward main to topic").is_none());
         assert!(matches!(
             message_of(&menu, "Rebase main onto topic"),
-            Some(Message::Rebase { onto, autostash: false }) if onto == "refs/heads/topic"
+            Some(Message::Rebase { onto, autostash: false, .. }) if onto == "refs/heads/topic"
         ));
         // The checked-out branch offers no merge.
         let head = branch(true, false);

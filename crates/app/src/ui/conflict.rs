@@ -254,6 +254,12 @@ fn side_panel<'a>(
 
 fn whole_file<'a>(repo: &RepoView, reason: WholeFileReason, idle: bool) -> Element<'a, Message> {
     let (explanation, ours_label, theirs_label) = match reason {
+        WholeFileReason::TooLarge => (
+            "This file is larger than 2 MB, so the conflict view is not shown. Take one \
+             side's file:",
+            "Take ours",
+            "Take theirs",
+        ),
         WholeFileReason::Binary => (
             "This file is binary (or not UTF-8), so lines cannot be picked. Take one side's file:",
             "Take ours",
