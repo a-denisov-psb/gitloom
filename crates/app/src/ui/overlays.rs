@@ -131,6 +131,43 @@ pub fn form(form: &Form) -> Element<'_, Message> {
 }
 
 /// Menu at its origin; a click anywhere else closes it.
+/// Commit message dialog (reword, squash).
+pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Message> {
+    let mut content = column![
+        text(&dialog.title).size(17),
+        iced::widget::text_editor(&dialog.editor)
+            .on_action(Message::MessageDialogEdited)
+            .padding(6)
+            .height(180),
+    ]
+    .spacing(12);
+    if let Some(error) = &dialog.error {
+        content = content.push(text(error).size(12).color(theme::DANGER));
+    }
+    content = content.push(
+        row![
+            space::horizontal(),
+            button(text("Cancel"))
+                .on_press(Message::MessageDialogClosed)
+                .padding([6, 14])
+                .style(button::secondary),
+            button(text(&dialog.submit))
+                .on_press(Message::MessageDialogSubmit)
+                .padding([6, 14])
+                .style(button::primary),
+        ]
+        .spacing(8),
+    );
+    let dialog = container(content)
+        .width(DIALOG_WIDTH)
+        .padding(20)
+        .style(theme::dialog);
+    opaque(
+        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
+            .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
 pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Message> {
     let origin = menu.origin(window);
     let entries = Column::with_children(menu.entries.iter().enumerate().map(|(index, entry)| {

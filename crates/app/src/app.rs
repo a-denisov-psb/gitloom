@@ -175,6 +175,25 @@ pub enum Message {
         height: f32,
     },
     DiffClosed,
+    /// "Edit commit message": opens the message dialog for commit `id`.
+    EditCommitMessage(String),
+    /// "Squash N commits" for the multi-selection: opens the message dialog.
+    SquashSelected,
+    MessageDialogEdited(iced::widget::text_editor::Action),
+    MessageDialogClosed,
+    MessageDialogSubmit,
+    /// Change the message of commit `id` (amend for HEAD, else a rebase).
+    RewordCommit {
+        id: String,
+        message: String,
+        autostash: bool,
+    },
+    /// Squash the contiguous commits `ids` into one with `message`.
+    SquashCommits {
+        ids: Vec<String>,
+        message: String,
+        autostash: bool,
+    },
     /// Open the interactive rebase panel for the commits after `base`.
     RebasePanelOpened(String),
     RebaseLoaded {
@@ -491,6 +510,8 @@ pub struct App {
     pub modal: Option<Modal>,
     /// Open form dialog (inputs); below a modal, above everything else.
     pub form: Option<Form>,
+    /// Open commit message dialog (reword, squash).
+    pub message_dialog: Option<crate::overlay::MessageDialog>,
     pub context_menu: Option<ContextMenu>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
@@ -529,6 +550,7 @@ impl App {
             git: None,
             notice: None,
             modal: None,
+            message_dialog: None,
             form: None,
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
@@ -1519,7 +1541,8 @@ impl App {
 
     fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
         // An open dialog or menu only reacts to Esc and Enter.
-        let overlay_open = self.modal.is_some() || self.context_menu.is_some();
+        let overlay_open =
+            self.modal.is_some() || self.context_menu.is_some() || self.message_dialog.is_some();
         if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
             return Task::none();
         }
@@ -1619,6 +1642,7 @@ impl App {
                 if self.modal.take().is_some()
                     || self.context_menu.take().is_some()
                     || self.form.take().is_some()
+                    || self.message_dialog.take().is_some()
                     || self
                         .active_view_mut()
                         .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
@@ -1866,6 +1890,10 @@ impl App {
             Message::Merge { source, .. } => (format!("Merge {} into {head}", short(source)), true),
             Message::Rebase { onto, .. } => (format!("Rebase {head} onto {}", short(onto)), true),
             Message::RunInteractiveRebase { .. } => (format!("Interactive rebase of {head}"), true),
+            Message::RewordCommit { id, .. } => {
+                (format!("Edit message of {}", &id[..id.len().min(7)]), true)
+            }
+            Message::SquashCommits { ids, .. } => (format!("Squash {} commits", ids.len()), true),
             Message::FastForward {
                 branch: None,
                 source,
@@ -1895,6 +1923,16 @@ impl App {
                 input,
                 autostash,
             } => git_core::rebase_interactive(git, base, input, *autostash).map(drop),
+            Message::RewordCommit {
+                id,
+                message,
+                autostash,
+            } => git_core::reword_commit(git, id, message, *autostash).map(drop),
+            Message::SquashCommits {
+                ids,
+                message,
+                autostash,
+            } => git_core::squash_commits(git, ids, message, *autostash).map(drop),
             Message::FastForward {
                 branch: None,
                 source,
@@ -2541,9 +2579,12 @@ impl App {
                             blocked_checkout = checkout;
                         }
                         let blocked = match &merge {
-                            Some(Message::Rebase { .. } | Message::RunInteractiveRebase { .. }) => {
-                                git_core::rebase_blocked(error)
-                            }
+                            Some(
+                                Message::Rebase { .. }
+                                | Message::RunInteractiveRebase { .. }
+                                | Message::RewordCommit { .. }
+                                | Message::SquashCommits { .. },
+                            ) => git_core::rebase_blocked(error),
                             _ => git_core::merge_blocked(error),
                         };
                         if blocked {
@@ -2754,24 +2795,26 @@ impl App {
                     .active_tab()
                     .and_then(Tab::view)
                     .and_then(|v| v.snapshot.commit(&id))
-                    .map(|c| {
-                        if c.body.is_empty() {
-                            c.summary.clone()
-                        } else {
-                            format!("{}\n\n{}", c.summary, c.body)
+                    .map(full_message)
+                    .unwrap_or_default();
+                let facts = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|view| {
+                        let snapshot = &view.snapshot;
+                        let clean = snapshot.state.is_clean();
+                        crate::menus::CommitFacts {
+                            rebase_from: clean
+                                && snapshot.head.target().is_some_and(|head| {
+                                    head != id && snapshot.is_ancestor(&id, head) == Some(true)
+                                }),
+                            rewordable: clean && crate::repo_view::rewordable(snapshot, &id),
                         }
                     })
                     .unwrap_or_default();
-                let rebase_from = self.active_tab().and_then(Tab::view).is_some_and(|view| {
-                    let snapshot = &view.snapshot;
-                    snapshot.state.is_clean()
-                        && snapshot.head.target().is_some_and(|head| {
-                            head != id && snapshot.is_ancestor(&id, head) == Some(true)
-                        })
-                });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::commit(&id, &message, writable, rebase_from),
+                    crate::menus::commit(&id, &message, writable, facts),
                 ));
             }
             Message::BranchContextMenu {
@@ -3462,6 +3505,81 @@ impl App {
                     view.center = CenterView::Graph;
                 }
             }
+            Message::EditCommitMessage(id) => {
+                let message = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.commit(&id))
+                    .map(full_message);
+                if let Some(message) = message {
+                    self.message_dialog = Some(crate::overlay::MessageDialog::new(
+                        format!("Edit message of {}", &id[..id.len().min(7)]),
+                        "Save message",
+                        &message,
+                        crate::overlay::MessageAction::Reword { id },
+                    ));
+                }
+            }
+            Message::SquashSelected => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let ids = view.multi.ids().to_vec();
+                if !crate::repo_view::squashable(&view.snapshot, &ids) {
+                    self.status = "Select commits that follow each other on the current \
+                                   branch, without merges"
+                        .into();
+                    return Task::none();
+                }
+                // Oldest first, like Git's combined squash message.
+                let message = ids
+                    .iter()
+                    .rev()
+                    .filter_map(|id| view.snapshot.commit(id))
+                    .map(|c| full_message(c).trim().to_owned())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                self.message_dialog = Some(crate::overlay::MessageDialog::new(
+                    format!("Squash {} commits", ids.len()),
+                    "Squash",
+                    &message,
+                    crate::overlay::MessageAction::Squash { ids },
+                ));
+            }
+            Message::MessageDialogEdited(action) => {
+                if let Some(dialog) = self.message_dialog.as_mut() {
+                    dialog.editor.perform(action);
+                }
+            }
+            Message::MessageDialogClosed => self.message_dialog = None,
+            Message::MessageDialogSubmit => {
+                let Some(dialog) = self.message_dialog.as_mut() else {
+                    return Task::none();
+                };
+                let message = dialog.editor.text();
+                if message.trim().is_empty() {
+                    dialog.error = Some("Enter a commit message".into());
+                    return Task::none();
+                }
+                let message = format!("{}\n", message.trim_end());
+                let request = match dialog.action.clone() {
+                    crate::overlay::MessageAction::Reword { id } => Message::RewordCommit {
+                        id,
+                        message,
+                        autostash: false,
+                    },
+                    crate::overlay::MessageAction::Squash { ids } => Message::SquashCommits {
+                        ids,
+                        message,
+                        autostash: false,
+                    },
+                };
+                self.message_dialog = None;
+                return self.merge(request);
+            }
+            Message::RewordCommit { .. } | Message::SquashCommits { .. } => {
+                return self.merge(message);
+            }
             Message::RebasePanelOpened(base) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -4073,7 +4191,10 @@ fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
 fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
     let operation = if matches!(
         request,
-        Message::Rebase { .. } | Message::RunInteractiveRebase { .. }
+        Message::Rebase { .. }
+            | Message::RunInteractiveRebase { .. }
+            | Message::RewordCommit { .. }
+            | Message::SquashCommits { .. }
     ) {
         "rebase"
     } else {
@@ -4091,6 +4212,16 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         Message::RunInteractiveRebase { base, input, .. } => Message::RunInteractiveRebase {
             base,
             input,
+            autostash: true,
+        },
+        Message::RewordCommit { id, message, .. } => Message::RewordCommit {
+            id,
+            message,
+            autostash: true,
+        },
+        Message::SquashCommits { ids, message, .. } => Message::SquashCommits {
+            ids,
+            message,
             autostash: true,
         },
         Message::FastForward { branch, source, .. } => Message::FastForward {
@@ -4122,6 +4253,15 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         ],
         default: Some(1),
     })
+}
+
+/// Summary and body of `commit` as one message.
+fn full_message(commit: &git_core::Commit) -> String {
+    if commit.body.is_empty() {
+        commit.summary.clone()
+    } else {
+        format!("{}\n\n{}", commit.summary, commit.body)
+    }
 }
 
 /// Keys of the interactive rebase panel; true if `shortcut` was handled.
@@ -5832,6 +5972,86 @@ mod tests {
                 if base == "a"
                     && input.sequence.as_deref() == Some("pick b\nsquash c\n")
                     && input.messages == ["B\n\nC\n"]
+        ));
+    }
+
+    fn paste_into_message_dialog(app: &mut App, text: &str) {
+        use iced::widget::text_editor::{Action, Edit};
+        let _ = app.update(Message::MessageDialogEdited(Action::Edit(Edit::Paste(
+            Arc::new(text.into()),
+        ))));
+    }
+
+    #[test]
+    fn reword_and_squash_rules_follow_the_first_parent_line() {
+        let app = ready_app(&["c", "b", "a"]);
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        assert!(crate::repo_view::rewordable(snapshot, "c"), "HEAD: amend");
+        assert!(crate::repo_view::rewordable(snapshot, "b"));
+        assert!(!crate::repo_view::rewordable(snapshot, "a"), "root commit");
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(crate::repo_view::squashable(snapshot, &ids(&["c", "b"])));
+        assert!(
+            !crate::repo_view::squashable(snapshot, &ids(&["b", "a"])),
+            "root"
+        );
+        assert!(
+            !crate::repo_view::squashable(snapshot, &ids(&["c", "a"])),
+            "gap"
+        );
+        assert!(!crate::repo_view::squashable(snapshot, &ids(&["c"])));
+    }
+
+    #[test]
+    fn edit_commit_message_runs_a_reword() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        let _ = app.update(Message::EditCommitMessage("b".into()));
+        assert_eq!(
+            app.message_dialog.as_ref().unwrap().title,
+            "Edit message of b"
+        );
+        let _ = app.update(Message::MessageDialogSubmit);
+        assert_eq!(
+            app.message_dialog.as_ref().unwrap().error.as_deref(),
+            Some("Enter a commit message")
+        );
+        paste_into_message_dialog(&mut app, "New message");
+        let _ = app.update(Message::MessageDialogSubmit);
+        assert!(app.message_dialog.is_none());
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Edit message of b"));
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::RewordCommit { id, message, autostash: false })
+                if id == "b" && message == "New message\n"
+        ));
+    }
+
+    #[test]
+    fn squash_selected_needs_a_squashable_selection() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        app.tabs[0].view_mut().unwrap().multi.single("c");
+        let _ = app.update(Message::SquashSelected);
+        assert!(app.message_dialog.is_none());
+
+        let view = app.tabs[0].view_mut().unwrap();
+        let snapshot = Arc::clone(&view.snapshot);
+        let order = crate::repo_view::selectable_ids(&snapshot);
+        view.multi.range("b", &order);
+        let _ = app.update(Message::SquashSelected);
+        assert_eq!(
+            app.message_dialog.as_ref().unwrap().title,
+            "Squash 2 commits"
+        );
+        paste_into_message_dialog(&mut app, "Both");
+        let _ = app.update(Message::MessageDialogSubmit);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Squash 2 commits"));
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::SquashCommits { ids, .. }) if ids.len() == 2
         ));
     }
 

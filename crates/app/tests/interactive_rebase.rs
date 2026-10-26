@@ -172,3 +172,82 @@ fn conflict_during_reorder_stops_the_rebase() {
         .unwrap();
     assert_eq!(repo.head(), head);
 }
+
+fn rev(repo: &TestRepo, name: &str) -> String {
+    repo.git(&["rev-parse", name])
+}
+
+#[test]
+fn reword_head_amends_only_the_message() {
+    let (repo, base) = history();
+    repo.write("staged.txt", "staged\n");
+    repo.git(&["add", "staged.txt"]);
+    let parent = rev(&repo, "HEAD~1");
+    git_core::reword_commit(&backend(&repo), &repo.head(), "four v2\n", false).unwrap();
+    assert_eq!(messages(&repo, &base)[0], "four v2");
+    assert_eq!(repo.parents("HEAD"), [parent]);
+    assert_eq!(files(&repo, "HEAD"), "four.txt", "the index stays out");
+    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "staged.txt");
+}
+
+#[test]
+fn reword_an_older_commit() {
+    let (repo, base) = history();
+    let two = rev(&repo, "HEAD~2");
+    assert_eq!(
+        git_core::reword_commit(&backend(&repo), &two, "two v2\n\nbody\n", false).unwrap(),
+        MergeOutcome::Done
+    );
+    assert_eq!(
+        messages(&repo, &base),
+        ["four", "three", "two v2\n\nbody", "one"]
+    );
+}
+
+#[test]
+fn squash_selected_commits_keeps_later_ones() {
+    let (repo, base) = history();
+    let ids = vec![rev(&repo, "HEAD~1"), rev(&repo, "HEAD~2")];
+    git_core::squash_commits(&backend(&repo), &ids, "two and three\n", false).unwrap();
+    assert_eq!(messages(&repo, &base), ["four", "two and three", "one"]);
+    assert_eq!(files(&repo, "HEAD~1"), "three.txt\ntwo.txt");
+}
+
+#[test]
+fn squash_rejects_non_contiguous_selections() {
+    let (repo, _) = history();
+    let head = repo.head();
+    let ids = vec![rev(&repo, "HEAD"), rev(&repo, "HEAD~2")];
+    let error = git_core::squash_commits(&backend(&repo), &ids, "x\n", false).unwrap_err();
+    assert!(error.to_string().contains("follow each other"), "{error}");
+    assert_eq!(repo.head(), head);
+    assert!(git_core::squash_commits(&backend(&repo), &ids[..1], "x\n", false).is_err());
+}
+
+#[test]
+fn reword_rejects_commits_off_the_linear_history() {
+    let (repo, _) = history();
+    repo.git(&["switch", "--quiet", "-c", "side", "HEAD~1"]);
+    let side = repo.commit("side.txt", "side\n", "side");
+    repo.checkout("main");
+    repo.merge("side", "merge side");
+    let head = repo.head();
+    // "side" is reachable through the merge, not on the first-parent line.
+    let error = git_core::reword_commit(&backend(&repo), &side, "x\n", false).unwrap_err();
+    assert!(error.to_string().contains("follow each other"), "{error}");
+    assert_eq!(repo.head(), head);
+}
+
+#[test]
+fn reword_refuses_when_a_merge_follows() {
+    let (repo, _) = history();
+    let two = rev(&repo, "HEAD~2");
+    repo.git(&["switch", "--quiet", "-c", "side", "HEAD~1"]);
+    repo.commit("side.txt", "side\n", "side");
+    repo.checkout("main");
+    repo.merge("side", "merge side");
+    let head = repo.head();
+    let error = git_core::reword_commit(&backend(&repo), &two, "x\n", false).unwrap_err();
+    assert!(error.to_string().contains("without merges"), "{error}");
+    assert_eq!(repo.head(), head);
+}

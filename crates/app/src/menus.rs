@@ -28,9 +28,17 @@ fn later(label: &str) -> MenuEntry {
     }
 }
 
-/// `rebase_from`: the commit is a proper ancestor of HEAD and no operation
-/// is in progress, so the commits after it can be rebased interactively.
-pub fn commit(id: &str, message: &str, writable: bool, rebase_from: bool) -> Vec<MenuEntry> {
+/// History actions on a commit that depend on its position.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CommitFacts {
+    /// A proper ancestor of HEAD and no operation in progress: the commits
+    /// after it can be rebased interactively.
+    pub rebase_from: bool,
+    /// Its message can be edited (HEAD, or linear history up to HEAD).
+    pub rewordable: bool,
+}
+
+pub fn commit(id: &str, message: &str, writable: bool, facts: CommitFacts) -> Vec<MenuEntry> {
     vec![
         action(
             "Checkout this commit",
@@ -49,8 +57,13 @@ pub fn commit(id: &str, message: &str, writable: bool, rebase_from: bool) -> Vec
         ),
         MenuEntry::Separator,
         action(
+            "Edit commit message",
+            writable && facts.rewordable,
+            Message::EditCommitMessage(id.into()),
+        ),
+        action(
             "Interactive rebase from here",
-            writable && rebase_from,
+            writable && facts.rebase_from,
             Message::RebasePanelOpened(id.into()),
         ),
         later("Cherry-pick commit"),
@@ -452,7 +465,7 @@ mod tests {
     #[test]
     fn m4_actions_are_disabled_with_a_hint() {
         for menu in [
-            commit("c1", "msg", true, false),
+            commit("c1", "msg", true, CommitFacts::default()),
             branch(false, true),
             remote_menu(None, false),
         ] {
@@ -464,6 +477,7 @@ mod tests {
                     "Pull",
                     "Unset upstream",
                     "Interactive rebase from here",
+                    "Edit commit message",
                 ]
                 .contains(&label)
                 {
@@ -487,7 +501,16 @@ mod tests {
         });
         assert_eq!(summary(&menu).0, ["Copy name"]);
         assert_eq!(
-            summary(&commit("c1", "msg", false, true)).0,
+            summary(&commit(
+                "c1",
+                "msg",
+                false,
+                CommitFacts {
+                    rebase_from: true,
+                    rewordable: true
+                }
+            ))
+            .0,
             ["Copy SHA", "Copy message"]
         );
         assert_eq!(summary(&tag("v1", false)).0, ["Copy name"]);
