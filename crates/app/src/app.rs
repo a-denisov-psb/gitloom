@@ -176,12 +176,12 @@ pub enum Message {
     },
     DiffClosed,
     /// "Edit commit message": opens the message dialog for commit `id`.
-    EditCommitMessage(String),
+    RewordStart(String),
     /// "Squash N commits" for the multi-selection: opens the message dialog.
     SquashSelected,
-    MessageDialogEdited(iced::widget::text_editor::Action),
-    MessageDialogClosed,
-    MessageDialogSubmit,
+    CommitMessageEdited(iced::widget::text_editor::Action),
+    CommitMessageClosed,
+    CommitMessageSubmit,
     /// Change the message of commit `id` (amend for HEAD, else a rebase).
     RewordCommit {
         id: String,
@@ -3505,7 +3505,7 @@ impl App {
                     view.center = CenterView::Graph;
                 }
             }
-            Message::EditCommitMessage(id) => {
+            Message::RewordStart(id) => {
                 let message = self
                     .active_tab()
                     .and_then(Tab::view)
@@ -3546,13 +3546,13 @@ impl App {
                     crate::overlay::MessageAction::Squash { ids },
                 ));
             }
-            Message::MessageDialogEdited(action) => {
+            Message::CommitMessageEdited(action) => {
                 if let Some(dialog) = self.message_dialog.as_mut() {
                     dialog.editor.perform(action);
                 }
             }
-            Message::MessageDialogClosed => self.message_dialog = None,
-            Message::MessageDialogSubmit => {
+            Message::CommitMessageClosed => self.message_dialog = None,
+            Message::CommitMessageSubmit => {
                 let Some(dialog) = self.message_dialog.as_mut() else {
                     return Task::none();
                 };
@@ -5977,7 +5977,7 @@ mod tests {
 
     fn paste_into_message_dialog(app: &mut App, text: &str) {
         use iced::widget::text_editor::{Action, Edit};
-        let _ = app.update(Message::MessageDialogEdited(Action::Edit(Edit::Paste(
+        let _ = app.update(Message::CommitMessageEdited(Action::Edit(Edit::Paste(
             Arc::new(text.into()),
         ))));
     }
@@ -6006,18 +6006,18 @@ mod tests {
     fn edit_commit_message_runs_a_reword() {
         let mut app = ready_app(&["c", "b", "a"]);
         let _ = app.update(git_available());
-        let _ = app.update(Message::EditCommitMessage("b".into()));
+        let _ = app.update(Message::RewordStart("b".into()));
         assert_eq!(
             app.message_dialog.as_ref().unwrap().title,
             "Edit message of b"
         );
-        let _ = app.update(Message::MessageDialogSubmit);
+        let _ = app.update(Message::CommitMessageSubmit);
         assert_eq!(
             app.message_dialog.as_ref().unwrap().error.as_deref(),
             Some("Enter a commit message")
         );
         paste_into_message_dialog(&mut app, "New message");
-        let _ = app.update(Message::MessageDialogSubmit);
+        let _ = app.update(Message::CommitMessageSubmit);
         assert!(app.message_dialog.is_none());
         let view = app.tabs[0].view().unwrap();
         assert_eq!(view.busy.as_deref(), Some("Edit message of b"));
@@ -6046,7 +6046,7 @@ mod tests {
             "Squash 2 commits"
         );
         paste_into_message_dialog(&mut app, "Both");
-        let _ = app.update(Message::MessageDialogSubmit);
+        let _ = app.update(Message::CommitMessageSubmit);
         let view = app.tabs[0].view().unwrap();
         assert_eq!(view.busy.as_deref(), Some("Squash 2 commits"));
         assert!(matches!(

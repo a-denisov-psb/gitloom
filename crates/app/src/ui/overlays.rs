@@ -136,7 +136,7 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
     let mut content = column![
         text(&dialog.title).size(17),
         iced::widget::text_editor(&dialog.editor)
-            .on_action(Message::MessageDialogEdited)
+            .on_action(Message::CommitMessageEdited)
             .padding(6)
             .height(180),
     ]
@@ -148,11 +148,11 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
         row![
             space::horizontal(),
             button(text("Cancel"))
-                .on_press(Message::MessageDialogClosed)
+                .on_press(Message::CommitMessageClosed)
                 .padding([6, 14])
                 .style(button::secondary),
             button(text(&dialog.submit))
-                .on_press(Message::MessageDialogSubmit)
+                .on_press(Message::CommitMessageSubmit)
                 .padding([6, 14])
                 .style(button::primary),
         ]

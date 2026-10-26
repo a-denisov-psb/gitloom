@@ -59,7 +59,7 @@ pub fn commit(id: &str, message: &str, writable: bool, facts: CommitFacts) -> Ve
         action(
             "Edit commit message",
             writable && facts.rewordable,
-            Message::EditCommitMessage(id.into()),
+            Message::RewordStart(id.into()),
         ),
         action(
             "Interactive rebase from here",
