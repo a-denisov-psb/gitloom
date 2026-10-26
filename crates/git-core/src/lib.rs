@@ -19,6 +19,7 @@ mod network;
 mod patch;
 mod pick;
 mod refname;
+mod reset;
 mod resolve;
 mod rewrite;
 mod state;
@@ -56,6 +57,9 @@ pub use network::{
 pub use patch::{build_patch, PatchDirection};
 pub use pick::{cherry_pick, commit_empty, revert};
 pub use refname::check_branch_name;
+pub use reset::{
+    hard_reset_with_snapshot, reset, undo_hard_reset, RawFile, ResetMode, ResetSnapshot,
+};
 pub use resolve::{
     conflict_stages, load_conflict, resolve_conflict, resolve_with_side, ConflictContent,
     ConflictStages, LoadedConflict, StageEntry, WholeFileReason,

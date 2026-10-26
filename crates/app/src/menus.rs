@@ -4,9 +4,6 @@
 use crate::app::{CheckoutTarget, Message};
 use crate::overlay::MenuEntry;
 
-/// Tooltip of actions that arrive with merge and rebase support (M4).
-const LATER: &str = "Not available yet";
-
 fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
     MenuEntry::Item {
         label: label.into(),
@@ -14,17 +11,6 @@ fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
         enabled,
         message: Box::new(message),
         hint: None,
-    }
-}
-
-/// Visible but disabled until M4.
-fn later(label: &str) -> MenuEntry {
-    MenuEntry::Item {
-        label: label.into(),
-        shortcut: None,
-        enabled: false,
-        message: Box::new(Message::Refresh),
-        hint: Some(LATER.into()),
     }
 }
 
@@ -40,9 +26,18 @@ pub struct CommitFacts {
     pub pickable: bool,
     /// It can be reverted (HEAD exists, no operation).
     pub revertable: bool,
+    /// HEAD can be reset to it (not HEAD itself, no operation).
+    pub resettable: bool,
 }
 
-pub fn commit(id: &str, message: &str, writable: bool, facts: CommitFacts) -> Vec<MenuEntry> {
+/// `head`: checked-out branch name, or "HEAD" when detached.
+pub fn commit(
+    id: &str,
+    message: &str,
+    writable: bool,
+    facts: CommitFacts,
+    head: &str,
+) -> Vec<MenuEntry> {
     vec![
         action(
             "Checkout this commit",
@@ -80,7 +75,11 @@ pub fn commit(id: &str, message: &str, writable: bool, facts: CommitFacts) -> Ve
             writable && facts.revertable,
             Message::RevertStart(id.into()),
         ),
-        later("Reset to this commit"),
+        action(
+            &format!("Reset {head} to this commit…"),
+            writable && facts.resettable,
+            Message::ResetStart(id.into()),
+        ),
         MenuEntry::Separator,
         action("Copy SHA", true, Message::CopyToClipboard(id.into())),
         action(
@@ -475,31 +474,33 @@ mod tests {
     }
 
     #[test]
-    fn m4_actions_are_disabled_with_a_hint() {
-        for menu in [
-            commit("c1", "msg", true, CommitFacts::default()),
-            branch(false, true),
-            remote_menu(None, false),
-        ] {
-            let (_, disabled) = summary(&menu);
-            for (label, hint) in disabled {
-                if [
-                    "Checkout",
-                    "Delete",
-                    "Pull",
-                    "Unset upstream",
-                    "Interactive rebase from here",
-                    "Edit commit message",
-                    "Cherry-pick commit",
-                    "Revert commit",
-                ]
-                .contains(&label)
-                {
-                    continue;
-                }
-                assert_eq!(hint, Some(LATER), "{label}");
-            }
-        }
+    fn commit_menu_history_actions_follow_the_facts() {
+        let none = commit("c1", "msg", true, CommitFacts::default(), "main");
+        let (enabled, _) = summary(&none);
+        assert_eq!(
+            enabled,
+            [
+                "Checkout this commit",
+                "Create branch here",
+                "Create tag here",
+                "Copy SHA",
+                "Copy message"
+            ]
+        );
+        let all = CommitFacts {
+            rebase_from: true,
+            rewordable: true,
+            pickable: true,
+            revertable: true,
+            resettable: true,
+        };
+        let menu = commit("c1", "msg", true, all, "topic");
+        let (_, disabled) = summary(&menu);
+        assert!(disabled.is_empty(), "{disabled:?}");
+        assert!(matches!(
+            message_of(&commit("c1", "msg", true, all, "topic"), "Reset topic to this commit…"),
+            Some(Message::ResetStart(id)) if id == "c1"
+        ));
     }
 
     #[test]
@@ -524,7 +525,9 @@ mod tests {
                     rewordable: true,
                     pickable: true,
                     revertable: true,
-                }
+                    resettable: true,
+                },
+                "main"
             ))
             .0,
             ["Copy SHA", "Copy message"]

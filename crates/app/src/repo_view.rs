@@ -76,6 +76,8 @@ pub enum Guarded {
     MoveHead,
     /// Merge or fast-forward.
     Merge,
+    /// Reset HEAD to another commit.
+    Reset,
 }
 
 /// How a line click changes the selection.
@@ -430,7 +432,11 @@ impl RepoView {
         let blocked = match action {
             // Committing continues the operation (M4-03).
             Guarded::Commit => false,
-            Guarded::Amend | Guarded::Stash | Guarded::MoveHead | Guarded::Merge => true,
+            Guarded::Amend
+            | Guarded::Stash
+            | Guarded::MoveHead
+            | Guarded::Merge
+            | Guarded::Reset => true,
         };
         blocked.then(|| {
             let verb = match action {
@@ -439,6 +445,7 @@ impl RepoView {
                 Guarded::Stash => "stash",
                 Guarded::MoveHead => "undo or redo commits",
                 Guarded::Merge => "merge",
+                Guarded::Reset => "reset",
             };
             format!("Cannot {verb} while a {operation} is in progress")
         })
