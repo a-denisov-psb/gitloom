@@ -265,6 +265,40 @@ impl Form {
     }
 }
 
+/// What the commit message dialog does on submit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageAction {
+    Reword { id: String },
+    Squash { ids: Vec<String> },
+}
+
+/// Dialog with a multi-line commit message (reword, squash; M4-08).
+#[derive(Debug)]
+pub struct MessageDialog {
+    pub title: String,
+    pub submit: String,
+    pub editor: iced::widget::text_editor::Content,
+    pub action: MessageAction,
+    pub error: Option<String>,
+}
+
+impl MessageDialog {
+    pub fn new(
+        title: impl Into<String>,
+        submit: impl Into<String>,
+        message: &str,
+        action: MessageAction,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            submit: submit.into(),
+            editor: iced::widget::text_editor::Content::with_text(message),
+            action,
+            error: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MenuEntry {
     Item {

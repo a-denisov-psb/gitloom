@@ -63,6 +63,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(form) = &app.form {
         layers.push(overlays::form(form));
     }
+    if let Some(dialog) = &app.message_dialog {
+        layers.push(overlays::message_dialog(dialog));
+    }
     if let Some(modal) = &app.modal {
         layers.push(overlays::modal(modal));
     }

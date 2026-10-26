@@ -19,6 +19,7 @@ mod network;
 mod patch;
 mod refname;
 mod resolve;
+mod rewrite;
 mod state;
 mod todo;
 mod watch;
@@ -57,6 +58,7 @@ pub use resolve::{
     conflict_stages, load_conflict, resolve_conflict, resolve_with_side, ConflictContent,
     ConflictStages, LoadedConflict, StageEntry, WholeFileReason,
 };
+pub use rewrite::{reword_commit, squash_commits};
 pub use state::{locked_file, Operation, RepoState};
 pub use todo::{
     build as build_todo, chains, default_message, needs_message, validate as validate_todo, Chain,

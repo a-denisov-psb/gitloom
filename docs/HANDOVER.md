@@ -64,6 +64,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M3-14: repeat the M3 walkthrough on Windows against the GitHub remote, on a throwaway branch (e.g. `e2e-windows`) and a throwaway tag: Fetch all, create branch (Ctrl+B), push with upstream, pull (fast-forward), push rejected → Force push (once without and once after a fetch), create/push/delete tag, rename branch incl. remote, delete remote and local branch, checkout of a remote branch; finally check that GitHub has no leftovers.
 - [x] Check the CI runs of `master` v0.4.0 (d4f9f4a) and `develop` (2d31663): both green (checked with `gh run list`, 2026-10-25). From now on Claude Code checks CI itself after each push to `develop`.
 - [ ] M4-07: in the interactive rebase panel, check the keys P/R/S/F/D, ↑/↓ and Alt+↑/↓ and typing into a reword message (keyboard input did not reach the window in my WSLg session; actions, drag and the combined squash message were verified by mouse). Also check in GitKraken whether its list shows the newest commit on top (Gitloom does).
+- [ ] M4-08: "Edit commit message" with a typed change (HEAD and an older commit) and "Squash N commits" after a Ctrl/Shift+click multi-selection (keyboard input and modifiers did not reach the window in my WSLg session; covered by integration tests).
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 
 ## Environment notes

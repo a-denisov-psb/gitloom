@@ -35,7 +35,7 @@ pub fn view(view: &RepoView) -> Element<'_, Message> {
 }
 
 /// Several commits selected: their summaries and the actions for them.
-/// Cherry-pick (M4-09) and squash (M4-08) are enabled in later tasks.
+/// Cherry-pick follows in M4-09.
 fn multi_selection(view: &RepoView) -> Element<'_, Message> {
     let count = view.multi.len();
     let commits = Column::with_children(view.multi.ids().iter().filter_map(|id| {
@@ -61,8 +61,17 @@ fn multi_selection(view: &RepoView) -> Element<'_, Message> {
         )
     };
     let mut actions = row![action(format!("Cherry-pick {count} commits"))].spacing(8);
-    if crate::repo_view::contiguous_on_head(&view.snapshot, view.multi.ids()) {
-        actions = actions.push(action(format!("Squash {count} commits")));
+    if crate::repo_view::squashable(&view.snapshot, view.multi.ids()) {
+        let squash = button(text(format!("Squash {count} commits")).size(12))
+            .padding([4, 10])
+            .style(button::secondary);
+        actions = actions.push(if view.write_block.is_some() {
+            write_tooltip(squash.into(), view)
+        } else {
+            squash
+                .on_press_maybe(view.busy.is_none().then_some(Message::SquashSelected))
+                .into()
+        });
     }
     let content = column![
         text(format!("{count} commits selected")).size(16),

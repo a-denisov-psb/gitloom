@@ -612,6 +612,46 @@ pub fn contiguous_on_head(snapshot: &RepoSnapshot, ids: &[String]) -> bool {
             .all(|id| snapshot.commit(id).is_some_and(|c| c.parents.len() <= 1))
 }
 
+/// The message of commit `id` can be changed: it is HEAD (amend), or an
+/// older commit on HEAD's first-parent line with a parent and no merge
+/// between it and HEAD (reworded by an interactive rebase).
+pub fn rewordable(snapshot: &RepoSnapshot, id: &str) -> bool {
+    let Some(head) = snapshot.head.target() else {
+        return false;
+    };
+    if head == id {
+        return true;
+    }
+    let mut current = head;
+    loop {
+        let Some(commit) = snapshot.commit(current) else {
+            return false;
+        };
+        if commit.parents.len() > 1 {
+            return false;
+        }
+        if current == id {
+            return commit.parents.len() == 1;
+        }
+        match commit.parents.first() {
+            Some(parent) => current = parent,
+            None => return false,
+        }
+    }
+}
+
+/// The selected commits can be squashed: more than one, contiguous on
+/// HEAD's first-parent line, and rewordable from the oldest of them.
+pub fn squashable(snapshot: &RepoSnapshot, ids: &[String]) -> bool {
+    ids.len() > 1
+        && contiguous_on_head(snapshot, ids)
+        && ids
+            .iter()
+            .filter_map(|id| snapshot.index.get(id).map(|&row| (row, id)))
+            .max_by_key(|(row, _)| *row)
+            .is_some_and(|(_, oldest)| rewordable(snapshot, oldest))
+}
+
 /// Commit ids that can be part of a multi-selection, in graph order
 /// (stashes are excluded).
 pub fn selectable_ids(snapshot: &RepoSnapshot) -> Vec<&str> {
