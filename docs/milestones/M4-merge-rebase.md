@@ -173,7 +173,9 @@ Acceptance: integration tests for both, incl. rejection of non-contiguous select
 
 Acceptance: integration tests for single, multiple, conflict, empty, revert of a merge.
 
-### [ ] M4-10 Reset
+### [x] M4-10 Reset
+
+> Done: `git_core::{reset, ResetMode}` (`git reset --soft|--mixed|--hard`) and the hard reset snapshot per planning decision: `hard_reset_with_snapshot` records HEAD, the index (`write-tree`) and every file the reset touches (tracked paths that differ from the target plus untracked files the target contains) as blobs without filters, `undo_hard_reset` restores HEAD (`reset --soft`), index (`read-tree`) and the files byte for byte incl. the executable bit, refusing if HEAD moved. The app uses the plain reset for now; M4-12 switches hard resets to the snapshot variant for undo. App: commit menu "Reset <branch> to this commit…" (not on HEAD, not during an operation) → dialog Soft / Mixed / Hard (deviation: dialog instead of a submenu, UX-PARITY) → Hard always confirmed with the list of files whose uncommitted changes are lost (Cancel is the default). The last "Not available yet" menu entries are gone. Tests: git-core (soft, mixed, hard keeps untracked files, snapshot + undo with staged/unstaged/CRLF/untracked-in-target/executable bit, undo refused after HEAD moved), menus, app (mode dialog, hard confirmation list, soft runs directly, blocked during an operation). Checked by hand: dirty `a.txt` and an untracked file → Reset main → Hard → confirmation lists `a.txt` → Hard reset → HEAD moved, `a.txt` reset, untracked file kept.
 
 - Commit context menu "Reset <current> to this commit" with Soft / Mixed / Hard; Hard always confirmed and lists the changes that will be lost.
 - Snapshot for hard reset per planning decision.
