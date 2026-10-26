@@ -380,6 +380,9 @@ pub struct RepoView {
     pub check_empty: bool,
     /// Branch being dragged onto another one (M4-11).
     pub drag: Option<BranchDrag>,
+    /// Undo entry of an operation that stopped (conflicts); pushed once it
+    /// completes, dropped when it is aborted (M4-12).
+    pub pending_history: Option<crate::undo::UndoAction>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -575,6 +578,7 @@ impl RepoView {
             pending_merge: None,
             check_empty: false,
             drag: None,
+            pending_history: None,
             pull_failure: None,
             network: None,
             queued: None,

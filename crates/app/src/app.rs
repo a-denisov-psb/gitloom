@@ -1869,11 +1869,13 @@ impl App {
         // During an operation the commit button continues it (`--continue`).
         if let Some(operation) = view.snapshot.state.kind().filter(|_| !amend) {
             let label = format!("Continue {}", operation.command());
-            let task = self.run_write(tab, label, move |git| {
+            let pending = view.pending_history.clone();
+            let task = self.run_undoable(tab, label, move |git| {
                 if stage_all {
                     git.stage_all()?;
                 }
-                git.continue_operation(operation, &message)
+                git.continue_operation(operation, &message)?;
+                complete_pending(git, pending.clone())
             });
             if let Some(view) = self.active_view_mut() {
                 if view.busy.is_some() {
@@ -1933,6 +1935,8 @@ impl App {
         };
         let head = head_name(&view.snapshot).to_owned();
         let operation = view.snapshot.state.kind();
+        let root = view.backend.path().to_path_buf();
+        let pending = view.pending_history.clone();
         let short = |source: &str| {
             source
                 .strip_prefix("refs/heads/")
@@ -1986,47 +1990,120 @@ impl App {
             return Task::none();
         }
         let op = request.clone();
-        let task = self.run_write(tab, label, move |git| match &op {
-            Message::Merge { source, autostash } => {
-                // Conflicts are no error: the banner takes over.
-                git_core::merge(git, source, *autostash).map(drop)
-            }
-            Message::Rebase { onto, autostash } => {
-                git_core::rebase(git, onto, *autostash).map(drop)
-            }
-            Message::RunInteractiveRebase {
-                base,
-                input,
-                autostash,
-            } => git_core::rebase_interactive(git, base, input, *autostash).map(drop),
-            Message::RewordCommit {
-                id,
-                message,
-                autostash,
-            } => git_core::reword_commit(git, id, message, *autostash).map(drop),
-            Message::SquashCommits {
-                ids,
-                message,
-                autostash,
-            } => git_core::squash_commits(git, ids, message, *autostash).map(drop),
-            Message::CherryPick(ids) => git_core::cherry_pick(git, ids).map(drop),
-            Message::Revert { id, mainline } => git_core::revert(git, id, *mainline).map(drop),
-            Message::Reset { id, mode, .. } => git_core::reset(git, id, *mode),
-            Message::CommitEmpty => match operation {
-                Some(operation) => git_core::commit_empty(git, operation).map(drop),
-                None => Ok(()),
-            },
-            Message::FastForward {
-                branch: None,
-                source,
-                autostash,
-            } => git_core::fast_forward_head(git, source, *autostash),
-            Message::FastForward {
+        let entry_label = label.clone();
+        let task = self.run_undoable(tab, label, move |git| {
+            use git_core::{HistoryUndo, MergeOutcome};
+            // A fast-forward of another branch moves only that branch.
+            if let Message::FastForward {
                 branch: Some(branch),
                 source,
                 ..
-            } => git_core::fast_forward_branch(git, branch, source),
-            _ => Ok(()),
+            } = &op
+            {
+                let reference = format!("refs/heads/{branch}");
+                let before = git_core::ref_commit(git, &reference)?;
+                git_core::fast_forward_branch(git, branch, source)?;
+                let after = git_core::ref_commit(git, &reference)?;
+                return Ok(before
+                    .zip(after)
+                    .filter(|(b, a)| b != a)
+                    .map(|(before, after)| {
+                        History::Push(UndoAction::History(git_core::HistoryChange {
+                            label: entry_label.clone(),
+                            kind: HistoryUndo::MoveBranch {
+                                name: branch.clone(),
+                            },
+                            before,
+                            after,
+                            branch: None,
+                        }))
+                    }));
+            }
+            // "Commit empty" completes the cherry-pick or revert that stopped.
+            if let Message::CommitEmpty = &op {
+                if let Some(operation) = operation {
+                    git_core::commit_empty(git, operation)?;
+                }
+                return complete_pending(git, pending.clone());
+            }
+            let Some(before) = git_core::head_commit(git)? else {
+                return Ok(None);
+            };
+            let branch = git_core::current_branch(git)?;
+            let (outcome, kind) = match &op {
+                Message::Merge { source, autostash } => {
+                    (git_core::merge(git, source, *autostash)?, HistoryUndo::Keep)
+                }
+                Message::Rebase { onto, autostash } => {
+                    (git_core::rebase(git, onto, *autostash)?, HistoryUndo::Keep)
+                }
+                Message::RunInteractiveRebase {
+                    base,
+                    input,
+                    autostash,
+                } => (
+                    git_core::rebase_interactive(git, base, input, *autostash)?,
+                    HistoryUndo::Keep,
+                ),
+                Message::RewordCommit {
+                    id,
+                    message,
+                    autostash,
+                } => (
+                    git_core::reword_commit(git, id, message, *autostash)?,
+                    HistoryUndo::Keep,
+                ),
+                Message::SquashCommits {
+                    ids,
+                    message,
+                    autostash,
+                } => (
+                    git_core::squash_commits(git, ids, message, *autostash)?,
+                    HistoryUndo::Keep,
+                ),
+                Message::CherryPick(ids) => (git_core::cherry_pick(git, ids)?, HistoryUndo::Keep),
+                Message::Revert { id, mainline } => {
+                    (git_core::revert(git, id, *mainline)?, HistoryUndo::Keep)
+                }
+                Message::Reset {
+                    id,
+                    mode: git_core::ResetMode::Hard,
+                    ..
+                } => (
+                    MergeOutcome::Done,
+                    HistoryUndo::HardReset(git_core::hard_reset_with_snapshot(git, &root, id)?),
+                ),
+                Message::Reset { id, mode, .. } => {
+                    let index_tree = git_core::index_tree(git)?;
+                    git_core::reset(git, id, *mode)?;
+                    (
+                        MergeOutcome::Done,
+                        HistoryUndo::Reset {
+                            mode: *mode,
+                            index_tree,
+                        },
+                    )
+                }
+                Message::FastForward {
+                    source, autostash, ..
+                } => {
+                    git_core::fast_forward_head(git, source, *autostash)?;
+                    (MergeOutcome::Done, HistoryUndo::Keep)
+                }
+                _ => return Ok(None),
+            };
+            let entry = git_core::HistoryChange {
+                label: entry_label.clone(),
+                kind,
+                before,
+                after: String::new(),
+                branch,
+            };
+            match outcome {
+                // Stopped: the entry waits for Continue (or goes with Abort).
+                MergeOutcome::Conflicts => Ok(Some(History::Started(UndoAction::History(entry)))),
+                MergeOutcome::Done => finish_entry(git, entry),
+            }
         });
         let picks = matches!(
             request,
@@ -2068,11 +2145,18 @@ impl App {
             return Task::none();
         }
         let verb = if skip { "Skip" } else { "Abort" };
-        let task = self.run_write(tab, format!("{verb} {}", operation.command()), move |git| {
+        let pending = self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.pending_history.clone());
+        let label = format!("{verb} {}", operation.command());
+        let task = self.run_undoable(tab, label, move |git| {
             if skip {
-                git.skip_operation(operation)
+                git.skip_operation(operation)?;
+                complete_pending(git, pending.clone())
             } else {
-                git.abort_operation(operation)
+                // An aborted operation leaves no undo entry.
+                git.abort_operation(operation).map(|()| None)
             }
         });
         if let Some(view) = self.active_view_mut() {
@@ -2134,6 +2218,11 @@ impl App {
                     change.apply(git, undo)?;
                     UndoAction::Ref(change)
                 }
+                UndoAction::History(change) => UndoAction::History(if undo {
+                    git_core::undo_history(git, &root, &change)?
+                } else {
+                    git_core::redo_history(git, &root, &change)?
+                }),
                 UndoAction::Discard { label, snapshot } => {
                     // Restoring returns the replaced state, which reverts the restore.
                     let replaced = git_core::restore_snapshot(git, &root, &snapshot)?;
@@ -2690,7 +2779,17 @@ impl App {
                         }
                         Ok(Some(History::Undone(action))) => view.redo.push(action.clone()),
                         Ok(Some(History::Redone(action))) => view.undo.push(action.clone()),
+                        Ok(Some(History::Started(action))) => {
+                            view.pending_history = Some(action.clone());
+                        }
                         Ok(None) | Err(_) => {}
+                    }
+                    // A completed or aborted operation has no entry aside.
+                    let completed =
+                        matches!(result, Ok(Some(History::Push(UndoAction::History(_)))));
+                    let aborted = result.is_ok() && label.starts_with("Abort ");
+                    if completed || aborted {
+                        view.pending_history = None;
                     }
                     let clears_message = std::mem::take(&mut view.clear_message_after_write);
                     if let (Some(last), Err(error)) = (&mut view.last_write, &result) {
@@ -4176,6 +4275,10 @@ impl App {
                         .pull_failure
                         .take()
                         .map(|error| (error, view.snapshot.state.clone()));
+                    // The operation ended outside Gitloom: its entry is gone.
+                    if view.busy.is_none() && view.snapshot.state.is_clean() {
+                        view.pending_history = None;
+                    }
                     if view.busy.is_none() && std::mem::take(&mut view.check_empty) {
                         empty_pick = view.empty_pick().then(|| empty_pick_dialog(&view.snapshot));
                     }
@@ -4633,6 +4736,39 @@ fn empty_pick_dialog(snapshot: &RepoSnapshot) -> Option<Modal> {
         buttons,
         default,
     })
+}
+
+/// Completes a history entry with the current HEAD; no entry if nothing
+/// moved (e.g. "Already up to date").
+fn finish_entry(
+    git: &dyn git_core::GitWriter,
+    mut entry: git_core::HistoryChange,
+) -> git_core::Result<Option<History>> {
+    let Some(after) = git_core::head_commit(git)? else {
+        return Ok(None);
+    };
+    if after == entry.before && !matches!(entry.kind, git_core::HistoryUndo::HardReset(_)) {
+        return Ok(None);
+    }
+    entry.after = after;
+    Ok(Some(History::Push(UndoAction::History(entry))))
+}
+
+/// After Continue, Skip or "Commit empty": once the operation is complete,
+/// the entry kept aside when it stopped is pushed; while it is still in
+/// progress the entry stays aside.
+fn complete_pending(
+    git: &dyn git_core::GitWriter,
+    pending: Option<UndoAction>,
+) -> git_core::Result<Option<History>> {
+    let Some(UndoAction::History(entry)) = pending else {
+        return Ok(None);
+    };
+    if git_core::current_state(git)?.is_clean() {
+        finish_entry(git, entry)
+    } else {
+        Ok(Some(History::Started(UndoAction::History(entry))))
+    }
 }
 
 /// Summary and body of `commit` as one message.
@@ -6687,6 +6823,92 @@ mod tests {
         });
         assert!(app.context_menu.is_none(), "dropped on itself");
         assert!(app.tabs[0].view().unwrap().drag.is_none());
+    }
+
+    fn history_entry(label: &str) -> UndoAction {
+        UndoAction::History(git_core::HistoryChange {
+            label: label.into(),
+            kind: git_core::HistoryUndo::Keep,
+            before: "b".into(),
+            after: "a".into(),
+            branch: Some("main".into()),
+        })
+    }
+
+    fn finish(app: &mut App, label: &str, result: Result<Option<History>, String>) {
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().busy = Some(label.into());
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: label.into(),
+            result,
+        });
+    }
+
+    #[test]
+    fn stopped_operation_keeps_its_entry_until_it_completes() {
+        let mut app = staging_app(&[], &[]);
+        let entry = history_entry("Merge topic into main");
+        finish(
+            &mut app,
+            "Merge topic into main",
+            Ok(Some(History::Started(entry.clone()))),
+        );
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.pending_history.as_ref(), Some(&entry));
+        assert!(view.undo.is_empty());
+
+        // Staging a resolved file does not drop it.
+        finish(&mut app, "Stage a.txt", Ok(None));
+        assert!(app.tabs[0].view().unwrap().pending_history.is_some());
+
+        finish(
+            &mut app,
+            "Continue merge",
+            Ok(Some(History::Push(entry.clone()))),
+        );
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.pending_history.is_none());
+        assert_eq!(view.undo, [entry]);
+        assert_eq!(view.undo[0].label(), "Merge topic into main");
+    }
+
+    #[test]
+    fn aborted_operation_leaves_no_entry() {
+        let mut app = staging_app(&[], &[]);
+        finish(
+            &mut app,
+            "Rebase main onto topic",
+            Ok(Some(History::Started(history_entry(
+                "Rebase main onto topic",
+            )))),
+        );
+        finish(&mut app, "Abort rebase", Ok(None));
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.pending_history.is_none());
+        assert!(view.undo.is_empty());
+    }
+
+    #[test]
+    fn history_undo_is_blocked_during_an_operation_except_branch_moves() {
+        let entry = history_entry("Merge");
+        assert!(entry.moves_head());
+        let moved = UndoAction::History(git_core::HistoryChange {
+            label: "Fast-forward other to main".into(),
+            kind: git_core::HistoryUndo::MoveBranch {
+                name: "other".into(),
+            },
+            before: "b".into(),
+            after: "a".into(),
+            branch: None,
+        });
+        assert!(!moved.moves_head());
+
+        let mut app = app_in_state(merging());
+        app.tabs[0].view_mut().unwrap().undo.push(entry);
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.tabs[0].view().unwrap().undo.len(), 1);
     }
 
     #[test]
