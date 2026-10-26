@@ -17,6 +17,7 @@ mod diff;
 mod graph;
 pub(crate) mod overlays;
 pub(crate) mod panel;
+mod rebase;
 mod sidebar;
 mod start;
 pub(crate) mod statusbar;
@@ -114,6 +115,7 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                 CenterView::Graph => graph::view(view),
                 CenterView::Diff(diff) => diff::view(view, diff),
                 CenterView::Conflict(conflict) => conflict::view(view, conflict),
+                CenterView::Rebase(panel) => rebase::view(view, panel),
             },
             PaneKind::Panel => panel::view(view),
         };

@@ -188,6 +188,8 @@ pub enum CenterView {
     Diff(Box<DiffView>),
     /// Conflict resolution view of one file (M4-05).
     Conflict(Box<crate::conflict::ConflictView>),
+    /// Interactive rebase panel (M4-07), replacing the graph.
+    Rebase(Box<crate::rebase_panel::RebasePanel>),
 }
 
 /// Vertical scroll state of the graph list (pixels).

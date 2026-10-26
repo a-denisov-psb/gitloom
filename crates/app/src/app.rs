@@ -175,6 +175,32 @@ pub enum Message {
         height: f32,
     },
     DiffClosed,
+    /// Open the interactive rebase panel for the commits after `base`.
+    RebasePanelOpened(String),
+    RebaseLoaded {
+        tab: TabId,
+        base: String,
+        result: Result<Vec<(String, String)>, String>,
+    },
+    RebaseSetAction {
+        index: usize,
+        action: git_core::TodoAction,
+    },
+    RebaseDragStart(usize),
+    RebaseDragOver(usize),
+    RebaseDragEnd,
+    RebaseMessageEdited {
+        id: String,
+        action: iced::widget::text_editor::Action,
+    },
+    /// "Start rebase" in the panel.
+    RebaseStart,
+    /// Runs the prepared interactive rebase (also the "Stash and rebase" retry).
+    RunInteractiveRebase {
+        base: String,
+        input: git_core::EditorInput,
+        autostash: bool,
+    },
     /// Open the conflict view for a conflicted file.
     ConflictOpened(String),
     ConflictLoaded {
@@ -1497,6 +1523,11 @@ impl App {
         if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
             return Task::none();
         }
+        if let Some(panel) = self.active_rebase_panel() {
+            if rebase_panel_shortcut(panel, shortcut) {
+                return Task::none();
+            }
+        }
         let count = self.tabs.len();
         match shortcut {
             Shortcut::NewTab => {
@@ -1598,6 +1629,8 @@ impl App {
                     view.center = CenterView::Graph;
                 }
             }
+            // Only meaningful in the interactive rebase panel (handled above).
+            Shortcut::TodoKey(_) | Shortcut::Reorder { .. } => {}
             Shortcut::Confirm => {
                 if let Some(modal) = self.modal.take() {
                     if let Some(message) = modal.default_action() {
@@ -1795,6 +1828,14 @@ impl App {
         task
     }
 
+    /// The interactive rebase panel of the active tab, if it is open.
+    fn active_rebase_panel(&mut self) -> Option<&mut crate::rebase_panel::RebasePanel> {
+        match &mut self.active_view_mut()?.center {
+            CenterView::Rebase(panel) => Some(panel),
+            _ => None,
+        }
+    }
+
     /// The conflict view of the active tab, if it is open.
     fn active_conflict(&mut self) -> Option<&mut crate::conflict::ConflictView> {
         match &mut self.active_view_mut()?.center {
@@ -1824,6 +1865,7 @@ impl App {
         let (label, touches_worktree) = match &request {
             Message::Merge { source, .. } => (format!("Merge {} into {head}", short(source)), true),
             Message::Rebase { onto, .. } => (format!("Rebase {head} onto {}", short(onto)), true),
+            Message::RunInteractiveRebase { .. } => (format!("Interactive rebase of {head}"), true),
             Message::FastForward {
                 branch: None,
                 source,
@@ -1848,6 +1890,11 @@ impl App {
             Message::Rebase { onto, autostash } => {
                 git_core::rebase(git, onto, *autostash).map(drop)
             }
+            Message::RunInteractiveRebase {
+                base,
+                input,
+                autostash,
+            } => git_core::rebase_interactive(git, base, input, *autostash).map(drop),
             Message::FastForward {
                 branch: None,
                 source,
@@ -1864,6 +1911,10 @@ impl App {
             if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                 if view.busy.is_some() {
                     view.pending_merge = Some(request);
+                    // The panel's plan runs now; conflicts show in the banner.
+                    if matches!(view.center, CenterView::Rebase(_)) {
+                        view.center = CenterView::Graph;
+                    }
                 }
             }
         }
@@ -2273,7 +2324,7 @@ impl App {
             let (is_diff, id, offset) = match &view.center {
                 CenterView::Graph => (false, &view.graph_scroll_id, view.scroll.offset),
                 CenterView::Diff(diff) => (true, &diff.scroll_id, diff.scroll.offset),
-                CenterView::Conflict(_) => return None,
+                CenterView::Conflict(_) | CenterView::Rebase(_) => return None,
             };
             let task = (offset > 0.0).then(|| scroll_by_id(id.clone(), offset));
             Some(((tab.id, is_diff), task))
@@ -2490,7 +2541,9 @@ impl App {
                             blocked_checkout = checkout;
                         }
                         let blocked = match &merge {
-                            Some(Message::Rebase { .. }) => git_core::rebase_blocked(error),
+                            Some(Message::Rebase { .. } | Message::RunInteractiveRebase { .. }) => {
+                                git_core::rebase_blocked(error)
+                            }
                             _ => git_core::merge_blocked(error),
                         };
                         if blocked {
@@ -2709,9 +2762,16 @@ impl App {
                         }
                     })
                     .unwrap_or_default();
+                let rebase_from = self.active_tab().and_then(Tab::view).is_some_and(|view| {
+                    let snapshot = &view.snapshot;
+                    snapshot.state.is_clean()
+                        && snapshot.head.target().is_some_and(|head| {
+                            head != id && snapshot.is_ancestor(&id, head) == Some(true)
+                        })
+                });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::commit(&id, &message, writable),
+                    crate::menus::commit(&id, &message, writable, rebase_from),
                 ));
             }
             Message::BranchContextMenu {
@@ -3402,6 +3462,90 @@ impl App {
                     view.center = CenterView::Graph;
                 }
             }
+            Message::RebasePanelOpened(base) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                if self.state_blocked(Guarded::Merge) {
+                    return Task::none();
+                }
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let label = view.snapshot.commit(&base).map_or_else(
+                    || base[..base.len().min(7)].to_owned(),
+                    |c| format!("{} {}", c.short_id(), c.summary),
+                );
+                view.center = CenterView::Rebase(Box::new(crate::rebase_panel::RebasePanel::new(
+                    base.clone(),
+                    label,
+                )));
+                let writer = Arc::clone(&view.writer);
+                let id = base.clone();
+                return Task::perform(
+                    blocking(move || {
+                        git_core::rebase_commits(&*writer, &id).map_err(|e| e.to_string())
+                    }),
+                    move |result| Message::RebaseLoaded {
+                        tab,
+                        base: base.clone(),
+                        result,
+                    },
+                );
+            }
+            Message::RebaseLoaded { tab, base, result } => {
+                if let Some(CenterView::Rebase(panel)) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .map(|v| &mut v.center)
+                {
+                    if panel.base == base {
+                        panel.set_loaded(result);
+                    }
+                }
+            }
+            Message::RebaseSetAction { index, action } => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.set_action(index, action);
+                }
+            }
+            Message::RebaseDragStart(index) => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.drag_start(index);
+                }
+            }
+            Message::RebaseDragOver(index) => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.drag_over(index);
+                }
+            }
+            Message::RebaseDragEnd => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.drag_end();
+                }
+            }
+            Message::RebaseMessageEdited { id, action } => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.edit_message(&id, action);
+                }
+            }
+            Message::RebaseStart => {
+                let Some(panel) = self.active_rebase_panel() else {
+                    return Task::none();
+                };
+                match panel.build() {
+                    Ok(input) => {
+                        let base = panel.base.clone();
+                        return self.update(Message::RunInteractiveRebase {
+                            base,
+                            input,
+                            autostash: false,
+                        });
+                    }
+                    Err(problem) => self.status = problem,
+                }
+            }
+            Message::RunInteractiveRebase { .. } => return self.merge(message),
             Message::ConflictOpened(path) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
@@ -3927,7 +4071,10 @@ fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
 /// Local changes would be overwritten by the merge: offer to stash them,
 /// merge and re-apply them (`--autostash`; planning decision M4).
 fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
-    let operation = if matches!(request, Message::Rebase { .. }) {
+    let operation = if matches!(
+        request,
+        Message::Rebase { .. } | Message::RunInteractiveRebase { .. }
+    ) {
         "rebase"
     } else {
         "merge"
@@ -3939,6 +4086,11 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         },
         Message::Rebase { onto, .. } => Message::Rebase {
             onto,
+            autostash: true,
+        },
+        Message::RunInteractiveRebase { base, input, .. } => Message::RunInteractiveRebase {
+            base,
+            input,
             autostash: true,
         },
         Message::FastForward { branch, source, .. } => Message::FastForward {
@@ -3970,6 +4122,25 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         ],
         default: Some(1),
     })
+}
+
+/// Keys of the interactive rebase panel; true if `shortcut` was handled.
+fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut: Shortcut) -> bool {
+    use crate::nav::Move;
+    use git_core::TodoAction;
+    match shortcut {
+        Shortcut::Navigate(Move::Previous) => panel.move_selection(true),
+        Shortcut::Navigate(Move::Next) => panel.move_selection(false),
+        Shortcut::Reorder { up } => panel.move_selected(up),
+        Shortcut::StageSelected => panel.set_selected_action(TodoAction::Squash),
+        Shortcut::TodoKey(key) => {
+            if let Some(action) = TodoAction::ALL.into_iter().find(|a| a.key() == key) {
+                panel.set_selected_action(action);
+            }
+        }
+        _ => return false,
+    }
+    true
 }
 
 /// Marker labels for ours and theirs in the conflict view: the checked-out
@@ -5588,6 +5759,80 @@ mod tests {
             result: Err("old".into()),
         });
         assert_eq!(conflict_center(&app).unwrap().loaded, Loadable::Loading);
+    }
+
+    fn rebase_center(app: &App) -> Option<&crate::rebase_panel::RebasePanel> {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Rebase(panel) => Some(panel),
+            _ => None,
+        }
+    }
+
+    fn menu_item_enabled(app: &App, label: &str) -> Option<bool> {
+        app.context_menu
+            .as_ref()?
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                crate::overlay::MenuEntry::Item {
+                    label: l, enabled, ..
+                } if l == label => Some(*enabled),
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn interactive_rebase_is_offered_for_ancestors_of_head() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        let item = "Interactive rebase from here";
+        for (id, enabled) in [("a", true), ("b", true), ("c", false)] {
+            let _ = app.update(Message::CommitContextMenu {
+                id: id.into(),
+                position: iced::Point::ORIGIN,
+            });
+            assert_eq!(menu_item_enabled(&app, item), Some(enabled), "{id}");
+        }
+    }
+
+    #[test]
+    fn rebase_panel_keys_plan_and_start() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RebasePanelOpened("a".into()));
+        assert_eq!(rebase_center(&app).unwrap().loaded, Loadable::Loading);
+        let _ = app.update(Message::RebaseLoaded {
+            tab,
+            base: "a".into(),
+            result: Ok(vec![("b".into(), "B\n".into()), ("c".into(), "C\n".into())]),
+        });
+        // Top row (newest, "c") is selected: S squashes it into "b".
+        let _ = app.update(checked(Shortcut::StageSelected, false));
+        assert_eq!(
+            rebase_center(&app).unwrap().entries[1].action,
+            git_core::TodoAction::Squash
+        );
+        // ↓ selects "b"; S there would leave nothing to meld into.
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        let _ = app.update(checked(Shortcut::TodoKey('s'), false));
+        let _ = app.update(checked(Shortcut::StageSelected, false));
+        let _ = app.update(Message::RebaseStart);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert!(app.status.contains("oldest kept commit"), "{}", app.status);
+
+        let _ = app.update(checked(Shortcut::TodoKey('p'), false));
+        let _ = app.update(Message::RebaseStart);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Interactive rebase of HEAD"));
+        assert!(matches!(view.center, CenterView::Graph), "panel closes");
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::RunInteractiveRebase { base, input, autostash: false })
+                if base == "a"
+                    && input.sequence.as_deref() == Some("pick b\nsquash c\n")
+                    && input.messages == ["B\n\nC\n"]
+        ));
     }
 
     #[test]

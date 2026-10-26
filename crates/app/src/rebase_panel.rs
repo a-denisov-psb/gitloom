@@ -259,11 +259,11 @@ mod tests {
     fn messages_are_prefilled_for_rewords_and_squash_chains() {
         let mut panel = panel(3);
         panel.set_action(1, Reword);
-        assert_eq!(panel.message_editor(1).unwrap().text(), "m1\n");
+        assert_eq!(panel.message_editor(1).unwrap().text(), "m1");
         assert!(panel.message_editor(0).is_none());
         panel.set_action(2, Squash);
         // c1 heads a squash chain now: its editor keeps the reword text.
-        assert_eq!(panel.message_editor(1).unwrap().text(), "m1\n");
+        assert_eq!(panel.message_editor(1).unwrap().text(), "m1");
         panel.set_action(1, Pick);
         assert!(panel.message_editor(1).is_some(), "squash chain");
 
@@ -288,9 +288,7 @@ mod tests {
         panel.set_action(1, Reword);
         panel.edit_message(
             "c1",
-            text_editor::Action::Edit(text_editor::Edit::Paste(std::sync::Arc::new(
-                "new ".into(),
-            ))),
+            text_editor::Action::Edit(text_editor::Edit::Paste(std::sync::Arc::new("new ".into()))),
         );
         let input = panel.build().unwrap();
         assert_eq!(input.messages, ["new m1\n"]);
