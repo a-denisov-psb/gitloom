@@ -179,7 +179,7 @@ pub fn graph_row(
     let Some(layout_row) = snapshot.layout.row(row_index) else {
         return container(text("")).height(ROW_HEIGHT).into();
     };
-    let color = theme::lane_color(layout_row.color.0);
+    let color = layout_row.color.0;
 
     if snapshot.has_wip && row_index == 0 {
         let tree = &snapshot.working_tree;
@@ -480,7 +480,7 @@ fn cell<'a>(
 fn row_button<'a>(
     content: iced::widget::Row<'a, Message>,
     selected: bool,
-    lane_color: Color,
+    lane_color: u32,
     on_press: Message,
 ) -> Element<'a, Message> {
     button(content.padding([0, ROW_PADDING]).height(Fill))
@@ -526,10 +526,11 @@ impl canvas::Program<Message> for GraphCell {
         &self,
         _state: &(),
         renderer: &Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
+        let p = theme::palette(theme);
         let mut frame = Frame::new(renderer, bounds.size());
         let height = bounds.height;
         let mid = height / 2.0;
@@ -558,14 +559,14 @@ impl canvas::Program<Message> for GraphCell {
                     (curve(node, Point::new(lane_x(to), height)), color, dashed)
                 }
             };
-            frame.stroke(&path, line(theme::lane_color(color.0), dashed));
+            frame.stroke(&path, line(theme::lane_color(p, color.0), dashed));
         }
 
-        let color = theme::lane_color(self.row.color.0);
+        let color = theme::lane_color(p, self.row.color.0);
         match &self.node {
             Node::Wip => {
                 let circle = Path::circle(node, NODE_RADIUS - 2.0);
-                frame.fill(&circle, theme::BG_GRAPH);
+                frame.fill(&circle, p.bg_graph);
                 frame.stroke(&circle, line(color, true));
             }
             Node::Merge => frame.fill(&Path::circle(node, MERGE_RADIUS), color),
@@ -575,7 +576,7 @@ impl canvas::Program<Message> for GraphCell {
                     Point::new(node.x - size / 2.0, node.y - size / 2.0),
                     iced::Size::new(size, size),
                 );
-                frame.fill(&square, theme::BG_GRAPH);
+                frame.fill(&square, p.bg_graph);
                 frame.stroke(&square, line(color, false));
             }
             Node::Commit(initials) => {
@@ -583,7 +584,7 @@ impl canvas::Program<Message> for GraphCell {
                 frame.fill_text(canvas::Text {
                     content: initials.clone(),
                     position: node,
-                    color: Color::WHITE,
+                    color: p.node_text,
                     size: 8.into(),
                     align_x: iced::widget::text::Alignment::Center,
                     align_y: alignment::Vertical::Center,

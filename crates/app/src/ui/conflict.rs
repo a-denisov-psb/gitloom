@@ -29,7 +29,7 @@ pub fn view<'a>(repo: &'a RepoView, conflict: &'a ConflictView) -> Element<'a, M
 
     let body: Element<'a, Message> = match &conflict.loaded {
         Loadable::Loading => muted("Loading conflict…").into(),
-        Loadable::Failed(error) => text(error).color(theme::DANGER).into(),
+        Loadable::Failed(error) => text(error).style(theme::text_danger).into(),
         Loadable::Ready(loaded) => match &loaded.content {
             ConflictContent::Text(conflict_text) => {
                 return text_view(repo, conflict, conflict_text, title, close, idle);
@@ -106,7 +106,7 @@ fn text_view<'a>(
             .push(
                 text("Edited by hand: picks no longer change the output")
                     .size(11)
-                    .color(theme::WARNING),
+                    .style(theme::text_warning),
             )
             .push(
                 button(text("Reset output").size(11))
@@ -163,7 +163,7 @@ fn side_panel<'a>(
                             text(display(line))
                                 .font(Font::MONOSPACE)
                                 .size(TEXT_SIZE)
-                                .color(theme::TEXT_MUTED),
+                                .style(theme::text_muted),
                         )
                         .padding([0, 26]),
                     );
@@ -239,9 +239,11 @@ fn side_panel<'a>(
         format!("B · theirs · {label}")
     };
     column![
-        text(heading)
-            .size(12)
-            .color(if ours { theme::ACCENT } else { theme::WARNING }),
+        text(heading).size(12).style(if ours {
+            theme::text_accent
+        } else {
+            theme::text_warning
+        }),
         container(scrollable(rows).height(Fill).width(Fill))
             .height(Fill)
             .width(Fill)

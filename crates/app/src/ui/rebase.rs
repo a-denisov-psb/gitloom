@@ -38,7 +38,7 @@ pub fn view<'a>(repo: &'a RepoView, panel: &'a RebasePanel) -> Element<'a, Messa
 
     let body: Element<'a, Message> = match &panel.loaded {
         Loadable::Loading => muted("Loading commits…").into(),
-        Loadable::Failed(error) => text(error).color(theme::DANGER).into(),
+        Loadable::Failed(error) => text(error).style(theme::text_danger).into(),
         Loadable::Ready(()) => {
             let mut rows = Column::new().spacing(2);
             for index in panel.display_order() {
@@ -66,11 +66,11 @@ pub fn view<'a>(repo: &'a RepoView, panel: &'a RebasePanel) -> Element<'a, Messa
                 },
             ))
             .size(12)
-            .color(theme::WARNING),
+            .style(theme::text_warning),
         );
     }
     if let (Loadable::Ready(()), Some(problem)) = (&panel.loaded, panel.problem()) {
-        content = content.push(text(problem).size(12).color(theme::WARNING));
+        content = content.push(text(problem).size(12).style(theme::text_warning));
     }
     content.push(body).into()
 }
@@ -114,15 +114,15 @@ fn entry_row(panel: &RebasePanel, index: usize) -> Element<'_, Message> {
     let dropped = entry.action == TodoAction::Drop;
     let melded = matches!(entry.action, TodoAction::Squash | TodoAction::Fixup);
     let mut label = row![
-        text("⋮⋮").color(theme::TEXT_MUTED),
+        text("⋮⋮").style(theme::text_muted),
         text(&entry.id[..entry.id.len().min(7)])
             .font(Font::MONOSPACE)
             .size(12)
-            .color(theme::TEXT_MUTED),
-        text(summary).size(13).color(if dropped {
-            theme::TEXT_MUTED
+            .style(theme::text_muted),
+        text(summary).size(13).style(if dropped {
+            theme::text_muted
         } else {
-            theme::TEXT
+            theme::text_normal
         }),
     ]
     .spacing(10)
@@ -154,7 +154,7 @@ fn entry_row(panel: &RebasePanel, index: usize) -> Element<'_, Message> {
         .width(Fill)
         .style(move |theme| {
             if selected {
-                container::Style::default().background(theme::BG_SELECTED)
+                theme::selected(theme)
             } else {
                 theme::panel(theme)
             }
