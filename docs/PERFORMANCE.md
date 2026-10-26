@@ -70,6 +70,14 @@ Release builds, same machine. Interaction latencies are measured from the synthe
 - **Context menus in a scrolled graph** appeared off screen: inside a scrolled `scrollable`, iced passes the cursor in content coordinates. `context_area`/`drag_area` now add the translation iced hands to `overlay()` at the start of every update.
 - **Scroll position reset when a menu opened**: the root switched between a bare widget and a `Stack` when an overlay appeared, so iced rebuilt the widget tree and dropped the graph's scroll state; the root is now always a `Stack`.
 
+## M5: productivity parity
+
+Release builds, same machine. The full M5 measurement (M5-14) adds the rest.
+
+| Metric | Result | How |
+|---|---|---|
+| Palette filter, 100 000 file paths | **3.5–8.1 ms** per keystroke (6 queries) | `cargo test --release -p gitloom palette_filter_speed -- --ignored --nocapture` |
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |

@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Command palette (Ctrl+P): run any action by typing part of its name; open a recent repository (Ctrl+Shift+O) or check out a branch from the palette.
 - Keyboard shortcut list (Ctrl+/): all shortcuts grouped like GitKraken's, with a filter.
 - Icons (Lucide) in the toolbar, sidebar, graph, file lists and banners instead of text symbols; a combined local/remote pill shows a cloud icon with the remote names as tooltip.
 - Zoom (Ctrl+= / Ctrl+- / Ctrl+0, 70–200 %, remembered) and fullscreen (F11).
