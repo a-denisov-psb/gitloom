@@ -251,3 +251,30 @@ fn reword_refuses_when_a_merge_follows() {
     assert!(error.to_string().contains("without merges"), "{error}");
     assert_eq!(repo.head(), head);
 }
+
+#[test]
+fn reword_and_squash_are_undone_and_redone() {
+    for squash in [false, true] {
+        let (repo, _) = history();
+        let cli = backend(&repo);
+        let before = repo.head();
+        let branch = git_core::current_branch(&cli).unwrap();
+        if squash {
+            let ids = vec![rev(&repo, "HEAD"), rev(&repo, "HEAD~1")];
+            git_core::squash_commits(&cli, &ids, "three and four\n", false).unwrap();
+        } else {
+            git_core::reword_commit(&cli, &rev(&repo, "HEAD~1"), "three v2\n", false).unwrap();
+        }
+        let entry = git_core::HistoryChange {
+            label: "test".into(),
+            kind: git_core::HistoryUndo::Keep,
+            before: before.clone(),
+            after: repo.head(),
+            branch,
+        };
+        git_core::undo_history(&cli, repo.path(), &entry).unwrap();
+        assert_eq!(repo.head(), before, "squash: {squash}");
+        git_core::redo_history(&cli, repo.path(), &entry).unwrap();
+        assert_eq!(repo.head(), entry.after, "squash: {squash}");
+    }
+}

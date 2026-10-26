@@ -16,6 +16,9 @@ pub enum UndoAction {
     },
     /// Checkout, branch or tag change (M3-12).
     Ref(git_core::RefChange),
+    /// Merge, fast-forward, rebase, cherry-pick, revert, reset, reword or
+    /// squash (M4-12).
+    History(git_core::HistoryChange),
 }
 
 impl UndoAction {
@@ -26,7 +29,8 @@ impl UndoAction {
             Self::Commit { .. }
                 | Self::Ref(git_core::RefChange::Checkout { .. })
                 | Self::Ref(git_core::RefChange::CreateBranch { .. })
-        )
+        ) || matches!(self, Self::History(change)
+            if !matches!(change.kind, git_core::HistoryUndo::MoveBranch { .. }))
     }
 
     /// Shown in the Undo/Redo tooltips, e.g. "Commit abc1234".
@@ -39,6 +43,7 @@ impl UndoAction {
                 &after[..after.len().min(7)]
             ),
             Self::Ref(change) => change.label(),
+            Self::History(change) => change.label.clone(),
         }
     }
 }
@@ -52,6 +57,9 @@ pub enum History {
     Undone(UndoAction),
     /// A redone action: pushed back onto the undo stack.
     Redone(UndoAction),
+    /// An operation that stopped (conflicts, empty step): its entry is
+    /// kept aside and pushed once the operation completes (M4-12).
+    Started(UndoAction),
 }
 
 #[cfg(test)]

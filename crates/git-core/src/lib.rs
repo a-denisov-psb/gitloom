@@ -12,6 +12,7 @@ mod discard;
 mod editor;
 mod gix_backend;
 mod history;
+mod history_ops;
 mod merge;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
@@ -42,6 +43,10 @@ pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
     tag_message, unreachable_from_branches, HeadPosition, RefChange,
+};
+pub use history_ops::{
+    current_branch, current_state, index_tree, redo_history, undo_history, HistoryChange,
+    HistoryUndo,
 };
 pub use merge::{
     fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
