@@ -204,3 +204,41 @@ fn rebase_with_a_resolved_conflict() {
     assert_eq!(message(&repo, "HEAD~2"), "main change");
     assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "resolved");
 }
+
+/// Installs a `commit-msg` hook that rejects every commit.
+fn failing_hook(repo: &TestRepo) {
+    let hook = repo.path().join(".git/hooks/commit-msg");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\necho 'rejected by hook' >&2\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn failing_hook_during_continue_keeps_the_state() {
+    // `git rebase` does not run commit-msg hooks for the commits it replays.
+    for operation in [Operation::Merge, Operation::CherryPick, Operation::Revert] {
+        let repo = diverged();
+        start(&repo, operation);
+        resolve(&repo);
+        failing_hook(&repo);
+        let cli = backend(&repo);
+        match cli.continue_operation(operation, "Resolved\n") {
+            Err(Error::Command { stderr, .. }) => {
+                assert!(
+                    stderr.contains("rejected by hook"),
+                    "{operation:?}: {stderr}"
+                )
+            }
+            other => panic!("{operation:?}: unexpected {other:?}"),
+        }
+        assert_eq!(state(&repo).kind(), Some(operation), "{operation:?}");
+        // Without the hook the same Continue succeeds.
+        std::fs::remove_file(repo.path().join(".git/hooks/commit-msg")).unwrap();
+        cli.continue_operation(operation, "Resolved\n").unwrap();
+        assert_eq!(state(&repo), RepoState::Clean, "{operation:?}");
+    }
+}

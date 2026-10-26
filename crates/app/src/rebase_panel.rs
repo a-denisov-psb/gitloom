@@ -25,6 +25,8 @@ pub struct RebasePanel {
     pub dragging: Option<usize>,
     /// Message editors by chain head commit id.
     pub messages: HashMap<Oid, text_editor::Content>,
+    /// Merge commits after the base; the rebase drops them (M4-13).
+    pub flattened_merges: usize,
 }
 
 impl RebasePanel {
@@ -37,6 +39,7 @@ impl RebasePanel {
             selected: 0,
             dragging: None,
             messages: HashMap::new(),
+            flattened_merges: 0,
         }
     }
 

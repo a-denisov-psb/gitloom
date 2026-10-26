@@ -384,10 +384,13 @@ pub enum Message {
         source: String,
         autostash: bool,
     },
-    /// Rebase HEAD onto the branch with full reference name `onto`.
+    /// Rebase HEAD onto the branch with full reference name `onto`;
+    /// unless `confirmed`, merge commits that would be flattened are
+    /// pointed out first (M4-13).
     Rebase {
         onto: String,
         autostash: bool,
+        confirmed: bool,
     },
     /// Fast-forward local `branch` (`None`: the checked-out branch) to the
     /// branch with full reference name `source`.
@@ -1991,6 +1994,7 @@ impl App {
         }
         let op = request.clone();
         let entry_label = label.clone();
+        let started_label = label.clone();
         let task = self.run_undoable(tab, label, move |git| {
             use git_core::{HistoryUndo, MergeOutcome};
             // A fast-forward of another branch moves only that branch.
@@ -2034,9 +2038,9 @@ impl App {
                 Message::Merge { source, autostash } => {
                     (git_core::merge(git, source, *autostash)?, HistoryUndo::Keep)
                 }
-                Message::Rebase { onto, autostash } => {
-                    (git_core::rebase(git, onto, *autostash)?, HistoryUndo::Keep)
-                }
+                Message::Rebase {
+                    onto, autostash, ..
+                } => (git_core::rebase(git, onto, *autostash)?, HistoryUndo::Keep),
                 Message::RunInteractiveRebase {
                     base,
                     input,
@@ -2109,19 +2113,26 @@ impl App {
             request,
             Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty
         );
+        // Queued behind a yielding auto-fetch, the next WriteFinished is the
+        // fetch's: only a request that started may leave these flags.
+        let started = self
+            .tab_mut(tab)
+            .and_then(Tab::view_mut)
+            .is_some_and(|v| v.busy.as_deref() == Some(started_label.as_str()));
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
-            if picks && view.busy.is_some() {
+            if picks && started {
                 view.check_empty = true;
             }
         }
         if touches_worktree {
             if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
-                if view.busy.is_some() {
+                if started {
                     view.pending_merge = Some(request);
-                    // The panel's plan runs now; conflicts show in the banner.
-                    if matches!(view.center, CenterView::Rebase(_)) {
-                        view.center = CenterView::Graph;
-                    }
+                }
+                // The panel's plan runs now (or once the auto-fetch stopped);
+                // conflicts show in the banner.
+                if view.busy.is_some() && matches!(view.center, CenterView::Rebase(_)) {
+                    view.center = CenterView::Graph;
                 }
             }
         }
@@ -3361,6 +3372,48 @@ impl App {
             }
             Message::FormClosed => self.form = None,
             Message::FormSubmit => return self.submit_form(),
+            Message::Rebase {
+                onto,
+                autostash,
+                confirmed: false,
+            } => {
+                let merges = self.active_tab().and_then(Tab::view).map_or(0, |view| {
+                    let snapshot = &view.snapshot;
+                    let onto_commit = git_core_ref_target(snapshot, &onto);
+                    match (snapshot.head.target(), onto_commit) {
+                        (Some(head), Some(onto)) => snapshot.merges_between(onto, head),
+                        _ => 0,
+                    }
+                });
+                let confirmed = Message::Rebase {
+                    onto: onto.clone(),
+                    autostash,
+                    confirmed: true,
+                };
+                if merges == 0 {
+                    return self.merge(confirmed);
+                }
+                let head = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map_or_else(|| "HEAD".to_owned(), |v| head_name(&v.snapshot).to_owned());
+                let target = onto
+                    .strip_prefix("refs/heads/")
+                    .or_else(|| onto.strip_prefix("refs/remotes/"))
+                    .unwrap_or(&onto);
+                self.modal = Some(Modal::confirm(
+                    "Rebase flattens merges",
+                    format!(
+                        "{head} contains {merges} merge commit{} since {target}. A rebase replays \
+                         the changes of the merged commits one by one and drops the merge \
+                         commits (Git's default). Rebase anyway?",
+                        if merges == 1 { "" } else { "s" }
+                    ),
+                    "Rebase",
+                    false,
+                    confirmed,
+                ));
+            }
             Message::Merge { .. } | Message::FastForward { .. } | Message::Rebase { .. } => {
                 return self.merge(message);
             }
@@ -3898,10 +3951,13 @@ impl App {
                     || base[..base.len().min(7)].to_owned(),
                     |c| format!("{} {}", c.short_id(), c.summary),
                 );
-                view.center = CenterView::Rebase(Box::new(crate::rebase_panel::RebasePanel::new(
-                    base.clone(),
-                    label,
-                )));
+                let mut panel = crate::rebase_panel::RebasePanel::new(base.clone(), label);
+                panel.flattened_merges = view
+                    .snapshot
+                    .head
+                    .target()
+                    .map_or(0, |head| view.snapshot.merges_between(&base, head));
+                view.center = CenterView::Rebase(Box::new(panel));
                 let writer = Arc::clone(&view.writer);
                 let id = base.clone();
                 return Task::perform(
@@ -4523,6 +4579,7 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
         Message::Rebase { onto, .. } => Message::Rebase {
             onto,
             autostash: true,
+            confirmed: true,
         },
         Message::RunInteractiveRebase { base, input, .. } => Message::RunInteractiveRebase {
             base,
@@ -4736,6 +4793,24 @@ fn empty_pick_dialog(snapshot: &RepoSnapshot) -> Option<Modal> {
         buttons,
         default,
     })
+}
+
+/// Commit a full reference name (`refs/heads/x`, `refs/remotes/o/x`) points
+/// to in `snapshot`.
+fn git_core_ref_target<'a>(snapshot: &'a RepoSnapshot, reference: &str) -> Option<&'a str> {
+    let (kind, name) = if let Some(name) = reference.strip_prefix("refs/heads/") {
+        (git_core::RefKind::LocalBranch, name)
+    } else {
+        (
+            git_core::RefKind::RemoteBranch,
+            reference.strip_prefix("refs/remotes/")?,
+        )
+    };
+    snapshot
+        .refs
+        .iter()
+        .find(|r| r.kind == kind && r.name == name)
+        .map(|r| r.target.as_str())
 }
 
 /// Completes a history entry with the current HEAD; no entry if nothing
@@ -6299,6 +6374,7 @@ mod tests {
         let _ = app.update(Message::Rebase {
             onto: "refs/remotes/origin/main".into(),
             autostash: false,
+            confirmed: false,
         });
         assert_eq!(
             app.tabs[0].view().unwrap().busy.as_deref(),
@@ -6314,7 +6390,7 @@ mod tests {
         assert_eq!(modal.buttons[1].label, "Stash and rebase");
         assert!(matches!(
             modal.action(1),
-            Some(Message::Rebase { onto, autostash: true }) if onto == "refs/remotes/origin/main"
+            Some(Message::Rebase { onto, autostash: true, .. }) if onto == "refs/remotes/origin/main"
         ));
     }
 
@@ -6909,6 +6985,72 @@ mod tests {
         let _ = app.update(Message::Undo);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
         assert_eq!(app.tabs[0].view().unwrap().undo.len(), 1);
+    }
+
+    #[test]
+    fn rebasing_over_merges_asks_first() {
+        // HEAD "m" merges "s" (side) into "a"; "base" is where "onto" points.
+        let mut app = app_with_history(&[
+            ("m", &["a", "s"]),
+            ("s", &["base"]),
+            ("a", &["base"]),
+            ("base", &[]),
+        ]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs = vec![git_core::Reference {
+            name: "onto".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "base".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        }];
+        assert_eq!(snapshot.merges_between("base", "m"), 1);
+        assert_eq!(snapshot.merges_between("a", "m"), 1);
+        assert_eq!(snapshot.merges_between("m", "m"), 0);
+        view.apply_snapshot(Arc::new(snapshot));
+
+        let _ = app.update(Message::Rebase {
+            onto: "refs/heads/onto".into(),
+            autostash: false,
+            confirmed: false,
+        });
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Rebase flattens merges");
+        let _ = app.update(modal.action(1).unwrap());
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Rebase HEAD onto onto")
+        );
+    }
+
+    #[test]
+    fn operations_started_during_auto_fetch_make_it_yield() {
+        let mut app = staging_app(&["a"], &[]);
+        let cancel = git_core::CancelToken::default();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.busy = Some("Auto-fetch".into());
+        view.network = Some(crate::repo_view::NetworkOp {
+            label: "Auto-fetch".into(),
+            kind: crate::repo_view::NetworkKind::Fetch,
+            progress: None,
+            cancel: cancel.clone(),
+            background: true,
+        });
+        let _ = app.update(Message::Merge {
+            source: "refs/heads/topic".into(),
+            autostash: false,
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(cancel.is_cancelled());
+        assert!(view.queued.is_some());
+        assert_eq!(app.status, "Stopping Auto-fetch…");
+        assert!(
+            view.pending_merge.is_none(),
+            "the merge has not started yet"
+        );
     }
 
     #[test]

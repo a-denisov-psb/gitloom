@@ -52,6 +52,23 @@ pub fn view<'a>(repo: &'a RepoView, panel: &'a RebasePanel) -> Element<'a, Messa
     };
 
     let mut content = column![header].spacing(10).padding(12);
+    if panel.flattened_merges > 0 {
+        content = content.push(
+            text(format!(
+                "{} merge commit{} in this range {} not listed: the rebase replays the \
+                 merged commits and drops the merges (Git's default).",
+                panel.flattened_merges,
+                if panel.flattened_merges == 1 { "" } else { "s" },
+                if panel.flattened_merges == 1 {
+                    "is"
+                } else {
+                    "are"
+                },
+            ))
+            .size(12)
+            .color(theme::WARNING),
+        );
+    }
     if let (Loadable::Ready(()), Some(problem)) = (&panel.loaded, panel.problem()) {
         content = content.push(text(problem).size(12).color(theme::WARNING));
     }
