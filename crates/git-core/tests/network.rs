@@ -260,8 +260,9 @@ fn conflicting_pull_can_be_aborted() {
 
         let cli = CliBackend::new(local.path());
         match state(&local) {
-            RepoState::Merging { .. } => cli.abort_merge().unwrap(),
-            RepoState::Rebasing { .. } => cli.abort_rebase().unwrap(),
+            s @ (RepoState::Merging { .. } | RepoState::Rebasing { .. }) => {
+                cli.abort_operation(s.kind().unwrap()).unwrap()
+            }
             other => panic!("{mode:?}: unexpected state {other:?}"),
         }
         assert_eq!(state(&local), RepoState::Clean);

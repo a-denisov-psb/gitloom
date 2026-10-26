@@ -254,6 +254,24 @@ pub fn diff_line(
     }
 }
 
+/// Conflict line in the ours (blue) or theirs (orange) panel; picked lines
+/// are stronger.
+pub fn conflict_line(ours: bool, picked: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let color = if ours { ACCENT } else { WARNING };
+        filled(color.scale_alpha(if picked { 0.32 } else { 0.12 }))
+    }
+}
+
+/// Outline of the branch a dragged branch would be dropped on (M4-11).
+pub fn drop_target(_: &Theme) -> container::Style {
+    container::Style {
+        border: Border::default().width(2).color(ACCENT).rounded(4),
+        background: Some(ACCENT.scale_alpha(0.15).into()),
+        ..container::Style::default()
+    }
+}
+
 /// Selected segment of a segmented control (diff modes).
 pub fn mode_active(_: &Theme, _: button::Status) -> button::Style {
     button_style(Some(BG_SELECTED), TEXT)

@@ -65,6 +65,23 @@ pub struct DiffView {
     pub fetched: Vec<String>,
 }
 
+/// A branch being dragged: its name and kind, and the branch under the
+/// pointer (drop target highlight).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchDrag {
+    pub source: (String, git_core::RefKind),
+    pub target: Option<(String, git_core::RefKind)>,
+}
+
+impl BranchDrag {
+    /// `name`/`kind` is highlighted as drop target.
+    pub fn targets(&self, name: &str, kind: git_core::RefKind) -> bool {
+        self.target
+            .as_ref()
+            .is_some_and(|(n, k)| n == name && *k == kind)
+    }
+}
+
 /// Write actions that would break an operation in progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Guarded {
@@ -74,6 +91,10 @@ pub enum Guarded {
     Stash,
     /// Undo or redo of a commit or amend (moves HEAD).
     MoveHead,
+    /// Merge or fast-forward.
+    Merge,
+    /// Reset HEAD to another commit.
+    Reset,
 }
 
 /// How a line click changes the selection.
@@ -180,10 +201,14 @@ impl DiffView {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum CenterView {
     Graph,
     Diff(Box<DiffView>),
+    /// Conflict resolution view of one file (M4-05).
+    Conflict(Box<crate::conflict::ConflictView>),
+    /// Interactive rebase panel (M4-07), replacing the graph.
+    Rebase(Box<crate::rebase_panel::RebasePanel>),
 }
 
 /// Vertical scroll state of the graph list (pixels).
@@ -295,6 +320,9 @@ pub struct RepoView {
     pub backend: Arc<dyn GitBackend>,
     pub snapshot: Arc<RepoSnapshot>,
     pub selection: Option<Selection>,
+    /// Commits selected with Ctrl/Shift (M4-01); more than one shows the
+    /// multi-selection panel.
+    pub multi: crate::selection::MultiSelection,
     pub details: Option<CommitDetails>,
     pub center: CenterView,
     pub filter: String,
@@ -308,7 +336,7 @@ pub struct RepoView {
     /// Commit description.
     pub description: iced::widget::text_editor::Content,
     /// The fields were filled from `MERGE_MSG` for the current merge.
-    pub merge_prefilled: bool,
+    pub merge_prefilled: Option<String>,
     /// "Amend previous commit" is checked.
     pub amend: bool,
     /// Runs write operations through the `git` executable.
@@ -344,6 +372,17 @@ pub struct RepoView {
     /// Target of the running checkout, to offer "Stash and checkout" if
     /// local changes block it.
     pub pending_checkout: Option<crate::app::CheckoutTarget>,
+    /// The running merge or fast-forward, repeated with `autostash` if
+    /// local changes block it.
+    pub pending_merge: Option<crate::app::Message>,
+    /// A cherry-pick or revert ran: after the next refresh, an empty result
+    /// (operation in progress, nothing to commit) opens the empty dialog.
+    pub check_empty: bool,
+    /// Branch being dragged onto another one (M4-11).
+    pub drag: Option<BranchDrag>,
+    /// Undo entry of an operation that stopped (conflicts); pushed once it
+    /// completes, dropped when it is aborted (M4-12).
+    pub pending_history: Option<crate::undo::UndoAction>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -413,8 +452,13 @@ impl RepoView {
         let state = &self.snapshot.state;
         let operation = state.operation()?;
         let blocked = match action {
-            Guarded::Commit => !state.concluded_by_commit(),
-            Guarded::Amend | Guarded::Stash | Guarded::MoveHead => true,
+            // Committing continues the operation (M4-03).
+            Guarded::Commit => false,
+            Guarded::Amend
+            | Guarded::Stash
+            | Guarded::MoveHead
+            | Guarded::Merge
+            | Guarded::Reset => true,
         };
         blocked.then(|| {
             let verb = match action {
@@ -422,9 +466,36 @@ impl RepoView {
                 Guarded::Amend => "amend",
                 Guarded::Stash => "stash",
                 Guarded::MoveHead => "undo or redo commits",
+                Guarded::Merge => "merge",
+                Guarded::Reset => "reset",
             };
             format!("Cannot {verb} while a {operation} is in progress")
         })
+    }
+
+    /// A cherry-pick or revert stopped with nothing to commit: no conflicts
+    /// and no staged or unstaged changes (untracked files do not count).
+    pub fn empty_pick(&self) -> bool {
+        let tree = &self.snapshot.working_tree;
+        matches!(
+            self.snapshot.state,
+            git_core::RepoState::CherryPicking { .. } | git_core::RepoState::Reverting { .. }
+        ) && tree.staged.is_empty()
+            && tree
+                .unstaged
+                .iter()
+                .all(|f| f.kind == git_core::ChangeKind::Untracked)
+    }
+
+    /// Paths with unresolved conflicts, sorted.
+    pub fn conflicted_files(&self) -> Vec<&str> {
+        self.snapshot
+            .working_tree
+            .unstaged
+            .iter()
+            .filter(|f| f.kind == git_core::ChangeKind::Conflicted)
+            .map(|f| f.path.as_str())
+            .collect()
     }
 
     /// HEAD is already part of its upstream branch (amending rewrites pushed history).
@@ -441,17 +512,18 @@ impl RepoView {
     pub fn prefill_message(&mut self) {
         let empty = self.summary.trim().is_empty() && self.description.text().trim().is_empty();
         match &self.snapshot.merge_message {
-            Some(message) if !self.merge_prefilled => {
+            // Each new message (e.g. the next stopped rebase step) prefills once.
+            Some(message) if self.merge_prefilled.as_ref() != Some(message) => {
                 if empty {
                     let (summary, description) = split_message(&strip_comments(message));
                     self.summary = summary;
                     self.description = iced::widget::text_editor::Content::with_text(&description);
                 }
-                self.merge_prefilled = true;
+                self.merge_prefilled = Some(message.clone());
             }
             Some(_) => {}
             None => {
-                self.merge_prefilled = false;
+                self.merge_prefilled = None;
                 if empty {
                     if let Some(template) = &self.snapshot.commit_template {
                         self.description = iced::widget::text_editor::Content::with_text(
@@ -466,15 +538,17 @@ impl RepoView {
     pub fn new(backend: Arc<dyn GitBackend>, snapshot: Arc<RepoSnapshot>) -> Self {
         let selection = restore_selection(None, &snapshot);
         let mut cli = git_core::CliBackend::new(backend.path());
-        // Gitloom itself answers credential prompts (ADR-019).
+        // Gitloom itself answers credential prompts (ADR-019) and acts as
+        // Git's editor (ADR-021).
         if let Ok(exe) = std::env::current_exe() {
-            cli = cli.with_askpass(exe);
+            cli = cli.with_askpass(&exe).with_editor(exe);
         }
         let writer: Arc<dyn git_core::GitWriter> = Arc::new(cli);
         let mut view = Self {
             backend,
             snapshot,
             selection,
+            multi: crate::selection::MultiSelection::default(),
             details: None,
             center: CenterView::Graph,
             filter: String::new(),
@@ -483,7 +557,7 @@ impl RepoView {
             error: None,
             summary: String::new(),
             description: iced::widget::text_editor::Content::new(),
-            merge_prefilled: false,
+            merge_prefilled: None,
             amend: false,
             writer,
             busy: None,
@@ -501,6 +575,10 @@ impl RepoView {
             then_network: None,
             pending_delete: None,
             pending_checkout: None,
+            pending_merge: None,
+            check_empty: false,
+            drag: None,
+            pending_history: None,
             pull_failure: None,
             network: None,
             queued: None,
@@ -520,6 +598,7 @@ impl RepoView {
     /// Replaces the snapshot after a refresh and keeps the selection if possible.
     pub fn apply_snapshot(&mut self, snapshot: Arc<RepoSnapshot>) {
         self.selection = restore_selection(self.selection.as_ref(), &snapshot);
+        self.multi.retain(&selectable_ids(&snapshot));
         if let Some(details) = &self.details {
             if snapshot.commit(&details.id).is_none() {
                 self.details = None;
@@ -530,6 +609,17 @@ impl RepoView {
         self.suppress_watch = false;
         self.error = None;
         self.prefill_message();
+        // A resolved (or no longer conflicted) file closes its conflict view.
+        if let CenterView::Conflict(conflict) = &self.center {
+            if !self.conflicted_files().contains(&conflict.path.as_str()) {
+                self.center = CenterView::Graph;
+            }
+        }
+    }
+
+    /// More than one commit is selected (Ctrl/Shift).
+    pub fn is_multi(&self) -> bool {
+        self.multi.len() > 1
     }
 
     /// Selected commit id, if a commit (not WIP) is selected.
@@ -539,6 +629,87 @@ impl RepoView {
             _ => None,
         }
     }
+}
+
+/// The commits `ids` form an unbroken first-parent chain ending at HEAD's
+/// branch history (squash candidates: contiguous, no merges).
+pub fn contiguous_on_head(snapshot: &RepoSnapshot, ids: &[String]) -> bool {
+    let Some(head) = snapshot.head.target() else {
+        return false;
+    };
+    // Walk HEAD's first-parent chain and look for the selection as one run.
+    let mut chain = Vec::new();
+    let mut current = Some(head.to_owned());
+    while let Some(id) = current {
+        let Some(commit) = snapshot.commit(&id) else {
+            break;
+        };
+        chain.push(id.clone());
+        current = commit.parents.first().cloned();
+        if chain.len() > 10_000 {
+            break;
+        }
+    }
+    let Some(start) = chain.iter().position(|id| ids.contains(id)) else {
+        return false;
+    };
+    let run = &chain[start..(start + ids.len()).min(chain.len())];
+    run.len() == ids.len()
+        && run.iter().all(|id| ids.contains(id))
+        && run
+            .iter()
+            .all(|id| snapshot.commit(id).is_some_and(|c| c.parents.len() <= 1))
+}
+
+/// The message of commit `id` can be changed: it is HEAD (amend), or an
+/// older commit on HEAD's first-parent line with a parent and no merge
+/// between it and HEAD (reworded by an interactive rebase).
+pub fn rewordable(snapshot: &RepoSnapshot, id: &str) -> bool {
+    let Some(head) = snapshot.head.target() else {
+        return false;
+    };
+    if head == id {
+        return true;
+    }
+    let mut current = head;
+    loop {
+        let Some(commit) = snapshot.commit(current) else {
+            return false;
+        };
+        if commit.parents.len() > 1 {
+            return false;
+        }
+        if current == id {
+            return commit.parents.len() == 1;
+        }
+        match commit.parents.first() {
+            Some(parent) => current = parent,
+            None => return false,
+        }
+    }
+}
+
+/// The selected commits can be squashed: more than one, contiguous on
+/// HEAD's first-parent line, and rewordable from the oldest of them.
+pub fn squashable(snapshot: &RepoSnapshot, ids: &[String]) -> bool {
+    ids.len() > 1
+        && contiguous_on_head(snapshot, ids)
+        && ids
+            .iter()
+            .filter_map(|id| snapshot.index.get(id).map(|&row| (row, id)))
+            .max_by_key(|(row, _)| *row)
+            .is_some_and(|(_, oldest)| rewordable(snapshot, oldest))
+}
+
+/// Commit ids that can be part of a multi-selection, in graph order
+/// (stashes are excluded).
+pub fn selectable_ids(snapshot: &RepoSnapshot) -> Vec<&str> {
+    snapshot
+        .commits
+        .iter()
+        .map(|c| c.id.as_str())
+        .filter(|id| !snapshot.is_stash(id))
+        .collect()
 }
 
 /// Message without `#` comment lines (as Git's editor cleanup would remove them).

@@ -175,6 +175,114 @@ pub enum Message {
         height: f32,
     },
     DiffClosed,
+    /// A branch drag started on `name`.
+    BranchDragStart {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    BranchDragEnter {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    BranchDragLeave {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    /// Left button released over branch `name`: drops a dragged branch.
+    BranchDropped {
+        name: String,
+        kind: git_core::RefKind,
+        position: iced::Point,
+    },
+    /// Left button released anywhere: a drag not dropped on a branch ends.
+    BranchDragEnd,
+    /// Cherry-pick the commits in this order (oldest first) onto HEAD.
+    CherryPick(Vec<String>),
+    /// "Revert commit": a merge commit asks for the parent first.
+    RevertStart(String),
+    Revert {
+        id: String,
+        /// 1-based parent a merge commit is reverted against.
+        mainline: Option<usize>,
+    },
+    /// Keep the empty result of a cherry-pick or revert step as a commit.
+    CommitEmpty,
+    /// "Reset to this commit": asks for the mode.
+    ResetStart(String),
+    /// Reset HEAD to `id`; a hard reset runs only once `confirmed`.
+    Reset {
+        id: String,
+        mode: git_core::ResetMode,
+        confirmed: bool,
+    },
+    /// "Edit commit message": opens the message dialog for commit `id`.
+    RewordStart(String),
+    /// "Squash N commits" for the multi-selection: opens the message dialog.
+    SquashSelected,
+    CommitMessageEdited(iced::widget::text_editor::Action),
+    CommitMessageClosed,
+    CommitMessageSubmit,
+    /// Change the message of commit `id` (amend for HEAD, else a rebase).
+    RewordCommit {
+        id: String,
+        message: String,
+        autostash: bool,
+    },
+    /// Squash the contiguous commits `ids` into one with `message`.
+    SquashCommits {
+        ids: Vec<String>,
+        message: String,
+        autostash: bool,
+    },
+    /// Open the interactive rebase panel for the commits after `base`.
+    RebasePanelOpened(String),
+    RebaseLoaded {
+        tab: TabId,
+        base: String,
+        result: Result<Vec<(String, String)>, String>,
+    },
+    RebaseSetAction {
+        index: usize,
+        action: git_core::TodoAction,
+    },
+    RebaseDragStart(usize),
+    RebaseDragOver(usize),
+    RebaseDragEnd,
+    RebaseMessageEdited {
+        id: String,
+        action: iced::widget::text_editor::Action,
+    },
+    /// "Start rebase" in the panel.
+    RebaseStart,
+    /// Runs the prepared interactive rebase (also the "Stash and rebase" retry).
+    RunInteractiveRebase {
+        base: String,
+        input: git_core::EditorInput,
+        autostash: bool,
+    },
+    /// Open the conflict view for a conflicted file.
+    ConflictOpened(String),
+    ConflictLoaded {
+        tab: TabId,
+        path: String,
+        result: Result<git_core::LoadedConflict, String>,
+    },
+    ConflictToggleLine {
+        hunk: usize,
+        side: git_core::Side,
+        line: usize,
+    },
+    ConflictToggleHunk {
+        hunk: usize,
+        side: git_core::Side,
+    },
+    ConflictTakeAll(git_core::Side),
+    ConflictOutputEdited(iced::widget::text_editor::Action),
+    ConflictResetOutput,
+    /// Save the output as the resolved file and stage it.
+    ConflictSave,
+    /// Take the whole file from one side (binary, delete/modify).
+    ConflictTakeFile(git_core::Side),
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
@@ -270,7 +378,33 @@ pub enum Message {
     /// Toolbar Pull (`None`: the current mode) or a mode from the dropdown,
     /// which becomes the button's mode.
     Pull(Option<git_core::PullMode>),
-    /// Abort the merge or rebase a failed pull left behind.
+    /// Merge the branch with full reference name `source` into HEAD.
+    /// `autostash`: stash local changes first and re-apply them afterwards.
+    Merge {
+        source: String,
+        autostash: bool,
+    },
+    /// Rebase HEAD onto the branch with full reference name `onto`;
+    /// unless `confirmed`, merge commits that would be flattened are
+    /// pointed out first (M4-13).
+    Rebase {
+        onto: String,
+        autostash: bool,
+        confirmed: bool,
+    },
+    /// Fast-forward local `branch` (`None`: the checked-out branch) to the
+    /// branch with full reference name `source`.
+    FastForward {
+        branch: Option<String>,
+        source: String,
+        autostash: bool,
+    },
+    /// Continue the operation in progress with the commit panel's message
+    /// (banner button; the commit button does the same).
+    ContinueOperation,
+    /// Skip the current commit of a rebase or cherry-pick.
+    SkipOperation,
+    /// Abort the operation in progress (banner, failed pull dialog).
     AbortOperation,
     /// Double click on a branch, or "Checkout this commit" (asks first).
     Checkout(CheckoutTarget),
@@ -419,6 +553,8 @@ pub struct App {
     pub modal: Option<Modal>,
     /// Open form dialog (inputs); below a modal, above everything else.
     pub form: Option<Form>,
+    /// Open commit message dialog (reword, squash).
+    pub message_dialog: Option<crate::overlay::MessageDialog>,
     pub context_menu: Option<ContextMenu>,
     /// Current window size, used to keep menus inside the window.
     pub window_size: iced::Size,
@@ -457,6 +593,7 @@ impl App {
             git: None,
             notice: None,
             modal: None,
+            message_dialog: None,
             form: None,
             context_menu: None,
             window_size: iced::Size::new(1400.0, 860.0),
@@ -1202,6 +1339,16 @@ impl App {
                 self.form = None;
                 self.run_network(tab, delete_remote_tag_request(&remote, &tag))
             }
+            FormAction::RevertMerge { tab: _, id } => {
+                // "2: abc1234 summary" → parent 2.
+                let mainline = form
+                    .value(0)
+                    .split(':')
+                    .next()
+                    .and_then(|n| n.trim().parse::<usize>().ok());
+                self.form = None;
+                self.merge(Message::Revert { id, mainline })
+            }
             FormAction::PushSetUpstream { tab, local } => {
                 let remote = form.value(0).to_owned();
                 let branch = form.value(1).to_owned();
@@ -1447,9 +1594,15 @@ impl App {
 
     fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
         // An open dialog or menu only reacts to Esc and Enter.
-        let overlay_open = self.modal.is_some() || self.context_menu.is_some();
+        let overlay_open =
+            self.modal.is_some() || self.context_menu.is_some() || self.message_dialog.is_some();
         if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
             return Task::none();
+        }
+        if let Some(panel) = self.active_rebase_panel() {
+            if rebase_panel_shortcut(panel, shortcut) {
+                return Task::none();
+            }
         }
         let count = self.tabs.len();
         match shortcut {
@@ -1477,7 +1630,30 @@ impl App {
                     crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
                 });
                 if let Some(selection) = target {
+                    if let Some(view) = self.active_view_mut() {
+                        match &selection {
+                            Selection::Commit(id) => select_multi(view, id, false, false),
+                            Selection::Wip => view.multi.clear(),
+                        }
+                    }
                     let task = self.select(selection);
+                    return Task::batch([task, self.reveal_selection()]);
+                }
+            }
+            Shortcut::ExtendSelection(step) => {
+                let target = self.active_tab().and_then(Tab::view).and_then(|view| {
+                    crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
+                });
+                // The WIP row and stashes are not part of a multi-selection.
+                if let Some(Selection::Commit(id)) = target {
+                    let Some(view) = self.active_view_mut() else {
+                        return Task::none();
+                    };
+                    if view.snapshot.is_stash(&id) {
+                        return Task::none();
+                    }
+                    select_multi(view, &id, false, true);
+                    let task = self.select(Selection::Commit(id));
                     return Task::batch([task, self.reveal_selection()]);
                 }
             }
@@ -1519,6 +1695,10 @@ impl App {
                 if self.modal.take().is_some()
                     || self.context_menu.take().is_some()
                     || self.form.take().is_some()
+                    || self.message_dialog.take().is_some()
+                    || self
+                        .active_view_mut()
+                        .is_some_and(|v| v.drag.take().is_some())
                     || self
                         .active_view_mut()
                         .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
@@ -1529,6 +1709,8 @@ impl App {
                     view.center = CenterView::Graph;
                 }
             }
+            // Only meaningful in the interactive rebase panel (handled above).
+            Shortcut::TodoKey(_) | Shortcut::Reorder { .. } => {}
             Shortcut::Confirm => {
                 if let Some(modal) = self.modal.take() {
                     if let Some(message) = modal.default_action() {
@@ -1687,6 +1869,24 @@ impl App {
         }
         let message = view.commit_message();
         let amend = view.amend;
+        // During an operation the commit button continues it (`--continue`).
+        if let Some(operation) = view.snapshot.state.kind().filter(|_| !amend) {
+            let label = format!("Continue {}", operation.command());
+            let pending = view.pending_history.clone();
+            let task = self.run_undoable(tab, label, move |git| {
+                if stage_all {
+                    git.stage_all()?;
+                }
+                git.continue_operation(operation, &message)?;
+                complete_pending(git, pending.clone())
+            });
+            if let Some(view) = self.active_view_mut() {
+                if view.busy.is_some() {
+                    view.clear_message_after_write = true;
+                }
+            }
+            return task;
+        }
         let label = if amend { "Amend" } else { "Commit" };
         let task = self.run_undoable(tab, label, move |git| {
             if stage_all {
@@ -1701,6 +1901,274 @@ impl App {
                 before,
                 after,
             })))
+        });
+        if let Some(view) = self.active_view_mut() {
+            if view.busy.is_some() {
+                view.clear_message_after_write = true;
+            }
+        }
+        task
+    }
+
+    /// The interactive rebase panel of the active tab, if it is open.
+    fn active_rebase_panel(&mut self) -> Option<&mut crate::rebase_panel::RebasePanel> {
+        match &mut self.active_view_mut()?.center {
+            CenterView::Rebase(panel) => Some(panel),
+            _ => None,
+        }
+    }
+
+    /// The conflict view of the active tab, if it is open.
+    fn active_conflict(&mut self) -> Option<&mut crate::conflict::ConflictView> {
+        match &mut self.active_view_mut()?.center {
+            CenterView::Conflict(conflict) => Some(conflict),
+            _ => None,
+        }
+    }
+
+    /// Runs a [`Message::Merge`], [`Message::FastForward`] or
+    /// [`Message::Rebase`]; local changes that block it lead to the "Stash
+    /// and merge" (or rebase) dialog.
+    fn merge(&mut self, request: Message) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let head = head_name(&view.snapshot).to_owned();
+        let operation = view.snapshot.state.kind();
+        let root = view.backend.path().to_path_buf();
+        let pending = view.pending_history.clone();
+        let short = |source: &str| {
+            source
+                .strip_prefix("refs/heads/")
+                .or_else(|| source.strip_prefix("refs/remotes/"))
+                .unwrap_or(source)
+                .to_owned()
+        };
+        let (label, touches_worktree) = match &request {
+            Message::Merge { source, .. } => (format!("Merge {} into {head}", short(source)), true),
+            Message::Rebase { onto, .. } => (format!("Rebase {head} onto {}", short(onto)), true),
+            Message::RunInteractiveRebase { .. } => (format!("Interactive rebase of {head}"), true),
+            Message::RewordCommit { id, .. } => {
+                (format!("Edit message of {}", &id[..id.len().min(7)]), true)
+            }
+            Message::SquashCommits { ids, .. } => (format!("Squash {} commits", ids.len()), true),
+            Message::CherryPick(ids) => (
+                match ids.as_slice() {
+                    [id] => format!("Cherry-pick {}", &id[..id.len().min(7)]),
+                    _ => format!("Cherry-pick {} commits", ids.len()),
+                },
+                true,
+            ),
+            Message::Revert { id, .. } => (format!("Revert {}", &id[..id.len().min(7)]), true),
+            Message::CommitEmpty => ("Commit empty".to_string(), false),
+            Message::Reset { id, mode, .. } => (
+                format!(
+                    "{} reset {head} to {}",
+                    mode.label(),
+                    &id[..id.len().min(7)]
+                ),
+                true,
+            ),
+            Message::FastForward {
+                branch: None,
+                source,
+                ..
+            } => (format!("Fast-forward {head} to {}", short(source)), true),
+            Message::FastForward {
+                branch: Some(branch),
+                source,
+                ..
+            } => (format!("Fast-forward {branch} to {}", short(source)), false),
+            _ => return Task::none(),
+        };
+        let guard = if matches!(request, Message::Reset { .. }) {
+            Guarded::Reset
+        } else {
+            Guarded::Merge
+        };
+        if touches_worktree && self.state_blocked(guard) {
+            return Task::none();
+        }
+        let op = request.clone();
+        let entry_label = label.clone();
+        let started_label = label.clone();
+        let task = self.run_undoable(tab, label, move |git| {
+            use git_core::{HistoryUndo, MergeOutcome};
+            // A fast-forward of another branch moves only that branch.
+            if let Message::FastForward {
+                branch: Some(branch),
+                source,
+                ..
+            } = &op
+            {
+                let reference = format!("refs/heads/{branch}");
+                let before = git_core::ref_commit(git, &reference)?;
+                git_core::fast_forward_branch(git, branch, source)?;
+                let after = git_core::ref_commit(git, &reference)?;
+                return Ok(before
+                    .zip(after)
+                    .filter(|(b, a)| b != a)
+                    .map(|(before, after)| {
+                        History::Push(UndoAction::History(git_core::HistoryChange {
+                            label: entry_label.clone(),
+                            kind: HistoryUndo::MoveBranch {
+                                name: branch.clone(),
+                            },
+                            before,
+                            after,
+                            branch: None,
+                        }))
+                    }));
+            }
+            // "Commit empty" completes the cherry-pick or revert that stopped.
+            if let Message::CommitEmpty = &op {
+                if let Some(operation) = operation {
+                    git_core::commit_empty(git, operation)?;
+                }
+                return complete_pending(git, pending.clone());
+            }
+            let Some(before) = git_core::head_commit(git)? else {
+                return Ok(None);
+            };
+            let branch = git_core::current_branch(git)?;
+            let (outcome, kind) = match &op {
+                Message::Merge { source, autostash } => {
+                    (git_core::merge(git, source, *autostash)?, HistoryUndo::Keep)
+                }
+                Message::Rebase {
+                    onto, autostash, ..
+                } => (git_core::rebase(git, onto, *autostash)?, HistoryUndo::Keep),
+                Message::RunInteractiveRebase {
+                    base,
+                    input,
+                    autostash,
+                } => (
+                    git_core::rebase_interactive(git, base, input, *autostash)?,
+                    HistoryUndo::Keep,
+                ),
+                Message::RewordCommit {
+                    id,
+                    message,
+                    autostash,
+                } => (
+                    git_core::reword_commit(git, id, message, *autostash)?,
+                    HistoryUndo::Keep,
+                ),
+                Message::SquashCommits {
+                    ids,
+                    message,
+                    autostash,
+                } => (
+                    git_core::squash_commits(git, ids, message, *autostash)?,
+                    HistoryUndo::Keep,
+                ),
+                Message::CherryPick(ids) => (git_core::cherry_pick(git, ids)?, HistoryUndo::Keep),
+                Message::Revert { id, mainline } => {
+                    (git_core::revert(git, id, *mainline)?, HistoryUndo::Keep)
+                }
+                Message::Reset {
+                    id,
+                    mode: git_core::ResetMode::Hard,
+                    ..
+                } => (
+                    MergeOutcome::Done,
+                    HistoryUndo::HardReset(git_core::hard_reset_with_snapshot(git, &root, id)?),
+                ),
+                Message::Reset { id, mode, .. } => {
+                    let index_tree = git_core::index_tree(git)?;
+                    git_core::reset(git, id, *mode)?;
+                    (
+                        MergeOutcome::Done,
+                        HistoryUndo::Reset {
+                            mode: *mode,
+                            index_tree,
+                        },
+                    )
+                }
+                Message::FastForward {
+                    source, autostash, ..
+                } => {
+                    git_core::fast_forward_head(git, source, *autostash)?;
+                    (MergeOutcome::Done, HistoryUndo::Keep)
+                }
+                _ => return Ok(None),
+            };
+            let entry = git_core::HistoryChange {
+                label: entry_label.clone(),
+                kind,
+                before,
+                after: String::new(),
+                branch,
+            };
+            match outcome {
+                // Stopped: the entry waits for Continue (or goes with Abort).
+                MergeOutcome::Conflicts => Ok(Some(History::Started(UndoAction::History(entry)))),
+                MergeOutcome::Done => finish_entry(git, entry),
+            }
+        });
+        let picks = matches!(
+            request,
+            Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty
+        );
+        // Queued behind a yielding auto-fetch, the next WriteFinished is the
+        // fetch's: only a request that started may leave these flags.
+        let started = self
+            .tab_mut(tab)
+            .and_then(Tab::view_mut)
+            .is_some_and(|v| v.busy.as_deref() == Some(started_label.as_str()));
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if picks && started {
+                view.check_empty = true;
+            }
+        }
+        if touches_worktree {
+            if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                if started {
+                    view.pending_merge = Some(request);
+                }
+                // The panel's plan runs now (or once the auto-fetch stopped);
+                // conflicts show in the banner.
+                if view.busy.is_some() && matches!(view.center, CenterView::Rebase(_)) {
+                    view.center = CenterView::Graph;
+                }
+            }
+        }
+        task
+    }
+
+    /// Skips the current commit (`skip`) or aborts the operation in progress.
+    /// The message in the commit panel belonged to that step and is cleared.
+    fn skip_or_abort(&mut self, skip: bool) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(operation) = self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.snapshot.state.kind())
+        else {
+            return Task::none();
+        };
+        if skip && !operation.can_skip() {
+            return Task::none();
+        }
+        let verb = if skip { "Skip" } else { "Abort" };
+        let pending = self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.pending_history.clone());
+        let label = format!("{verb} {}", operation.command());
+        let task = self.run_undoable(tab, label, move |git| {
+            if skip {
+                git.skip_operation(operation)?;
+                complete_pending(git, pending.clone())
+            } else {
+                // An aborted operation leaves no undo entry.
+                git.abort_operation(operation).map(|()| None)
+            }
         });
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
@@ -1761,6 +2229,11 @@ impl App {
                     change.apply(git, undo)?;
                     UndoAction::Ref(change)
                 }
+                UndoAction::History(change) => UndoAction::History(if undo {
+                    git_core::undo_history(git, &root, &change)?
+                } else {
+                    git_core::redo_history(git, &root, &change)?
+                }),
                 UndoAction::Discard { label, snapshot } => {
                     // Restoring returns the replaced state, which reverts the restore.
                     let replaced = git_core::restore_snapshot(git, &root, &snapshot)?;
@@ -2081,6 +2554,7 @@ impl App {
             let (is_diff, id, offset) = match &view.center {
                 CenterView::Graph => (false, &view.graph_scroll_id, view.scroll.offset),
                 CenterView::Diff(diff) => (true, &diff.scroll_id, diff.scroll.offset),
+                CenterView::Conflict(_) | CenterView::Rebase(_) => return None,
             };
             let task = (offset > 0.0).then(|| scroll_by_id(id.clone(), offset));
             Some(((tab.id, is_diff), task))
@@ -2241,6 +2715,7 @@ impl App {
                 let mut pull = false;
                 let mut push = false;
                 let mut blocked_checkout = None;
+                let mut blocked_merge = None;
                 let mut inline_error = false;
                 let mut not_merged = None;
                 let mut then_network = None;
@@ -2290,9 +2765,22 @@ impl App {
                         }
                     }
                     let checkout = view.pending_checkout.take();
+                    let merge = view.pending_merge.take();
                     if let Err(error) = &result {
                         if git_core::checkout_blocked(error) {
                             blocked_checkout = checkout;
+                        }
+                        let blocked = match &merge {
+                            Some(
+                                Message::Rebase { .. }
+                                | Message::RunInteractiveRebase { .. }
+                                | Message::RewordCommit { .. }
+                                | Message::SquashCommits { .. },
+                            ) => git_core::rebase_blocked(error),
+                            _ => git_core::merge_blocked(error),
+                        };
+                        if blocked {
+                            blocked_merge = merge;
                         }
                     }
                     match &result {
@@ -2302,7 +2790,17 @@ impl App {
                         }
                         Ok(Some(History::Undone(action))) => view.redo.push(action.clone()),
                         Ok(Some(History::Redone(action))) => view.undo.push(action.clone()),
+                        Ok(Some(History::Started(action))) => {
+                            view.pending_history = Some(action.clone());
+                        }
                         Ok(None) | Err(_) => {}
+                    }
+                    // A completed or aborted operation has no entry aside.
+                    let completed =
+                        matches!(result, Ok(Some(History::Push(UndoAction::History(_)))));
+                    let aborted = result.is_ok() && label.starts_with("Abort ");
+                    if completed || aborted {
+                        view.pending_history = None;
                     }
                     let clears_message = std::mem::take(&mut view.clear_message_after_write);
                     if let (Some(last), Err(error)) = (&mut view.last_write, &result) {
@@ -2333,6 +2831,11 @@ impl App {
                     Err(error) if blocked_checkout.is_some() => {
                         if let Some(target) = blocked_checkout {
                             self.modal = Some(checkout_blocked_dialog(error, target));
+                        }
+                    }
+                    Err(error) if blocked_merge.is_some() => {
+                        if let Some(request) = blocked_merge {
+                            self.modal = merge_blocked_dialog(error, request);
                         }
                     }
                     Err(error) if push && git_core::push_rejection(&error).is_some() => {
@@ -2494,17 +2997,35 @@ impl App {
                     .active_tab()
                     .and_then(Tab::view)
                     .and_then(|v| v.snapshot.commit(&id))
-                    .map(|c| {
-                        if c.body.is_empty() {
-                            c.summary.clone()
-                        } else {
-                            format!("{}\n\n{}", c.summary, c.body)
+                    .map(full_message)
+                    .unwrap_or_default();
+                let head = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map_or_else(|| "HEAD".to_owned(), |v| head_name(&v.snapshot).to_owned());
+                let facts = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|view| {
+                        let snapshot = &view.snapshot;
+                        let clean = snapshot.state.is_clean();
+                        crate::menus::CommitFacts {
+                            rebase_from: clean
+                                && snapshot.head.target().is_some_and(|head| {
+                                    head != id && snapshot.is_ancestor(&id, head) == Some(true)
+                                }),
+                            rewordable: clean && crate::repo_view::rewordable(snapshot, &id),
+                            pickable: clean
+                                && snapshot.head.target().is_some_and(|head| head != id),
+                            revertable: clean && snapshot.head.target().is_some(),
+                            resettable: clean
+                                && snapshot.head.target().is_some_and(|head| head != id),
                         }
                     })
                     .unwrap_or_default();
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::commit(&id, &message, writable),
+                    crate::menus::commit(&id, &message, writable, facts, &head),
                 ));
             }
             Message::BranchContextMenu {
@@ -2523,15 +3044,32 @@ impl App {
                             .refs
                             .iter()
                             .find(|r| r.kind == kind && r.name == name);
+                        let target = local.map_or("", |r| r.target.as_str());
                         crate::menus::local_branch(crate::menus::LocalBranch {
                             name: &name,
-                            target: local.map_or("", |r| r.target.as_str()),
+                            target,
                             is_head: view.snapshot.head.branch() == Some(name.as_str()),
                             has_upstream: local.is_some_and(|r| r.upstream.is_some()),
                             writable,
+                            head: head_name(&view.snapshot),
+                            head_can_fast_forward: view.snapshot.head_can_fast_forward(target),
                         })
                     }
-                    git_core::RefKind::RemoteBranch => crate::menus::remote_branch(&name, writable),
+                    git_core::RefKind::RemoteBranch => {
+                        let snapshot = &view.snapshot;
+                        let target = snapshot
+                            .refs
+                            .iter()
+                            .find(|r| r.kind == kind && r.name == name)
+                            .map_or("", |r| r.target.as_str());
+                        crate::menus::remote_branch(crate::menus::RemoteBranch {
+                            name: &name,
+                            writable,
+                            head: head_name(snapshot),
+                            head_can_fast_forward: snapshot.head_can_fast_forward(target),
+                            behind_local: behind_local(snapshot, &name, target),
+                        })
+                    }
                     git_core::RefKind::Tag => crate::menus::tag(&name, writable),
                 };
                 self.context_menu = Some(ContextMenu::new(position, entries));
@@ -2834,24 +3372,54 @@ impl App {
             }
             Message::FormClosed => self.form = None,
             Message::FormSubmit => return self.submit_form(),
-            Message::AbortOperation => {
-                let Some(tab) = self.active_tab().map(|t| t.id) else {
-                    return Task::none();
+            Message::Rebase {
+                onto,
+                autostash,
+                confirmed: false,
+            } => {
+                let merges = self.active_tab().and_then(Tab::view).map_or(0, |view| {
+                    let snapshot = &view.snapshot;
+                    let onto_commit = git_core_ref_target(snapshot, &onto);
+                    match (snapshot.head.target(), onto_commit) {
+                        (Some(head), Some(onto)) => snapshot.merges_between(onto, head),
+                        _ => 0,
+                    }
+                });
+                let confirmed = Message::Rebase {
+                    onto: onto.clone(),
+                    autostash,
+                    confirmed: true,
                 };
-                let state = self
+                if merges == 0 {
+                    return self.merge(confirmed);
+                }
+                let head = self
                     .active_tab()
                     .and_then(Tab::view)
-                    .map(|v| v.snapshot.state.clone());
-                return match state {
-                    Some(git_core::RepoState::Merging { .. }) => {
-                        self.run_write(tab, "Abort merge", |git| git.abort_merge())
-                    }
-                    Some(git_core::RepoState::Rebasing { .. }) => {
-                        self.run_write(tab, "Abort rebase", |git| git.abort_rebase())
-                    }
-                    _ => Task::none(),
-                };
+                    .map_or_else(|| "HEAD".to_owned(), |v| head_name(&v.snapshot).to_owned());
+                let target = onto
+                    .strip_prefix("refs/heads/")
+                    .or_else(|| onto.strip_prefix("refs/remotes/"))
+                    .unwrap_or(&onto);
+                self.modal = Some(Modal::confirm(
+                    "Rebase flattens merges",
+                    format!(
+                        "{head} contains {merges} merge commit{} since {target}. A rebase replays \
+                         the changes of the merged commits one by one and drops the merge \
+                         commits (Git's default). Rebase anyway?",
+                        if merges == 1 { "" } else { "s" }
+                    ),
+                    "Rebase",
+                    false,
+                    confirmed,
+                ));
             }
+            Message::Merge { .. } | Message::FastForward { .. } | Message::Rebase { .. } => {
+                return self.merge(message);
+            }
+            Message::ContinueOperation => return self.commit(false),
+            Message::SkipOperation => return self.skip_or_abort(true),
+            Message::AbortOperation => return self.skip_or_abort(false),
             Message::AutoFetchDue(seq) => {
                 if seq == self.auto_fetch_seq {
                     self.auto_fetch_at = None;
@@ -3082,8 +3650,17 @@ impl App {
                     return Task::batch([task, self.reveal_selection()]);
                 }
             }
-            Message::WipSelected => return self.select(Selection::Wip),
+            Message::WipSelected => {
+                if let Some(view) = self.active_view_mut() {
+                    view.multi.clear();
+                }
+                return self.select(Selection::Wip);
+            }
             Message::CommitSelected(id) => {
+                let (toggle, range) = (self.modifiers.command(), self.modifiers.shift());
+                if let Some(view) = self.active_view_mut() {
+                    select_multi(view, &id, toggle, range);
+                }
                 let task = self.select(Selection::Commit(id));
                 return Task::batch([task, self.reveal_selection()]);
             }
@@ -3180,6 +3757,370 @@ impl App {
                 if let Some(view) = self.active_view_mut() {
                     view.center = CenterView::Graph;
                 }
+            }
+            Message::RewordStart(id) => {
+                let message = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.commit(&id))
+                    .map(full_message);
+                if let Some(message) = message {
+                    self.message_dialog = Some(crate::overlay::MessageDialog::new(
+                        format!("Edit message of {}", &id[..id.len().min(7)]),
+                        "Save message",
+                        &message,
+                        crate::overlay::MessageAction::Reword { id },
+                    ));
+                }
+            }
+            Message::SquashSelected => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let ids = view.multi.ids().to_vec();
+                if !crate::repo_view::squashable(&view.snapshot, &ids) {
+                    self.status = "Select commits that follow each other on the current \
+                                   branch, without merges"
+                        .into();
+                    return Task::none();
+                }
+                // Oldest first, like Git's combined squash message.
+                let message = ids
+                    .iter()
+                    .rev()
+                    .filter_map(|id| view.snapshot.commit(id))
+                    .map(|c| full_message(c).trim().to_owned())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                self.message_dialog = Some(crate::overlay::MessageDialog::new(
+                    format!("Squash {} commits", ids.len()),
+                    "Squash",
+                    &message,
+                    crate::overlay::MessageAction::Squash { ids },
+                ));
+            }
+            Message::CommitMessageEdited(action) => {
+                if let Some(dialog) = self.message_dialog.as_mut() {
+                    dialog.editor.perform(action);
+                }
+            }
+            Message::CommitMessageClosed => self.message_dialog = None,
+            Message::CommitMessageSubmit => {
+                let Some(dialog) = self.message_dialog.as_mut() else {
+                    return Task::none();
+                };
+                let message = dialog.editor.text();
+                if message.trim().is_empty() {
+                    dialog.error = Some("Enter a commit message".into());
+                    return Task::none();
+                }
+                let message = format!("{}\n", message.trim_end());
+                let request = match dialog.action.clone() {
+                    crate::overlay::MessageAction::Reword { id } => Message::RewordCommit {
+                        id,
+                        message,
+                        autostash: false,
+                    },
+                    crate::overlay::MessageAction::Squash { ids } => Message::SquashCommits {
+                        ids,
+                        message,
+                        autostash: false,
+                    },
+                };
+                self.message_dialog = None;
+                return self.merge(request);
+            }
+            Message::RewordCommit { .. } | Message::SquashCommits { .. } => {
+                return self.merge(message);
+            }
+            Message::CherryPick(_) | Message::Revert { .. } | Message::CommitEmpty => {
+                return self.merge(message);
+            }
+            Message::BranchDragStart { name, kind } => {
+                if let Some(view) = self.active_view_mut() {
+                    view.drag = Some(crate::repo_view::BranchDrag {
+                        source: (name, kind),
+                        target: None,
+                    });
+                }
+            }
+            Message::BranchDragEnter { name, kind } => {
+                if let Some(drag) = self.active_view_mut().and_then(|v| v.drag.as_mut()) {
+                    drag.target = (drag.source != (name.clone(), kind)).then_some((name, kind));
+                }
+            }
+            Message::BranchDragLeave { name, kind } => {
+                if let Some(drag) = self.active_view_mut().and_then(|v| v.drag.as_mut()) {
+                    if drag.targets(&name, kind) {
+                        drag.target = None;
+                    }
+                }
+            }
+            Message::BranchDropped {
+                name,
+                kind,
+                position,
+            } => {
+                let writable = self.write_block().is_none();
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let Some(drag) = view.drag.take() else {
+                    return Task::none();
+                };
+                if drag.source == (name.clone(), kind) || kind == git_core::RefKind::Tag {
+                    return Task::none();
+                }
+                let entries = drop_entries(&view.snapshot, &drag.source, (&name, kind), writable);
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::BranchDragEnd => {
+                if let Some(view) = self.active_view_mut() {
+                    if view.drag.is_some() {
+                        view.drag = None;
+                    }
+                }
+            }
+            Message::ResetStart(id) => {
+                if self.state_blocked(Guarded::Reset) {
+                    return Task::none();
+                }
+                if let Some(view) = self.active_tab().and_then(Tab::view) {
+                    self.modal = Some(reset_dialog(&view.snapshot, &id));
+                }
+            }
+            Message::Reset {
+                id,
+                mode: git_core::ResetMode::Hard,
+                confirmed: false,
+            } => {
+                if let Some(view) = self.active_tab().and_then(Tab::view) {
+                    self.modal = Some(hard_reset_dialog(&view.snapshot, &id));
+                }
+            }
+            Message::Reset { .. } => return self.merge(message),
+            Message::RevertStart(id) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let Some(commit) = view.snapshot.commit(&id) else {
+                    return Task::none();
+                };
+                if !commit.is_merge() {
+                    return self.merge(Message::Revert { id, mainline: None });
+                }
+                let options: Vec<String> = commit
+                    .parents
+                    .iter()
+                    .enumerate()
+                    .map(|(i, parent)| {
+                        let summary = view
+                            .snapshot
+                            .commit(parent)
+                            .map_or_else(String::new, |c| c.summary.clone());
+                        format!("{}: {} {summary}", i + 1, &parent[..parent.len().min(7)])
+                    })
+                    .collect();
+                let first = options.first().cloned().unwrap_or_default();
+                self.form = Some(Form {
+                    title: format!("Revert merge {}", commit.short_id()),
+                    text: "A merge commit is reverted against one of its parents: the \
+                           changes brought in from the other parents are undone. Usually \
+                           this is parent 1, the branch that was merged into."
+                        .into(),
+                    fields: vec![crate::overlay::FormField::choice("Parent", first, options)],
+                    submit: "Revert".into(),
+                    action: FormAction::RevertMerge { tab, id },
+                    error: None,
+                });
+            }
+            Message::RebasePanelOpened(base) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                if self.state_blocked(Guarded::Merge) {
+                    return Task::none();
+                }
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let label = view.snapshot.commit(&base).map_or_else(
+                    || base[..base.len().min(7)].to_owned(),
+                    |c| format!("{} {}", c.short_id(), c.summary),
+                );
+                let mut panel = crate::rebase_panel::RebasePanel::new(base.clone(), label);
+                panel.flattened_merges = view
+                    .snapshot
+                    .head
+                    .target()
+                    .map_or(0, |head| view.snapshot.merges_between(&base, head));
+                view.center = CenterView::Rebase(Box::new(panel));
+                let writer = Arc::clone(&view.writer);
+                let id = base.clone();
+                return Task::perform(
+                    blocking(move || {
+                        git_core::rebase_commits(&*writer, &id).map_err(|e| e.to_string())
+                    }),
+                    move |result| Message::RebaseLoaded {
+                        tab,
+                        base: base.clone(),
+                        result,
+                    },
+                );
+            }
+            Message::RebaseLoaded { tab, base, result } => {
+                if let Some(CenterView::Rebase(panel)) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .map(|v| &mut v.center)
+                {
+                    if panel.base == base {
+                        panel.set_loaded(result);
+                    }
+                }
+            }
+            Message::RebaseSetAction { index, action } => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.set_action(index, action);
+                }
+            }
+            Message::RebaseDragStart(index) => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.drag_start(index);
+                }
+            }
+            Message::RebaseDragOver(index) => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.drag_over(index);
+                }
+            }
+            Message::RebaseDragEnd => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.drag_end();
+                }
+            }
+            Message::RebaseMessageEdited { id, action } => {
+                if let Some(panel) = self.active_rebase_panel() {
+                    panel.edit_message(&id, action);
+                }
+            }
+            Message::RebaseStart => {
+                let Some(panel) = self.active_rebase_panel() else {
+                    return Task::none();
+                };
+                match panel.build() {
+                    Ok(input) => {
+                        let base = panel.base.clone();
+                        return self.update(Message::RunInteractiveRebase {
+                            base,
+                            input,
+                            autostash: false,
+                        });
+                    }
+                    Err(problem) => self.status = problem,
+                }
+            }
+            Message::RunInteractiveRebase { .. } => return self.merge(message),
+            Message::ConflictOpened(path) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let labels = conflict_labels(&view.snapshot);
+                view.center = CenterView::Conflict(Box::new(crate::conflict::ConflictView::new(
+                    path.clone(),
+                    labels,
+                )));
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::load_conflict(&*writer, &path)
+                            .map(|loaded| (path, loaded))
+                            .map_err(|e| e.to_string())
+                    }),
+                    move |result| match result {
+                        Ok((path, loaded)) => Message::ConflictLoaded {
+                            tab,
+                            path,
+                            result: Ok(loaded),
+                        },
+                        Err(error) => Message::ConflictLoaded {
+                            tab,
+                            path: String::new(),
+                            result: Err(error),
+                        },
+                    },
+                );
+            }
+            Message::ConflictLoaded { tab, path, result } => {
+                if let Some(CenterView::Conflict(conflict)) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .map(|v| &mut v.center)
+                {
+                    // A failed load has no path; it belongs to the open view.
+                    if path.is_empty() || conflict.path == path {
+                        conflict.set_loaded(result);
+                    }
+                }
+            }
+            Message::ConflictToggleLine { hunk, side, line } => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.toggle_line(hunk, side, line);
+                }
+            }
+            Message::ConflictToggleHunk { hunk, side } => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.toggle_hunk(hunk, side);
+                }
+            }
+            Message::ConflictTakeAll(side) => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.take_all(side);
+                }
+            }
+            Message::ConflictOutputEdited(action) => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.edit(action);
+                }
+            }
+            Message::ConflictResetOutput => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.reset_output();
+                }
+            }
+            Message::ConflictSave => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(conflict) = self.active_conflict() else {
+                    return Task::none();
+                };
+                let path = conflict.path.clone();
+                match conflict.resolved_content() {
+                    Ok(content) => {
+                        return self.run_write(tab, format!("Resolve {path}"), move |git| {
+                            git_core::resolve_conflict(git, &path, content.as_bytes())
+                        });
+                    }
+                    Err(reason) => self.status = reason,
+                }
+            }
+            Message::ConflictTakeFile(side) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(path) = self.active_conflict().map(|c| c.path.clone()) else {
+                    return Task::none();
+                };
+                return self.run_write(tab, format!("Resolve {path}"), move |git| {
+                    git_core::resolve_with_side(git, &path, side)
+                });
             }
             Message::Retry(id) => {
                 let path = self
@@ -3376,6 +4317,7 @@ impl App {
                 let id = tab.id;
                 let mut reload = false;
                 let mut pull_failure = None;
+                let mut empty_pick = None;
                 if let Some(view) = tab.view_mut() {
                     match result {
                         Ok(snapshot) => view.apply_snapshot(snapshot),
@@ -3389,9 +4331,19 @@ impl App {
                         .pull_failure
                         .take()
                         .map(|error| (error, view.snapshot.state.clone()));
+                    // The operation ended outside Gitloom: its entry is gone.
+                    if view.busy.is_none() && view.snapshot.state.is_clean() {
+                        view.pending_history = None;
+                    }
+                    if view.busy.is_none() && std::mem::take(&mut view.check_empty) {
+                        empty_pick = view.empty_pick().then(|| empty_pick_dialog(&view.snapshot));
+                    }
                 }
                 if let Some((error, state)) = pull_failure {
                     self.modal = Some(pull_failed_dialog(error, &state));
+                }
+                if let Some(dialog) = empty_pick.flatten() {
+                    self.modal = Some(dialog);
                 }
                 if reload {
                     return Task::batch([self.reload_diff(id), self.load_details()]);
@@ -3605,6 +4557,358 @@ fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
     }
 }
 
+/// Local changes would be overwritten by the merge: offer to stash them,
+/// merge and re-apply them (`--autostash`; planning decision M4).
+fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
+    let operation = if matches!(
+        request,
+        Message::Rebase { .. }
+            | Message::RunInteractiveRebase { .. }
+            | Message::RewordCommit { .. }
+            | Message::SquashCommits { .. }
+    ) {
+        "rebase"
+    } else {
+        "merge"
+    };
+    let retry = match request {
+        Message::Merge { source, .. } => Message::Merge {
+            source,
+            autostash: true,
+        },
+        Message::Rebase { onto, .. } => Message::Rebase {
+            onto,
+            autostash: true,
+            confirmed: true,
+        },
+        Message::RunInteractiveRebase { base, input, .. } => Message::RunInteractiveRebase {
+            base,
+            input,
+            autostash: true,
+        },
+        Message::RewordCommit { id, message, .. } => Message::RewordCommit {
+            id,
+            message,
+            autostash: true,
+        },
+        Message::SquashCommits { ids, message, .. } => Message::SquashCommits {
+            ids,
+            message,
+            autostash: true,
+        },
+        Message::FastForward { branch, source, .. } => Message::FastForward {
+            branch,
+            source,
+            autostash: true,
+        },
+        _ => return None,
+    };
+    Some(Modal {
+        title: format!("Local changes block the {operation}"),
+        text: format!(
+            "Your local changes are in the way of the {operation}. Stash them, \
+             {operation} and apply them again afterwards? If they conflict with the \
+             result, they stay in the stash list."
+        ),
+        details: Some(error),
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: format!("Stash and {operation}"),
+                kind: crate::overlay::ButtonKind::Primary,
+                message: Some(retry),
+            },
+        ],
+        default: Some(1),
+    })
+}
+
+/// Menu for dropping branch `source` onto branch `target` (M4-11).
+fn drop_entries(
+    snapshot: &RepoSnapshot,
+    source: &(String, git_core::RefKind),
+    target: (&str, git_core::RefKind),
+    writable: bool,
+) -> Vec<crate::overlay::MenuEntry> {
+    use git_core::RefKind;
+    let commit_of = |name: &str, kind: RefKind| {
+        snapshot
+            .refs
+            .iter()
+            .find(|r| r.name == name && r.kind == kind)
+            .map_or("", |r| r.target.as_str())
+    };
+    let source_commit = commit_of(&source.0, source.1);
+    let target_commit = commit_of(target.0, target.1);
+    let can_fast_forward = target.1 == RefKind::LocalBranch
+        && !target_commit.is_empty()
+        && source_commit != target_commit
+        && snapshot.is_ancestor(target_commit, source_commit) != Some(false);
+    crate::menus::drop_menu(crate::menus::DropFacts {
+        source: &source.0,
+        source_remote: source.1 == RefKind::RemoteBranch,
+        target: target.0,
+        target_remote: target.1 == RefKind::RemoteBranch,
+        target_commit,
+        head: snapshot.head.branch(),
+        can_fast_forward,
+        writable: writable && snapshot.state.is_clean(),
+    })
+}
+
+/// "Reset <branch> to this commit": soft, mixed or hard (confirmed next).
+fn reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
+    use git_core::ResetMode;
+    let head = head_name(snapshot);
+    let short = &id[..id.len().min(7)];
+    let button = |mode: ResetMode, kind| crate::overlay::DialogButton {
+        label: mode.label().into(),
+        kind,
+        message: Some(Message::Reset {
+            id: id.to_owned(),
+            mode,
+            confirmed: false,
+        }),
+    };
+    Modal {
+        title: format!("Reset {head} to {short}"),
+        text: "Soft: keep all changes, staged.\n\
+               Mixed: keep all changes, unstaged.\n\
+               Hard: discard all uncommitted changes (untracked files stay)."
+            .into(),
+        details: None,
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            button(ResetMode::Soft, crate::overlay::ButtonKind::Secondary),
+            button(ResetMode::Mixed, crate::overlay::ButtonKind::Primary),
+            button(ResetMode::Hard, crate::overlay::ButtonKind::Danger),
+        ],
+        default: Some(2),
+    }
+}
+
+/// A hard reset is always confirmed and lists the changes it discards.
+fn hard_reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
+    let head = head_name(snapshot);
+    let short = &id[..id.len().min(7)];
+    let tree = &snapshot.working_tree;
+    let mut lost: Vec<&str> = tree
+        .staged
+        .iter()
+        .chain(&tree.unstaged)
+        .filter(|f| f.kind != git_core::ChangeKind::Untracked)
+        .map(|f| f.path.as_str())
+        .collect();
+    lost.sort_unstable();
+    lost.dedup();
+    let text = if lost.is_empty() {
+        format!("Move {head} to {short} and reset the working tree? There are no uncommitted changes to lose.")
+    } else {
+        format!(
+            "Move {head} to {short} and discard the uncommitted changes to {} file{}? \
+             Untracked files stay.",
+            lost.len(),
+            if lost.len() == 1 { "" } else { "s" }
+        )
+    };
+    let details = (!lost.is_empty()).then(|| {
+        const SHOWN: usize = 20;
+        let mut list = lost
+            .iter()
+            .take(SHOWN)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        if lost.len() > SHOWN {
+            list.push_str(&format!("\n… and {} more", lost.len() - SHOWN));
+        }
+        list
+    });
+    Modal {
+        title: format!("Hard reset {head}"),
+        text,
+        details,
+        buttons: vec![
+            crate::overlay::DialogButton {
+                label: "Cancel".into(),
+                kind: crate::overlay::ButtonKind::Secondary,
+                message: None,
+            },
+            crate::overlay::DialogButton {
+                label: "Hard reset".into(),
+                kind: crate::overlay::ButtonKind::Danger,
+                message: Some(Message::Reset {
+                    id: id.to_owned(),
+                    mode: git_core::ResetMode::Hard,
+                    confirmed: true,
+                }),
+            },
+        ],
+        default: Some(0),
+    }
+}
+
+/// A cherry-pick or revert step has nothing to commit (its changes are
+/// already there): skip it, keep it as an empty commit, or abort.
+fn empty_pick_dialog(snapshot: &RepoSnapshot) -> Option<Modal> {
+    let operation = snapshot.state.kind()?;
+    let (title, what) = match operation {
+        git_core::Operation::Revert => ("Empty revert", "Reverting this commit"),
+        _ => ("Empty cherry-pick", "Applying this commit"),
+    };
+    let mut buttons = vec![crate::overlay::DialogButton {
+        label: format!("Abort {}", operation.command()),
+        kind: crate::overlay::ButtonKind::Secondary,
+        message: Some(Message::AbortOperation),
+    }];
+    if operation.can_skip() {
+        buttons.push(crate::overlay::DialogButton {
+            label: "Skip".into(),
+            kind: crate::overlay::ButtonKind::Secondary,
+            message: Some(Message::SkipOperation),
+        });
+    }
+    buttons.push(crate::overlay::DialogButton {
+        label: "Commit empty".into(),
+        kind: crate::overlay::ButtonKind::Primary,
+        message: Some(Message::CommitEmpty),
+    });
+    let default = buttons.len().checked_sub(2);
+    Some(Modal {
+        title: title.into(),
+        text: format!(
+            "{what} changes nothing: its changes are already on {}. Skip it, \
+             or keep it as an empty commit?",
+            snapshot.branch_label()
+        ),
+        details: None,
+        buttons,
+        default,
+    })
+}
+
+/// Commit a full reference name (`refs/heads/x`, `refs/remotes/o/x`) points
+/// to in `snapshot`.
+fn git_core_ref_target<'a>(snapshot: &'a RepoSnapshot, reference: &str) -> Option<&'a str> {
+    let (kind, name) = if let Some(name) = reference.strip_prefix("refs/heads/") {
+        (git_core::RefKind::LocalBranch, name)
+    } else {
+        (
+            git_core::RefKind::RemoteBranch,
+            reference.strip_prefix("refs/remotes/")?,
+        )
+    };
+    snapshot
+        .refs
+        .iter()
+        .find(|r| r.kind == kind && r.name == name)
+        .map(|r| r.target.as_str())
+}
+
+/// Completes a history entry with the current HEAD; no entry if nothing
+/// moved (e.g. "Already up to date").
+fn finish_entry(
+    git: &dyn git_core::GitWriter,
+    mut entry: git_core::HistoryChange,
+) -> git_core::Result<Option<History>> {
+    let Some(after) = git_core::head_commit(git)? else {
+        return Ok(None);
+    };
+    if after == entry.before && !matches!(entry.kind, git_core::HistoryUndo::HardReset(_)) {
+        return Ok(None);
+    }
+    entry.after = after;
+    Ok(Some(History::Push(UndoAction::History(entry))))
+}
+
+/// After Continue, Skip or "Commit empty": once the operation is complete,
+/// the entry kept aside when it stopped is pushed; while it is still in
+/// progress the entry stays aside.
+fn complete_pending(
+    git: &dyn git_core::GitWriter,
+    pending: Option<UndoAction>,
+) -> git_core::Result<Option<History>> {
+    let Some(UndoAction::History(entry)) = pending else {
+        return Ok(None);
+    };
+    if git_core::current_state(git)?.is_clean() {
+        finish_entry(git, entry)
+    } else {
+        Ok(Some(History::Started(UndoAction::History(entry))))
+    }
+}
+
+/// Summary and body of `commit` as one message.
+fn full_message(commit: &git_core::Commit) -> String {
+    if commit.body.is_empty() {
+        commit.summary.clone()
+    } else {
+        format!("{}\n\n{}", commit.summary, commit.body)
+    }
+}
+
+/// Keys of the interactive rebase panel; true if `shortcut` was handled.
+fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut: Shortcut) -> bool {
+    use crate::nav::Move;
+    use git_core::TodoAction;
+    match shortcut {
+        Shortcut::Navigate(Move::Previous) => panel.move_selection(true),
+        Shortcut::Navigate(Move::Next) => panel.move_selection(false),
+        Shortcut::Reorder { up } => panel.move_selected(up),
+        Shortcut::StageSelected => panel.set_selected_action(TodoAction::Squash),
+        Shortcut::TodoKey(key) => {
+            if let Some(action) = TodoAction::ALL.into_iter().find(|a| a.key() == key) {
+                panel.set_selected_action(action);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Marker labels for ours and theirs in the conflict view: the checked-out
+/// branch (or HEAD) and the commit being merged, picked or reverted.
+fn conflict_labels(snapshot: &RepoSnapshot) -> (String, String) {
+    use git_core::RepoState;
+    let ours = head_name(snapshot).to_owned();
+    let theirs = match &snapshot.state {
+        RepoState::Merging { merge_head } => snapshot.commit_name(merge_head),
+        RepoState::CherryPicking { commit: Some(id) }
+        | RepoState::Reverting { commit: Some(id) } => snapshot.commit_name(id),
+        _ => "theirs".into(),
+    };
+    (ours, theirs)
+}
+
+/// Name of the checked-out branch for menu labels, "HEAD" when detached.
+fn head_name(snapshot: &RepoSnapshot) -> &str {
+    snapshot.head.branch().unwrap_or("HEAD")
+}
+
+/// Local branch tracking remote branch `name` (at `target`) that is not
+/// checked out and can be fast-forwarded to it.
+fn behind_local<'a>(snapshot: &'a RepoSnapshot, name: &str, target: &str) -> Option<&'a str> {
+    snapshot
+        .refs
+        .iter()
+        .find(|r| {
+            r.kind == git_core::RefKind::LocalBranch
+                && !r.is_head
+                && r.upstream.as_deref() == Some(name)
+                && r.target != target
+                && snapshot.is_ancestor(&r.target, target) != Some(false)
+        })
+        .map(|r| r.name.as_str())
+}
+
 /// Dialog for a rejected push: the remote has commits we do not have
 /// (offer Pull or a force push), or a force push lost its lease.
 fn push_rejected_dialog(error: String) -> Modal {
@@ -3679,9 +4983,9 @@ fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
     Modal {
         title: "Pull stopped with conflicts".into(),
         text: format!(
-            "The {operation} stopped because of conflicting changes. Resolving conflicts \
-             in Gitloom comes in a later version: resolve them in a terminal or editor, \
-             or abort the {operation} to get back to the state before the pull."
+            "The {operation} stopped because of conflicting changes. Resolve the \
+             conflicts, stage the files and continue, or abort the {operation} to get \
+             back to the state before the pull."
         ),
         details: Some(error),
         buttons: vec![
@@ -3697,6 +5001,32 @@ fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
             },
         ],
         default: Some(0),
+    }
+}
+
+/// Updates the multi-selection for a click (or keyboard move) on commit
+/// `id`: `toggle` = Ctrl, `range` = Shift, neither = only this commit.
+fn select_multi(view: &mut RepoView, id: &str, toggle: bool, range: bool) {
+    let snapshot = Arc::clone(&view.snapshot);
+    let order = crate::repo_view::selectable_ids(&snapshot);
+    if snapshot.is_stash(id) {
+        view.multi.clear();
+        return;
+    }
+    // The current single selection is where a Ctrl/Shift selection starts.
+    if (toggle || range) && view.multi.is_empty() {
+        if let Some(current) = view.selected_commit().map(str::to_owned) {
+            if order.contains(&current.as_str()) {
+                view.multi.single(&current);
+            }
+        }
+    }
+    if range {
+        view.multi.range(id, &order);
+    } else if toggle {
+        view.multi.toggle(id, &order);
+    } else {
+        view.multi.single(id);
     }
 }
 
@@ -3851,6 +5181,8 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
 /// Why committing is not possible right now, if it is not.
 pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     let tree = &view.snapshot.working_tree;
+    // Continuing an operation may commit nothing new (e.g. a resolved rebase step).
+    let continues = view.snapshot.state.kind().is_some() && !view.amend;
     let merging = view.snapshot.merge_message.is_some();
     let has_changes = !tree.staged.is_empty() || (stage_all && !tree.unstaged.is_empty());
     let state = if view.amend {
@@ -3858,9 +5190,12 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     } else {
         Guarded::Commit
     };
+    let conflicts = view.conflicted_files();
     if let Some(reason) = view.state_block(state) {
         Some(reason)
-    } else if !has_changes && !merging && !view.amend {
+    } else if continues && !conflicts.is_empty() && !stage_all {
+        Some(unresolved_conflicts(&conflicts))
+    } else if !has_changes && !continues && !merging && !view.amend {
         // Amending may only change the message.
         Some("Stage files to commit".into())
     } else if view.summary.trim().is_empty() {
@@ -3868,6 +5203,21 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Tooltip for a blocked Continue: which files still have conflicts.
+pub fn unresolved_conflicts(paths: &[&str]) -> String {
+    const SHOWN: usize = 5;
+    let mut list = paths
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if paths.len() > SHOWN {
+        list.push_str(&format!(" and {} more", paths.len() - SHOWN));
+    }
+    format!("Resolve and stage the conflicted files first: {list}")
 }
 
 /// True if HEAD, any ref target or upstream, or the stash list differ from `snapshot`.
@@ -4436,7 +5786,7 @@ mod tests {
         let tab = app.tabs[0].id;
         let diff_state = |app: &App| match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => (diff.diff.clone(), diff.rows.len()),
-            CenterView::Graph => panic!("diff closed"),
+            _ => panic!("diff closed"),
         };
         assert_eq!(diff_state(&app).0, Loadable::Loading);
 
@@ -4480,7 +5830,7 @@ mod tests {
     fn open_diff(app: &App) -> &crate::repo_view::DiffView {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => diff,
-            CenterView::Graph => panic!("no diff"),
+            _ => panic!("no diff"),
         }
     }
 
@@ -4567,7 +5917,7 @@ mod tests {
     fn shown_diff_view(app: &App) -> &crate::repo_view::DiffView {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => diff,
-            CenterView::Graph => panic!("diff closed"),
+            _ => panic!("diff closed"),
         }
     }
 
@@ -4739,7 +6089,7 @@ mod tests {
     fn shown_diff(app: &App) -> Option<DiffRequest> {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => Some(diff.request.clone()),
-            CenterView::Graph => None,
+            _ => None,
         }
     }
 
@@ -4922,18 +6272,847 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rebase_in_progress_blocks_committing() {
-        let app = app_in_state(git_core::RepoState::Rebasing {
+    fn rebasing() -> git_core::RepoState {
+        git_core::RepoState::Rebasing {
             branch: Some("topic".into()),
             onto: None,
             step: None,
-        });
+        }
+    }
+
+    /// Marks `paths` as conflicted in the working tree of the first tab.
+    fn with_conflicts(app: &mut App, paths: &[&str]) {
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut tree = view.snapshot.working_tree.clone();
+        for path in paths {
+            tree.unstaged.push(git_core::FileChange {
+                path: (*path).into(),
+                kind: git_core::ChangeKind::Conflicted,
+                old_path: None,
+            });
+        }
+        view.snapshot = Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+    }
+
+    #[test]
+    fn commit_button_continues_the_operation() {
+        for (state, label) in [
+            (rebasing(), "Continue rebase"),
+            (merging(), "Continue merge"),
+            (
+                git_core::RepoState::CherryPicking { commit: None },
+                "Continue cherry-pick",
+            ),
+            (
+                git_core::RepoState::Reverting { commit: None },
+                "Continue revert",
+            ),
+        ] {
+            let mut app = app_in_state(state);
+            let view = app.tabs[0].view_mut().unwrap();
+            // A resolved step may have nothing staged.
+            let tree = git_core::WorkingTree::default();
+            view.snapshot = Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+            assert!(commit_blocker(view, false).is_none(), "{label}");
+            let _ = app.update(Message::CommitRequested);
+            let view = app.tabs[0].view().unwrap();
+            assert_eq!(view.busy.as_deref(), Some(label));
+            assert!(view.clear_message_after_write);
+        }
+    }
+
+    #[test]
+    fn banner_continue_needs_resolved_conflicts_and_a_message() {
+        let mut app = app_in_state(rebasing());
+        with_conflicts(&mut app, &["b.txt", "c.txt"]);
         let view = app.tabs[0].view().unwrap();
         assert_eq!(
             commit_blocker(view, false).as_deref(),
-            Some("Cannot commit while a rebase is in progress")
+            Some("Resolve and stage the conflicted files first: b.txt, c.txt")
         );
+        let _ = app.update(Message::ContinueOperation);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+
+        let mut app = app_in_state(rebasing());
+        app.tabs[0].view_mut().unwrap().summary.clear();
+        let _ = app.update(Message::ContinueOperation);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Enter a commit summary");
+    }
+
+    #[test]
+    fn blocked_merge_offers_stash_and_merge() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Merge {
+            source: "refs/heads/topic".into(),
+            autostash: false,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Merge topic into HEAD")
+        );
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Merge topic into HEAD".into(),
+            result: Err("error: Your local changes to the following files would be \
+                         overwritten by merge:\n\ta\nPlease commit your changes or stash them"
+                .into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Local changes block the merge");
+        assert!(matches!(
+            modal.action(1),
+            Some(Message::Merge { source, autostash: true }) if source == "refs/heads/topic"
+        ));
+    }
+
+    #[test]
+    fn blocked_rebase_offers_stash_and_rebase() {
+        let mut app = staging_app(&["a"], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::Rebase {
+            onto: "refs/remotes/origin/main".into(),
+            autostash: false,
+            confirmed: false,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Rebase HEAD onto origin/main")
+        );
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Rebase HEAD onto origin/main".into(),
+            result: Err("error: cannot rebase: You have unstaged changes.".into()),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Local changes block the rebase");
+        assert_eq!(modal.buttons[1].label, "Stash and rebase");
+        assert!(matches!(
+            modal.action(1),
+            Some(Message::Rebase { onto, autostash: true, .. }) if onto == "refs/remotes/origin/main"
+        ));
+    }
+
+    #[test]
+    fn merging_is_blocked_during_an_operation_but_fast_forwarding_others_is_not() {
+        let mut app = app_in_state(rebasing());
+        let _ = app.update(Message::Merge {
+            source: "refs/heads/topic".into(),
+            autostash: false,
+        });
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, "Cannot merge while a rebase is in progress");
+
+        let _ = app.update(Message::FastForward {
+            branch: Some("topic".into()),
+            source: "refs/remotes/origin/topic".into(),
+            autostash: false,
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            view.busy.as_deref(),
+            Some("Fast-forward topic to origin/topic")
+        );
+        assert!(
+            view.pending_merge.is_none(),
+            "does not touch the working tree"
+        );
+    }
+
+    fn conflict_center(app: &App) -> Option<&crate::conflict::ConflictView> {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Conflict(conflict) => Some(conflict),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn conflict_view_opens_loads_and_closes_when_resolved() {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["a.txt"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ConflictOpened("a.txt".into()));
+        let conflict = conflict_center(&app).unwrap();
+        assert_eq!(conflict.loaded, Loadable::Loading);
+        assert_eq!(conflict.labels, ("HEAD".to_string(), "x".to_string()));
+
+        let text = git_core::ConflictText {
+            chunks: vec![git_core::Chunk::Conflict(git_core::ConflictHunk {
+                ours: vec!["o\n".into()],
+                base: vec![],
+                theirs: vec!["t\n".into()],
+            })],
+            eol: "\n",
+        };
+        let _ = app.update(Message::ConflictLoaded {
+            tab,
+            path: "a.txt".into(),
+            result: Ok(git_core::LoadedConflict {
+                path: "a.txt".into(),
+                stages: git_core::ConflictStages::default(),
+                content: git_core::ConflictContent::Text(text),
+            }),
+        });
+        // Saving with an open conflict explains instead of writing.
+        let _ = app.update(Message::ConflictSave);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(
+            app.status,
+            "Pick lines for the remaining conflict, or edit the output"
+        );
+        let _ = app.update(Message::ConflictTakeAll(git_core::Side::Theirs));
+        assert_eq!(conflict_center(&app).unwrap().output.text(), "t\n");
+        let _ = app.update(Message::ConflictSave);
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Resolve a.txt")
+        );
+
+        // The refresh after resolving: no conflict left, the view closes.
+        let view = app.tabs[0].view_mut().unwrap();
+        view.busy = None;
+        let snapshot = view
+            .snapshot
+            .with_working_tree(git_core::WorkingTree::default());
+        view.apply_snapshot(Arc::new(snapshot.unwrap()));
+        assert!(conflict_center(&app).is_none());
+    }
+
+    #[test]
+    fn a_stale_conflict_load_is_ignored() {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["a.txt", "b.txt"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ConflictOpened("b.txt".into()));
+        let _ = app.update(Message::ConflictLoaded {
+            tab,
+            path: "a.txt".into(),
+            result: Err("old".into()),
+        });
+        assert_eq!(conflict_center(&app).unwrap().loaded, Loadable::Loading);
+    }
+
+    fn rebase_center(app: &App) -> Option<&crate::rebase_panel::RebasePanel> {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::Rebase(panel) => Some(panel),
+            _ => None,
+        }
+    }
+
+    fn menu_item_enabled(app: &App, label: &str) -> Option<bool> {
+        app.context_menu
+            .as_ref()?
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                crate::overlay::MenuEntry::Item {
+                    label: l, enabled, ..
+                } if l == label => Some(*enabled),
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn interactive_rebase_is_offered_for_ancestors_of_head() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        let item = "Interactive rebase from here";
+        for (id, enabled) in [("a", true), ("b", true), ("c", false)] {
+            let _ = app.update(Message::CommitContextMenu {
+                id: id.into(),
+                position: iced::Point::ORIGIN,
+            });
+            assert_eq!(menu_item_enabled(&app, item), Some(enabled), "{id}");
+        }
+    }
+
+    #[test]
+    fn rebase_panel_keys_plan_and_start() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RebasePanelOpened("a".into()));
+        assert_eq!(rebase_center(&app).unwrap().loaded, Loadable::Loading);
+        let _ = app.update(Message::RebaseLoaded {
+            tab,
+            base: "a".into(),
+            result: Ok(vec![("b".into(), "B\n".into()), ("c".into(), "C\n".into())]),
+        });
+        // Top row (newest, "c") is selected: S squashes it into "b".
+        let _ = app.update(checked(Shortcut::StageSelected, false));
+        assert_eq!(
+            rebase_center(&app).unwrap().entries[1].action,
+            git_core::TodoAction::Squash
+        );
+        // ↓ selects "b"; S there would leave nothing to meld into.
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        let _ = app.update(checked(Shortcut::TodoKey('s'), false));
+        let _ = app.update(checked(Shortcut::StageSelected, false));
+        let _ = app.update(Message::RebaseStart);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert!(app.status.contains("oldest kept commit"), "{}", app.status);
+
+        let _ = app.update(checked(Shortcut::TodoKey('p'), false));
+        let _ = app.update(Message::RebaseStart);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Interactive rebase of HEAD"));
+        assert!(matches!(view.center, CenterView::Graph), "panel closes");
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::RunInteractiveRebase { base, input, autostash: false })
+                if base == "a"
+                    && input.sequence.as_deref() == Some("pick b\nsquash c\n")
+                    && input.messages == ["B\n\nC\n"]
+        ));
+    }
+
+    fn paste_into_message_dialog(app: &mut App, text: &str) {
+        use iced::widget::text_editor::{Action, Edit};
+        let _ = app.update(Message::CommitMessageEdited(Action::Edit(Edit::Paste(
+            Arc::new(text.into()),
+        ))));
+    }
+
+    #[test]
+    fn reword_and_squash_rules_follow_the_first_parent_line() {
+        let app = ready_app(&["c", "b", "a"]);
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        assert!(crate::repo_view::rewordable(snapshot, "c"), "HEAD: amend");
+        assert!(crate::repo_view::rewordable(snapshot, "b"));
+        assert!(!crate::repo_view::rewordable(snapshot, "a"), "root commit");
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(crate::repo_view::squashable(snapshot, &ids(&["c", "b"])));
+        assert!(
+            !crate::repo_view::squashable(snapshot, &ids(&["b", "a"])),
+            "root"
+        );
+        assert!(
+            !crate::repo_view::squashable(snapshot, &ids(&["c", "a"])),
+            "gap"
+        );
+        assert!(!crate::repo_view::squashable(snapshot, &ids(&["c"])));
+    }
+
+    #[test]
+    fn edit_commit_message_runs_a_reword() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        let _ = app.update(Message::RewordStart("b".into()));
+        assert_eq!(
+            app.message_dialog.as_ref().unwrap().title,
+            "Edit message of b"
+        );
+        let _ = app.update(Message::CommitMessageSubmit);
+        assert_eq!(
+            app.message_dialog.as_ref().unwrap().error.as_deref(),
+            Some("Enter a commit message")
+        );
+        paste_into_message_dialog(&mut app, "New message");
+        let _ = app.update(Message::CommitMessageSubmit);
+        assert!(app.message_dialog.is_none());
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Edit message of b"));
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::RewordCommit { id, message, autostash: false })
+                if id == "b" && message == "New message\n"
+        ));
+    }
+
+    #[test]
+    fn squash_selected_needs_a_squashable_selection() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        app.tabs[0].view_mut().unwrap().multi.single("c");
+        let _ = app.update(Message::SquashSelected);
+        assert!(app.message_dialog.is_none());
+
+        let view = app.tabs[0].view_mut().unwrap();
+        let snapshot = Arc::clone(&view.snapshot);
+        let order = crate::repo_view::selectable_ids(&snapshot);
+        view.multi.range("b", &order);
+        let _ = app.update(Message::SquashSelected);
+        assert_eq!(
+            app.message_dialog.as_ref().unwrap().title,
+            "Squash 2 commits"
+        );
+        paste_into_message_dialog(&mut app, "Both");
+        let _ = app.update(Message::CommitMessageSubmit);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Squash 2 commits"));
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::SquashCommits { ids, .. }) if ids.len() == 2
+        ));
+    }
+
+    /// Ready app with a history given as `(id, parents)`, newest first;
+    /// HEAD is detached at the first commit.
+    fn app_with_history(history: &[(&str, &[&str])]) -> App {
+        use git_core::{Commit, Head, Log, WorkingTree};
+        let mut app = ready_app(&["x"]);
+        let _ = app.update(git_available());
+        let commits = history
+            .iter()
+            .enumerate()
+            .map(|(i, (id, parents))| Commit {
+                id: id.to_string(),
+                parents: parents.iter().map(|p| p.to_string()).collect(),
+                summary: format!("summary {id}"),
+                body: String::new(),
+                author: String::new(),
+                email: String::new(),
+                author_time: 100 - i as i64,
+                commit_time: 100 - i as i64,
+            })
+            .collect();
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits,
+                truncated: false,
+            },
+            Head::Detached {
+                target: history[0].0.into(),
+            },
+            Vec::new(),
+            Vec::new(),
+            WorkingTree::default(),
+        )
+        .unwrap();
+        app.tabs[0]
+            .view_mut()
+            .unwrap()
+            .apply_snapshot(Arc::new(snapshot));
+        app
+    }
+
+    #[test]
+    fn cherry_pick_and_revert_from_the_commit_menu() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(git_available());
+        for (id, pick) in [("c", false), ("b", true)] {
+            let _ = app.update(Message::CommitContextMenu {
+                id: id.into(),
+                position: iced::Point::ORIGIN,
+            });
+            assert_eq!(
+                menu_item_enabled(&app, "Cherry-pick commit"),
+                Some(pick),
+                "{id}"
+            );
+            assert_eq!(menu_item_enabled(&app, "Revert commit"), Some(true), "{id}");
+        }
+        app.context_menu = None;
+        let _ = app.update(Message::RevertStart("b".into()));
+        assert!(app.form.is_none(), "no parent to choose");
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Revert b")
+        );
+        assert!(app.tabs[0].view().unwrap().check_empty);
+    }
+
+    #[test]
+    fn reverting_a_merge_asks_for_the_parent() {
+        let mut app = app_with_history(&[("m", &["p1", "p2"]), ("p2", &["p1"]), ("p1", &[])]);
+        let _ = app.update(Message::RevertStart("m".into()));
+        let form = app.form.as_mut().unwrap();
+        assert_eq!(form.value(0), "1: p1 summary p1");
+        form.fields[0].value = "2: p2 summary p2".into();
+        let _ = app.update(Message::FormSubmit);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Revert m"));
+        assert!(matches!(
+            &view.pending_merge,
+            Some(Message::Revert { id, mainline: Some(2) }) if id == "m"
+        ));
+    }
+
+    #[test]
+    fn empty_pick_offers_skip_or_commit_empty() {
+        for (state, skip) in [
+            (git_core::RepoState::CherryPicking { commit: None }, true),
+            (git_core::RepoState::Reverting { commit: None }, false),
+        ] {
+            let mut app = ready_app(&["c", "b", "a"]);
+            let _ = app.update(git_available());
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CherryPick(vec!["b".into()]));
+            let view = app.tabs[0].view_mut().unwrap();
+            assert_eq!(view.busy.as_deref(), Some("Cherry-pick b"));
+            view.busy = None;
+            let generation = app.tabs[0].generation;
+            let view = app.tabs[0].view().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            snapshot.state = state.clone();
+            let _ = app.update(Message::SnapshotLoaded {
+                tab,
+                generation,
+                result: Ok(Arc::new(snapshot)),
+            });
+            let modal = app.modal.clone().unwrap();
+            let labels: Vec<_> = modal.buttons.iter().map(|b| b.label.as_str()).collect();
+            assert_eq!(labels.contains(&"Skip"), skip, "{state:?}");
+            assert_eq!(labels.last(), Some(&"Commit empty"));
+            assert!(matches!(
+                modal.buttons.last().and_then(|b| b.message.clone()),
+                Some(Message::CommitEmpty)
+            ));
+        }
+    }
+
+    #[test]
+    fn reset_asks_for_the_mode_and_confirms_hard() {
+        let mut app = staging_app(&["u.txt"], &["s.txt"]);
+        let _ = app.update(Message::ResetStart("c".into()));
+        let modal = app.modal.take().unwrap();
+        let labels: Vec<_> = modal.buttons.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(labels, ["Cancel", "Soft", "Mixed", "Hard"]);
+
+        let _ = app.update(modal.action(3).unwrap());
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Hard reset HEAD");
+        assert_eq!(modal.details.as_deref(), Some("s.txt\nu.txt"));
+        assert_eq!(modal.default, Some(0), "Cancel is the default");
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+
+        let _ = app.update(modal.action(1).unwrap());
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Hard reset HEAD to c")
+        );
+    }
+
+    #[test]
+    fn soft_reset_runs_directly_and_resets_are_blocked_during_operations() {
+        let mut app = staging_app(&[], &[]);
+        let _ = app.update(Message::Reset {
+            id: "c".into(),
+            mode: git_core::ResetMode::Soft,
+            confirmed: false,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Soft reset HEAD to c")
+        );
+
+        let mut app = app_in_state(merging());
+        let _ = app.update(Message::ResetStart("c".into()));
+        assert!(app.modal.is_none());
+        assert_eq!(app.status, "Cannot reset while a merge is in progress");
+    }
+
+    /// History main (checked out) at "m", feature one commit ahead at "f".
+    fn drag_app() -> App {
+        let mut app = app_with_history(&[("f", &["m"]), ("m", &[])]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let branch = |name: &str, target: &str, is_head: bool| git_core::Reference {
+            name: name.into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: target.into(),
+            is_head,
+            upstream: None,
+            ahead_behind: None,
+        };
+        snapshot.refs = vec![branch("main", "m", true), branch("feature", "f", false)];
+        snapshot.head = git_core::Head::Branch {
+            name: "main".into(),
+            target: "m".into(),
+        };
+        view.apply_snapshot(Arc::new(snapshot));
+        app
+    }
+
+    fn local(name: &str) -> (String, git_core::RefKind) {
+        (name.into(), git_core::RefKind::LocalBranch)
+    }
+
+    #[test]
+    fn dragging_a_branch_highlights_targets_and_drops_into_a_menu() {
+        let mut app = drag_app();
+        let (name, kind) = local("feature");
+        let _ = app.update(Message::BranchDragStart {
+            name: name.clone(),
+            kind,
+        });
+        // Over itself: no target.
+        let _ = app.update(Message::BranchDragEnter {
+            name: name.clone(),
+            kind,
+        });
+        assert_eq!(
+            app.tabs[0].view().unwrap().drag.as_ref().unwrap().target,
+            None
+        );
+        let _ = app.update(Message::BranchDragEnter {
+            name: "main".into(),
+            kind,
+        });
+        let _ = app.update(Message::BranchDragLeave {
+            name: name.clone(),
+            kind,
+        });
+        let drag = app.tabs[0].view().unwrap().drag.clone().unwrap();
+        assert!(drag.targets("main", kind), "leaving another entry keeps it");
+
+        let _ = app.update(Message::BranchDropped {
+            name: "main".into(),
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        let _ = app.update(Message::BranchDragEnd);
+        assert!(app.tabs[0].view().unwrap().drag.is_none());
+        assert_eq!(
+            menu_item_enabled(&app, "Fast-forward main to feature"),
+            Some(true)
+        );
+        assert_eq!(
+            menu_item_enabled(&app, "Merge feature into main"),
+            Some(true)
+        );
+        assert_eq!(
+            menu_item_enabled(&app, "Rebase feature onto main"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_release_without_a_drag_or_on_the_source_opens_nothing() {
+        let mut app = drag_app();
+        let (name, kind) = local("feature");
+        let _ = app.update(Message::BranchDropped {
+            name: "main".into(),
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        assert!(app.context_menu.is_none(), "plain click");
+        let _ = app.update(Message::BranchDragStart {
+            name: name.clone(),
+            kind,
+        });
+        let _ = app.update(Message::BranchDropped {
+            name,
+            kind,
+            position: iced::Point::ORIGIN,
+        });
+        assert!(app.context_menu.is_none(), "dropped on itself");
+        assert!(app.tabs[0].view().unwrap().drag.is_none());
+    }
+
+    fn history_entry(label: &str) -> UndoAction {
+        UndoAction::History(git_core::HistoryChange {
+            label: label.into(),
+            kind: git_core::HistoryUndo::Keep,
+            before: "b".into(),
+            after: "a".into(),
+            branch: Some("main".into()),
+        })
+    }
+
+    fn finish(app: &mut App, label: &str, result: Result<Option<History>, String>) {
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().busy = Some(label.into());
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: label.into(),
+            result,
+        });
+    }
+
+    #[test]
+    fn stopped_operation_keeps_its_entry_until_it_completes() {
+        let mut app = staging_app(&[], &[]);
+        let entry = history_entry("Merge topic into main");
+        finish(
+            &mut app,
+            "Merge topic into main",
+            Ok(Some(History::Started(entry.clone()))),
+        );
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.pending_history.as_ref(), Some(&entry));
+        assert!(view.undo.is_empty());
+
+        // Staging a resolved file does not drop it.
+        finish(&mut app, "Stage a.txt", Ok(None));
+        assert!(app.tabs[0].view().unwrap().pending_history.is_some());
+
+        finish(
+            &mut app,
+            "Continue merge",
+            Ok(Some(History::Push(entry.clone()))),
+        );
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.pending_history.is_none());
+        assert_eq!(view.undo, [entry]);
+        assert_eq!(view.undo[0].label(), "Merge topic into main");
+    }
+
+    #[test]
+    fn aborted_operation_leaves_no_entry() {
+        let mut app = staging_app(&[], &[]);
+        finish(
+            &mut app,
+            "Rebase main onto topic",
+            Ok(Some(History::Started(history_entry(
+                "Rebase main onto topic",
+            )))),
+        );
+        finish(&mut app, "Abort rebase", Ok(None));
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.pending_history.is_none());
+        assert!(view.undo.is_empty());
+    }
+
+    #[test]
+    fn history_undo_is_blocked_during_an_operation_except_branch_moves() {
+        let entry = history_entry("Merge");
+        assert!(entry.moves_head());
+        let moved = UndoAction::History(git_core::HistoryChange {
+            label: "Fast-forward other to main".into(),
+            kind: git_core::HistoryUndo::MoveBranch {
+                name: "other".into(),
+            },
+            before: "b".into(),
+            after: "a".into(),
+            branch: None,
+        });
+        assert!(!moved.moves_head());
+
+        let mut app = app_in_state(merging());
+        app.tabs[0].view_mut().unwrap().undo.push(entry);
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.tabs[0].view().unwrap().undo.len(), 1);
+    }
+
+    #[test]
+    fn rebasing_over_merges_asks_first() {
+        // HEAD "m" merges "s" (side) into "a"; "base" is where "onto" points.
+        let mut app = app_with_history(&[
+            ("m", &["a", "s"]),
+            ("s", &["base"]),
+            ("a", &["base"]),
+            ("base", &[]),
+        ]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs = vec![git_core::Reference {
+            name: "onto".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "base".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        }];
+        assert_eq!(snapshot.merges_between("base", "m"), 1);
+        assert_eq!(snapshot.merges_between("a", "m"), 1);
+        assert_eq!(snapshot.merges_between("m", "m"), 0);
+        view.apply_snapshot(Arc::new(snapshot));
+
+        let _ = app.update(Message::Rebase {
+            onto: "refs/heads/onto".into(),
+            autostash: false,
+            confirmed: false,
+        });
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Rebase flattens merges");
+        let _ = app.update(modal.action(1).unwrap());
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Rebase HEAD onto onto")
+        );
+    }
+
+    #[test]
+    fn operations_started_during_auto_fetch_make_it_yield() {
+        let mut app = staging_app(&["a"], &[]);
+        let cancel = git_core::CancelToken::default();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.busy = Some("Auto-fetch".into());
+        view.network = Some(crate::repo_view::NetworkOp {
+            label: "Auto-fetch".into(),
+            kind: crate::repo_view::NetworkKind::Fetch,
+            progress: None,
+            cancel: cancel.clone(),
+            background: true,
+        });
+        let _ = app.update(Message::Merge {
+            source: "refs/heads/topic".into(),
+            autostash: false,
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(cancel.is_cancelled());
+        assert!(view.queued.is_some());
+        assert_eq!(app.status, "Stopping Auto-fetch…");
+        assert!(
+            view.pending_merge.is_none(),
+            "the merge has not started yet"
+        );
+    }
+
+    #[test]
+    fn unresolved_conflicts_lists_at_most_five_files() {
+        let paths = ["a", "b", "c", "d", "e", "f", "g"];
+        assert_eq!(
+            unresolved_conflicts(&paths),
+            "Resolve and stage the conflicted files first: a, b, c, d, e and 2 more"
+        );
+    }
+
+    #[test]
+    fn skip_only_for_rebase_and_cherry_pick_abort_for_all() {
+        for (state, skip) in [
+            (rebasing(), Some("Skip rebase")),
+            (
+                git_core::RepoState::CherryPicking { commit: None },
+                Some("Skip cherry-pick"),
+            ),
+            (merging(), None),
+            (git_core::RepoState::Reverting { commit: None }, None),
+        ] {
+            let mut app = app_in_state(state.clone());
+            let _ = app.update(Message::SkipOperation);
+            let view = app.tabs[0].view().unwrap();
+            assert_eq!(view.busy.as_deref(), skip, "{state:?}");
+
+            let mut app = app_in_state(state.clone());
+            let _ = app.update(Message::AbortOperation);
+            let view = app.tabs[0].view().unwrap();
+            let abort = format!("Abort {}", state.operation().unwrap());
+            assert_eq!(view.busy.as_deref(), Some(abort.as_str()));
+            assert!(view.clear_message_after_write);
+        }
+    }
+
+    #[test]
+    fn each_new_operation_message_prefills_the_panel() {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.state = rebasing();
+        snapshot.merge_message = Some(
+            "First step
+"
+            .into(),
+        );
+        view.apply_snapshot(Arc::new(snapshot.clone()));
+        assert_eq!(view.summary, "First step");
+        // Continue cleared the panel; the rebase stopped at the next commit.
+        view.summary.clear();
+        snapshot.merge_message = Some(
+            "Second step
+"
+            .into(),
+        );
+        view.apply_snapshot(Arc::new(snapshot.clone()));
+        assert_eq!(view.summary, "Second step");
+        // The same message does not refill a field the user emptied.
+        view.summary.clear();
+        view.apply_snapshot(Arc::new(snapshot));
+        assert!(view.summary.is_empty());
     }
 
     #[test]
@@ -6553,6 +8732,90 @@ mod tests {
         app.session.auto_fetch_minutes = 0;
         let _ = app.update(Message::Refresh);
         assert_eq!(app.auto_fetch_at, None);
+    }
+
+    fn multi_ids(app: &App) -> Vec<String> {
+        app.tabs[0].view().unwrap().multi.ids().to_vec()
+    }
+
+    fn click_with(app: &mut App, id: &str, modifiers: keyboard::Modifiers) {
+        let _ = app.update(Message::ModifiersChanged(modifiers));
+        let _ = app.update(Message::CommitSelected(id.into()));
+        let _ = app.update(Message::ModifiersChanged(keyboard::Modifiers::empty()));
+    }
+
+    #[test]
+    fn ctrl_and_shift_clicks_select_several_commits() {
+        let mut app = ready_app(&["e", "d", "c", "b", "a"]);
+        click_with(&mut app, "d", keyboard::Modifiers::empty());
+        assert_eq!(multi_ids(&app), ["d"]);
+        assert!(!app.tabs[0].view().unwrap().is_multi());
+
+        click_with(&mut app, "b", keyboard::Modifiers::COMMAND);
+        assert_eq!(multi_ids(&app), ["d", "b"]);
+        assert!(app.tabs[0].view().unwrap().is_multi());
+
+        click_with(&mut app, "e", keyboard::Modifiers::SHIFT);
+        assert_eq!(
+            multi_ids(&app),
+            ["e", "d", "c", "b"],
+            "range from the anchor b"
+        );
+
+        click_with(&mut app, "c", keyboard::Modifiers::empty());
+        assert_eq!(multi_ids(&app), ["c"], "plain click resets");
+    }
+
+    #[test]
+    fn shift_arrows_extend_and_plain_arrows_reset() {
+        let mut app = ready_app(&["e", "d", "c", "b", "a"]);
+        click_with(&mut app, "d", keyboard::Modifiers::empty());
+        let _ = app.update(checked(
+            Shortcut::ExtendSelection(crate::nav::Move::Next),
+            false,
+        ));
+        let _ = app.update(checked(
+            Shortcut::ExtendSelection(crate::nav::Move::Next),
+            false,
+        ));
+        assert_eq!(multi_ids(&app), ["d", "c", "b"]);
+        let _ = app.update(checked(
+            Shortcut::ExtendSelection(crate::nav::Move::Previous),
+            false,
+        ));
+        assert_eq!(multi_ids(&app), ["d", "c"]);
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        assert_eq!(multi_ids(&app), ["b"]);
+    }
+
+    #[test]
+    fn multi_selection_survives_refresh() {
+        let mut app = ready_app(&["e", "d", "c", "b", "a"]);
+        click_with(&mut app, "d", keyboard::Modifiers::empty());
+        click_with(&mut app, "b", keyboard::Modifiers::SHIFT);
+        let view = app.tabs[0].view_mut().unwrap();
+        let snapshot = Arc::clone(&view.snapshot);
+        view.apply_snapshot(snapshot);
+        assert_eq!(multi_ids(&app), ["d", "c", "b"]);
+    }
+
+    #[test]
+    fn squash_needs_a_contiguous_run_on_head() {
+        let app = ready_app(&["e", "d", "c", "b", "a"]);
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(crate::repo_view::contiguous_on_head(
+            snapshot,
+            &ids(&["d", "c"])
+        ));
+        assert!(crate::repo_view::contiguous_on_head(
+            snapshot,
+            &ids(&["e", "d", "c"])
+        ));
+        assert!(
+            !crate::repo_view::contiguous_on_head(snapshot, &ids(&["e", "c"])),
+            "gap"
+        );
     }
 
     #[test]

@@ -264,13 +264,13 @@ fn remove_file(root: &Path, path: &str) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
-fn is_executable(_path: &Path) -> bool {
+pub(crate) fn is_executable(_path: &Path) -> bool {
     false
 }
 

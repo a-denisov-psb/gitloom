@@ -9,7 +9,9 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::{CancelToken, Error, Progress, Result};
+use crate::editor::{editor_command, EditorInput, EditorKind, PreparedEditor};
+use crate::editor::{EDITOR_DIR_ENV, EDITOR_ENV};
+use crate::{CancelToken, Error, Operation, Progress, Result};
 
 /// Oldest supported Git (Ubuntu 22.04 LTS ships 2.34).
 pub const MIN_GIT_VERSION: GitVersion = GitVersion {
@@ -118,6 +120,30 @@ pub struct RunOptions<'a> {
 pub trait GitWriter: Send + Sync {
     /// Runs `git` with `args` in the repository root.
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput>;
+
+    /// Runs `git` like [`Self::run`] but returns the exit code (`None` if
+    /// terminated) with the output instead of failing on a non-zero code,
+    /// for commands that report results that way (`git merge-file`).
+    fn run_status(
+        &self,
+        args: &[&str],
+        options: RunOptions<'_>,
+    ) -> Result<(Option<i32>, GitOutput)> {
+        self.run(args, options).map(|output| (Some(0), output))
+    }
+
+    /// Runs a command that asks for a todo list or commit messages: Gitloom
+    /// acts as Git's editor and answers with `input` (ADR-021). Fails if no
+    /// editor program is configured.
+    fn run_editing(
+        &self,
+        args: &[&str],
+        input: &EditorInput,
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
+        let _ = (args, input, options);
+        Err(Error::Backend("no Git editor configured".into()))
+    }
 
     /// Runs a long (network) command: reports progress parsed from stderr
     /// (pass `--progress` in `args`) and stops the process tree when `cancel`
@@ -438,15 +464,48 @@ pub trait GitWriter: Send + Sync {
             .map(drop)
     }
 
-    /// Aborts a merge in progress (`git merge --abort`).
-    fn abort_merge(&self) -> Result<()> {
-        self.run(&["merge", "--abort"], RunOptions::default())
+    /// Concludes the current step of `operation` (`git <op> --continue`) with
+    /// `message`. Hooks run as usual. Rebase and merge ask through the editor
+    /// (ADR-021); cherry-pick and revert may commit `MERGE_MSG` without
+    /// asking, so it is replaced first.
+    fn continue_operation(&self, operation: Operation, message: &str) -> Result<()> {
+        if operation != Operation::Rebase {
+            let read = RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            };
+            let git_dir = self.run(&["rev-parse", "--absolute-git-dir"], read)?;
+            let path = Path::new(git_dir.stdout_text().trim_end()).join("MERGE_MSG");
+            std::fs::write(&path, message)
+                .map_err(|e| Error::Backend(format!("could not write {}: {e}", path.display())))?;
+        }
+        let input = EditorInput {
+            sequence: None,
+            messages: vec![message.to_owned()],
+        };
+        self.run_editing(
+            &[operation.command(), "--continue"],
+            &input,
+            RunOptions::default(),
+        )
+        .map(drop)
+    }
+
+    /// Skips the current commit of a rebase or cherry-pick (`--skip`).
+    fn skip_operation(&self, operation: Operation) -> Result<()> {
+        if !operation.can_skip() {
+            return Err(Error::Backend(format!(
+                "a {} cannot skip commits",
+                operation.command()
+            )));
+        }
+        self.run(&[operation.command(), "--skip"], RunOptions::default())
             .map(drop)
     }
 
-    /// Aborts a rebase in progress (`git rebase --abort`).
-    fn abort_rebase(&self) -> Result<()> {
-        self.run(&["rebase", "--abort"], RunOptions::default())
+    /// Aborts `operation` and restores the state before it (`--abort`).
+    fn abort_operation(&self, operation: Operation) -> Result<()> {
+        self.run(&[operation.command(), "--abort"], RunOptions::default())
             .map(drop)
     }
 
@@ -589,6 +648,8 @@ pub struct CliBackend {
     root: PathBuf,
     /// Program answering credential and host key prompts (ADR-019).
     askpass: Option<PathBuf>,
+    /// Program acting as Git editor for [`GitWriter::run_editing`] (ADR-021).
+    editor: Option<PathBuf>,
 }
 
 impl CliBackend {
@@ -598,6 +659,7 @@ impl CliBackend {
             git: PathBuf::from("git"),
             root: root.into(),
             askpass: None,
+            editor: None,
         }
     }
 
@@ -606,6 +668,14 @@ impl CliBackend {
     /// prompt as only argument, with [`ASKPASS_ENV`] set, and prints the answer.
     pub fn with_askpass(mut self, program: impl Into<PathBuf>) -> Self {
         self.askpass = Some(program.into());
+        self
+    }
+
+    /// Commands run with [`GitWriter::run_editing`] start `program` as
+    /// sequence and message editor (`--git-editor=<kind> <file>`, with
+    /// [`crate::EDITOR_ENV`] set). All other commands never open an editor.
+    pub fn with_editor(mut self, program: impl Into<PathBuf>) -> Self {
+        self.editor = Some(program.into());
         self
     }
 
@@ -625,7 +695,63 @@ impl GitWriter for CliBackend {
     }
 
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
+        self.execute(self.command(), args, options)
+    }
+
+    fn run_status(
+        &self,
+        args: &[&str],
+        options: RunOptions<'_>,
+    ) -> Result<(Option<i32>, GitOutput)> {
+        let (_, output) = self.execute_raw(self.command(), args, options)?;
+        Ok((
+            output.status.code(),
+            GitOutput {
+                stdout: output.stdout,
+                stderr: output.stderr,
+            },
+        ))
+    }
+
+    fn run_editing(
+        &self,
+        args: &[&str],
+        input: &EditorInput,
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
+        let program = self
+            .editor
+            .as_ref()
+            .ok_or_else(|| Error::Backend("no Git editor configured".into()))?;
+        // Removed when this function returns, whatever Git did.
+        let prepared = PreparedEditor::new(input)?;
         let mut cmd = self.command();
+        cmd.env(
+            "GIT_SEQUENCE_EDITOR",
+            editor_command(program, EditorKind::Sequence),
+        )
+        .env("GIT_EDITOR", editor_command(program, EditorKind::Message))
+        .env(EDITOR_ENV, "1")
+        .env(EDITOR_DIR_ENV, prepared.dir());
+        self.execute(cmd, args, options)
+    }
+}
+
+impl CliBackend {
+    /// Runs `cmd` (from [`Self::command`]) with `args` in the repository root.
+    fn execute(&self, cmd: Command, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
+        let (display, output) = self.execute_raw(cmd, args, options)?;
+        finish(display, output)
+    }
+
+    /// Like [`Self::execute`] without checking the exit code; returns the
+    /// command for messages and the raw output.
+    fn execute_raw(
+        &self,
+        mut cmd: Command,
+        args: &[&str],
+        options: RunOptions<'_>,
+    ) -> Result<(String, std::process::Output)> {
         cmd.args(args).current_dir(&self.root);
         if options.read_only {
             cmd.env("GIT_OPTIONAL_LOCKS", "0");
@@ -655,12 +781,12 @@ impl GitWriter for CliBackend {
                     return Err(Error::Backend(format!("could not write to {display}: {e}")));
                 }
             }
-            return finish(display, output);
+            return Ok((display, output));
         }
         let output = child
             .wait_with_output()
             .map_err(|e| Error::Backend(format!("could not run {display}: {e}")))?;
-        finish(display, output)
+        Ok((display, output))
     }
 }
 

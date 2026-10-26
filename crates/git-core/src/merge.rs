@@ -1,0 +1,175 @@
+//! Merge, fast-forward (M4-04) and rebase (M4-06). Blocking: runs `git`.
+
+use crate::{EditorInput, Error, GitWriter, Oid, Result, RunOptions};
+
+/// How a merge or rebase ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// Fast-forwarded, merge commit created, or all commits rebased.
+    Done,
+    /// Stopped with conflicts; the operation is in progress.
+    Conflicts,
+}
+
+/// Merges `rev` into HEAD (`git merge`), respecting the user's `merge.ff`
+/// and `merge.autoStash`; the message is Git's default. `autostash` stashes
+/// local changes first and re-applies them afterwards (if they conflict with
+/// the result, Git keeps them in the stash list).
+pub fn merge(git: &dyn GitWriter, rev: &str, autostash: bool) -> Result<MergeOutcome> {
+    let mut args = vec!["merge"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(short_branch(rev));
+    match git.run(&args, RunOptions::default()) {
+        Ok(_) => Ok(MergeOutcome::Done),
+        Err(error) => {
+            if merge_in_progress(git)? {
+                Ok(MergeOutcome::Conflicts)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Fast-forwards the checked-out branch to `rev` (`git merge --ff-only`).
+pub fn fast_forward_head(git: &dyn GitWriter, rev: &str, autostash: bool) -> Result<()> {
+    let mut args = vec!["merge", "--ff-only"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(short_branch(rev));
+    git.run(&args, RunOptions::default()).map(drop)
+}
+
+/// Branch name as Git's default merge message shows it: `refs/heads/x` →
+/// `x` ("Merge branch 'x'"), `refs/remotes/origin/x` → `origin/x`
+/// ("Merge remote-tracking branch 'origin/x'").
+fn short_branch(rev: &str) -> &str {
+    rev.strip_prefix("refs/heads/")
+        .or_else(|| rev.strip_prefix("refs/remotes/"))
+        .unwrap_or(rev)
+}
+
+/// Fast-forwards local branch `branch` (not checked out) to the reference
+/// `source` (full name, e.g. `refs/remotes/origin/main`) without touching
+/// the working tree. Git refuses if it is not a fast-forward.
+pub fn fast_forward_branch(git: &dyn GitWriter, branch: &str, source: &str) -> Result<()> {
+    let refspec = format!("{source}:refs/heads/{branch}");
+    git.run(
+        &["fetch", "--quiet", "--no-write-fetch-head", ".", &refspec],
+        RunOptions::default(),
+    )
+    .map(drop)
+}
+
+/// Rebases HEAD onto `onto` (`git rebase`), respecting the user's
+/// `rebase.autoStash`; merge commits are flattened (Git's default).
+/// `autostash` stashes local changes first and re-applies them afterwards.
+pub fn rebase(git: &dyn GitWriter, onto: &str, autostash: bool) -> Result<MergeOutcome> {
+    let mut args = vec!["rebase"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(onto);
+    match git.run(&args, RunOptions::default()) {
+        Ok(_) => Ok(MergeOutcome::Done),
+        Err(error) => {
+            // A step that stopped with conflicts leaves REBASE_HEAD behind.
+            if pseudo_ref_exists(git, "REBASE_HEAD")? {
+                Ok(MergeOutcome::Conflicts)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Commits an interactive rebase onto `base` replays, oldest first, with
+/// their full messages: like Git's own todo list (`base..HEAD` without
+/// merges, topological order).
+pub fn rebase_commits(git: &dyn GitWriter, base: &str) -> Result<Vec<(Oid, String)>> {
+    let read = RunOptions {
+        read_only: true,
+        ..RunOptions::default()
+    };
+    let range = format!("{base}..HEAD");
+    let output = git.run(
+        &[
+            "log",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            "--format=%H%x1f%B%x1e",
+            &range,
+            "--",
+        ],
+        read,
+    )?;
+    Ok(output
+        .stdout_text()
+        .split('\x1e')
+        .filter_map(|record| {
+            let (id, message) = record.trim_start_matches('\n').split_once('\x1f')?;
+            Some((id.to_owned(), message.to_owned()))
+        })
+        .collect())
+}
+
+/// Runs `git rebase -i <base>` with the prepared todo list and messages
+/// (see [`crate::build_todo`]); Gitloom answers Git's editors (ADR-021).
+pub fn rebase_interactive(
+    git: &dyn GitWriter,
+    base: &str,
+    input: &EditorInput,
+    autostash: bool,
+) -> Result<MergeOutcome> {
+    let mut args = vec!["rebase", "--interactive"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(base);
+    match git.run_editing(&args, input, RunOptions::default()) {
+        Ok(_) => Ok(MergeOutcome::Done),
+        Err(error) => {
+            if pseudo_ref_exists(git, "REBASE_HEAD")? {
+                Ok(MergeOutcome::Conflicts)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// True if Git refused to rebase because of local changes.
+pub fn rebase_blocked(stderr: &str) -> bool {
+    stderr.contains("cannot rebase: You have unstaged changes")
+        || stderr.contains("cannot rebase: Your index contains uncommitted changes")
+        || merge_blocked(stderr)
+}
+
+/// True if a merge stopped and waits for its conclusion.
+fn merge_in_progress(git: &dyn GitWriter) -> Result<bool> {
+    pseudo_ref_exists(git, "MERGE_HEAD")
+}
+
+fn pseudo_ref_exists(git: &dyn GitWriter, name: &str) -> Result<bool> {
+    let read = RunOptions {
+        read_only: true,
+        ..RunOptions::default()
+    };
+    match git.run(&["rev-parse", "--verify", "--quiet", name], read) {
+        Ok(_) => Ok(true),
+        Err(Error::Command { code: Some(1), .. }) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// True if Git refused to merge (or fast-forward) because local changes
+/// would be overwritten.
+pub fn merge_blocked(stderr: &str) -> bool {
+    stderr.contains("would be overwritten by merge")
+        || stderr.contains("untracked working tree files would be overwritten")
+        || stderr.contains("Please commit your changes or stash them")
+}

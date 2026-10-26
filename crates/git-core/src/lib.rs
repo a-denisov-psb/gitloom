@@ -6,30 +6,51 @@
 //! - [`CliBackend`]: write operations via the `git` executable
 
 mod cli_backend;
+mod conflict;
 mod diff;
 mod discard;
+mod editor;
 mod gix_backend;
 mod history;
+mod history_ops;
+mod merge;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
 mod network;
 mod patch;
+mod pick;
 mod refname;
+mod reset;
+mod resolve;
+mod rewrite;
 mod state;
+mod todo;
 mod watch;
 
 pub use cli_backend::{
     branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
     GitVersion, GitWriter, RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
 };
+pub use conflict::{
+    with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,
+};
 pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
     FileSnapshot, IndexSnapshot,
 };
+pub use editor::{editor_call, editor_main, EditorInput, EditorKind, EDITOR_DIR_ENV, EDITOR_ENV};
 pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
     tag_message, unreachable_from_branches, HeadPosition, RefChange,
+};
+pub use history_ops::{
+    current_branch, current_state, index_tree, redo_history, undo_history, HistoryChange,
+    HistoryUndo,
+};
+pub use merge::{
+    fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
+    rebase_commits, rebase_interactive, MergeOutcome,
 };
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
@@ -39,8 +60,21 @@ pub use network::{
     CancelToken, Progress, PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
+pub use pick::{cherry_pick, commit_empty, revert};
 pub use refname::check_branch_name;
-pub use state::{locked_file, RepoState};
+pub use reset::{
+    hard_reset_with_snapshot, reset, undo_hard_reset, RawFile, ResetMode, ResetSnapshot,
+};
+pub use resolve::{
+    conflict_stages, load_conflict, resolve_conflict, resolve_with_side, ConflictContent,
+    ConflictStages, LoadedConflict, StageEntry, WholeFileReason, MAX_CONFLICT_SIZE,
+};
+pub use rewrite::{reword_commit, squash_commits};
+pub use state::{locked_file, Operation, RepoState};
+pub use todo::{
+    build as build_todo, chains, default_message, needs_message, validate as validate_todo, Chain,
+    TodoAction, TodoEntry,
+};
 pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;
@@ -419,8 +453,8 @@ pub trait GitBackend: Send + Sync {
     /// Operation in progress (merge, rebase, cherry-pick, revert).
     fn state(&self) -> Result<RepoState>;
 
-    /// Prepared message (`MERGE_MSG`) of a merge, cherry-pick or revert in
-    /// progress, if one is running.
+    /// Prepared message (`MERGE_MSG`) of the operation in progress, if one is
+    /// running; for a stopped rebase step the message of the commit being applied.
     fn merge_message(&self) -> Result<Option<String>>;
 
     /// Working tree content of `path` as Git stores it (filters applied);

@@ -100,6 +100,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   Git command. Not undone: the stash made by "Stash and checkout", the remote side of
   a branch rename; restored annotated tags are new tag objects with the same message.
   Network operations are not undoable and clear the redo stack.
+- Extension (M4 plan): a hard reset is undoable by snapshot: before the reset the index
+  tree (`git write-tree`) and every changed worktree file (blob, `--no-filters`) are
+  recorded; undo restores HEAD, index and files.
 
 ## ADR-015 Context menus and modals in M2
 
@@ -146,6 +149,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   environment variable `GITLOOM_ASKPASS=1`, which `CliBackend` sets for its Git processes;
   `gitloom --askpass "<prompt>"` works as well. Password/passphrase/PIN/token prompts are
   masked, SSH host key questions get Yes/No buttons, failures get a hint in the error dialog.
+- Addendum (M4-02): the same executable also acts as Git's editor (ADR-021). Editor calls
+  are recognized by their first argument (`--git-editor=sequence|message <file>`) before
+  askpass mode is checked; `GITLOOM_EDITOR=1` is set for them.
 
 ## ADR-020 Network operations and auto-fetch
 
@@ -156,3 +162,93 @@ Architecture decision records in short form. New entries at the bottom. Change a
   skipped during merge/rebase states.
 - Note: this is network access by default; it only contacts remotes the user
   configured, so it does not conflict with ADR-009.
+
+## ADR-021 Gitloom as Git editor
+
+- Status: accepted (M4 plan)
+- Decision: Git commands that would open an editor run with `GIT_SEQUENCE_EDITOR` and
+  `GIT_EDITOR` pointing to the Gitloom executable in editor mode (env flag like askpass,
+  ADR-019, plus the path of a prepared file). Editor mode copies the prepared todo list or
+  message into the file Git passes and exits 0; without preparation it exits 1, so Git
+  aborts cleanly. Editor mode never starts a UI.
+- Why: interactive rebase, reword, squash, merge and revert messages need editor input;
+  terminal editors would hang a GUI process. Preparing the content in the UI first keeps
+  every command non-interactive.
+- Implementation note (M4-02): `GitWriter::run_editing(args, EditorInput)` writes the todo
+  list and a queue of commit messages (`message-0001`, ...) into a private temp directory
+  (`GITLOOM_EDITOR_DIR`, removed afterwards) and sets
+  `GIT_SEQUENCE_EDITOR='<exe>' --git-editor=sequence` and
+  `GIT_EDITOR='<exe>' --git-editor=message` (shell-quoted, since Git runs editors through
+  `sh`; forward slashes on Windows). Each message editor call consumes the next message, so
+  one interactive rebase with several rewords and squashes needs no round trips; an empty
+  queue exits 1. All other commands keep `GIT_EDITOR=:`.
+
+## ADR-022 Conflict resolution model
+
+- Status: accepted (M4 plan)
+- Decision: the conflict view follows GitKraken: "ours" top left, "theirs" top right with
+  checkboxes per hunk and line, editable output below. Data comes from index stages 1/2/3;
+  the initial output is `git merge-file -p` (with markers). A pure model in git-core maps
+  hunks and lines of both sides to the output; once the user edits the output, the edited
+  text wins over the checkboxes (with an indicator and "Reset output"). Line endings are
+  preserved.
+- Why: matches GitKraken users' expectations and keeps the logic testable outside the UI.
+- Implementation note (M4-05): `git merge-file -p --diff3 --marker-size=31` runs on the
+  stage blobs (written to a temp dir, as stored in the index); the long markers keep
+  conflict markers committed in the file from being parsed as real ones. The output shown
+  to the user uses Git's 7-character markers for open conflicts and, per conflict, the
+  picked lines with ours before theirs. Lines keep their terminators, so CRLF content is
+  reproduced byte for byte; text typed into the output gets the file's line ending. Saving
+  writes the content as a blob, sets it as stage 0 (`update-index --cacheinfo`) and checks
+  it out (`checkout-index`), so checkout filters such as `core.autocrlf` apply. Binary and
+  delete/modify conflicts offer only "take ours/theirs" (`checkout --ours/--theirs` + `add`,
+  or `rm` for the deleting side). `git merge-file` ends both sides of a conflict at the end
+  of a file without trailing newline with a newline; the resolved file then has one.
+
+## ADR-023 Settings file separate from the session
+
+- Status: accepted (M5 plan)
+- Decision: user preferences live in `<config dir>/gitloom/settings.json` (versioned,
+  atomic writes); `session.json` keeps state (tabs, recents, panes, pull mode, hidden
+  and soloed branches). `auto_fetch_minutes` moves from the session to the settings
+  with a one-time migration. A corrupted settings file falls back to defaults and is
+  kept as `settings.json.bak`.
+- Why: preferences and state change at different rates; a broken session must not
+  reset preferences and vice versa.
+
+## ADR-024 Git CLI for file history and blame
+
+- Status: accepted (M5 plan)
+- Decision: file history (`git log --follow`) and blame (`git blame --porcelain`) are
+  read through the Git CLI with `--no-optional-locks`, cancellable by killing the
+  process. All other reads stay on gix (ADR-002).
+- Why: rename following, `.mailmap` and `blame.ignoreRevsFile` then behave exactly like
+  Git; `git` is required since M2 anyway.
+
+## ADR-025 Icon set
+
+- Status: accepted (M5 plan)
+- Decision: Lucide icons (ISC license), vendored as SVG files under
+  `crates/app/assets/icons/` with the license file, embedded at compile time and
+  rendered with iced's `svg` feature, tinted by theme colors. Only icons in use are
+  vendored.
+- Why: permissive license, consistent line style, no runtime dependency; GitKraken
+  assets are not allowed (ADR-005).
+
+## ADR-026 Avatars
+
+- Status: accepted (M5 plan)
+- Decision: avatars are opt-in (off by default, ADR-009). When on, Gitloom requests
+  `https://gravatar.com/avatar/<sha256(email)>?d=404` with `ureq` (rustls, proxy from
+  the environment), caches results and misses for 7 days in the cache dir, runs at most
+  4 requests in parallel and only for visible commits. When off, no HTTP client exists.
+- Why: privacy by default; the hash, not the email, leaves the machine, and the
+  setting says so.
+
+## ADR-027 Theme system
+
+- Status: accepted (M5 plan)
+- Decision: all colors come from a runtime `ThemePalette`; Dark (default) and Light.
+  A "System" option is added only if iced 0.14 can detect the OS theme (result recorded
+  here by M5-03). Text colors reach WCAG AA contrast in both palettes.
+- Why: light theme parity with GitKraken; one place for colors.

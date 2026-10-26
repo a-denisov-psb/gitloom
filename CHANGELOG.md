@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
+### Added
+
+- Select several commits in the graph: Ctrl+click toggles, Shift+click selects a range, Shift+↑/↓ extend the selection. The right panel lists the selected commits.
+- Merge and fast-forward from the branch context menu ("Merge X into Y", "Fast-forward Y to X", and for remote branches "Fast-forward L to origin/L" for a local branch that is behind). Local changes that block a merge can be stashed and re-applied automatically.
+- A rebase over merge commits asks first, the interactive rebase panel names the merges it drops, and conflicts in files larger than 2 MB offer taking one side's file.
+- Undo and redo for merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reset (a hard reset restores the discarded changes), reword and squash. An operation that stopped with conflicts gets its entry when it is completed; aborted operations leave none.
+- Drag a branch (graph pill or sidebar) onto another branch: fast-forward, merge, rebase or interactive rebase from the menu that opens.
+- Reset the current branch to a commit (soft, mixed or hard) from the commit menu; a hard reset is confirmed and lists the changes that will be lost.
+- Cherry-pick one commit (commit menu) or several (multi-selection, applied oldest first) and revert a commit; merge commits ask for the parent. An empty result offers "Skip" or "Commit empty".
+- "Edit commit message" in the commit menu (HEAD is amended, older commits are reworded by a rebase) and "Squash N commits" for a contiguous multi-selection, both with a message dialog.
+- Interactive rebase: "Interactive rebase from here" in the commit menu opens a panel to pick, reword, squash, fix up, drop and reorder (drag or Alt+↑/↓) the commits; reword and squash messages are edited inline before starting.
+- Rebase from the branch context menu ("Rebase Y onto X"); conflicts stop in the banner and the conflict view, local changes can be stashed and re-applied automatically.
+- Conflict resolution view: click a conflicted file to pick hunks or single lines from "ours" and "theirs", edit the output, then "Save and mark resolved". Binary and delete/modify conflicts take one side's file. Line endings are kept.
+- Continue, Skip and Abort for merges, rebases, cherry-picks and reverts in progress, from the banner or the commit panel ("Continue rebase"); the commit message can be edited before continuing. Conflicted files get their own section in the staging panel.
+
+### Changed
+
+- Shift+↑/↓ now extend the commit selection; jumping to the first parent or child on the branch stays on Shift+J/K.
+
+### Fixed
+
+- Right click on a commit in a scrolled graph opened its menu off screen (and a drop from a scrolled graph likewise); opening a menu or dialog no longer resets the graph's scroll position.
+
 ## [0.4.0] - 2026-10-25
 
 ### Added

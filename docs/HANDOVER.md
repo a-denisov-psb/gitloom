@@ -20,28 +20,29 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M3, version 0.4.0)
+## Current state (end of M4, version 0.5.0)
 
-Done (M3-01 … M3-15, see the notes in `docs/milestones/M3-branches-remotes.md`; M1/M2 in their milestone files):
+Done (M4-01 … M4-15, see the notes in `docs/milestones/M4-merge-rebase.md`; M1–M3 in their milestone files):
 
-- `git-core`: reads via `GixBackend` (reopens when `.git/config` changes; remotes, remote URLs, stash parts, operation state); writes via `CliBackend` / `GitWriter`: staging, discard, commit, stash, checkout, branches, tags, upstream and remote management; `run_network` with progress parsing and process tree cancel; askpass (`GITLOOM_ASKPASS`, ADR-019); undoable `RefChange`s.
+- `git-core`: reads via `GixBackend`; writes via `CliBackend` / `GitWriter`, now also merge and fast-forward, rebase and interactive rebase, cherry-pick, revert, reset, continue/skip/abort, conflict model and resolution (ADR-022); Gitloom as Git's editor (ADR-021); undo/redo entries for all history operations.
 - `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
-- `app`: everything from M2 plus fetch/auto-fetch (one timer, ADR-020), pull modes, push with upstream setup and force-with-lease, checkout by double click, inline branch create/rename, tags, remotes, complete context menus (`menus.rs`, M4 actions disabled), undo for ref changes, detached HEAD guard, askpass window, generic form overlay.
-- Measurements: `docs/PERFORMANCE.md` (M1, M2, M3 sections).
-- Branches: `master` with `v0.1.0` … `v0.4.0`; `develop` (default branch on GitHub).
+- `app`: everything from M3 plus multi-selection in the graph, merge/rebase/cherry-pick/revert/reset from the menus, interactive rebase panel, reword and squash shortcuts, conflict resolution view, operation banner with Continue/Skip/Abort, drag and drop of branches.
+- Planning: M5 is planned in task-level detail (`docs/milestones/M5-productivity.md`, ADR-023 … ADR-027).
+- Measurements: `docs/PERFORMANCE.md` (M1 … M4 sections).
+- Branches: `master` with `v0.1.0` … `v0.4.0` (`v0.5.0` after the maintainer pushes it); `develop` (default branch on GitHub).
 
 Verified:
 
-- `./scripts/check.sh` green on Linux, clippy for the Windows target; Windows test binaries run locally where noted.
-- M3 walkthrough on Linux against the GitHub remote of this repo (see the M3-14 note); GitHub left clean.
-- UI checked by hand through WSLg (synthetic mouse and keyboard; keyboard input was unreliable at times, gaps are maintainer to-dos).
+- `./scripts/check.sh` green on Linux, clippy for the Windows target; CI green on all platforms for the last code commit (e461b48). The CI run of the planning merge e048618 did not start (GitHub account billing), see Maintainer to-dos.
+- M4 walkthrough on Linux by mouse on a clone of this repo (see the M4-14 note).
+- UI checked by hand through WSLg (synthetic mouse; keyboard input and modifiers did not reach the window, gaps are maintainer to-dos).
 
 Not done / known limitations:
 
-- Merge/rebase/cherry-pick/revert/reset actions, conflict resolution, drag and drop of branches: M4 (menus show them disabled).
-- Real credential prompts (GCM on Windows, SSH passphrase on Linux) and the Windows run of the M2/M3 walkthroughs are open maintainer checks.
+- M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict notice): ROADMAP ideas backlog (open question 9).
+- Real credential prompts (GCM on Windows, SSH passphrase on Linux), keyboard parts of the M3/M4 walkthroughs and the Windows runs of M2–M4 are open maintainer checks.
 - Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
-- Icons are Unicode placeholders (M5); remote markers on pills are text.
+- Icons are Unicode placeholders (M5-05); remote markers on pills are text.
 - Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
 ## Maintainer to-dos
@@ -62,7 +63,12 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] M3-08: rename a branch with the keyboard (verified in the M3-14 walkthrough against GitHub): right click a local branch → Rename… → edit the name → Enter; for a branch with an upstream choose "Rename remote too" and check the remote. (Menu, input, delete, force delete and remote delete verified by mouse; keyboard input did not reach the window in my session.)
 - [ ] M3-10: add a remote with "+" in the REMOTE section (type name and URL) and rename a remote from its context menu (type the new name). Set/unset upstream, Edit URL (prefilled), Fetch and Remove were verified by mouse; typing did not reach the window reliably in my session.
 - [ ] M3-14: repeat the M3 walkthrough on Windows against the GitHub remote, on a throwaway branch (e.g. `e2e-windows`) and a throwaway tag: Fetch all, create branch (Ctrl+B), push with upstream, pull (fast-forward), push rejected → Force push (once without and once after a fetch), create/push/delete tag, rename branch incl. remote, delete remote and local branch, checkout of a remote branch; finally check that GitHub has no leftovers.
+- [x] Check the CI runs of `master` v0.4.0 (d4f9f4a) and `develop` (2d31663): both green (checked with `gh run list`, 2026-10-25). From now on Claude Code checks CI itself after each push to `develop`.
+- [ ] M4-07: in the interactive rebase panel, check the keys P/R/S/F/D, ↑/↓ and Alt+↑/↓ and typing into a reword message (keyboard input did not reach the window in my WSLg session; actions, drag and the combined squash message were verified by mouse). Also check in GitKraken whether its list shows the newest commit on top (Gitloom does).
+- [ ] M4-08: "Edit commit message" with a typed change (HEAD and an older commit) and "Squash N commits" after a Ctrl/Shift+click multi-selection (keyboard input and modifiers did not reach the window in my WSLg session; covered by integration tests).
+- [ ] M4-14: on Linux, the M4 acceptance walkthrough was done by mouse on a clone of this repo (merge with the conflict view, rebase with a conflict, interactive rebase with reorder/squash/reword/drop, cherry-pick, revert, reset soft/mixed/hard, each undone and redone; trees compared with the CLI). Please add the keyboard parts: cherry-pick of three commits via Ctrl/Shift+click multi-selection and a typed reword message. Then repeat the whole M4 walkthrough on Windows (also checks CRLF and Git for Windows' shell running Gitloom as editor).
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
+- [ ] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0.
 
 ## Environment notes
 
@@ -102,4 +108,5 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 | 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |
 | 6 | Memory target: accept "private memory < 300 MB" or require total RSS | M1-15 | done: private memory counts (ADR-012) |
 | 8 | "Discard all": should it also reset staged changes like GitKraken might (reset --hard + clean)? M2-08 discards only unstaged changes and untracked files | M2-08 | decided (maintainer, 2026-10-23): if changes are staged, ask whether to discard them too; implemented |
+| 9 | M4 known limitations, candidates for the backlog: (a) an interactive rebase that stops for a conflict loses the remaining prepared reword/squash messages (Git then stops at those steps; Continue uses the prefilled original message); (b) reverting a commit without changes fails in Git itself ("nothing to commit"), Gitloom shows Git's error; (c) an autostash that conflicts after a merge/rebase stays in the stash list without a dedicated notice (the conflicted files and the stash entry are visible) | M4-13 | decided (maintainer, 2026-10-26): all three go to the ROADMAP ideas backlog, no follow-up in M5 |
 | 7 | Start screen path input as fallback for missing folder dialogs (Linux without XDG portal) — keep? | M1-08 | done: native dialog is the default on all platforms, path input stays as fallback |

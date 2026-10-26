@@ -244,6 +244,8 @@ pub enum FormAction {
     PushTag { tab: crate::app::TabId, tag: String },
     /// Delete tag `tag` on the chosen remote.
     DeleteRemoteTag { tab: crate::app::TabId, tag: String },
+    /// Revert merge commit `id` against the chosen parent ("1: …").
+    RevertMerge { tab: crate::app::TabId, id: String },
 }
 
 /// Modal dialog with inputs (e.g. remote and branch name for a first push).
@@ -262,6 +264,40 @@ impl Form {
     /// Trimmed value of field `index` (empty if out of range).
     pub fn value(&self, index: usize) -> &str {
         self.fields.get(index).map_or("", |f| f.value.trim())
+    }
+}
+
+/// What the commit message dialog does on submit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageAction {
+    Reword { id: String },
+    Squash { ids: Vec<String> },
+}
+
+/// Dialog with a multi-line commit message (reword, squash; M4-08).
+#[derive(Debug)]
+pub struct MessageDialog {
+    pub title: String,
+    pub submit: String,
+    pub editor: iced::widget::text_editor::Content,
+    pub action: MessageAction,
+    pub error: Option<String>,
+}
+
+impl MessageDialog {
+    pub fn new(
+        title: impl Into<String>,
+        submit: impl Into<String>,
+        message: &str,
+        action: MessageAction,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            submit: submit.into(),
+            editor: iced::widget::text_editor::Content::with_text(message),
+            action,
+            error: None,
+        }
     }
 }
 

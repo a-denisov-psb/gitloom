@@ -25,6 +25,8 @@ pub enum Shortcut {
     UnstageAll,
     /// Ctrl+L: fetch all remotes.
     FetchAll,
+    /// Shift+↑/↓: extend the commit selection by one row.
+    ExtendSelection(Move),
     /// Ctrl+B: new branch at the selected commit.
     CreateBranch,
     /// Ctrl+Z.
@@ -41,6 +43,13 @@ pub enum Shortcut {
     Close,
     /// Enter: confirm the default button of an open dialog.
     Confirm,
+    /// P / R / F / D in the interactive rebase panel (S arrives as
+    /// `StageSelected` and means squash there).
+    TodoKey(char),
+    /// Alt+↑ / Alt+↓: move the selected row of the interactive rebase panel.
+    Reorder {
+        up: bool,
+    },
 }
 
 impl Shortcut {
@@ -84,18 +93,25 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
         Key::Character("y" | "Y") if command && !alt && !shift => Some(Shortcut::Redo),
         Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
+        Key::Named(Named::ArrowUp) if alt && !command && !shift => {
+            Some(Shortcut::Reorder { up: true })
+        }
+        Key::Named(Named::ArrowDown) if alt && !command && !shift => {
+            Some(Shortcut::Reorder { up: false })
+        }
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::End) if command && !alt => Some(Shortcut::Navigate(Move::Last)),
-        Key::Named(Named::ArrowDown) if plain => Some(Shortcut::Navigate(if shift {
-            Move::FirstParent
+        // Shift+↑/↓ extend the selection (M4-01); Shift+J/K stay parent/child.
+        Key::Named(Named::ArrowDown) if plain => Some(if shift {
+            Shortcut::ExtendSelection(Move::Next)
         } else {
-            Move::Next
-        })),
-        Key::Named(Named::ArrowUp) if plain => Some(Shortcut::Navigate(if shift {
-            Move::Child
+            Shortcut::Navigate(Move::Next)
+        }),
+        Key::Named(Named::ArrowUp) if plain => Some(if shift {
+            Shortcut::ExtendSelection(Move::Previous)
         } else {
-            Move::Previous
-        })),
+            Shortcut::Navigate(Move::Previous)
+        }),
         // iced reports the key without modifiers ("j" for Shift+J, from winit's
         // `key_without_modifiers`); upper case is accepted too (e.g. Caps Lock).
         Key::Character(c) if plain => match (c.to_lowercase().as_str(), shift) {
@@ -104,6 +120,7 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             ("j", true) => Some(Shortcut::Navigate(Move::FirstParent)),
             ("k", true) => Some(Shortcut::Navigate(Move::Child)),
             ("s", false) => Some(Shortcut::StageSelected),
+            (key @ ("p" | "r" | "f" | "d"), false) => key.chars().next().map(Shortcut::TodoKey),
             ("u", false) => Some(Shortcut::UnstageSelected),
             _ => None,
         },
@@ -208,11 +225,11 @@ mod tests {
         assert_eq!(shortcut(&ch("k"), none), nav(Move::Previous));
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowDown), Modifiers::SHIFT),
-            nav(Move::FirstParent)
+            Some(Shortcut::ExtendSelection(Move::Next))
         );
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowUp), Modifiers::SHIFT),
-            nav(Move::Child)
+            Some(Shortcut::ExtendSelection(Move::Previous))
         );
         // As iced delivers Shift+J: the key without modifiers plus Shift
         // (regression, M2-01 check on Windows).
@@ -233,12 +250,15 @@ mod tests {
             shortcut(&Key::Named(Named::End), Modifiers::COMMAND),
             nav(Move::Last)
         );
-        // Plain Home/End and Alt+arrows are not graph shortcuts.
+        // Plain Home/End are not graph shortcuts; Alt+arrows reorder the
+        // interactive rebase panel.
         assert_eq!(shortcut(&Key::Named(Named::Home), none), None);
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowDown), Modifiers::ALT),
-            None
+            Some(Shortcut::Reorder { up: false })
         );
+        assert_eq!(shortcut(&ch("p"), none), Some(Shortcut::TodoKey('p')));
+        assert_eq!(shortcut(&ch("d"), none), Some(Shortcut::TodoKey('d')));
     }
 
     #[test]

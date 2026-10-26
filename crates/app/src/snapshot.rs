@@ -331,6 +331,66 @@ impl RepoSnapshot {
         self.index.get(id).and_then(|&i| self.commits.get(i))
     }
 
+    /// Whether `ancestor` is reachable from `descendant` (or equal), judged
+    /// from the loaded history; `None` if that history is incomplete.
+    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Option<bool> {
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![descendant];
+        let mut complete = true;
+        while let Some(id) = stack.pop() {
+            if id == ancestor {
+                return Some(true);
+            }
+            if !seen.insert(id) {
+                continue;
+            }
+            match self.commit(id) {
+                Some(commit) => stack.extend(commit.parents.iter().map(String::as_str)),
+                None => complete = false,
+            }
+        }
+        complete.then_some(false)
+    }
+
+    /// Merge commits reachable from `head` but not from `base` (flattened
+    /// by a rebase onto `base`), judged from the loaded history.
+    pub fn merges_between(&self, base: &str, head: &str) -> usize {
+        let mut excluded = std::collections::HashSet::new();
+        let mut stack = vec![base];
+        while let Some(id) = stack.pop() {
+            if excluded.insert(id) {
+                if let Some(commit) = self.commit(id) {
+                    stack.extend(commit.parents.iter().map(String::as_str));
+                }
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![head];
+        let mut merges = 0;
+        while let Some(id) = stack.pop() {
+            if excluded.contains(id) || !seen.insert(id) {
+                continue;
+            }
+            if let Some(commit) = self.commit(id) {
+                if commit.is_merge() {
+                    merges += 1;
+                }
+                stack.extend(commit.parents.iter().map(String::as_str));
+            }
+        }
+        merges
+    }
+
+    /// The checked-out branch (or detached HEAD) can be fast-forwarded to
+    /// `target`: HEAD is a proper ancestor (unknown counts as possible; Git
+    /// checks again).
+    pub fn head_can_fast_forward(&self, target: &str) -> bool {
+        match self.head.target() {
+            Some(head) => head != target && self.is_ancestor(head, target) != Some(false),
+            None => false,
+        }
+    }
+
     pub fn refs_at(&self, index: usize) -> impl Iterator<Item = &Reference> {
         self.refs_by_commit
             .get(&index)
@@ -395,6 +455,36 @@ mod tests {
             }],
             staged: Vec::new(),
         }
+    }
+
+    #[test]
+    fn ancestry_from_the_loaded_history() {
+        // d (merge of b and c) -> b -> a; c -> a; x has a parent that is not loaded.
+        let log = Log {
+            commits: vec![
+                commit("x", &["missing"], 50),
+                commit("d", &["b", "c"], 40),
+                commit("c", &["a"], 30),
+                commit("b", &["a"], 20),
+                commit("a", &[], 10),
+            ],
+            truncated: false,
+        };
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "b".into(),
+        };
+        let snapshot =
+            RepoSnapshot::build(log, head, Vec::new(), Vec::new(), WorkingTree::default()).unwrap();
+        assert_eq!(snapshot.is_ancestor("a", "d"), Some(true));
+        assert_eq!(snapshot.is_ancestor("c", "d"), Some(true));
+        assert_eq!(snapshot.is_ancestor("d", "d"), Some(true));
+        assert_eq!(snapshot.is_ancestor("c", "b"), Some(false));
+        assert_eq!(snapshot.is_ancestor("a", "x"), None, "history incomplete");
+        assert!(snapshot.head_can_fast_forward("d"));
+        assert!(!snapshot.head_can_fast_forward("b"), "already there");
+        assert!(!snapshot.head_can_fast_forward("c"), "diverged");
+        assert!(snapshot.head_can_fast_forward("x"), "unknown: Git decides");
     }
 
     #[test]

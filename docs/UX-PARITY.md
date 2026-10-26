@@ -30,7 +30,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Double click local branch | Checkout | done (M3; sidebar and graph pill) |
 | Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
 | Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
-| Drag branch onto branch | Merge/rebase menu | M4 (moved from M3) |
+| Branch context menu: merge and rebase | "Merge X into Y", "Rebase Y onto X"; "Fast-forward Y to X" when possible; remote branch: "Fast-forward L to origin/L" for a local branch behind it | done (M4-04, M4-06) |
+| Drag branch onto branch | Menu: Fast-forward, Merge, Rebase, Interactive rebase | done (M4-11): graph pills and sidebar branches, drop target outlined; items that need another checked-out branch are disabled with "Check out <branch> first" (verify in GitKraken: disabled or automatic checkout?) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
@@ -48,9 +49,15 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
-| Merge in progress | Banner in the tab, commit concludes the merge | done (M2-09, M2-13); also rebase, cherry-pick, revert; Abort/Continue shown disabled until M4 |
+| Merge in progress | Banner in the tab with Continue/Abort (Skip for rebase and cherry-pick); the commit button becomes "Continue <operation>" | done (M2-09, M2-13, M4-03); also rebase, cherry-pick, revert; Continue is disabled while conflicts are unresolved (tooltip lists the files) |
+| Reset | Commit menu "Reset <branch> to this commit" → Soft / Mixed / Hard | done (M4-10) as a dialog with three buttons instead of GitKraken's submenu (the context menu has no submenus); Hard is always confirmed and lists the files whose changes are lost |
+| Cherry-pick and revert | Commit menu "Cherry-pick commit" / "Revert commit"; multi-selection "Cherry-pick N commits" (oldest first) | done (M4-09); a merge commit asks for the parent to revert against; an empty result opens "Skip" / "Commit empty" (verify wording in GitKraken) |
+| Conflicted files | "Conflicted Files" section above "Unstaged Files" | done (M4-03) |
 | Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
 | Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
+| Conflicted file | Opens conflict view (ours, theirs, output) | done (M4-05); with both sides picked in one conflict, ours lines come first (GitKraken keeps the click order) |
+| Interactive rebase | Panel with actions per commit, reorder by drag | done (M4-07): commit menu "Interactive rebase from here"; newest on top until the maintainer verifies GitKraken's order; P/R/S/F/D, ↑/↓, Alt+↑/↓ reorder; inline message editors for rewords and squash chains |
+| Multi-select commits | Ctrl+click, Shift+click | done (M4-01; also Shift+↑/↓; panel "N commits selected") |
 
 ## Keyboard shortcuts
 
@@ -76,9 +83,9 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|---|
 | Next / previous item | ↓ / J next (older), ↑ / K previous (newer) | done (M1) |
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
-| Next / previous commit in branch | Shift+↓ / Shift+J (first parent), Shift+↑ / Shift+K (child on the same branch) | done (M1) |
+| Next / previous commit in branch | Shift+J (first parent), Shift+K (child on the same branch) | done (M1; Shift+↑/↓ extend the selection since M4-01) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), rest M4 |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reset, reword, squash (M4-12); history operations are undone with `git reset --keep`, which refuses to overwrite local changes |
 
 ### Command palette and search
 
@@ -124,9 +131,13 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | "Discard all" with staged changes asks whether to discard them too ("Keep staged" is the default) | Maintainer decision (HANDOVER question 8); staged work is never lost by accident |
 | Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
-| While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled; during a rebase also Commit | Prevents breaking the operation until M4 brings Continue/Abort; Git itself refuses some of these (amend during a merge) |
+| While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled | Prevents breaking the operation; Git itself refuses some of these (amend during a merge) |
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
 | Checkout blocked by local changes offers "Stash and checkout" | Avoids a dead end; the stash stays visible and is not popped automatically |
-| A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | Conflict resolution comes in M4; until then the user is not left in a half-finished state without a way back |
+| Merge, fast-forward or rebase blocked by local changes offers "Stash and merge" / "Stash and rebase" (stash, run, apply again with `--autostash`) | Planning decision M4 (same pattern as checkout); unlike checkout the stash is applied again automatically, and stays in the list only if applying it conflicts |
+| A rebase over merge commits is confirmed first ("Rebase flattens merges"), and the interactive rebase panel says how many merges it drops | M4-13 plan: Git's default flattens merges; the hint prevents surprises |
+| A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | The user is not left in a half-finished state without a way back; resolving and continuing works from the banner |
+| The commit message of a rebase step is editable before Continue (prefilled with the original message) | Git asks for the message on `rebase --continue` after a conflict; the commit panel answers instead of a terminal editor |
+| Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

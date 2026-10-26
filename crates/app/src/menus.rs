@@ -4,9 +4,6 @@
 use crate::app::{CheckoutTarget, Message};
 use crate::overlay::MenuEntry;
 
-/// Tooltip of actions that arrive with merge and rebase support (M4).
-const LATER: &str = "Not available yet";
-
 fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
     MenuEntry::Item {
         label: label.into(),
@@ -17,18 +14,30 @@ fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
     }
 }
 
-/// Visible but disabled until M4.
-fn later(label: &str) -> MenuEntry {
-    MenuEntry::Item {
-        label: label.into(),
-        shortcut: None,
-        enabled: false,
-        message: Box::new(Message::Refresh),
-        hint: Some(LATER.into()),
-    }
+/// History actions on a commit that depend on its position.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CommitFacts {
+    /// A proper ancestor of HEAD and no operation in progress: the commits
+    /// after it can be rebased interactively.
+    pub rebase_from: bool,
+    /// Its message can be edited (HEAD, or linear history up to HEAD).
+    pub rewordable: bool,
+    /// It can be cherry-picked onto HEAD (not HEAD itself, no operation).
+    pub pickable: bool,
+    /// It can be reverted (HEAD exists, no operation).
+    pub revertable: bool,
+    /// HEAD can be reset to it (not HEAD itself, no operation).
+    pub resettable: bool,
 }
 
-pub fn commit(id: &str, message: &str, writable: bool) -> Vec<MenuEntry> {
+/// `head`: checked-out branch name, or "HEAD" when detached.
+pub fn commit(
+    id: &str,
+    message: &str,
+    writable: bool,
+    facts: CommitFacts,
+    head: &str,
+) -> Vec<MenuEntry> {
     vec![
         action(
             "Checkout this commit",
@@ -46,9 +55,31 @@ pub fn commit(id: &str, message: &str, writable: bool) -> Vec<MenuEntry> {
             Message::CreateTagStart(id.into()),
         ),
         MenuEntry::Separator,
-        later("Cherry-pick commit"),
-        later("Revert commit"),
-        later("Reset to this commit"),
+        action(
+            "Edit commit message",
+            writable && facts.rewordable,
+            Message::RewordStart(id.into()),
+        ),
+        action(
+            "Interactive rebase from here",
+            writable && facts.rebase_from,
+            Message::RebasePanelOpened(id.into()),
+        ),
+        action(
+            "Cherry-pick commit",
+            writable && facts.pickable,
+            Message::CherryPick(vec![id.into()]),
+        ),
+        action(
+            "Revert commit",
+            writable && facts.revertable,
+            Message::RevertStart(id.into()),
+        ),
+        action(
+            &format!("Reset {head} to this commit…"),
+            writable && facts.resettable,
+            Message::ResetStart(id.into()),
+        ),
         MenuEntry::Separator,
         action("Copy SHA", true, Message::CopyToClipboard(id.into())),
         action(
@@ -68,6 +99,52 @@ pub struct LocalBranch<'a> {
     pub is_head: bool,
     pub has_upstream: bool,
     pub writable: bool,
+    /// Checked-out branch name, or "HEAD" when detached.
+    pub head: &'a str,
+    /// HEAD can be fast-forwarded to this branch.
+    pub head_can_fast_forward: bool,
+}
+
+/// "Merge X into Y", "Rebase Y onto X" and, if possible, "Fast-forward Y
+/// to X" for the branch with full reference name `reference` and display
+/// name `name`.
+fn merge_entries(
+    name: &str,
+    reference: &str,
+    head: &str,
+    head_can_fast_forward: bool,
+    writable: bool,
+) -> Vec<MenuEntry> {
+    let mut entries = Vec::new();
+    if head_can_fast_forward {
+        entries.push(action(
+            &format!("Fast-forward {head} to {name}"),
+            writable,
+            Message::FastForward {
+                branch: None,
+                source: reference.into(),
+                autostash: false,
+            },
+        ));
+    }
+    entries.push(action(
+        &format!("Merge {name} into {head}"),
+        writable,
+        Message::Merge {
+            source: reference.into(),
+            autostash: false,
+        },
+    ));
+    entries.push(action(
+        &format!("Rebase {head} onto {name}"),
+        writable,
+        Message::Rebase {
+            onto: reference.into(),
+            autostash: false,
+            confirmed: false,
+        },
+    ));
+    entries
 }
 
 pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
@@ -77,6 +154,8 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         is_head,
         has_upstream,
         writable,
+        head,
+        head_can_fast_forward,
     } = branch;
     let (pull, push) = if is_head {
         (Message::Pull(None), Message::Push { force: false })
@@ -86,7 +165,19 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             Message::PushBranch(name.into()),
         )
     };
-    vec![
+    // Merging the checked-out branch into itself makes no sense.
+    let merge = if is_head {
+        Vec::new()
+    } else {
+        merge_entries(
+            name,
+            &format!("refs/heads/{name}"),
+            head,
+            head_can_fast_forward,
+            writable,
+        )
+    };
+    let mut entries = vec![
         action(
             "Checkout",
             writable && !is_head,
@@ -106,8 +197,9 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             Message::UnsetUpstream(name.into()),
         ),
         MenuEntry::Separator,
-        later("Merge into current branch"),
-        later("Rebase current branch onto this"),
+    ];
+    entries.extend(merge);
+    entries.extend([
         MenuEntry::Separator,
         action("Rename…", writable, Message::RenameStart(name.into())),
         // The checked-out branch cannot be deleted.
@@ -123,20 +215,61 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         ),
         MenuEntry::Separator,
         action("Copy name", true, Message::CopyToClipboard(name.into())),
-    ]
+    ]);
+    entries
 }
 
-/// Remote branch by full name (`origin/topic`).
-pub fn remote_branch(name: &str, writable: bool) -> Vec<MenuEntry> {
-    vec![
+/// Facts about a remote branch for its menu.
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteBranch<'a> {
+    /// Short name (`origin/topic`).
+    pub name: &'a str,
+    pub writable: bool,
+    /// Checked-out branch name, or "HEAD" when detached.
+    pub head: &'a str,
+    /// HEAD can be fast-forwarded to this branch.
+    pub head_can_fast_forward: bool,
+    /// Local branch tracking this one that is not checked out and can be
+    /// fast-forwarded to it.
+    pub behind_local: Option<&'a str>,
+}
+
+pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
+    let RemoteBranch {
+        name,
+        writable,
+        head,
+        head_can_fast_forward,
+        behind_local,
+    } = branch;
+    let reference = format!("refs/remotes/{name}");
+    let mut entries = vec![
         action(
             "Checkout",
             writable,
             Message::Checkout(CheckoutTarget::Remote(name.into())),
         ),
         MenuEntry::Separator,
-        later("Merge into current branch"),
-        later("Rebase current branch onto this"),
+    ];
+    if let Some(local) = behind_local {
+        entries.push(action(
+            &format!("Fast-forward {local} to {name}"),
+            writable,
+            Message::FastForward {
+                branch: Some(local.into()),
+                source: reference.clone(),
+                autostash: false,
+            },
+        ));
+    }
+    entries.extend(merge_entries(
+        name,
+        &reference,
+        head,
+        head_can_fast_forward,
+        writable,
+    ));
+    entries.extend([
         MenuEntry::Separator,
         action(
             "Delete on remote",
@@ -144,7 +277,105 @@ pub fn remote_branch(name: &str, writable: bool) -> Vec<MenuEntry> {
             Message::DeleteRemoteBranch(name.into()),
         ),
         action("Copy name", true, Message::CopyToClipboard(name.into())),
-    ]
+    ]);
+    entries
+}
+
+/// Facts about a branch dropped onto another one (M4-11).
+#[derive(Debug, Clone, Copy)]
+pub struct DropFacts<'a> {
+    /// Dragged branch (short name) and whether it is a remote branch.
+    pub source: &'a str,
+    pub source_remote: bool,
+    /// Branch it was dropped on.
+    pub target: &'a str,
+    pub target_remote: bool,
+    /// Commit the target points to (base of an interactive rebase onto it).
+    pub target_commit: &'a str,
+    /// Checked-out branch, if any.
+    pub head: Option<&'a str>,
+    /// The target is a local branch that is a proper ancestor of the source.
+    pub can_fast_forward: bool,
+    /// Writing is possible and no operation is in progress.
+    pub writable: bool,
+}
+
+fn needs_checkout(label: &str, enabled: bool, branch: &str, message: Message) -> MenuEntry {
+    if enabled {
+        return action(label, true, message);
+    }
+    MenuEntry::Item {
+        label: label.into(),
+        shortcut: None,
+        enabled: false,
+        message: Box::new(message),
+        hint: Some(format!("Check out {branch} first")),
+    }
+}
+
+/// Menu after dropping branch S onto branch T (planning decision M4):
+/// fast-forward T to S (if possible), merge S into T, rebase S onto T,
+/// interactive rebase S onto T. Items that need another checked-out branch
+/// are disabled with "Check out <branch> first".
+pub fn drop_menu(facts: DropFacts<'_>) -> Vec<MenuEntry> {
+    let DropFacts {
+        source,
+        source_remote,
+        target,
+        target_remote,
+        target_commit,
+        head,
+        can_fast_forward,
+        writable,
+    } = facts;
+    let reference = |name: &str, remote: bool| {
+        if remote {
+            format!("refs/remotes/{name}")
+        } else {
+            format!("refs/heads/{name}")
+        }
+    };
+    let source_ref = reference(source, source_remote);
+    let target_checked_out = !target_remote && head == Some(target);
+    let source_checked_out = !source_remote && head == Some(source);
+    let mut entries = Vec::new();
+    if can_fast_forward && !target_remote {
+        entries.push(action(
+            &format!("Fast-forward {target} to {source}"),
+            writable,
+            Message::FastForward {
+                branch: (!target_checked_out).then(|| target.to_owned()),
+                source: source_ref.clone(),
+                autostash: false,
+            },
+        ));
+    }
+    entries.push(needs_checkout(
+        &format!("Merge {source} into {target}"),
+        writable && target_checked_out,
+        target,
+        Message::Merge {
+            source: source_ref,
+            autostash: false,
+        },
+    ));
+    entries.push(needs_checkout(
+        &format!("Rebase {source} onto {target}"),
+        writable && source_checked_out,
+        source,
+        Message::Rebase {
+            onto: reference(target, target_remote),
+            autostash: false,
+            confirmed: false,
+        },
+    ));
+    entries.push(needs_checkout(
+        &format!("Interactive rebase {source} onto {target}"),
+        writable && source_checked_out,
+        source,
+        Message::RebasePanelOpened(target_commit.to_owned()),
+    ));
+    entries
 }
 
 pub fn tag(name: &str, writable: bool) -> Vec<MenuEntry> {
@@ -222,7 +453,80 @@ mod tests {
             is_head,
             has_upstream,
             writable: true,
+            head: "main",
+            head_can_fast_forward: false,
         })
+    }
+
+    fn remote_menu(behind_local: Option<&str>, head_can_fast_forward: bool) -> Vec<MenuEntry> {
+        remote_branch(RemoteBranch {
+            name: "origin/topic",
+            writable: true,
+            head: "main",
+            head_can_fast_forward,
+            behind_local,
+        })
+    }
+
+    fn message_of(menu: &[MenuEntry], label: &str) -> Option<Message> {
+        menu.iter().find_map(|e| match e {
+            MenuEntry::Item {
+                label: l, message, ..
+            } if l == label => Some(message.as_ref().clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn other_branches_merge_into_head() {
+        let menu = branch(false, false);
+        assert!(matches!(
+            message_of(&menu, "Merge topic into main"),
+            Some(Message::Merge { source, autostash: false }) if source == "refs/heads/topic"
+        ));
+        assert!(message_of(&menu, "Fast-forward main to topic").is_none());
+        assert!(matches!(
+            message_of(&menu, "Rebase main onto topic"),
+            Some(Message::Rebase { onto, autostash: false, .. }) if onto == "refs/heads/topic"
+        ));
+        // The checked-out branch offers no merge.
+        let head = branch(true, false);
+        assert!(!summary(&head).0.iter().any(|l| l.starts_with("Merge")));
+
+        let ahead = local_branch(LocalBranch {
+            name: "topic",
+            target: "c1",
+            is_head: false,
+            has_upstream: false,
+            writable: true,
+            head: "main",
+            head_can_fast_forward: true,
+        });
+        assert!(matches!(
+            message_of(&ahead, "Fast-forward main to topic"),
+            Some(Message::FastForward { branch: None, source, .. }) if source == "refs/heads/topic"
+        ));
+    }
+
+    #[test]
+    fn remote_branch_merges_and_fast_forwards() {
+        let menu = remote_menu(None, false);
+        assert!(matches!(
+            message_of(&menu, "Merge origin/topic into main"),
+            Some(Message::Merge { source, .. }) if source == "refs/remotes/origin/topic"
+        ));
+        assert!(!summary(&menu)
+            .0
+            .iter()
+            .any(|l| l.starts_with("Fast-forward")));
+
+        let menu = remote_menu(Some("topic"), true);
+        assert!(matches!(
+            message_of(&menu, "Fast-forward topic to origin/topic"),
+            Some(Message::FastForward { branch: Some(b), source, .. })
+                if b == "topic" && source == "refs/remotes/origin/topic"
+        ));
+        assert!(message_of(&menu, "Fast-forward main to origin/topic").is_some());
     }
 
     #[test]
@@ -268,21 +572,114 @@ mod tests {
     }
 
     #[test]
-    fn m4_actions_are_disabled_with_a_hint() {
-        for menu in [
-            commit("c1", "msg", true),
-            branch(false, true),
-            remote_branch("origin/topic", true),
-        ] {
-            let (_, disabled) = summary(&menu);
-            assert!(!disabled.is_empty());
-            for (label, hint) in disabled {
-                if ["Checkout", "Delete", "Pull", "Unset upstream"].contains(&label) {
-                    continue;
-                }
-                assert_eq!(hint, Some(LATER), "{label}");
-            }
+    fn commit_menu_history_actions_follow_the_facts() {
+        let none = commit("c1", "msg", true, CommitFacts::default(), "main");
+        let (enabled, _) = summary(&none);
+        assert_eq!(
+            enabled,
+            [
+                "Checkout this commit",
+                "Create branch here",
+                "Create tag here",
+                "Copy SHA",
+                "Copy message"
+            ]
+        );
+        let all = CommitFacts {
+            rebase_from: true,
+            rewordable: true,
+            pickable: true,
+            revertable: true,
+            resettable: true,
+        };
+        let menu = commit("c1", "msg", true, all, "topic");
+        let (_, disabled) = summary(&menu);
+        assert!(disabled.is_empty(), "{disabled:?}");
+        assert!(matches!(
+            message_of(&commit("c1", "msg", true, all, "topic"), "Reset topic to this commit…"),
+            Some(Message::ResetStart(id)) if id == "c1"
+        ));
+    }
+
+    fn drop_facts<'a>(head: Option<&'a str>, can_fast_forward: bool) -> DropFacts<'a> {
+        DropFacts {
+            source: "feature",
+            source_remote: false,
+            target: "main",
+            target_remote: false,
+            target_commit: "c0",
+            head,
+            can_fast_forward,
+            writable: true,
         }
+    }
+
+    fn hint_of<'a>(menu: &'a [MenuEntry], label: &str) -> Option<&'a str> {
+        menu.iter().find_map(|e| match e {
+            MenuEntry::Item { label: l, hint, .. } if l == label => hint.as_deref(),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn drop_onto_the_checked_out_target_merges() {
+        let menu = drop_menu(drop_facts(Some("main"), true));
+        let (enabled, disabled) = summary(&menu);
+        assert_eq!(
+            enabled,
+            ["Fast-forward main to feature", "Merge feature into main"]
+        );
+        assert_eq!(
+            hint_of(&menu, "Rebase feature onto main"),
+            Some("Check out feature first")
+        );
+        assert_eq!(disabled.len(), 2);
+        assert!(matches!(
+            message_of(&menu, "Fast-forward main to feature"),
+            Some(Message::FastForward { branch: None, source, .. }) if source == "refs/heads/feature"
+        ));
+    }
+
+    #[test]
+    fn drop_with_the_source_checked_out_rebases() {
+        let menu = drop_menu(drop_facts(Some("feature"), false));
+        let (enabled, _) = summary(&menu);
+        assert_eq!(
+            enabled,
+            [
+                "Rebase feature onto main",
+                "Interactive rebase feature onto main"
+            ]
+        );
+        assert_eq!(
+            hint_of(&menu, "Merge feature into main"),
+            Some("Check out main first")
+        );
+        assert!(matches!(
+            message_of(&menu, "Interactive rebase feature onto main"),
+            Some(Message::RebasePanelOpened(base)) if base == "c0"
+        ));
+    }
+
+    #[test]
+    fn fast_forward_of_a_branch_that_is_not_checked_out() {
+        let menu = drop_menu(drop_facts(Some("other"), true));
+        let (enabled, _) = summary(&menu);
+        assert_eq!(enabled, ["Fast-forward main to feature"]);
+        assert!(matches!(
+            message_of(&menu, "Fast-forward main to feature"),
+            Some(Message::FastForward { branch: Some(b), .. }) if b == "main"
+        ));
+        // Remote targets cannot be fast-forwarded or merged into.
+        let mut facts = drop_facts(Some("feature"), true);
+        facts.target = "origin/main";
+        facts.target_remote = true;
+        let menu = drop_menu(facts);
+        assert!(message_of(&menu, "Fast-forward origin/main to feature").is_none());
+        assert!(matches!(
+            message_of(&menu, "Rebase feature onto origin/main"),
+            Some(Message::Rebase { onto, .. }) if onto == "refs/remotes/origin/main"
+        ));
     }
 
     #[test]
@@ -293,10 +690,25 @@ mod tests {
             is_head: false,
             has_upstream: true,
             writable: false,
+            head: "main",
+            head_can_fast_forward: true,
         });
         assert_eq!(summary(&menu).0, ["Copy name"]);
         assert_eq!(
-            summary(&commit("c1", "msg", false)).0,
+            summary(&commit(
+                "c1",
+                "msg",
+                false,
+                CommitFacts {
+                    rebase_from: true,
+                    rewordable: true,
+                    pickable: true,
+                    revertable: true,
+                    resettable: true,
+                },
+                "main"
+            ))
+            .0,
             ["Copy SHA", "Copy message"]
         );
         assert_eq!(summary(&tag("v1", false)).0, ["Copy name"]);

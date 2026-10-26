@@ -1,12 +1,15 @@
 mod app;
 mod askpass;
+mod conflict;
 mod fetch;
 mod format;
 mod menus;
 mod nav;
 mod overlay;
 mod panes;
+mod rebase_panel;
 mod repo_view;
+mod selection;
 mod session;
 mod shortcuts;
 mod snapshot;
@@ -19,11 +22,16 @@ use std::path::PathBuf;
 use app::App;
 
 fn main() -> iced::Result {
-    // Started by Git or SSH to ask for credentials (ADR-019).
     let args: Vec<String> = std::env::args_os()
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
+    // Started by Git as sequence or message editor (ADR-021): no UI.
+    if let Some((kind, file)) = git_core::editor_call(&args) {
+        let dir = std::env::var_os(git_core::EDITOR_DIR_ENV).map(PathBuf::from);
+        std::process::exit(git_core::editor_main(kind, &file, dir.as_deref()));
+    }
+    // Started by Git or SSH to ask for credentials (ADR-019).
     let marker = std::env::var_os(git_core::ASKPASS_ENV).is_some();
     if let Some(prompt) = askpass::prompt_from_args(&args, marker) {
         return askpass::main(prompt);
