@@ -102,9 +102,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(modal) = &app.modal {
         layers.push(overlays::modal(modal));
     }
-    if layers.len() == 1 {
-        return layers.remove(0);
-    }
+    // Always a stack, even without overlays: switching between a bare base
+    // and a stack would change the widget tree, and iced would drop the
+    // widget state below (graph scroll position, focus) when a menu opens.
     iced::widget::Stack::with_children(layers)
         .width(Fill)
         .height(Fill)
