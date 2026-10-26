@@ -368,18 +368,23 @@ impl ContextMenu {
     }
 
     /// Top-left corner keeping the menu inside a window of `window` size:
-    /// flips left/up when there is not enough room right/below the cursor.
+    /// flips left/up when there is not enough room right/below the cursor,
+    /// and stays as close to the cursor as the window allows when there is
+    /// no room on either side (small window, high zoom).
     pub fn origin(&self, window: Size) -> Point {
-        let height = self.height();
-        let mut x = self.position.x;
-        let mut y = self.position.y;
-        if x + MENU_WIDTH > window.width {
-            x = (x - MENU_WIDTH).max(0.0);
+        fn axis(cursor: f32, size: f32, room: f32) -> f32 {
+            if cursor + size <= room {
+                cursor
+            } else if cursor - size >= 0.0 {
+                cursor - size
+            } else {
+                (room - size).max(0.0)
+            }
         }
-        if y + height > window.height {
-            y = (y - height).max(0.0);
-        }
-        Point::new(x, y)
+        Point::new(
+            axis(self.position.x, MENU_WIDTH, window.width),
+            axis(self.position.y, self.height(), window.height),
+        )
     }
 }
 
@@ -423,6 +428,14 @@ mod tests {
         let origin = corner.origin(window);
         assert_eq!(origin.x, 790.0 - MENU_WIDTH);
         assert!(origin.y + corner.height() <= 600.0);
+        // No room above or below (high zoom): as low as the window allows.
+        let height = corner.height();
+        let short = Size::new(800.0, height + 40.0);
+        let mut middle = corner.clone();
+        middle.position = Point::new(100.0, 60.0);
+        assert_eq!(middle.origin(short).y, 40.0);
+        let tiny = Size::new(800.0, height - 10.0);
+        assert_eq!(middle.origin(tiny).y, 0.0);
     }
 
     #[test]

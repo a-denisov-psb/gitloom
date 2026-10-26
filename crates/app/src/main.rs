@@ -58,6 +58,7 @@ fn main() -> iced::Result {
     .title(App::title)
     .subscription(App::subscription)
     .theme(App::theme)
+    .scale_factor(App::scale_factor)
     .settings(iced::Settings {
         default_text_size: 13.into(),
         ..iced::Settings::default()

@@ -105,8 +105,8 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Fullscreen | F11 | M5 |
-| Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | M5 |
+| Fullscreen | F11 | done (M5-04) |
+| Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | done (M5-04; 70–200 % in 10 % steps, also Ctrl++ and numpad +, saved in the settings) |
 | Toggle left panel | Ctrl+J | done (M1) |
 | Toggle commit detail panel | Ctrl+K | done (M1) |
 | Close current panel | Esc | done (M1, diff view) |

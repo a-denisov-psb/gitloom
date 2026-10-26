@@ -93,7 +93,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let base = context_area::release_area(base, Message::BranchDragEnd);
     let mut layers = vec![base];
     if let Some(menu) = &app.context_menu {
-        layers.push(overlays::context_menu(menu, app.window_size));
+        layers.push(overlays::context_menu(menu, app.window_size()));
     }
     if let Some(form) = &app.form {
         layers.push(overlays::form(form));
