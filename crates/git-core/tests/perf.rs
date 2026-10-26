@@ -175,3 +175,51 @@ fn network_runner_overhead() {
     });
     eprintln!("fetch of 300 commits: plain git {plain:?}, runner {runner:?} ({updates} progress updates over 5 runs)");
 }
+
+/// M4-14: conflict view data for a 5 000-line file with 500 conflicts.
+#[test]
+#[ignore = "manual timing"]
+fn conflict_of_a_5000_line_file() {
+    use git_core::{load_conflict, ConflictContent, Picks, Side};
+    let lines = |tag: &str| {
+        (0..5000)
+            .map(|i| {
+                if i % 10 == 5 {
+                    format!("line {i} {tag}\n")
+                } else {
+                    format!("line {i}\n")
+                }
+            })
+            .collect::<String>()
+    };
+    let repo = TestRepo::new();
+    repo.commit("big.txt", &lines("base"), "base");
+    repo.branch("topic");
+    repo.commit("big.txt", &lines("ours"), "ours");
+    repo.checkout("topic");
+    repo.commit("big.txt", &lines("theirs"), "theirs");
+    repo.checkout("main");
+    assert!(!repo.try_git(&["merge", "topic"]));
+    let cli = CliBackend::new(repo.path());
+
+    let load = median(5, || {
+        let start = Instant::now();
+        load_conflict(&cli, "big.txt").unwrap();
+        start.elapsed()
+    });
+    let ConflictContent::Text(text) = load_conflict(&cli, "big.txt").unwrap().content else {
+        panic!("expected a text conflict");
+    };
+    let output = median(5, || {
+        let mut picks = Picks::new(&text);
+        let start = Instant::now();
+        picks.take_all(Side::Theirs);
+        let out = text.output(&picks, ("HEAD", "topic"));
+        assert!(!out.is_empty());
+        start.elapsed()
+    });
+    eprintln!(
+        "5000 lines, {} conflicts: load {load:?}, picks + output {output:?}",
+        text.hunks().count()
+    );
+}
