@@ -356,6 +356,9 @@ pub struct RepoView {
     /// The running merge or fast-forward, repeated with `autostash` if
     /// local changes block it.
     pub pending_merge: Option<crate::app::Message>,
+    /// A cherry-pick or revert ran: after the next refresh, an empty result
+    /// (operation in progress, nothing to commit) opens the empty dialog.
+    pub check_empty: bool,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -439,6 +442,20 @@ impl RepoView {
             };
             format!("Cannot {verb} while a {operation} is in progress")
         })
+    }
+
+    /// A cherry-pick or revert stopped with nothing to commit: no conflicts
+    /// and no staged or unstaged changes (untracked files do not count).
+    pub fn empty_pick(&self) -> bool {
+        let tree = &self.snapshot.working_tree;
+        matches!(
+            self.snapshot.state,
+            git_core::RepoState::CherryPicking { .. } | git_core::RepoState::Reverting { .. }
+        ) && tree.staged.is_empty()
+            && tree
+                .unstaged
+                .iter()
+                .all(|f| f.kind == git_core::ChangeKind::Untracked)
     }
 
     /// Paths with unresolved conflicts, sorted.
@@ -530,6 +547,7 @@ impl RepoView {
             pending_delete: None,
             pending_checkout: None,
             pending_merge: None,
+            check_empty: false,
             pull_failure: None,
             network: None,
             queued: None,

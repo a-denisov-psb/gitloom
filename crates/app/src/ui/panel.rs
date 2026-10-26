@@ -52,15 +52,20 @@ fn multi_selection(view: &RepoView) -> Element<'_, Message> {
         )
     }))
     .spacing(4);
-    let action = |label: String| {
-        with_tooltip(
-            button(text(label).size(12))
-                .padding([4, 10])
-                .style(button::secondary)
-                .into(),
-        )
+    let pick = button(text(format!("Cherry-pick {count} commits")).size(12))
+        .padding([4, 10])
+        .style(button::secondary);
+    // Applied oldest first; the selection is in graph order (newest first).
+    let mut oldest_first = view.multi.ids().to_vec();
+    oldest_first.reverse();
+    let can_pick = view.snapshot.state.is_clean() && view.busy.is_none();
+    let pick: Element<'_, Message> = if view.write_block.is_some() {
+        write_tooltip(pick.into(), view)
+    } else {
+        pick.on_press_maybe(can_pick.then_some(Message::CherryPick(oldest_first)))
+            .into()
     };
-    let mut actions = row![action(format!("Cherry-pick {count} commits"))].spacing(8);
+    let mut actions = row![pick].spacing(8);
     if crate::repo_view::squashable(&view.snapshot, view.multi.ids()) {
         let squash = button(text(format!("Squash {count} commits")).size(12))
             .padding([4, 10])
