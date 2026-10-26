@@ -7,6 +7,7 @@ mod menus;
 mod nav;
 mod overlay;
 mod panes;
+mod rebase_panel;
 mod repo_view;
 mod selection;
 mod session;

@@ -28,7 +28,9 @@ fn later(label: &str) -> MenuEntry {
     }
 }
 
-pub fn commit(id: &str, message: &str, writable: bool) -> Vec<MenuEntry> {
+/// `rebase_from`: the commit is a proper ancestor of HEAD and no operation
+/// is in progress, so the commits after it can be rebased interactively.
+pub fn commit(id: &str, message: &str, writable: bool, rebase_from: bool) -> Vec<MenuEntry> {
     vec![
         action(
             "Checkout this commit",
@@ -46,6 +48,11 @@ pub fn commit(id: &str, message: &str, writable: bool) -> Vec<MenuEntry> {
             Message::CreateTagStart(id.into()),
         ),
         MenuEntry::Separator,
+        action(
+            "Interactive rebase from here",
+            writable && rebase_from,
+            Message::RebasePanelOpened(id.into()),
+        ),
         later("Cherry-pick commit"),
         later("Revert commit"),
         later("Reset to this commit"),
@@ -445,13 +452,21 @@ mod tests {
     #[test]
     fn m4_actions_are_disabled_with_a_hint() {
         for menu in [
-            commit("c1", "msg", true),
+            commit("c1", "msg", true, false),
             branch(false, true),
             remote_menu(None, false),
         ] {
             let (_, disabled) = summary(&menu);
             for (label, hint) in disabled {
-                if ["Checkout", "Delete", "Pull", "Unset upstream"].contains(&label) {
+                if [
+                    "Checkout",
+                    "Delete",
+                    "Pull",
+                    "Unset upstream",
+                    "Interactive rebase from here",
+                ]
+                .contains(&label)
+                {
                     continue;
                 }
                 assert_eq!(hint, Some(LATER), "{label}");
@@ -472,7 +487,7 @@ mod tests {
         });
         assert_eq!(summary(&menu).0, ["Copy name"]);
         assert_eq!(
-            summary(&commit("c1", "msg", false)).0,
+            summary(&commit("c1", "msg", false, true)).0,
             ["Copy SHA", "Copy message"]
         );
         assert_eq!(summary(&tag("v1", false)).0, ["Copy name"]);

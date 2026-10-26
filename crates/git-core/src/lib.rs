@@ -20,6 +20,7 @@ mod patch;
 mod refname;
 mod resolve;
 mod state;
+mod todo;
 mod watch;
 
 pub use cli_backend::{
@@ -41,7 +42,7 @@ pub use history::{
 };
 pub use merge::{
     fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
-    MergeOutcome,
+    rebase_commits, rebase_interactive, MergeOutcome,
 };
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
@@ -57,6 +58,10 @@ pub use resolve::{
     ConflictStages, LoadedConflict, StageEntry, WholeFileReason,
 };
 pub use state::{locked_file, Operation, RepoState};
+pub use todo::{
+    build as build_todo, chains, default_message, needs_message, validate as validate_todo, Chain,
+    TodoAction, TodoEntry,
+};
 pub use watch::{classify_git_path, ChangeSet};
 
 use std::fmt;

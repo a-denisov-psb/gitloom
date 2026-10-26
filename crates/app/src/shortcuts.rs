@@ -43,6 +43,13 @@ pub enum Shortcut {
     Close,
     /// Enter: confirm the default button of an open dialog.
     Confirm,
+    /// P / R / F / D in the interactive rebase panel (S arrives as
+    /// `StageSelected` and means squash there).
+    TodoKey(char),
+    /// Alt+↑ / Alt+↓: move the selected row of the interactive rebase panel.
+    Reorder {
+        up: bool,
+    },
 }
 
 impl Shortcut {
@@ -86,6 +93,12 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
         Key::Character("y" | "Y") if command && !alt && !shift => Some(Shortcut::Redo),
         Key::Named(Named::ArrowUp) if mac_jump => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::ArrowDown) if mac_jump => Some(Shortcut::Navigate(Move::Last)),
+        Key::Named(Named::ArrowUp) if alt && !command && !shift => {
+            Some(Shortcut::Reorder { up: true })
+        }
+        Key::Named(Named::ArrowDown) if alt && !command && !shift => {
+            Some(Shortcut::Reorder { up: false })
+        }
         Key::Named(Named::Home) if command && !alt => Some(Shortcut::Navigate(Move::First)),
         Key::Named(Named::End) if command && !alt => Some(Shortcut::Navigate(Move::Last)),
         // Shift+↑/↓ extend the selection (M4-01); Shift+J/K stay parent/child.
@@ -107,6 +120,7 @@ pub fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
             ("j", true) => Some(Shortcut::Navigate(Move::FirstParent)),
             ("k", true) => Some(Shortcut::Navigate(Move::Child)),
             ("s", false) => Some(Shortcut::StageSelected),
+            (key @ ("p" | "r" | "f" | "d"), false) => key.chars().next().map(Shortcut::TodoKey),
             ("u", false) => Some(Shortcut::UnstageSelected),
             _ => None,
         },
@@ -236,12 +250,15 @@ mod tests {
             shortcut(&Key::Named(Named::End), Modifiers::COMMAND),
             nav(Move::Last)
         );
-        // Plain Home/End and Alt+arrows are not graph shortcuts.
+        // Plain Home/End are not graph shortcuts; Alt+arrows reorder the
+        // interactive rebase panel.
         assert_eq!(shortcut(&Key::Named(Named::Home), none), None);
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowDown), Modifiers::ALT),
-            None
+            Some(Shortcut::Reorder { up: false })
         );
+        assert_eq!(shortcut(&ch("p"), none), Some(Shortcut::TodoKey('p')));
+        assert_eq!(shortcut(&ch("d"), none), Some(Shortcut::TodoKey('d')));
     }
 
     #[test]

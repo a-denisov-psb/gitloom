@@ -1,6 +1,6 @@
 //! Merge, fast-forward (M4-04) and rebase (M4-06). Blocking: runs `git`.
 
-use crate::{Error, GitWriter, Result, RunOptions};
+use crate::{EditorInput, Error, GitWriter, Oid, Result, RunOptions};
 
 /// How a merge or rebase ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +77,62 @@ pub fn rebase(git: &dyn GitWriter, onto: &str, autostash: bool) -> Result<MergeO
         Ok(_) => Ok(MergeOutcome::Done),
         Err(error) => {
             // A step that stopped with conflicts leaves REBASE_HEAD behind.
+            if pseudo_ref_exists(git, "REBASE_HEAD")? {
+                Ok(MergeOutcome::Conflicts)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Commits an interactive rebase onto `base` replays, oldest first, with
+/// their full messages: like Git's own todo list (`base..HEAD` without
+/// merges, topological order).
+pub fn rebase_commits(git: &dyn GitWriter, base: &str) -> Result<Vec<(Oid, String)>> {
+    let read = RunOptions {
+        read_only: true,
+        ..RunOptions::default()
+    };
+    let range = format!("{base}..HEAD");
+    let output = git.run(
+        &[
+            "log",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            "--format=%H%x1f%B%x1e",
+            &range,
+            "--",
+        ],
+        read,
+    )?;
+    Ok(output
+        .stdout_text()
+        .split('\x1e')
+        .filter_map(|record| {
+            let (id, message) = record.trim_start_matches('\n').split_once('\x1f')?;
+            Some((id.to_owned(), message.to_owned()))
+        })
+        .collect())
+}
+
+/// Runs `git rebase -i <base>` with the prepared todo list and messages
+/// (see [`crate::build_todo`]); Gitloom answers Git's editors (ADR-021).
+pub fn rebase_interactive(
+    git: &dyn GitWriter,
+    base: &str,
+    input: &EditorInput,
+    autostash: bool,
+) -> Result<MergeOutcome> {
+    let mut args = vec!["rebase", "--interactive"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(base);
+    match git.run_editing(&args, input, RunOptions::default()) {
+        Ok(_) => Ok(MergeOutcome::Done),
+        Err(error) => {
             if pseudo_ref_exists(git, "REBASE_HEAD")? {
                 Ok(MergeOutcome::Conflicts)
             } else {

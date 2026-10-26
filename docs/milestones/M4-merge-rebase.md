@@ -143,7 +143,9 @@ Acceptance: unit tests for the conflict model (overlapping hunks, line picks fro
 
 Acceptance: integration tests: clean rebase, rebase with conflict resolved, abort.
 
-### [ ] M4-07 Interactive rebase
+### [x] M4-07 Interactive rebase
+
+> Done: pure plan `git_core::todo` (`TodoAction`, `validate_todo`, `chains`, `needs_message`, `default_message`, `build_todo`: one message per reword and one combined per chain with a squash, in Git's editor order; a reword heading a squash chain becomes pick), `rebase_commits` (`base..HEAD`, no merges, topological, oldest first) and `rebase_interactive` (`rebase -i` via `run_editing`). App: `rebase_panel::RebasePanel` (newest on top, selection, drag, Alt+↑/↓, message editors keyed by chain head) and `ui::rebase` (action buttons per row, "↓ into the commit below" for squash/fixup, validation hint, Cancel / Start rebase); commit menu "Interactive rebase from here" only for proper ancestors of HEAD without an operation in progress; P/R/S/F/D, ↑/↓, Alt+↑/↓ in the panel; local changes → "Stash and rebase". List order: newest on top, pending the maintainer's GitKraken check. Known limit (→ M4-13): after a conflict stop the remaining prepared messages are gone; Git then stops at those reword/squash steps and Continue uses the prefilled original message. Drag and drop entry follows in M4-11. Tests: plan model, panel state (selection, reorder, drag, messages), integration with the real binary (reorder, reword, squash with combined message, fixup, drop, mixed plan message order, conflict during reorder), app (menu rule, keys → plan → start closes the panel). Checked by hand: menu → panel with 4 commits; Squash on the top commit → combined message editor under the commit below; Drop; drag of the oldest commit to the top; Start rebase → history and messages as planned. Keys could not be checked by hand (WSLg; maintainer to-do).
 
 - Entry: commit context menu "Interactive rebase from here" (commits after the selected one up to HEAD), drag and drop menu (M4-11).
 - Panel per planning decision; validation (first commit cannot be squash/fixup; at least one commit kept).
