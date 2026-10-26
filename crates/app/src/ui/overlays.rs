@@ -199,6 +199,75 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
     )
 }
 
+/// Command palette (Ctrl+P): query field at the top center, results with
+/// the shortcut or path on the right, disabled entries with their reason.
+pub fn palette(palette: &crate::palette::Palette) -> Element<'_, Message> {
+    let mut rows = Column::new().spacing(1);
+    if palette.loading {
+        rows = rows.push(container(muted("Loading…")).padding([6, 10]));
+    } else if palette.shown_count() == 0 {
+        rows = rows.push(container(muted("No matches")).padding([6, 10]));
+    }
+    for (index, entry) in palette.shown().enumerate() {
+        let mut line = row![text(&entry.label).size(13).wrapping(text::Wrapping::None)]
+            .spacing(8)
+            .align_y(iced::Center);
+        if let Some(reason) = &entry.disabled {
+            line = line.push(muted(reason).size(11));
+        }
+        line = line.push(space::horizontal());
+        if let Some(detail) = &entry.detail {
+            line = line.push(
+                muted(detail)
+                    .size(11)
+                    .wrapping(text::Wrapping::None)
+                    .font(Font::MONOSPACE),
+            );
+        }
+        let style = if entry.disabled.is_some() {
+            theme::menu_item_disabled
+        } else {
+            theme::menu_item
+        };
+        rows = rows.push(
+            button(line)
+                .on_press(Message::PaletteRun(index))
+                .padding([5, 10])
+                .width(Fill)
+                .style(move |theme, status| {
+                    if index == palette.selected {
+                        theme::menu_item(theme, iced::widget::button::Status::Hovered)
+                    } else {
+                        style(theme, status)
+                    }
+                }),
+        );
+    }
+    let list = scrollable(rows).height(Length::Shrink);
+    let content = column![
+        text_input(palette.mode.placeholder(), &palette.query)
+            .id(crate::app::PALETTE_INPUT)
+            .on_input(Message::PaletteQuery)
+            .on_submit(Message::PaletteSubmit)
+            .padding(8)
+            .size(14),
+        container(list).max_height(420),
+    ]
+    .spacing(8);
+    let dialog = container(content).width(620).padding(10).style(theme::menu);
+    opaque(
+        mouse_area(
+            container(opaque(dialog))
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::Center)
+                .padding(Padding::default().top(60)),
+        )
+        .on_press(Message::PaletteClosed)
+        .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
 /// Menu at its origin; a click anywhere else closes it.
 /// Commit message dialog (reword, squash).
 pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Message> {

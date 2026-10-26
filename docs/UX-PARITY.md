@@ -91,9 +91,9 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Command palette | Ctrl+P | M5 |
+| Command palette | Ctrl+P | done (M5-06; all actions with shortcuts, disabled ones with the reason; sub-lists for repositories and branch checkout) |
 | Search commits | Ctrl+F | M5 |
-| Open repo via palette | Ctrl+Shift+O | M5 |
+| Open repo via palette | Ctrl+Shift+O | done (M5-06; recent repositories and Browse…) |
 | File history and blame | Ctrl+Shift+H | M5 |
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |
 | Open repo in terminal | Alt+T | M5 |
@@ -126,7 +126,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Deviation | Reason |
 |---|---|
-| Ctrl+O opens a folder dialog directly | Quick access before the command palette exists (M5); does not collide with a GitKraken shortcut |
+| Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
 | Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |

@@ -66,6 +66,8 @@ pub enum ActionId {
     OpenRepoPalette,
     /// Ctrl+Shift+H: palette list of files for the file history.
     FileHistory,
+    /// Palette list of branches to check out.
+    CheckoutBranch,
     OpenTerminal,
     OpenFileManager,
     ExternalDiff,
@@ -134,6 +136,8 @@ impl Context {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Requires {
     Nothing,
+    /// An open repository in the active tab.
+    Repository,
     /// Lands with a later M5 task: listed, but disabled.
     NotYet,
 }
@@ -487,6 +491,13 @@ fn table() -> Vec<Action> {
         &[ch('o').cmd()],
     );
     add(
+        A::CheckoutBranch,
+        "Checkout branch…",
+        RepoActions,
+        Global,
+        &[],
+    );
+    add(
         A::Refresh,
         "Reload repository",
         RepoActions,
@@ -607,7 +618,7 @@ fn table() -> Vec<Action> {
     );
     add(
         A::OpenRepoPalette,
-        "Open repository (palette)",
+        "Open recent repository…",
         PaletteAndSearch,
         Global,
         &[ch('o').cmd().shift()],
@@ -735,13 +746,39 @@ fn table() -> Vec<Action> {
         &[named(Named::Tab).ctrl().shift()],
     );
 
+    for action in &mut actions {
+        if matches!(
+            action.id,
+            A::FetchAll
+                | A::CreateBranch
+                | A::StageSelected
+                | A::StageAll
+                | A::UnstageSelected
+                | A::UnstageAll
+                | A::Commit
+                | A::StageAllAndCommit
+                | A::FocusSummary
+                | A::Refresh
+                | A::Navigate(_)
+                | A::ExtendSelection(_)
+                | A::Undo
+                | A::Redo
+                | A::FocusFilter
+                | A::CheckoutBranch
+                | A::SearchCommits
+                | A::FileHistory
+                | A::OpenTerminal
+                | A::OpenFileManager
+                | A::ExternalDiff
+        ) {
+            action.requires = Requires::Repository;
+        }
+    }
     // Actions of later M5 tasks: listed, disabled until their task lands.
     for action in &mut actions {
         if matches!(
             action.id,
-            A::CommandPalette
-                | A::SearchCommits
-                | A::OpenRepoPalette
+            A::SearchCommits
                 | A::FileHistory
                 | A::OpenTerminal
                 | A::OpenFileManager
@@ -934,7 +971,8 @@ mod tests {
 
     #[test]
     fn later_actions_are_disabled_with_a_reason() {
-        assert_eq!(ActionId::CommandPalette.static_block(), Some(NOT_AVAILABLE));
+        assert_eq!(ActionId::SearchCommits.static_block(), Some(NOT_AVAILABLE));
+        assert_eq!(ActionId::CommandPalette.static_block(), None);
         assert_eq!(ActionId::ShortcutList.static_block(), None);
         assert_eq!(ActionId::Undo.static_block(), None);
     }
