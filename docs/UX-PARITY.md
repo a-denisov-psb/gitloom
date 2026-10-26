@@ -36,7 +36,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu) |
-| Auto-fetch | Periodic fetch in the background | done (M3, every 5 min, `auto_fetch_minutes` in the session file) |
+| Auto-fetch | Periodic fetch in the background | done (M3, every 5 min; interval in Preferences → General since M5-02) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
@@ -111,6 +111,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Toggle commit detail panel | Ctrl+K | done (M1) |
 | Close current panel | Esc | done (M1, diff view) |
 | Keyboard shortcut list | Ctrl+/ | done (M5-01; grouped by category, with a filter) |
+| Preferences | Ctrl+, | done (M5-02; replaces the tab content, categories left; also the gear button in the toolbar) |
 
 ### Tabs
 

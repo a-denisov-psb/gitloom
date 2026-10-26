@@ -13,6 +13,7 @@ use crate::repo_view::{
     NetworkRequest, Queued, RepoView, Section, Selection, WatchState, WriteOp,
 };
 use crate::session::{self, Session};
+use crate::settings::{self, Settings};
 use crate::shortcuts::{self, Shortcut};
 use crate::snapshot::RepoSnapshot;
 use crate::ui;
@@ -31,6 +32,8 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
+/// Settings changes are written after this quiet period.
+const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// What a discard affects.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,6 +290,15 @@ pub enum Message {
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
+    SettingsLoaded(settings::Loaded),
+    /// Open the settings view (Ctrl+, , gear button, palette).
+    SettingsOpened,
+    SettingsClosed,
+    SettingsCategory(settings::Category),
+    /// Typed auto-fetch interval (minutes).
+    AutoFetchInput(String),
+    SettingsSaveDue(u64),
+    SettingsSaved(Result<(), String>),
     /// Filter of the keyboard shortcut list changed.
     ShortcutFilterChanged(String),
     ShortcutListClosed,
@@ -551,6 +563,12 @@ pub struct App {
     pub start_path: String,
     /// Recent repositories and the last persisted state.
     pub session: Session,
+    /// User preferences (ADR-023).
+    pub settings: Settings,
+    /// Open settings view; replaces the tab content.
+    pub settings_page: Option<settings::Page>,
+    settings_path: Option<PathBuf>,
+    settings_save_seq: u64,
     /// Result of looking for `git`; `None` until detected.
     pub git: Option<git_core::GitAvailability>,
     /// App-wide one-time notice (e.g. Git missing), dismissible.
@@ -598,6 +616,12 @@ impl App {
             status: String::new(),
             start_path: String::new(),
             session: Session::default(),
+            settings: Settings::default(),
+            settings_page: None,
+            settings_path: session_path
+                .as_deref()
+                .map(|path| path.with_file_name(settings::FILE_NAME)),
+            settings_save_seq: 0,
             git: None,
             notice: None,
             modal: None,
@@ -619,12 +643,32 @@ impl App {
             shown_center: None,
         };
         app.add_tab(TabState::Start);
+        let settings_path = app.settings_path.clone();
         let task = match session_path {
-            Some(path) => Task::perform(blocking(move || Ok(session::load(&path))), |loaded| {
-                Message::SessionLoaded(loaded.unwrap_or_else(|error| session::Loaded {
-                    session: Session::default(),
-                    notice: Some(error),
-                }))
+            Some(path) => Task::perform(
+                blocking(move || {
+                    // Settings first: they may take values over from the
+                    // session file (ADR-023).
+                    let settings = settings_path.map(|p| settings::load(&p, Some(&path)));
+                    Ok((settings, session::load(&path)))
+                }),
+                |loaded| loaded,
+            )
+            .then(|loaded| {
+                let (settings, session) = loaded.unwrap_or_else(|error| {
+                    (
+                        None,
+                        session::Loaded {
+                            session: Session::default(),
+                            notice: Some(error),
+                        },
+                    )
+                });
+                let session = Task::done(Message::SessionLoaded(session));
+                match settings {
+                    Some(settings) => Task::done(Message::SettingsLoaded(settings)).chain(session),
+                    None => session,
+                }
             }),
             None => Task::done(Message::SessionLoaded(session::Loaded {
                 session: Session::default(),
@@ -1440,7 +1484,7 @@ impl App {
 
     /// Starts an auto-fetch in every tab where one is due.
     fn auto_fetch(&mut self, now: std::time::Instant) -> Task<Message> {
-        let interval = self.session.auto_fetch_minutes;
+        let interval = self.settings.general.auto_fetch_minutes;
         let due: Vec<TabId> = self
             .tabs
             .iter()
@@ -1497,7 +1541,6 @@ impl App {
             tabs,
             active,
             panes: self.panes.ratios,
-            auto_fetch_minutes: self.session.auto_fetch_minutes,
             pull_mode: self.pull_mode.into(),
         }
     }
@@ -1606,7 +1649,8 @@ impl App {
         let overlay_open = self.modal.is_some()
             || self.context_menu.is_some()
             || self.message_dialog.is_some()
-            || self.shortcut_list.is_some();
+            || self.shortcut_list.is_some()
+            || self.settings_page.is_some();
         if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
             return Task::none();
         }
@@ -1723,12 +1767,13 @@ impl App {
             | Shortcut::Fullscreen
             | Shortcut::ZoomIn
             | Shortcut::ZoomOut
-            | Shortcut::ZoomReset
-            | Shortcut::Settings => {}
+            | Shortcut::ZoomReset => {}
+            Shortcut::Settings => return self.open_settings(),
             Shortcut::Close => {
                 if self.modal.take().is_some()
                     || self.context_menu.take().is_some()
                     || self.shortcut_list.take().is_some()
+                    || self.settings_page.take().is_some()
                     || self.form.take().is_some()
                     || self.message_dialog.take().is_some()
                     || self
@@ -2564,7 +2609,8 @@ impl App {
             .iter()
             .filter_map(|tab| tab.view().map(auto_fetch_state))
             .collect();
-        let Some(next) = crate::fetch::next_check(now, self.session.auto_fetch_minutes, &tabs)
+        let Some(next) =
+            crate::fetch::next_check(now, self.settings.general.auto_fetch_minutes, &tabs)
         else {
             self.auto_fetch_at = None;
             return Task::none();
@@ -2580,6 +2626,33 @@ impl App {
             async move { tokio::time::sleep_until(tokio::time::Instant::from_std(next)).await },
             move |()| Message::AutoFetchDue(seq),
         )
+    }
+
+    /// Drops the pending auto-fetch timer and plans the next one with the
+    /// current interval.
+    fn restart_auto_fetch(&mut self) -> Task<Message> {
+        self.auto_fetch_at = None;
+        self.auto_fetch_seq += 1;
+        self.schedule_auto_fetch()
+    }
+
+    /// Writes the settings after a short quiet period (typing an interval
+    /// changes them per key).
+    fn save_settings(&mut self) -> Task<Message> {
+        if self.settings_path.is_none() {
+            return Task::none();
+        }
+        self.settings_save_seq += 1;
+        let seq = self.settings_save_seq;
+        Task::perform(tokio::time::sleep(SETTINGS_SAVE_DEBOUNCE), move |()| {
+            Message::SettingsSaveDue(seq)
+        })
+    }
+
+    fn open_settings(&mut self) -> Task<Message> {
+        self.context_menu = None;
+        self.settings_page = Some(settings::Page::new(&self.settings));
+        iced::widget::operation::focus(crate::ui::settings::AUTO_FETCH_INPUT)
     }
 
     /// Re-applies the stored offset when a different graph or diff became visible.
@@ -2659,8 +2732,74 @@ impl App {
                 }
             }
             Message::ShortcutListClosed => self.shortcut_list = None,
+            Message::SettingsLoaded(loaded) => {
+                let settings::Loaded {
+                    settings,
+                    notice,
+                    write,
+                } = loaded;
+                if let Some(notice) = notice {
+                    self.status = notice;
+                }
+                self.settings = settings;
+                if let Some(page) = &mut self.settings_page {
+                    *page = settings::Page::new(&self.settings).with_category(page.category);
+                }
+                let save = if write {
+                    self.save_settings()
+                } else {
+                    Task::none()
+                };
+                return Task::batch([save, self.restart_auto_fetch()]);
+            }
+            Message::SettingsOpened => return self.open_settings(),
+            Message::SettingsClosed => self.settings_page = None,
+            Message::SettingsCategory(category) => {
+                if let Some(page) = &mut self.settings_page {
+                    page.category = category;
+                }
+            }
+            Message::AutoFetchInput(input) => {
+                let Some(page) = &mut self.settings_page else {
+                    return Task::none();
+                };
+                page.error = None;
+                match settings::parse_auto_fetch(&input) {
+                    Ok(minutes) => {
+                        page.auto_fetch_input = input;
+                        if minutes != self.settings.general.auto_fetch_minutes {
+                            self.settings.general.auto_fetch_minutes = minutes;
+                            return Task::batch([self.save_settings(), self.restart_auto_fetch()]);
+                        }
+                    }
+                    Err(error) => {
+                        page.auto_fetch_input = input;
+                        page.error = Some(error);
+                    }
+                }
+            }
+            Message::SettingsSaveDue(seq) => {
+                if seq != self.settings_save_seq {
+                    return Task::none();
+                }
+                let Some(path) = self.settings_path.clone() else {
+                    return Task::none();
+                };
+                let json = settings::to_json(&self.settings);
+                return Task::perform(
+                    blocking(move || settings::save(&path, &json).map_err(|e| e.to_string())),
+                    Message::SettingsSaved,
+                );
+            }
+            Message::SettingsSaved(result) => {
+                if let Err(error) = result {
+                    self.status = format!("Could not save the settings: {error}");
+                }
+            }
             Message::EscapeCaptured => {
-                self.shortcut_list = None;
+                if self.shortcut_list.take().is_none() {
+                    self.settings_page = None;
+                }
             }
             Message::FileContextMenu {
                 file,
@@ -5807,6 +5946,67 @@ mod tests {
     }
 
     #[test]
+    fn settings_view_opens_applies_and_closes() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, settings::Category::General);
+        assert_eq!(page.auto_fetch_input, "5");
+
+        // Valid input applies immediately; invalid input keeps the old value.
+        let _ = app.update(Message::AutoFetchInput("12".into()));
+        assert_eq!(app.settings.general.auto_fetch_minutes, 12);
+        let _ = app.update(Message::AutoFetchInput("12x".into()));
+        assert_eq!(app.settings.general.auto_fetch_minutes, 12);
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.auto_fetch_input, "12x");
+        assert!(page.error.is_some());
+        let _ = app.update(Message::AutoFetchInput("0".into()));
+        assert_eq!(app.settings.general.auto_fetch_minutes, 0);
+        assert!(app.settings_page.as_ref().unwrap().error.is_none());
+
+        // Other shortcuts wait; Esc returns to the repository.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(Message::SettingsCategory(settings::Category::Appearance));
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::Appearance)
+        );
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.settings_page.is_none());
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.settings_page.is_none());
+    }
+
+    #[test]
+    fn auto_fetch_interval_change_restarts_the_timer() {
+        let mut app = ready_app(&["c"]);
+        let seq = app.auto_fetch_seq;
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::AutoFetchInput("7".into()));
+        assert!(app.auto_fetch_seq > seq, "the pending timer is replaced");
+        // A timer of the old interval does nothing.
+        let _ = app.update(Message::AutoFetchDue(seq));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn loaded_settings_apply_and_report_a_reset_file() {
+        let mut app = ready_app(&["c"]);
+        let mut loaded = Settings::default();
+        loaded.general.auto_fetch_minutes = 30;
+        let _ = app.update(Message::SettingsLoaded(settings::Loaded {
+            settings: loaded.clone(),
+            notice: Some("The settings file was unreadable; defaults are used.".into()),
+            write: true,
+        }));
+        assert_eq!(app.settings, loaded);
+        assert!(app.status.contains("defaults are used"));
+    }
+
+    #[test]
     fn escape_closes_the_diff() {
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::DiffOpened(DiffRequest {
@@ -7977,7 +8177,7 @@ mod tests {
 
         // Off when the interval is 0.
         let mut app = app_with_remote();
-        app.session.auto_fetch_minutes = 0;
+        app.settings.general.auto_fetch_minutes = 0;
         let _ = app.auto_fetch(later + std::time::Duration::from_secs(3600));
         assert!(app.tabs[0].view().unwrap().busy.is_none());
     }
@@ -8807,7 +9007,7 @@ mod tests {
         assert!(app.tabs[0].view().unwrap().busy.is_none());
 
         // Off: no timer.
-        app.session.auto_fetch_minutes = 0;
+        app.settings.general.auto_fetch_minutes = 0;
         let _ = app.update(Message::Refresh);
         assert_eq!(app.auto_fetch_at, None);
     }

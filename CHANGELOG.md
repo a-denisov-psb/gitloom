@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Added
 
 - Keyboard shortcut list (Ctrl+/): all shortcuts grouped like GitKraken's, with a filter.
+- Preferences (Ctrl+, or the gear button): the auto-fetch interval can be changed (0 turns it off). Preferences are stored in `settings.json` next to the session; the interval set before is taken over.
 
 ## [0.5.0] - 2026-10-26
 

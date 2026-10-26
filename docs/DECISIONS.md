@@ -215,6 +215,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   kept as `settings.json.bak`.
 - Why: preferences and state change at different rates; a broken session must not
   reset preferences and vice versa.
+- Implementation note (M5-02): the file sits next to `session.json` (same config dir);
+  missing and unknown fields fall back to defaults, a newer version or a broken value
+  resets the whole file to defaults (backup kept). Writes are debounced (300 ms).
 
 ## ADR-024 Git CLI for file history and blame
 
