@@ -27,7 +27,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let local: Vec<_> = refs_of(RefKind::LocalBranch)
         .map(|r| match &repo.rename {
             Some(rename) if rename.old == r.name => rename_input(rename),
-            _ => ref_item(r, &r.name, 1),
+            _ => ref_item(repo, r, &r.name, 1),
         })
         .collect();
 
@@ -48,13 +48,15 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let remote: Vec<_> = by_remote
         .into_iter()
         .flat_map(|(name, refs)| {
-            std::iter::once(remote_label(name))
-                .chain(refs.into_iter().map(|r| ref_item(r, r.local_name(), 2)))
+            std::iter::once(remote_label(name)).chain(
+                refs.into_iter()
+                    .map(|r| ref_item(repo, r, r.local_name(), 2)),
+            )
         })
         .collect();
 
     let tags: Vec<_> = refs_of(RefKind::Tag)
-        .map(|r| ref_item(r, &r.name, 1))
+        .map(|r| ref_item(repo, r, &r.name, 1))
         .collect();
 
     // Click selects the stash row in the graph; right click opens its menu.
@@ -185,7 +187,12 @@ fn submodules<'a>() -> Element<'a, Message> {
     )
 }
 
-fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element<'a, Message> {
+fn ref_item<'a>(
+    repo: &RepoView,
+    reference: &'a Reference,
+    label: &'a str,
+    depth: u16,
+) -> Element<'a, Message> {
     let marker = if reference.is_head { "✓" } else { "" };
     let mut content = row![
         text(marker).width(INDENT).color(theme::ACCENT),
@@ -205,11 +212,21 @@ fn ref_item<'a>(reference: &'a Reference, label: &'a str, depth: u16) -> Element
         None => item,
     };
     let (name, kind) = (reference.name.clone(), reference.kind);
-    crate::ui::context_area::context_area(item, move |position| Message::BranchContextMenu {
-        name: name.clone(),
-        kind,
-        position,
-    })
+    let item =
+        crate::ui::context_area::context_area(item, move |position| Message::BranchContextMenu {
+            name: name.clone(),
+            kind,
+            position,
+        });
+    // Branches can be dragged onto each other (M4-11); tags cannot.
+    if reference.kind == RefKind::Tag {
+        return item;
+    }
+    let highlight = repo
+        .drag
+        .as_ref()
+        .is_some_and(|d| d.targets(&reference.name, reference.kind));
+    crate::ui::draggable_branch(item, &reference.name, reference.kind, highlight)
 }
 
 /// Inline rename input in place of the branch entry; red border on an error.
