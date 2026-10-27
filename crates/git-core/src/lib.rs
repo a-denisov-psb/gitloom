@@ -5,6 +5,7 @@
 //! - `MockBackend`: static sample data, only for tests and the `mock` feature
 //! - [`CliBackend`]: write operations via the `git` executable
 
+mod blame;
 mod cli_backend;
 mod conflict;
 mod diff;
@@ -28,6 +29,7 @@ mod state;
 mod todo;
 mod watch;
 
+pub use blame::{blame, parse_porcelain, Blame, BlameCommit, BlameGroup, UNCOMMITTED};
 pub use cli_backend::{
     branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
     GitVersion, GitWriter, RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,

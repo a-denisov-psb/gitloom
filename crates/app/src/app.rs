@@ -361,6 +361,27 @@ pub enum Message {
         result: Result<Vec<git_core::FileHistoryEntry>, String>,
     },
     FileHistorySelected(usize),
+    /// History / Blame toggle of the file history view (M5-10).
+    HistoryModeChosen(crate::file_history::HistoryMode),
+    /// "Blame at this commit" for history entry `index`.
+    BlameAt(usize),
+    BlameLoaded {
+        tab: TabId,
+        path: String,
+        rev: Option<String>,
+        result: Result<git_core::Blame, String>,
+    },
+    BlameScrolled {
+        offset: f32,
+        height: f32,
+    },
+    /// Click on a blame gutter: select that commit in the history list.
+    BlameCommitClicked(String),
+    /// Right click on history entry `index`.
+    FileHistoryEntryMenu {
+        index: usize,
+        position: iced::Point,
+    },
     /// Close the file history and select its selected commit in the graph.
     FileHistoryShowInGraph,
     /// Tracked files for the palette's file list (Ctrl+Shift+H).
@@ -3023,6 +3044,48 @@ impl App {
         }
     }
 
+    /// Replaces the blame of the file history (the old one is cancelled)
+    /// and loads the new one.
+    fn start_blame(
+        &mut self,
+        make: impl FnOnce(
+            &crate::file_history::FileHistoryView,
+        ) -> Option<crate::file_history::BlameView>,
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let writer = Arc::clone(&view.writer);
+        let CenterView::FileHistory(history) = &mut view.center else {
+            return Task::none();
+        };
+        let Some(blame) = make(history) else {
+            return Task::none();
+        };
+        let (path, rev, cancel) = (blame.path.clone(), blame.rev.clone(), blame.cancel.clone());
+        history.mode = crate::file_history::HistoryMode::Blame;
+        history.blame = Some(blame);
+        Task::perform(
+            blocking(move || {
+                let result = git_core::blame(writer.as_ref(), &path, rev.as_deref(), &cancel)
+                    .map_err(|e| e.to_string());
+                Ok((path, rev, result))
+            }),
+            move |result| match result {
+                Ok((path, rev, result)) => Message::BlameLoaded {
+                    tab,
+                    path,
+                    rev,
+                    result,
+                },
+                Err(error) => Message::StatusText(error),
+            },
+        )
+    }
+
     /// Opens the palette's file list and loads the tracked files.
     fn open_file_list(&mut self) -> Task<Message> {
         let Some(view) = self.active_tab().and_then(Tab::view) else {
@@ -3501,6 +3564,80 @@ impl App {
                 }
             }
             Message::FileHistorySelected(index) => {
+                return self.file_history_select(|h| h.select(index));
+            }
+            Message::HistoryModeChosen(mode) => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let CenterView::FileHistory(history) = &mut view.center else {
+                    return Task::none();
+                };
+                history.mode = mode;
+                if mode == crate::file_history::HistoryMode::Blame && history.blame.is_none() {
+                    return self.start_blame(|h| Some(h.default_blame()));
+                }
+            }
+            Message::BlameAt(index) => return self.start_blame(|h| h.blame_at(index)),
+            Message::BlameLoaded {
+                tab,
+                path,
+                rev,
+                result,
+            } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let CenterView::FileHistory(history) = &mut view.center else {
+                    return Task::none();
+                };
+                if let Some(blame) = history
+                    .blame
+                    .as_mut()
+                    .filter(|b| b.path == path && b.rev == rev)
+                {
+                    blame.blame = match result {
+                        Ok(blame) => Loadable::Ready(blame),
+                        Err(error) => Loadable::Failed(error),
+                    };
+                }
+            }
+            Message::BlameScrolled { offset, height } => {
+                if let Some(view) = self.active_view_mut() {
+                    if let CenterView::FileHistory(history) = &mut view.center {
+                        if let Some(blame) = history.blame.as_mut() {
+                            blame.scroll = crate::repo_view::Scroll { offset, height };
+                        }
+                    }
+                }
+            }
+            Message::BlameCommitClicked(id) => {
+                if let Some(view) = self.active_view_mut() {
+                    if let CenterView::FileHistory(history) = &mut view.center {
+                        history.mode = crate::file_history::HistoryMode::History;
+                    }
+                }
+                return self.file_history_select(|h| h.select_commit(&id));
+            }
+            Message::FileHistoryEntryMenu { index, position } => {
+                let deletion = self.active_tab().and_then(Tab::view).is_some_and(|view| {
+                    matches!(&view.center, CenterView::FileHistory(h)
+                        if matches!(&h.entries, Loadable::Ready(e)
+                            if e.get(index).is_some_and(|e| e.status == "D")))
+                });
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![
+                        MenuEntry::Item {
+                            label: "Blame at this commit".into(),
+                            shortcut: None,
+                            enabled: !deletion,
+                            message: Box::new(Message::BlameAt(index)),
+                            hint: deletion.then(|| "The file is deleted in this commit".to_owned()),
+                        },
+                        MenuEntry::item("Show in graph", Message::FileHistoryShowInGraph),
+                    ],
+                ));
                 return self.file_history_select(|h| h.select(index));
             }
             Message::FileHistoryShowInGraph => {
@@ -8723,6 +8860,88 @@ mod tests {
             CenterView::Graph
         ));
         assert!(cancel.is_cancelled());
+    }
+
+    fn blame_of(app: &App) -> &crate::file_history::BlameView {
+        history(app).blame.as_ref().unwrap()
+    }
+
+    #[test]
+    fn blame_mode_loads_and_gutter_selects_the_commit() {
+        use crate::file_history::HistoryMode;
+        let mut app = ready_app(&["c", "a"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![file_entry("c", "f.txt"), file_entry("a", "f.txt")]),
+        });
+        let _ = app.update(Message::HistoryModeChosen(HistoryMode::Blame));
+        assert_eq!(history(&app).mode, HistoryMode::Blame);
+        assert_eq!(blame_of(&app).rev, None, "working copy from HEAD");
+        let first_cancel = blame_of(&app).cancel.clone();
+
+        let blame = git_core::parse_porcelain(
+            b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1\nauthor A\nsummary s\n\tline\n",
+        );
+        // A result for another revision is ignored.
+        let _ = app.update(Message::BlameLoaded {
+            tab,
+            path: "f.txt".into(),
+            rev: Some("x".into()),
+            result: Ok(blame.clone()),
+        });
+        assert_eq!(blame_of(&app).blame, Loadable::Loading);
+        let _ = app.update(Message::BlameLoaded {
+            tab,
+            path: "f.txt".into(),
+            rev: None,
+            result: Ok(blame),
+        });
+        assert!(matches!(blame_of(&app).blame, Loadable::Ready(_)));
+
+        // "Blame at this commit" replaces (and cancels) the running blame.
+        let _ = app.update(Message::BlameAt(1));
+        assert_eq!(blame_of(&app).rev.as_deref(), Some("a"));
+        assert!(first_cancel.is_cancelled());
+
+        // Gutter click: back to the history with that commit selected.
+        let _ = app.update(Message::BlameCommitClicked("a".into()));
+        assert_eq!(history(&app).mode, HistoryMode::History);
+        assert_eq!(history(&app).selected, Some(1));
+        // Switching back keeps the loaded blame.
+        let _ = app.update(Message::HistoryModeChosen(HistoryMode::Blame));
+        assert_eq!(blame_of(&app).rev.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn history_entry_menu_offers_blame() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        let tab = app.tabs[0].id;
+        let mut deleted = file_entry("c", "f.txt");
+        deleted.status = "D".into();
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![deleted]),
+        });
+        let _ = app.update(Message::FileHistoryEntryMenu {
+            index: 0,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.as_ref().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, enabled: false, .. } if label == "Blame at this commit")));
     }
 
     #[test]

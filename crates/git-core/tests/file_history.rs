@@ -115,3 +115,71 @@ fn unknown_path_has_no_history() {
     repo.commit("a.txt", "1\n", "add");
     assert!(summaries(&repo, "missing.txt").is_empty());
 }
+
+/// `git blame` output reduced to (short commit, line) pairs for comparison.
+fn cli_blame(repo: &TestRepo, rev: Option<&str>, path: &str) -> Vec<(String, String)> {
+    let mut args = vec!["blame", "-s", "-l"];
+    args.extend(rev);
+    args.extend(["--", path]);
+    repo.git(&args)
+        .lines()
+        .map(|line| {
+            let (id, rest) = line.split_once(' ').unwrap();
+            let content = rest.split_once(") ").map_or("", |(_, c)| c);
+            (id.trim_start_matches('^').to_owned(), content.to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn blame_matches_git_blame() {
+    use git_core::{blame, UNCOMMITTED};
+    let repo = TestRepo::new();
+    repo.commit("f.txt", "one\ntwo\nthree\n", "first");
+    repo.commit("f.txt", "one\nTWO\nthree\nfour\n", "second");
+    let cli = CliBackend::new(repo.path());
+    let ours = blame(&cli, "f.txt", Some("HEAD"), &CancelToken::new()).unwrap();
+    let pairs: Vec<(String, String)> = ours
+        .lines
+        .iter()
+        .map(|(c, l)| (ours.commits[*c].id.clone(), l.clone()))
+        .collect();
+    let theirs: Vec<(String, String)> = cli_blame(&repo, Some("HEAD"), "f.txt")
+        .into_iter()
+        .map(|(id, l)| {
+            let full = pairs
+                .iter()
+                .find(|(p, _)| p.starts_with(&id))
+                .unwrap()
+                .0
+                .clone();
+            (full, l)
+        })
+        .collect();
+    assert_eq!(pairs, theirs);
+    assert_eq!(ours.groups.len(), 4, "first, second, first, second");
+    assert_eq!(ours.commits.iter().filter(|c| c.boundary).count(), 1);
+
+    // Working copy: changed lines are not committed yet.
+    repo.write("f.txt", "one\nTWO\nthree\nfour\nfive\n");
+    let wip = blame(&cli, "f.txt", None, &CancelToken::new()).unwrap();
+    let last = wip.lines.last().unwrap();
+    assert_eq!(last.1, "five");
+    assert_eq!(wip.commits[last.0].id, UNCOMMITTED);
+}
+
+#[test]
+fn blame_respects_the_mailmap() {
+    use git_core::blame;
+    let repo = TestRepo::new();
+    repo.commit("f.txt", "one\n", "first");
+    let author = repo.git(&["log", "-1", "--format=%an <%ae>"]);
+    repo.commit(
+        ".mailmap",
+        &format!("Mapped Name <mapped@example.com> {author}\n"),
+        "mailmap",
+    );
+    let cli = CliBackend::new(repo.path());
+    let ours = blame(&cli, "f.txt", Some("HEAD"), &CancelToken::new()).unwrap();
+    assert_eq!(ours.commits[0].author, "Mapped Name");
+}

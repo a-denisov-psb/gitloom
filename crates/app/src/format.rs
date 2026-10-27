@@ -12,6 +12,22 @@ pub fn date_time(timestamp: i64) -> String {
     )
 }
 
+/// Age of `timestamp` at `now`: "just now", "5 minutes ago", "3 days ago",
+/// "2 years ago" (blame gutter).
+pub fn relative(timestamp: i64, now: i64) -> String {
+    let seconds = (now - timestamp).max(0);
+    let (value, unit) = match seconds {
+        0..60 => return "just now".to_owned(),
+        60..3_600 => (seconds / 60, "minute"),
+        3_600..86_400 => (seconds / 3_600, "hour"),
+        86_400..2_592_000 => (seconds / 86_400, "day"),
+        2_592_000..31_536_000 => (seconds / 2_592_000, "month"),
+        _ => (seconds / 31_536_000, "year"),
+    };
+    let plural = if value == 1 { "" } else { "s" };
+    format!("{value} {unit}{plural} ago")
+}
+
 /// Groups digits by thousands with a space: `100000` → `100 000`.
 pub fn thousands(value: usize) -> String {
     let digits = value.to_string();
@@ -51,6 +67,18 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_ages() {
+        let now = 1_000_000_000;
+        assert_eq!(relative(now - 10, now), "just now");
+        assert_eq!(relative(now + 10, now), "just now", "clock skew");
+        assert_eq!(relative(now - 60, now), "1 minute ago");
+        assert_eq!(relative(now - 7_200, now), "2 hours ago");
+        assert_eq!(relative(now - 86_400 * 3, now), "3 days ago");
+        assert_eq!(relative(now - 86_400 * 65, now), "2 months ago");
+        assert_eq!(relative(now - 31_536_000 * 5, now), "5 years ago");
+    }
 
     #[test]
     fn formats_known_timestamps() {
