@@ -348,6 +348,23 @@ pub enum Message {
         forward: bool,
     },
     SearchClosed,
+    /// Open the history of a file; `start`: commit to start at and select
+    /// (`None`: HEAD).
+    FileHistoryOpened {
+        path: String,
+        start: Option<String>,
+    },
+    FileHistoryLoaded {
+        tab: TabId,
+        path: String,
+        start: String,
+        result: Result<Vec<git_core::FileHistoryEntry>, String>,
+    },
+    FileHistorySelected(usize),
+    /// Close the file history and select its selected commit in the graph.
+    FileHistoryShowInGraph,
+    /// Tracked files for the palette's file list (Ctrl+Shift+H).
+    PaletteFilesLoaded(Result<Vec<String>, String>),
     /// Hide or show a branch (eye in the sidebar, context menus).
     ToggleHidden {
         name: String,
@@ -1862,6 +1879,17 @@ impl App {
             Shortcut::ToggleSidebar => self.panes.toggle_sidebar(),
             Shortcut::TogglePanel => self.panes.toggle_panel(),
             Shortcut::Navigate(step) => {
+                // ↑/↓ move in the file history list while it is shown.
+                if let Some(view) = self.active_view_mut() {
+                    if matches!(view.center, CenterView::FileHistory(_)) {
+                        let down = match step {
+                            crate::nav::Move::Next => true,
+                            crate::nav::Move::Previous => false,
+                            _ => return Task::none(),
+                        };
+                        return self.file_history_select(|h| h.step(down));
+                    }
+                }
                 let target = self.active_tab().and_then(Tab::view).and_then(|view| {
                     crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
                 });
@@ -1939,11 +1967,9 @@ impl App {
                 }
             }
             Shortcut::SearchCommits => return self.update(Message::SearchOpened),
+            Shortcut::FileHistory => return self.open_file_list(),
             // Disabled until their task lands (`static_block` above).
-            Shortcut::FileHistory
-            | Shortcut::OpenTerminal
-            | Shortcut::OpenFileManager
-            | Shortcut::ExternalDiff => {}
+            Shortcut::OpenTerminal | Shortcut::OpenFileManager | Shortcut::ExternalDiff => {}
             Shortcut::ZoomIn => {
                 return self.set_zoom(settings::zoom_step(
                     self.settings.appearance.zoom_percent,
@@ -2897,6 +2923,7 @@ impl App {
                         let target = match action.id {
                             Shortcut::OpenRepoPalette => Target::Mode(Mode::OpenRepository),
                             Shortcut::CheckoutBranch => Target::Mode(Mode::CheckoutBranch),
+                            Shortcut::FileHistory => Target::Mode(Mode::Files),
                             id => Target::Action(id),
                         };
                         let mut entry = Entry::new(action.label.clone(), target)
@@ -2956,6 +2983,9 @@ impl App {
         };
         use palette::Target;
         if let Target::Mode(mode) = target {
+            if mode == palette::Mode::Files {
+                return self.open_file_list();
+            }
             return self.open_palette(mode);
         }
         self.palette = None;
@@ -2967,8 +2997,49 @@ impl App {
             Target::OpenRepo(path) => self.update(Message::OpenRecent(path)),
             Target::Browse => self.update(Message::OpenRepository),
             Target::Checkout(target) => self.update(Message::Checkout(target)),
-            Target::File(_) | Target::Mode(_) => Task::none(),
+            Target::File(path) => self.update(Message::FileHistoryOpened { path, start: None }),
+            Target::Mode(_) => Task::none(),
         }
+    }
+
+    /// Changes the selection of the file history and loads the diff.
+    fn file_history_select(
+        &mut self,
+        change: impl FnOnce(&mut crate::file_history::FileHistoryView) -> Option<DiffRequest>,
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let backend = Arc::clone(&view.backend);
+        let CenterView::FileHistory(history) = &mut view.center else {
+            return Task::none();
+        };
+        match change(history) {
+            Some(request) => load_diff(tab, backend, request),
+            None => Task::none(),
+        }
+    }
+
+    /// Opens the palette's file list and loads the tracked files.
+    fn open_file_list(&mut self) -> Task<Message> {
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let writer = Arc::clone(&view.writer);
+        self.context_menu = None;
+        self.shortcut_list = None;
+        self.palette = Some(Palette::loading(palette::Mode::Files));
+        let load = Task::perform(
+            blocking(move || {
+                git_core::tracked_files(writer.as_ref(), "HEAD", &git_core::CancelToken::new())
+                    .map_err(|e| e.to_string())
+            }),
+            Message::PaletteFilesLoaded,
+        );
+        Task::batch([load, iced::widget::operation::focus(PALETTE_INPUT)])
     }
 
     /// Searches the loaded commits of tab `tab` off the UI thread; `seq`
@@ -3086,7 +3157,9 @@ impl App {
             let (is_diff, id, offset) = match &view.center {
                 CenterView::Graph => (false, &view.graph_scroll_id, view.scroll.offset),
                 CenterView::Diff(diff) => (true, &diff.scroll_id, diff.scroll.offset),
-                CenterView::Conflict(_) | CenterView::Rebase(_) => return None,
+                CenterView::Conflict(_) | CenterView::Rebase(_) | CenterView::FileHistory(_) => {
+                    return None
+                }
             };
             let task = (offset > 0.0).then(|| scroll_by_id(id.clone(), offset));
             Some(((tab.id, is_diff), task))
@@ -3362,6 +3435,118 @@ impl App {
                     self.reveal_selection(),
                 ]);
             }
+            Message::FileHistoryOpened { path, start } => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let rev = start.clone().unwrap_or_else(|| "HEAD".to_owned());
+                let history =
+                    crate::file_history::FileHistoryView::new(path.clone(), rev.clone(), start);
+                let cancel = history.cancel.clone();
+                // Replacing a running history drops it, which stops its `git log`.
+                view.center = CenterView::FileHistory(Box::new(history));
+                view.search = None;
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        Ok(
+                            git_core::file_history(writer.as_ref(), &path, &rev, &cancel)
+                                .map(|entries| (path, rev, entries)),
+                        )
+                    }),
+                    move |result| match result.and_then(|r| r.map_err(|e| e.to_string())) {
+                        Ok((path, start, entries)) => Message::FileHistoryLoaded {
+                            tab,
+                            path,
+                            start,
+                            result: Ok(entries),
+                        },
+                        Err(error) => Message::FileHistoryLoaded {
+                            tab,
+                            path: String::new(),
+                            start: String::new(),
+                            result: Err(error),
+                        },
+                    },
+                );
+            }
+            Message::FileHistoryLoaded {
+                tab,
+                path,
+                start,
+                result,
+            } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let backend = Arc::clone(&view.backend);
+                let CenterView::FileHistory(history) = &mut view.center else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(entries) if history.path == path && history.start == start => {
+                        if let Some(request) = history.set_entries(entries) {
+                            return load_diff(tab, backend, request);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        if matches!(history.entries, Loadable::Loading) {
+                            history.entries = Loadable::Failed(error);
+                        }
+                    }
+                }
+            }
+            Message::FileHistorySelected(index) => {
+                return self.file_history_select(|h| h.select(index));
+            }
+            Message::FileHistoryShowInGraph => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let CenterView::FileHistory(history) = &view.center else {
+                    return Task::none();
+                };
+                let Some(id) = history.selected_entry().map(|e| e.id.clone()) else {
+                    return Task::none();
+                };
+                view.center = CenterView::Graph;
+                if !view.snapshot.index.contains_key(&id) {
+                    self.status = format!(
+                        "Commit {} is not in the graph (hidden branch or truncated history)",
+                        &id[..id.len().min(7)]
+                    );
+                    return Task::none();
+                }
+                select_multi(view, &id, false, false);
+                let task = self.select(Selection::Commit(id));
+                return Task::batch([task, self.reveal_selection()]);
+            }
+            Message::PaletteFilesLoaded(result) => {
+                if let Some(palette) = self
+                    .palette
+                    .as_mut()
+                    .filter(|p| p.mode == palette::Mode::Files)
+                {
+                    match result {
+                        Ok(files) => palette.set_entries(
+                            files
+                                .into_iter()
+                                .map(|path| {
+                                    palette::Entry::new(path.clone(), palette::Target::File(path))
+                                })
+                                .collect(),
+                        ),
+                        Err(error) => {
+                            palette.set_entries(Vec::new());
+                            self.status = format!("Could not list the files: {error}");
+                        }
+                    }
+                }
+            }
             Message::SearchClosed => {
                 if let Some(view) = self.active_view_mut() {
                     view.search = None;
@@ -3407,6 +3592,25 @@ impl App {
                     }
                     FileArea::Commit => {}
                 }
+                // History of the file (M5-09); from a commit it starts there.
+                let start = match area {
+                    FileArea::Commit => self
+                        .active_tab()
+                        .and_then(Tab::view)
+                        .and_then(|v| v.selected_commit().map(str::to_owned)),
+                    FileArea::Unstaged | FileArea::Staged => None,
+                };
+                entries.push(MenuEntry::Item {
+                    label: "File history".into(),
+                    shortcut: None,
+                    enabled: file.kind != git_core::ChangeKind::Untracked,
+                    message: Box::new(Message::FileHistoryOpened {
+                        path: file.path.clone(),
+                        start,
+                    }),
+                    hint: (file.kind == git_core::ChangeKind::Untracked)
+                        .then(|| "Untracked files have no history".to_owned()),
+                });
                 if area != FileArea::Commit {
                     entries.push(MenuEntry::item(
                         "Open file location",
@@ -3448,10 +3652,8 @@ impl App {
                 } else {
                     crate::repo_view::ClickMode::Replace
                 };
-                if let Some(view) = self.active_view_mut() {
-                    if let CenterView::Diff(diff) = &mut view.center {
-                        diff.click(row, mode);
-                    }
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    diff.click(row, mode);
                 }
             }
             Message::ApplyHunk(index) => return self.apply_diff_lines(move |_, h, _| h == index),
@@ -4463,7 +4665,7 @@ impl App {
                     return Task::none();
                 };
                 let writer = Arc::clone(&view.writer);
-                let CenterView::Diff(diff) = &mut view.center else {
+                let Some(diff) = view.center.diff_mut() else {
                     return Task::none();
                 };
                 if diff.request != request {
@@ -4499,7 +4701,7 @@ impl App {
                     return Task::none();
                 };
                 let backend = Arc::clone(&view.backend);
-                let CenterView::Diff(diff) = &mut view.center else {
+                let Some(diff) = view.center.diff_mut() else {
                     return Task::none();
                 };
                 if diff.request != request {
@@ -4519,10 +4721,8 @@ impl App {
                 }
             }
             Message::DiffScrolled { offset, height } => {
-                if let Some(view) = self.active_view_mut() {
-                    if let CenterView::Diff(diff) = &mut view.center {
-                        diff.scroll = crate::repo_view::Scroll { offset, height };
-                    }
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    diff.scroll = crate::repo_view::Scroll { offset, height };
                 }
             }
             Message::GraphScrolled { offset, height } => {
@@ -6548,8 +6748,8 @@ mod tests {
     #[test]
     fn actions_of_later_tasks_explain_why_they_do_nothing() {
         let mut app = ready_app(&["c"]);
-        let _ = app.update(checked(Shortcut::FileHistory, false));
-        assert_eq!(app.status, "File history and blame: Not available yet");
+        let _ = app.update(checked(Shortcut::OpenTerminal, false));
+        assert_eq!(app.status, "Open repository in terminal: Not available yet");
     }
 
     #[test]
@@ -8390,6 +8590,7 @@ mod tests {
                 "Discard changes",
                 "-",
                 "Ignore",
+                "File history",
                 "Open file location",
                 "Copy file path"
             ]
@@ -8428,9 +8629,132 @@ mod tests {
         // Other shortcuts are ignored while the menu is open.
         let _ = app.update(checked(Shortcut::NewTab, false));
         assert_eq!(app.tabs.len(), 1);
-        let _ = app.update(Message::MenuSelected(0));
+        // "File history", then "Copy file path".
+        let _ = app.update(Message::MenuSelected(1));
         assert!(app.context_menu.is_none());
         assert_eq!(app.status, "Copied to the clipboard");
+    }
+
+    fn file_entry(id: &str, path: &str) -> git_core::FileHistoryEntry {
+        git_core::FileHistoryEntry {
+            id: id.into(),
+            author: "A".into(),
+            email: "a@x".into(),
+            time: 0,
+            summary: id.into(),
+            path: path.into(),
+            old_path: None,
+            status: "M".into(),
+        }
+    }
+
+    fn history(app: &App) -> &crate::file_history::FileHistoryView {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::FileHistory(history) => history,
+            other => panic!("no file history: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_history_loads_selects_and_shows_in_graph() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        assert_eq!(history(&app).entries, Loadable::Loading);
+        let cancel = history(&app).cancel.clone();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![file_entry("c", "f.txt"), file_entry("a", "f.txt")]),
+        });
+        assert_eq!(history(&app).selected, Some(0));
+        assert_eq!(
+            history(&app).diff.as_ref().map(|d| d.request.kind.clone()),
+            Some(git_core::DiffKind::Commit("c".into()))
+        );
+        // ↓ moves in the list (the graph selection stays).
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        assert_eq!(history(&app).selected, Some(1));
+        // A result for another request is ignored.
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "other.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(Vec::new()),
+        });
+        assert_eq!(history(&app).selected, Some(1));
+
+        let _ = app.update(Message::FileHistoryShowInGraph);
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Graph
+        ));
+        assert_eq!(selected(&app), Some(Selection::Commit("a".into())));
+        assert!(cancel.is_cancelled(), "closing stops git log");
+    }
+
+    #[test]
+    fn file_history_closes_with_escape_and_reports_errors() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: Some("c".into()),
+        });
+        assert_eq!(history(&app).start, "c");
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: String::new(),
+            start: String::new(),
+            result: Err("Git error: bad revision".into()),
+        });
+        assert_eq!(
+            history(&app).entries,
+            Loadable::Failed("Git error: bad revision".into())
+        );
+        let cancel = history(&app).cancel.clone();
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Graph
+        ));
+        assert!(cancel.is_cancelled());
+    }
+
+    #[test]
+    fn palette_file_list_opens_the_history() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::FileHistory, false));
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.mode, palette::Mode::Files);
+        assert!(palette.loading);
+        let _ = app.update(Message::PaletteFilesLoaded(Ok(vec![
+            "README.md".into(),
+            "src/main.rs".into(),
+        ])));
+        let _ = app.update(Message::PaletteQuery("main".into()));
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        assert_eq!(history(&app).path, "src/main.rs");
+    }
+
+    #[test]
+    fn file_menu_offers_the_history_except_for_untracked_files() {
+        let mut app = ready_app(&["c"]);
+        let mut untracked = file("new.txt");
+        untracked.kind = git_core::ChangeKind::Untracked;
+        let _ = app.update(Message::FileContextMenu {
+            file: untracked,
+            area: FileArea::Unstaged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.as_ref().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, enabled: false, .. } if label == "File history")));
     }
 
     #[test]

@@ -778,7 +778,7 @@ fn table() -> Vec<Action> {
     for action in &mut actions {
         if matches!(
             action.id,
-            A::FileHistory | A::OpenTerminal | A::OpenFileManager | A::ExternalDiff
+            A::OpenTerminal | A::OpenFileManager | A::ExternalDiff
         ) {
             action.requires = Requires::NotYet;
         }
@@ -967,7 +967,8 @@ mod tests {
 
     #[test]
     fn later_actions_are_disabled_with_a_reason() {
-        assert_eq!(ActionId::FileHistory.static_block(), Some(NOT_AVAILABLE));
+        assert_eq!(ActionId::OpenTerminal.static_block(), Some(NOT_AVAILABLE));
+        assert_eq!(ActionId::FileHistory.static_block(), None);
         assert_eq!(ActionId::SearchCommits.static_block(), None);
         assert_eq!(ActionId::CommandPalette.static_block(), None);
         assert_eq!(ActionId::ShortcutList.static_block(), None);

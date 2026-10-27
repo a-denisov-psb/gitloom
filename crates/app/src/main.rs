@@ -3,6 +3,7 @@ mod app;
 mod askpass;
 mod conflict;
 mod fetch;
+mod file_history;
 mod format;
 mod fuzzy;
 mod icons;

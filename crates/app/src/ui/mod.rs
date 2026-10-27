@@ -13,7 +13,8 @@
 
 mod conflict;
 pub mod context_area;
-mod diff;
+pub(crate) mod diff;
+mod file_history;
 mod graph;
 pub(crate) mod overlays;
 pub(crate) mod panel;
@@ -160,6 +161,9 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                 CenterView::Diff(diff) => diff::view(view, diff),
                 CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
                 CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),
+                CenterView::FileHistory(history) => {
+                    with_background(file_history::view(view, history))
+                }
             },
             PaneKind::Panel => panel::view(view),
         };

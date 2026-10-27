@@ -95,7 +95,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Command palette | Ctrl+P | done (M5-06; all actions with shortcuts, disabled ones with the reason; sub-lists for repositories and branch checkout) |
 | Search commits | Ctrl+F | done (M5-07; field above the graph, non-matching rows dimmed, n of m, Enter / Shift+Enter; verify in GitKraken: dim or filter) |
 | Open repo via palette | Ctrl+Shift+O | done (M5-06; recent repositories and Browse…) |
-| File history and blame | Ctrl+Shift+H | M5 |
+| File history and blame | Ctrl+Shift+H | done for the history (M5-09: palette list of tracked files; also the file context menu and the History button of the diff); blame M5-10 |
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |
 | Open repo in terminal | Alt+T | M5 |
 | Open repo in file manager | Alt+O | M5 |

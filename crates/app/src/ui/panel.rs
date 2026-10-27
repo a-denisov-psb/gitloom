@@ -407,7 +407,7 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         CenterView::Conflict(conflict) => {
             file.kind == git_core::ChangeKind::Conflicted && conflict.path == file.path
         }
-        CenterView::Graph | CenterView::Rebase(_) => false,
+        CenterView::Graph | CenterView::Rebase(_) | CenterView::FileHistory(_) => false,
     };
 
     let label = match &file.old_path {
