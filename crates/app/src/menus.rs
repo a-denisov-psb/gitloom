@@ -4,6 +4,36 @@
 use crate::app::{CheckoutTarget, Message};
 use crate::overlay::MenuEntry;
 
+/// Hide/Show and Solo/Unsolo of a branch (M5-08); the checked-out branch
+/// cannot be hidden.
+fn visibility_entries(
+    name: &str,
+    kind: git_core::RefKind,
+    hidden: bool,
+    soloed: bool,
+    is_head: bool,
+) -> [MenuEntry; 2] {
+    let hide = MenuEntry::Item {
+        label: if hidden { "Show" } else { "Hide" }.into(),
+        shortcut: None,
+        enabled: !is_head,
+        message: Box::new(Message::ToggleHidden {
+            name: name.into(),
+            kind,
+        }),
+        hint: is_head.then(|| "Checked-out branch".to_owned()),
+    };
+    let solo = action(
+        if soloed { "Unsolo" } else { "Solo" },
+        true,
+        Message::ToggleSolo {
+            name: name.into(),
+            kind,
+        },
+    );
+    [hide, solo]
+}
+
 fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
     MenuEntry::Item {
         label: label.into(),
@@ -103,6 +133,9 @@ pub struct LocalBranch<'a> {
     pub head: &'a str,
     /// HEAD can be fast-forwarded to this branch.
     pub head_can_fast_forward: bool,
+    /// Hidden / soloed in the graph (M5-08).
+    pub hidden: bool,
+    pub soloed: bool,
 }
 
 /// "Merge X into Y", "Rebase Y onto X" and, if possible, "Fast-forward Y
@@ -156,6 +189,8 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         writable,
         head,
         head_can_fast_forward,
+        hidden,
+        soloed,
     } = branch;
     let (pull, push) = if is_head {
         (Message::Pull(None), Message::Push { force: false })
@@ -214,6 +249,16 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             Message::CreateTagStart(target.into()),
         ),
         MenuEntry::Separator,
+    ]);
+    entries.extend(visibility_entries(
+        name,
+        git_core::RefKind::LocalBranch,
+        hidden,
+        soloed,
+        is_head,
+    ));
+    entries.extend([
+        MenuEntry::Separator,
         action("Copy name", true, Message::CopyToClipboard(name.into())),
     ]);
     entries
@@ -232,6 +277,8 @@ pub struct RemoteBranch<'a> {
     /// Local branch tracking this one that is not checked out and can be
     /// fast-forwarded to it.
     pub behind_local: Option<&'a str>,
+    pub hidden: bool,
+    pub soloed: bool,
 }
 
 pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
@@ -241,6 +288,8 @@ pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
         head,
         head_can_fast_forward,
         behind_local,
+        hidden,
+        soloed,
     } = branch;
     let reference = format!("refs/remotes/{name}");
     let mut entries = vec![
@@ -276,6 +325,17 @@ pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
             writable,
             Message::DeleteRemoteBranch(name.into()),
         ),
+        MenuEntry::Separator,
+    ]);
+    entries.extend(visibility_entries(
+        name,
+        git_core::RefKind::RemoteBranch,
+        hidden,
+        soloed,
+        false,
+    ));
+    entries.extend([
+        MenuEntry::Separator,
         action("Copy name", true, Message::CopyToClipboard(name.into())),
     ]);
     entries
@@ -392,13 +452,32 @@ pub fn tag(name: &str, writable: bool) -> Vec<MenuEntry> {
     ]
 }
 
-pub fn remote(name: &str, writable: bool) -> Vec<MenuEntry> {
+/// `any_shown` / `any_hidden`: some of the remote's branches are shown /
+/// hidden in the graph.
+pub fn remote(name: &str, writable: bool, any_shown: bool, any_hidden: bool) -> Vec<MenuEntry> {
     vec![
         action("Fetch", writable, Message::FetchRemote(name.into())),
         MenuEntry::Separator,
         action("Edit URL…", writable, Message::EditRemoteUrl(name.into())),
         action("Rename…", writable, Message::RenameRemoteStart(name.into())),
         action("Remove", writable, Message::RemoveRemote(name.into())),
+        MenuEntry::Separator,
+        action(
+            "Hide all",
+            any_shown,
+            Message::HideRemote {
+                remote: name.into(),
+                hide: true,
+            },
+        ),
+        action(
+            "Show all",
+            any_hidden,
+            Message::HideRemote {
+                remote: name.into(),
+                hide: false,
+            },
+        ),
     ]
 }
 
@@ -455,6 +534,8 @@ mod tests {
             writable: true,
             head: "main",
             head_can_fast_forward: false,
+            hidden: false,
+            soloed: false,
         })
     }
 
@@ -465,6 +546,8 @@ mod tests {
             head: "main",
             head_can_fast_forward,
             behind_local,
+            hidden: false,
+            soloed: false,
         })
     }
 
@@ -501,6 +584,8 @@ mod tests {
             writable: true,
             head: "main",
             head_can_fast_forward: true,
+            hidden: false,
+            soloed: false,
         });
         assert!(matches!(
             message_of(&ahead, "Fast-forward main to topic"),
@@ -692,8 +777,11 @@ mod tests {
             writable: false,
             head: "main",
             head_can_fast_forward: true,
+            hidden: false,
+            soloed: false,
         });
-        assert_eq!(summary(&menu).0, ["Copy name"]);
+        // Hiding only changes the view, not the repository.
+        assert_eq!(summary(&menu).0, ["Hide", "Solo", "Copy name"]);
         assert_eq!(
             summary(&commit(
                 "c1",
@@ -712,7 +800,36 @@ mod tests {
             ["Copy SHA", "Copy message"]
         );
         assert_eq!(summary(&tag("v1", false)).0, ["Copy name"]);
-        assert!(summary(&remote("origin", false)).0.is_empty());
+        assert!(summary(&remote("origin", false, false, false)).0.is_empty());
+    }
+
+    #[test]
+    fn hide_and_solo_entries() {
+        let head = branch(true, false);
+        assert_eq!(hint_of(&head, "Hide"), Some("Checked-out branch"));
+        assert!(summary(&head).0.contains(&"Solo"));
+        let hidden = local_branch(LocalBranch {
+            name: "topic",
+            target: "c1",
+            is_head: false,
+            has_upstream: false,
+            writable: true,
+            head: "main",
+            head_can_fast_forward: false,
+            hidden: true,
+            soloed: true,
+        });
+        assert!(matches!(
+            message_of(&hidden, "Show"),
+            Some(Message::ToggleHidden { name, .. }) if name == "topic"
+        ));
+        assert!(message_of(&hidden, "Unsolo").is_some());
+        assert!(message_of(&remote_menu(None, false), "Hide").is_some());
+
+        let menu = remote("origin", true, true, false);
+        let (enabled, disabled) = summary(&menu);
+        assert!(enabled.contains(&"Hide all"));
+        assert!(disabled.iter().any(|(l, _)| *l == "Show all"));
     }
 
     #[test]

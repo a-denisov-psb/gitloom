@@ -139,6 +139,8 @@ impl Tab {
 pub struct Opened {
     backend: Arc<dyn GitBackend>,
     snapshot: Arc<RepoSnapshot>,
+    /// Stored hidden/soloed branches of the repository (pruned).
+    filter: crate::ref_filter::RefFilter,
 }
 
 impl std::fmt::Debug for Opened {
@@ -346,6 +348,26 @@ pub enum Message {
         forward: bool,
     },
     SearchClosed,
+    /// Hide or show a branch (eye in the sidebar, context menus).
+    ToggleHidden {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    ToggleSolo {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    /// "Hide all" / "Show all" branches of a remote.
+    HideRemote {
+        remote: String,
+        hide: bool,
+    },
+    /// The graph of `tab` was filtered for the hidden/soloed branches.
+    FilterApplied {
+        tab: TabId,
+        seq: u64,
+        result: Result<Arc<RepoSnapshot>, String>,
+    },
     /// A shortcut after checking whether a text input has focus.
     ShortcutChecked {
         shortcut: Shortcut,
@@ -1564,18 +1586,21 @@ impl App {
         }
         self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
+        let (paths, active) = (session.tabs.clone(), session.active);
+        // Before opening: the loaders read stored per-repository state
+        // (hidden branches).
+        self.session = session;
         let mut tasks = Vec::new();
-        if !session.tabs.is_empty() {
+        if !paths.is_empty() {
             // Replace the untouched start tab with the restored tabs.
             if self.tabs.len() == 1 && matches!(self.tabs[0].state, TabState::Start) {
                 self.tabs.clear();
             }
-            for path in &session.tabs {
-                tasks.push(self.open_in_new_tab(path.clone()));
+            for path in paths {
+                tasks.push(self.open_in_new_tab(path));
             }
-            self.active = session.active.min(self.tabs.len().saturating_sub(1));
+            self.active = active.min(self.tabs.len().saturating_sub(1));
         }
-        self.session = session;
         for path in std::mem::take(&mut self.pending_paths) {
             tasks.push(self.open_path(path));
         }
@@ -1600,8 +1625,62 @@ impl App {
             tabs,
             active,
             panes: self.panes.ratios,
+            ref_filters: self.ref_filters(),
             pull_mode: self.pull_mode.into(),
         }
+    }
+
+    /// Stored hidden/soloed branches: those of open repositories replace
+    /// the stored ones.
+    fn ref_filters(&self) -> std::collections::BTreeMap<PathBuf, crate::ref_filter::RefFilter> {
+        let mut filters = self.session.ref_filters.clone();
+        for view in self.tabs.iter().filter_map(Tab::view) {
+            let root = view.backend.path().to_path_buf();
+            if view.ref_filter.is_active() {
+                filters.insert(root, view.ref_filter.clone());
+            } else {
+                filters.remove(&root);
+            }
+        }
+        filters
+    }
+
+    /// Changes the hidden/soloed branches of the active tab and filters the
+    /// graph again in the background.
+    fn change_filter(
+        &mut self,
+        change: impl FnOnce(&mut crate::ref_filter::RefFilter, &[git_core::Reference]),
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let refs = view.snapshot.refs.clone();
+        change(&mut view.ref_filter, &refs);
+        Task::batch([self.ensure_filter(tab), self.persist()])
+    }
+
+    /// Filters the graph of tab `tab` again if its snapshot was built with
+    /// another filter (prunes branches that no longer exist first).
+    fn ensure_filter(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let refs = view.snapshot.refs.clone();
+        view.ref_filter.prune(&refs);
+        if view.snapshot.applied_filter == view.ref_filter {
+            return Task::none();
+        }
+        view.filter_seq += 1;
+        let seq = view.filter_seq;
+        let filter = view.ref_filter.clone();
+        let snapshot = Arc::clone(&view.snapshot);
+        Task::perform(
+            blocking(move || snapshot.with_filter(&filter).map(Arc::new)),
+            move |result| Message::FilterApplied { tab, seq, result },
+        )
     }
 
     /// Schedules a debounced save when the persisted state changed.
@@ -1937,12 +2016,22 @@ impl App {
         tab.generation += 1;
         let generation = tab.generation;
         tab.state = TabState::Loading { path: path.clone() };
+        let filters = self.session.ref_filters.clone();
         Task::perform(
             blocking(move || {
                 let backend: Arc<dyn GitBackend> =
                     Arc::new(GixBackend::discover(&path).map_err(|e| e.to_string())?);
-                let snapshot = Arc::new(RepoSnapshot::load(backend.as_ref())?);
-                Ok(Opened { backend, snapshot })
+                let mut snapshot = RepoSnapshot::load(backend.as_ref())?;
+                let mut filter = filters.get(backend.path()).cloned().unwrap_or_default();
+                filter.prune(&snapshot.refs);
+                if filter.is_active() {
+                    snapshot = snapshot.with_filter(&filter)?;
+                }
+                Ok(Opened {
+                    backend,
+                    snapshot: Arc::new(snapshot),
+                    filter,
+                })
             }),
             move |result| Message::RepoOpened {
                 tab: id,
@@ -1967,8 +2056,17 @@ impl App {
         tab.generation += 1;
         let generation = tab.generation;
         let backend = Arc::clone(&view.backend);
+        let mut filter = view.ref_filter.clone();
         Task::perform(
-            blocking(move || RepoSnapshot::load(backend.as_ref()).map(Arc::new)),
+            blocking(move || {
+                let snapshot = RepoSnapshot::load(backend.as_ref())?;
+                filter.prune(&snapshot.refs);
+                if filter.is_active() {
+                    snapshot.with_filter(&filter).map(Arc::new)
+                } else {
+                    Ok(Arc::new(snapshot))
+                }
+            }),
             move |result| Message::SnapshotLoaded {
                 tab: id,
                 generation,
@@ -3225,6 +3323,45 @@ impl App {
                 return self.search_step(forward);
             }
             Message::SearchStep { forward } => return self.search_step(forward),
+            Message::ToggleHidden { name, kind } => {
+                // The checked-out branch stays visible.
+                let is_head = self.active_tab().and_then(Tab::view).is_some_and(|v| {
+                    kind == git_core::RefKind::LocalBranch
+                        && v.snapshot.head.branch() == Some(name.as_str())
+                });
+                if is_head {
+                    return Task::none();
+                }
+                return self.change_filter(|filter, _| filter.toggle_hidden(&name, kind));
+            }
+            Message::ToggleSolo { name, kind } => {
+                return self.change_filter(|filter, _| filter.toggle_soloed(&name, kind));
+            }
+            Message::HideRemote { remote, hide } => {
+                return self
+                    .change_filter(|filter, refs| filter.set_remote_hidden(refs, &remote, hide));
+            }
+            Message::FilterApplied { tab, seq, result } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                if view.filter_seq != seq {
+                    return Task::none();
+                }
+                match result {
+                    // A hidden selection moves to the WIP row (apply_snapshot).
+                    Ok(snapshot) => view.apply_snapshot(snapshot),
+                    Err(error) => {
+                        self.status = format!("Could not filter the graph: {error}");
+                        return Task::none();
+                    }
+                }
+                return Task::batch([
+                    self.load_details(),
+                    self.run_search(tab, None),
+                    self.reveal_selection(),
+                ]);
+            }
             Message::SearchClosed => {
                 if let Some(view) = self.active_view_mut() {
                     view.search = None;
@@ -3668,6 +3805,8 @@ impl App {
                             writable,
                             head: head_name(&view.snapshot),
                             head_can_fast_forward: view.snapshot.head_can_fast_forward(target),
+                            hidden: view.ref_filter.is_hidden(&name, kind),
+                            soloed: view.ref_filter.is_soloed(&name, kind),
                         })
                     }
                     git_core::RefKind::RemoteBranch => {
@@ -3683,6 +3822,8 @@ impl App {
                             head: head_name(snapshot),
                             head_can_fast_forward: snapshot.head_can_fast_forward(target),
                             behind_local: behind_local(snapshot, &name, target),
+                            hidden: view.ref_filter.is_hidden(&name, kind),
+                            soloed: view.ref_filter.is_soloed(&name, kind),
                         })
                     }
                     git_core::RefKind::Tag => crate::menus::tag(&name, writable),
@@ -3793,9 +3934,30 @@ impl App {
             }
             Message::RemoteContextMenu { name, position } => {
                 let writable = self.write_block().is_none();
+                let (any_shown, any_hidden) =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .map_or((false, false), |view| {
+                            let branches: Vec<_> = view
+                                .snapshot
+                                .refs
+                                .iter()
+                                .filter(|r| {
+                                    r.kind == git_core::RefKind::RemoteBranch
+                                        && r.remote() == Some(name.as_str())
+                                })
+                                .collect();
+                            let hidden = |r: &&git_core::Reference| {
+                                view.ref_filter.is_hidden(&r.name, r.kind)
+                            };
+                            (
+                                branches.iter().any(|r| !hidden(r)),
+                                branches.iter().any(hidden),
+                            )
+                        });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::remote(&name, writable),
+                    crate::menus::remote(&name, writable, any_shown, any_hidden),
                 ));
             }
             Message::FetchRemote(name) => {
@@ -4889,7 +5051,9 @@ impl App {
                 let id = tab.id;
                 tab.state = match result {
                     Ok(opened) => {
-                        TabState::Ready(Box::new(RepoView::new(opened.backend, opened.snapshot)))
+                        let mut view = RepoView::new(opened.backend, opened.snapshot);
+                        view.ref_filter = opened.filter;
+                        TabState::Ready(Box::new(view))
                     }
                     Err(error) => TabState::Failed { path, error },
                 };
@@ -4961,8 +5125,11 @@ impl App {
                 if let Some(dialog) = empty_pick.flatten() {
                     self.modal = Some(dialog);
                 }
+                // Branches that no longer exist leave the filter; a filter
+                // changed while loading is applied now.
+                let filter = self.ensure_filter(id);
                 // Matches are commit indices: search the new history again.
-                let search = self.run_search(id, None);
+                let search = Task::batch([self.run_search(id, None), filter, self.persist()]);
                 if reload {
                     return Task::batch([self.reload_diff(id), self.load_details(), search]);
                 }
@@ -9039,6 +9206,156 @@ mod tests {
         let _ = app.update(Message::EscapeCaptured);
         assert!(app.tabs[0].view().unwrap().search.is_none());
         assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
+    }
+
+    /// main: m1 → base (checked out), topic: t1 → base; changes in the
+    /// working tree (WIP row).
+    fn filter_app() -> App {
+        use git_core::{Commit, FileChange, Head, Log, RefKind, Reference, WorkingTree};
+        let commit = |id: &str, parents: &[&str], time| Commit {
+            id: id.into(),
+            parents: parents.iter().map(|p| p.to_string()).collect(),
+            summary: id.into(),
+            body: String::new(),
+            author: String::new(),
+            email: String::new(),
+            author_time: time,
+            commit_time: time,
+        };
+        let branch = |name: &str, target: &str| Reference {
+            name: name.into(),
+            kind: RefKind::LocalBranch,
+            target: target.into(),
+            is_head: name == "main",
+            upstream: None,
+            ahead_behind: None,
+        };
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits: vec![
+                    commit("t1", &["base"], 30),
+                    commit("m1", &["base"], 20),
+                    commit("base", &[], 10),
+                ],
+                truncated: false,
+            },
+            Head::Branch {
+                name: "main".into(),
+                target: "m1".into(),
+            },
+            vec![branch("main", "m1"), branch("topic", "t1")],
+            Vec::new(),
+            WorkingTree {
+                unstaged: vec![FileChange {
+                    path: "f".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                }],
+                staged: Vec::new(),
+            },
+        )
+        .unwrap();
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("/repo"));
+        app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
+        app
+    }
+
+    /// Runs the background filter of the active tab synchronously.
+    fn apply_filter(app: &mut App) {
+        let view = app.tabs[0].view().unwrap();
+        let (seq, filter) = (view.filter_seq, view.ref_filter.clone());
+        let result = view.snapshot.with_filter(&filter).map(Arc::new);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FilterApplied { tab, seq, result });
+    }
+
+    fn graph_ids(app: &App) -> Vec<String> {
+        let view = app.tabs[0].view().unwrap();
+        view.snapshot.commits.iter().map(|c| c.id.clone()).collect()
+    }
+
+    #[test]
+    fn hiding_a_branch_filters_the_graph_and_moves_a_hidden_selection() {
+        let mut app = filter_app();
+        let _ = app.update(Message::CommitSelected("t1".into()));
+        let _ = app.update(Message::ToggleHidden {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        assert!(app.tabs[0].view().unwrap().ref_filter.is_active());
+        apply_filter(&mut app);
+        assert_eq!(graph_ids(&app), ["m1", "base"]);
+        assert_eq!(selected(&app), Some(Selection::Wip));
+        // Stored per repository by full name.
+        let root = app.tabs[0].view().unwrap().backend.path().to_path_buf();
+        assert_eq!(
+            app.current_session().ref_filters[&root]
+                .hidden
+                .iter()
+                .collect::<Vec<_>>(),
+            ["refs/heads/topic"]
+        );
+
+        // Show again: everything is back, the filter leaves the session.
+        let _ = app.update(Message::ToggleHidden {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        apply_filter(&mut app);
+        assert_eq!(graph_ids(&app), ["t1", "m1", "base"]);
+        assert!(app.current_session().ref_filters.is_empty());
+    }
+
+    #[test]
+    fn checked_out_branch_cannot_be_hidden_and_solo_keeps_head() {
+        let mut app = filter_app();
+        let _ = app.update(Message::ToggleHidden {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        assert!(!app.tabs[0].view().unwrap().ref_filter.is_active());
+
+        let _ = app.update(Message::ToggleSolo {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        apply_filter(&mut app);
+        // Soloed topic plus HEAD (main).
+        assert_eq!(graph_ids(&app), ["t1", "m1", "base"]);
+
+        // A stale result (older request) is ignored.
+        let tab = app.tabs[0].id;
+        let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+        let _ = app.update(Message::ToggleSolo {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        let stale = app.tabs[0].view().unwrap().filter_seq - 1;
+        let _ = app.update(Message::FilterApplied {
+            tab,
+            seq: stale,
+            result: Ok(snapshot),
+        });
+        assert!(app.tabs[0]
+            .view()
+            .unwrap()
+            .snapshot
+            .applied_filter
+            .is_active());
+    }
+
+    #[test]
+    fn stored_filters_of_vanished_branches_are_dropped() {
+        let mut app = filter_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.ref_filter
+            .toggle_hidden("gone", git_core::RefKind::LocalBranch);
+        let tab = app.tabs[0].id;
+        // Pruned before filtering: nothing to apply.
+        let _ = app.ensure_filter(tab);
+        assert!(!app.tabs[0].view().unwrap().ref_filter.is_active());
     }
 
     fn palette_labels(app: &App) -> Vec<String> {

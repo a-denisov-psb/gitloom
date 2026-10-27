@@ -326,6 +326,10 @@ pub struct RepoView {
     pub details: Option<CommitDetails>,
     /// Open commit search bar above the graph (M5-07).
     pub search: Option<crate::search::SearchState>,
+    /// Hidden and soloed branches (M5-08); the snapshot is filtered by it.
+    pub ref_filter: crate::ref_filter::RefFilter,
+    /// Number of the latest filter request; older results are dropped.
+    pub filter_seq: u64,
     pub center: CenterView,
     pub filter: String,
     pub collapsed: HashSet<Section>,
@@ -551,6 +555,8 @@ impl RepoView {
             snapshot,
             selection,
             search: None,
+            ref_filter: Default::default(),
+            filter_seq: 0,
             multi: crate::selection::MultiSelection::default(),
             details: None,
             center: CenterView::Graph,
