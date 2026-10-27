@@ -11,7 +11,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Area | GitKraken behavior | Status |
 |---|---|---|
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
-| Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | layout done, actions M2–M4 |
+| Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it) |
 | Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts | done (M0), real data M1 |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M1) |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
@@ -97,8 +97,8 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Open repo via palette | Ctrl+Shift+O | done (M5-06; recent repositories and Browse…) |
 | File history and blame | Ctrl+Shift+H | done (M5-09 history: palette list of tracked files, also the file context menu and the History button of the diff; M5-10 blame: History / Blame toggle, "Blame at this commit"; verify layout in GitKraken) |
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |
-| Open repo in terminal | Alt+T | M5 |
-| Open repo in file manager | Alt+O | M5 |
+| Open repo in terminal | Alt+T | done (M5-13; the system terminal, see deviations) |
+| Open repo in file manager | Alt+O | done (M5-13) |
 | Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts) |
 | Close current repo | Ctrl+W | done (M1) |
 
@@ -142,4 +142,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | The user is not left in a half-finished state without a way back; resolving and continuing works from the banner |
 | The commit message of a rebase step is editable before Continue (prefilled with the original message) | Git asks for the message on `rebase --continue` after a conflict; the commit panel answers instead of a terminal editor |
 | Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
+| The toolbar's Terminal button and Alt+T open the system terminal in the repository instead of a terminal inside the app | M5 plan: an integrated terminal is a backlog item; the command can be set in Preferences → External tools |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
