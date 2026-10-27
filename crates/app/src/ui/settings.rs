@@ -9,7 +9,6 @@ use crate::app::{App, Message};
 use crate::settings::{Category, Page, Settings, ThemeChoice, ToolChoice};
 use crate::theme;
 use crate::ui::muted;
-use crate::ui::panel::with_tooltip;
 
 /// Id of the auto-fetch input, focused when the view opens.
 pub const AUTO_FETCH_INPUT: &str = "settings-auto-fetch";
@@ -75,17 +74,6 @@ fn field<'a>(
         content = content.push(muted(note).size(12));
     }
     content.into()
-}
-
-/// Control of a later task: its current value, disabled with a tooltip.
-fn not_yet(value: String) -> Element<'static, Message> {
-    with_tooltip(
-        button(text(value))
-            .padding([5, 12])
-            .width(Length::Fixed(260.0))
-            .style(button::secondary)
-            .into(),
-    )
 }
 
 fn general(page: &Page) -> Element<'_, Message> {
@@ -261,11 +249,6 @@ fn tool_picker<'a>(
 
 fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
     let tools = &settings.tools;
-    let terminal = if tools.terminal_command.is_empty() {
-        "Detect automatically".to_owned()
-    } else {
-        tools.terminal_command.clone()
-    };
     let (diff_info, merge_info, note) = match &page.tools {
         Some(Ok((diff, merge))) => (Some(diff), Some(merge), None),
         Some(Err(error)) => (
@@ -294,11 +277,15 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
             tool_picker(merge_info, &tools.merge_tool, Message::MergeToolChosen),
             "Used by \"Open in merge tool\" for conflicted files (git mergetool).",
         ))
-        .push(column![field(
+        .push(field(
             "Terminal",
-            not_yet(terminal),
-            "Command used by Alt+T; {path} is replaced by the repository folder.",
-        ),])
+            text_input("Detect automatically", &tools.terminal_command)
+                .on_input(Message::TerminalCommandInput)
+                .padding(6)
+                .width(Length::Fixed(420.0))
+                .into(),
+            "Command for Alt+T and the toolbar's Terminal button; {path} is the repository folder. Empty: the first terminal found.",
+        ))
         .into()
 }
 
