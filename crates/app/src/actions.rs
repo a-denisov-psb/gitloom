@@ -138,12 +138,7 @@ pub enum Requires {
     Nothing,
     /// An open repository in the active tab.
     Repository,
-    /// Lands with a later M5 task: listed, but disabled.
-    NotYet,
 }
-
-/// Reason shown for actions of later tasks.
-pub const NOT_AVAILABLE: &str = "Not available yet";
 
 /// Modifier that has to be held besides Shift and Alt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,15 +352,6 @@ impl ActionId {
     /// (Enter only acts while a dialog is open).
     pub fn works_in_text_input(self) -> bool {
         find(self).is_some_and(|a| a.context == Context::TextField)
-    }
-
-    /// Why the action cannot run, if it cannot (the app adds state-based
-    /// reasons on top).
-    pub fn static_block(self) -> Option<&'static str> {
-        match find(self).map(|a| a.requires) {
-            Some(Requires::NotYet) => Some(NOT_AVAILABLE),
-            _ => None,
-        }
     }
 }
 
@@ -774,12 +760,6 @@ fn table() -> Vec<Action> {
             action.requires = Requires::Repository;
         }
     }
-    // Actions of later M5 tasks: listed, disabled until their task lands.
-    for action in &mut actions {
-        if matches!(action.id, A::OpenTerminal | A::OpenFileManager) {
-            action.requires = Requires::NotYet;
-        }
-    }
     actions
 }
 
@@ -960,16 +940,6 @@ mod tests {
         );
         // Letters keep their Shift: Shift+S is not S.
         assert_eq!(lookup(&key("s"), &key("S"), Modifiers::SHIFT, false), None);
-    }
-
-    #[test]
-    fn later_actions_are_disabled_with_a_reason() {
-        assert_eq!(ActionId::OpenTerminal.static_block(), Some(NOT_AVAILABLE));
-        assert_eq!(ActionId::FileHistory.static_block(), None);
-        assert_eq!(ActionId::SearchCommits.static_block(), None);
-        assert_eq!(ActionId::CommandPalette.static_block(), None);
-        assert_eq!(ActionId::ShortcutList.static_block(), None);
-        assert_eq!(ActionId::Undo.static_block(), None);
     }
 
     #[test]

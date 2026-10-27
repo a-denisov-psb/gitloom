@@ -319,6 +319,12 @@ pub enum Message {
     /// Ctrl+D or the diff header button: the shown diff in the external
     /// diff tool (M5-12).
     ExternalDiff,
+    /// Alt+T or the toolbar Terminal button: a terminal in the repository (M5-13).
+    OpenTerminal,
+    /// Alt+O: the repository folder in the file manager.
+    OpenFileManager,
+    /// Terminal command template typed in Preferences → External tools.
+    TerminalCommandInput(String),
     /// Open the conflicted file in the merge tool.
     OpenMergeTool(String),
     ExternalToolFinished {
@@ -1913,12 +1919,6 @@ impl App {
         {
             return Task::none();
         }
-        if let Some(reason) = shortcut.static_block() {
-            if let Some(action) = crate::actions::find(shortcut) {
-                self.status = format!("{}: {reason}", action.label);
-            }
-            return Task::none();
-        }
         if let Some(panel) = self.active_rebase_panel() {
             if rebase_panel_shortcut(panel, shortcut) {
                 return Task::none();
@@ -2036,8 +2036,8 @@ impl App {
             Shortcut::SearchCommits => return self.update(Message::SearchOpened),
             Shortcut::FileHistory => return self.open_file_list(),
             Shortcut::ExternalDiff => return self.external_diff(),
-            // Disabled until their task lands (`static_block` above).
-            Shortcut::OpenTerminal | Shortcut::OpenFileManager => {}
+            Shortcut::OpenTerminal => return self.update(Message::OpenTerminal),
+            Shortcut::OpenFileManager => return self.update(Message::OpenFileManager),
             Shortcut::ZoomIn => {
                 return self.set_zoom(settings::zoom_step(
                     self.settings.appearance.zoom_percent,
@@ -3015,9 +3015,6 @@ impl App {
     pub fn action_block(&self, id: Shortcut) -> Option<String> {
         let action = crate::actions::find(id)?;
         match action.requires {
-            crate::actions::Requires::NotYet => {
-                return Some(crate::actions::NOT_AVAILABLE.to_owned());
-            }
             crate::actions::Requires::Repository
                 if self.active_tab().and_then(Tab::view).is_none() =>
             {
@@ -3556,6 +3553,59 @@ impl App {
             Message::SettingsOpened => return self.open_settings(),
             Message::SystemTheme(mode) => self.system_theme = mode,
             Message::ExternalDiff => return self.external_diff(),
+            Message::OpenTerminal => {
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|v| v.backend.path().to_path_buf())
+                else {
+                    return Task::none();
+                };
+                let template = self.settings.tools.terminal_command.clone();
+                return Task::perform(
+                    blocking(move || {
+                        let launch = crate::launch::terminal(
+                            crate::launch::Platform::current(),
+                            &crate::launch::SystemLookup,
+                            &template,
+                            &root,
+                        )?;
+                        crate::launch::spawn(&launch).map_err(|e| {
+                            format!(
+                                "{e}. Check the terminal command in Preferences → External tools."
+                            )
+                        })
+                    }),
+                    |result| {
+                        Message::StatusText(match result {
+                            Ok(()) => String::new(),
+                            Err(error) => format!("Could not open a terminal: {error}"),
+                        })
+                    },
+                );
+            }
+            Message::OpenFileManager => {
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|v| v.backend.path().to_path_buf())
+                else {
+                    return Task::none();
+                };
+                return Task::perform(
+                    blocking(move || {
+                        crate::launch::spawn(&crate::launch::file_manager(
+                            crate::launch::Platform::current(),
+                            &root,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
+            Message::TerminalCommandInput(command) => {
+                self.settings.tools.terminal_command = command;
+                return self.save_settings();
+            }
             Message::OpenMergeTool(path) => return self.open_merge_tool(path),
             Message::ExternalToolFinished {
                 tab,
@@ -5049,7 +5099,12 @@ impl App {
                     .map(|p| p.to_path_buf())
                 {
                     return Task::perform(
-                        blocking(move || reveal_in_file_manager(&root.join(&path))),
+                        blocking(move || {
+                            crate::launch::spawn(&crate::launch::reveal_file(
+                                crate::launch::Platform::current(),
+                                &root.join(&path),
+                            ))
+                        }),
                         |result| Message::StatusText(result.err().unwrap_or_default()),
                     );
                 }
@@ -6906,26 +6961,6 @@ fn gitignore_pattern(path: &str) -> String {
 }
 
 /// Opens the system file manager at `path` (selecting it where supported).
-fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
-    let mut command = if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("explorer");
-        c.arg(format!("/select,{}", path.display()));
-        c
-    } else if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        c.arg("-R").arg(path);
-        c
-    } else {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(path.parent().unwrap_or(path));
-        c
-    };
-    command
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("Could not open the file manager: {e}"))
-}
-
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -7274,10 +7309,22 @@ mod tests {
     }
 
     #[test]
-    fn actions_of_later_tasks_explain_why_they_do_nothing() {
-        let mut app = ready_app(&["c"]);
-        let _ = app.update(checked(Shortcut::OpenTerminal, false));
-        assert_eq!(app.status, "Open repository in terminal: Not available yet");
+    fn every_action_is_available_once_a_repository_is_open() {
+        // M5 complete: no action is left disabled for a later task.
+        let app = ready_app(&["c"]);
+        let blocked: Vec<&str> = crate::actions::registry()
+            .iter()
+            .filter(|a| a.context != crate::actions::Context::RebasePanel)
+            .filter(|a| app.action_block(a.id).is_some())
+            .map(|a| a.label.as_str())
+            .collect();
+        assert!(blocked.is_empty(), "{blocked:?}");
+        // Without a repository the terminal has nothing to open.
+        let (empty, _) = App::new(Vec::new(), None);
+        assert_eq!(
+            empty.action_block(Shortcut::OpenTerminal).as_deref(),
+            Some("Open a repository first")
+        );
     }
 
     #[test]

@@ -198,7 +198,13 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         }
         // Nothing to stash or pop: plain disabled button.
         (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => disabled(),
-        (ToolbarAction::Terminal, _) => with_tooltip(disabled()),
+        (ToolbarAction::Terminal, _) => with_tooltip_text(
+            toolbar_button(action, Some(Message::OpenTerminal)).into(),
+            match crate::actions::ActionId::OpenTerminal.shortcut_text() {
+                Some(keys) => format!("Open a terminal in this repository ({keys})"),
+                None => "Open a terminal in this repository".to_owned(),
+            },
+        ),
         _ => write_tooltip(disabled(), view),
     }
 }

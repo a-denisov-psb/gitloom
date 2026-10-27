@@ -145,19 +145,10 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
             container(text(category.title()).size(13)).padding(Padding::default().top(8).bottom(2)),
         );
         for action in entries {
-            let block = action.id.static_block();
-            let mut label = row![text(&action.label).size(13)].spacing(8);
-            if let Some(reason) = block {
-                label = label.push(muted(reason).size(11));
-            }
+            let label = row![text(&action.label).size(13)].spacing(8);
             let keys = text(action.shortcut_labels(MAC))
                 .size(12)
                 .font(Font::MONOSPACE);
-            let keys = if block.is_some() {
-                keys.style(theme::text_muted)
-            } else {
-                keys
-            };
             rows = rows.push(
                 row![label, space::horizontal(), keys]
                     .align_y(iced::Center)
