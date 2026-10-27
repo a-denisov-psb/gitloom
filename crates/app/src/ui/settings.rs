@@ -158,7 +158,10 @@ fn appearance(app: &App) -> Element<'_, Message> {
         field("Zoom", zoom(appearance.zoom_percent), zoom_note()),
         field(
             "Load avatars from Gravatar",
-            not_yet(if appearance.avatars { "On" } else { "Off" }.to_owned()),
+            iced::widget::toggler(appearance.avatars)
+                .on_toggle(Message::AvatarsToggled)
+                .label(if appearance.avatars { "On" } else { "Off" })
+                .into(),
             "Sends a hash of each author's email address to gravatar.com",
         ),
     ]
