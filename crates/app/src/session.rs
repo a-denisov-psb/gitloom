@@ -33,6 +33,9 @@ pub struct Session {
     /// Mode of the toolbar Pull button (last one chosen in its dropdown).
     #[serde(default)]
     pub pull_mode: PullModeSetting,
+    /// Hidden and soloed branches per repository root (M5-08).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ref_filters: std::collections::BTreeMap<PathBuf, crate::ref_filter::RefFilter>,
 }
 
 /// [`git_core::PullMode`] as stored in the session file.
@@ -74,6 +77,7 @@ impl Default for Session {
             active: 0,
             panes: PaneRatios::default(),
             pull_mode: PullModeSetting::default(),
+            ref_filters: Default::default(),
         }
     }
 }
@@ -216,6 +220,10 @@ mod tests {
         };
         session.touch_recent(Path::new("/a"), 10);
         session.touch_recent(Path::new("/b"), 20);
+        let mut filter = crate::ref_filter::RefFilter::default();
+        filter.toggle_hidden("topic", git_core::RefKind::LocalBranch);
+        filter.toggle_soloed("origin/main", git_core::RefKind::RemoteBranch);
+        session.ref_filters.insert(PathBuf::from("/a"), filter);
         session
     }
 

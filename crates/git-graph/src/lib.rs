@@ -5,6 +5,7 @@
 
 mod layout;
 mod topo;
+mod visible;
 
 #[cfg(test)]
 mod test_support;
@@ -13,6 +14,7 @@ pub use layout::{
     layout, layout_with, ColorId, LaneHint, LaneHints, Layout, LayoutOptions, Row, Segment, Wip,
 };
 pub use topo::{topo_order, TopoOrder};
+pub use visible::visible_commits;
 
 use std::fmt;
 

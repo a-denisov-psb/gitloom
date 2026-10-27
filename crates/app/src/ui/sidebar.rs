@@ -213,15 +213,29 @@ fn ref_item<'a>(
     } else {
         space::horizontal().width(0).into()
     };
-    let mut content = row![
-        container(marker).width(INDENT),
-        text(label).wrapping(text::Wrapping::None),
-        space::horizontal(),
-    ]
-    .align_y(iced::Center);
+    // Branches not shown in the graph are dimmed (M5-08).
+    let filter = &repo.ref_filter;
+    // The checked-out branch is always shown (HEAD).
+    let dimmed = !reference.is_head && filter.dims(&reference.name, reference.kind);
+    let label = text(label).wrapping(text::Wrapping::None);
+    let label = if dimmed {
+        label.style(theme::text_faint)
+    } else {
+        label
+    };
+    let mut content = row![container(marker).width(INDENT), label, space::horizontal(),]
+        .spacing(4)
+        .align_y(iced::Center);
     // Like GitKraken: commits ahead/behind the upstream as small badges.
     if let Some(badge) = ahead_behind_badge(reference.ahead_behind) {
         content = content.push(muted(badge).size(11));
+    }
+    if filter.is_soloed(&reference.name, reference.kind) {
+        content = content.push(icons::tinted(Icon::Solo, 13.0, |p| p.accent));
+    }
+    let hidden = filter.is_hidden(&reference.name, reference.kind);
+    if hidden {
+        content = content.push(icons::tinted(Icon::EyeOff, 13.0, |p| p.text_muted));
     }
     let content = content.into();
 
@@ -245,7 +259,34 @@ fn ref_item<'a>(
         .drag
         .as_ref()
         .is_some_and(|d| d.targets(&reference.name, reference.kind));
-    crate::ui::draggable_branch(item, &reference.name, reference.kind, highlight)
+    let item = crate::ui::draggable_branch(item, &reference.name, reference.kind, highlight);
+    // Eye on hover hides or shows the branch; the checked-out one stays.
+    if reference.is_head {
+        return item;
+    }
+    // The eye shows the current state (like GitKraken): open = shown.
+    let (icon, tip) = if hidden {
+        (Icon::EyeOff, "Show in the graph")
+    } else {
+        (Icon::Eye, "Hide in the graph")
+    };
+    let eye = crate::ui::panel::with_tooltip_text(
+        button(icons::tinted(icon, 13.0, |p| p.text))
+            .on_press(Message::ToggleHidden {
+                name: reference.name.clone(),
+                kind: reference.kind,
+            })
+            .padding([3, 6])
+            .style(theme::flat)
+            .into(),
+        tip.to_owned(),
+    );
+    iced::widget::hover(
+        item,
+        row![space::horizontal(), eye]
+            .padding(iced::Padding::default().right(4))
+            .align_y(iced::Center),
+    )
 }
 
 /// Inline rename input in place of the branch entry; red border on an error.

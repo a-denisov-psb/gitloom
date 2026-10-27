@@ -12,6 +12,7 @@ mod overlay;
 mod palette;
 mod panes;
 mod rebase_panel;
+mod ref_filter;
 mod repo_view;
 mod search;
 mod selection;
