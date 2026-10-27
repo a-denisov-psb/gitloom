@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Hide and solo branches: the eye on hover in the left panel or the branch menu hides a branch from the graph, "Solo" shows only the soloed branches (and HEAD); a remote's menu hides or shows all its branches. Remembered per repository.
 - Commit search (Ctrl+F or the magnifier above the graph): message, author, email or SHA; other commits are dimmed, Enter / Shift+Enter jump between matches.
 - Command palette (Ctrl+P): run any action by typing part of its name; open a recent repository (Ctrl+Shift+O) or check out a branch from the palette.
 - Keyboard shortcut list (Ctrl+/): all shortcuts grouped like GitKraken's, with a filter.

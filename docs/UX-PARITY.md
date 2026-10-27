@@ -58,6 +58,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Conflicted file | Opens conflict view (ours, theirs, output) | done (M4-05); with both sides picked in one conflict, ours lines come first (GitKraken keeps the click order) |
 | Interactive rebase | Panel with actions per commit, reorder by drag | done (M4-07): commit menu "Interactive rebase from here"; newest on top until the maintainer verifies GitKraken's order; P/R/S/F/D, ↑/↓, Alt+↑/↓ reorder; inline message editors for rewords and squash chains |
 | Multi-select commits | Ctrl+click, Shift+click | done (M4-01; also Shift+↑/↓; panel "N commits selected") |
+| Hide / solo branches | Eye on hover in the left panel hides a branch; context menu Hide/Show, Solo; remote: Hide all / Show all | done (M5-08; the checked-out branch cannot be hidden until verified in GitKraken; stored per repository) |
 
 ## Keyboard shortcuts
 
