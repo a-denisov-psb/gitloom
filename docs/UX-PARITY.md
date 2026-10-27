@@ -54,7 +54,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Cherry-pick and revert | Commit menu "Cherry-pick commit" / "Revert commit"; multi-selection "Cherry-pick N commits" (oldest first) | done (M4-09); a merge commit asks for the parent to revert against; an empty result opens "Skip" / "Commit empty" (verify wording in GitKraken) |
 | Conflicted files | "Conflicted Files" section above "Unstaged Files" | done (M4-03) |
 | Local + remote branch on same commit | One combined pill | done (M1; since M5-05 a cloud icon, the remote names in its tooltip) |
-| Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
+| Commit node | Avatar (placeholder: initials) | done (M5-11; Gravatar opt-in in Preferences → Appearance, initials otherwise) |
 | Conflicted file | Opens conflict view (ours, theirs, output) | done (M4-05); with both sides picked in one conflict, ours lines come first (GitKraken keeps the click order) |
 | Interactive rebase | Panel with actions per commit, reorder by drag | done (M4-07): commit menu "Interactive rebase from here"; newest on top until the maintainer verifies GitKraken's order; P/R/S/F/D, ↑/↓, Alt+↑/↓ reorder; inline message editors for rewords and squash chains |
 | Multi-select commits | Ctrl+click, Shift+click | done (M4-01; also Shift+↑/↓; panel "N commits selected") |
