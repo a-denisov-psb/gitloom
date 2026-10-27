@@ -70,12 +70,12 @@ Until answered, implement the decisions above; adjust afterwards.
 
 ## Milestone acceptance
 
-- [ ] Every shortcut marked M5 in UX-PARITY works (Windows/Linux; macOS mapping covered by tests); Ctrl+/ lists all registered shortcuts.
-- [ ] Every registered action is reachable from the command palette.
-- [ ] On this repository and a generated 100 000-commit repository, search, hide/solo, palette, file history and blame meet the targets of M5-14.
-- [ ] All views are readable in Light and Dark at 70 %, 100 % and 200 % zoom (screenshots in `docs/screenshots/`).
-- [ ] With avatars off, Gitloom opens no network connection besides Git's own fetch/pull/push.
-- [ ] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
+- [ ] (Linux: Ctrl+/, Ctrl+, , Ctrl+P, Ctrl+= and F11 by hand, every chord dispatched by tests on both platform mappings; Windows and the keys WSLg did not deliver: maintainer to-do) Every shortcut marked M5 in UX-PARITY works (Windows/Linux; macOS mapping covered by tests); Ctrl+/ lists all registered shortcuts.
+- [x] Every registered action is reachable from the command palette.
+- [x] On this repository and a generated 100 000-commit repository, search, hide/solo, palette, file history and blame meet the targets of M5-14.
+- [x] All views are readable in Light and Dark at 70 %, 100 % and 200 % zoom (screenshots in `docs/screenshots/`).
+- [x] With avatars off, Gitloom opens no network connection besides Git's own fetch/pull/push.
+- [ ] (`check.sh` green on Linux and clippy for the Windows target after every merge; GitHub Actions did not start any job since 2026-10-26 — account billing, maintainer to-do) `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
 - [ ] Released as `v0.6.0` (M5-15).
 
 ## Task overview
@@ -246,7 +246,9 @@ Acceptance: integration tests with a fake tool (`difftool.<name>.cmd` / `mergeto
 
 Acceptance: unit tests for the detection order (injected executable lookup) and template expansion (spaces, quoting); checked by hand on Linux; Windows and macOS → maintainer to-do.
 
-### [ ] M5-14 End-to-end check, docs, performance
+### [x] M5-14 End-to-end check, docs, performance
+
+> Done: walkthrough on Linux (release build) of every M5 feature in Dark and Light, main view and Preferences at 70 %, 100 % and 200 % zoom, file history and blame in both themes (screenshots `docs/screenshots/m5-*`). Found and fixed: at 200 % in a 1 400 px window the toolbar cut off Pop, Terminal and Settings — below 1 100 logical pixels the toolbar is icon-only with labels in the tooltips. Measurements in PERFORMANCE.md "M5" with `scripts/perf_repo_m5.py` (100 000 commits) and this repository: search ≤ 15.5 ms, hide 147 ms / solo 79 ms, palette ≤ 4.6 ms, file history of 2 000 commits 0.52 s, blame of 10 000 lines 0.63 s; idle memory 117 MB anonymous (avatars off) / 120 MB (on), no TCP socket with avatars off. UX-PARITY: every M5 row done. Keyboard-only paths that WSLg did not deliver (palette arrows/Enter, search typing) and the Windows walkthrough are maintainer to-dos. CI could not run (billing), so the CI acceptance item stays open.
 
 - Walkthrough of all M5 features on Linux in both themes at 70 %, 100 % and 200 % zoom; Windows → maintainer to-do.
 - PERFORMANCE.md "M5" with a generated 100 000-commit repository: search < 50 ms, hide/solo toggle < 200 ms, palette filter < 30 ms; file history of a file with 2 000 commits < 2 s; blame of 10 000 lines < 2 s; idle memory with avatars on and off.
