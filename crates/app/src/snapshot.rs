@@ -984,6 +984,91 @@ mod filter_perf {
     }
 }
 
+/// M5-14: search, hide/solo toggle and palette filter on a real repository.
+/// `GITLOOM_PERF_REPO=<path> cargo test -p gitloom --release m5_timings -- --ignored --nocapture`
+#[cfg(test)]
+mod m5_perf {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "manual timing, needs GITLOOM_PERF_REPO"]
+    fn m5_timings() {
+        let Ok(path) = std::env::var("GITLOOM_PERF_REPO") else {
+            return;
+        };
+        let backend = git_core::GixBackend::discover(path).unwrap();
+        let snapshot = RepoSnapshot::load(&backend).unwrap();
+        eprintln!(
+            "{} commits, {} refs",
+            snapshot.commits.len(),
+            snapshot.refs.len()
+        );
+
+        for query in [
+            "module 7",
+            "Change 99999",
+            "dev3@",
+            "no such text",
+            "deadbeef",
+        ] {
+            let start = Instant::now();
+            let found = crate::search::matches(&snapshot.commits, query).len();
+            eprintln!(
+                "search {query:>14}: {:?} ({found} matches)",
+                start.elapsed()
+            );
+        }
+
+        // Hide the first non-HEAD branch, then show everything again.
+        let branch = snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && !r.is_head)
+            .map(|r| r.name.clone());
+        if let Some(branch) = branch {
+            let mut filter = crate::ref_filter::RefFilter::default();
+            filter.toggle_hidden(&branch, git_core::RefKind::LocalBranch);
+            let start = Instant::now();
+            let hidden = snapshot.with_filter(&filter).unwrap();
+            let hide = start.elapsed();
+            let mut solo = crate::ref_filter::RefFilter::default();
+            solo.toggle_soloed(&branch, git_core::RefKind::LocalBranch);
+            let start = Instant::now();
+            let soloed = snapshot.with_filter(&solo).unwrap();
+            let solo_time = start.elapsed();
+            let start = Instant::now();
+            let _ = hidden.with_filter(&Default::default()).unwrap();
+            let show = start.elapsed();
+            eprintln!(
+                "hide {branch}: {hide:?} ({} rows); solo: {solo_time:?} ({} rows); show all: {show:?}",
+                hidden.commits.len(),
+                soloed.commits.len()
+            );
+        }
+
+        // Palette file list: the repository's files repeated to 100 000 paths.
+        let cli = git_core::CliBackend::new(backend.path());
+        let files = git_core::tracked_files(&cli, "HEAD", &git_core::CancelToken::new()).unwrap();
+        let entries: Vec<crate::palette::Entry> = files
+            .iter()
+            .cycle()
+            .take(100_000)
+            .enumerate()
+            .map(|(i, f)| {
+                let path = format!("{i}/{f}");
+                crate::palette::Entry::new(path.clone(), crate::palette::Target::File(path))
+            })
+            .collect();
+        let mut palette = crate::palette::Palette::new(crate::palette::Mode::Files, entries);
+        for query in ["hot", "src f1", "big.txt"] {
+            let start = Instant::now();
+            palette.set_query(query.into());
+            eprintln!("palette {query:>8}: {:?}", start.elapsed());
+        }
+    }
+}
+
 /// Manual memory check against a large repository:
 /// `GITLOOM_PERF_REPO=<path> cargo test -p gitloom --release snapshot_memory -- --ignored --nocapture`
 #[cfg(test)]

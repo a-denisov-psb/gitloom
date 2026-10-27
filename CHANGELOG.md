@@ -22,6 +22,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- In a narrow window or at high zoom the toolbar shows icons only, so no button is cut off.
 - A context menu that fits neither below nor above the cursor (small window, high zoom) no longer jumps to the top of the window.
 
 ## [0.5.0] - 2026-10-26

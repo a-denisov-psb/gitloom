@@ -70,15 +70,36 @@ Release builds, same machine. Interaction latencies are measured from the synthe
 - **Context menus in a scrolled graph** appeared off screen: inside a scrolled `scrollable`, iced passes the cursor in content coordinates. `context_area`/`drag_area` now add the translation iced hands to `overlay()` at the start of every update.
 - **Scroll position reset when a menu opened**: the root switched between a bare widget and a `Stack` when an overlay appeared, so iced rebuilt the widget tree and dropped the graph's scroll state; the root is now always a `Stack`.
 
-## M5: productivity parity
+## M5: productivity parity (task M5-14)
 
-Release builds, same machine. The full M5 measurement (M5-14) adds the rest.
+Release builds, same machine. The generated repository comes from
+`scripts/perf_repo_m5.py` (100 000 commits, 50 authors, 21 branches, `hot.txt` changed by
+2 000 commits, `big.txt` with 10 000 lines changed by 200 commits); measured with
+`GITLOOM_PERF_REPO=<repo> cargo test -p gitloom --release m5_timings -- --ignored --nocapture`
+and `GITLOOM_PERF_REPO=<repo> cargo test -p git-core --release --test perf file_history_and_blame -- --ignored --nocapture`.
 
-| Metric | Result | How |
-|---|---|---|
-| Commit search, 100 000 commits with message bodies | **8.7–12.4 ms** (6 queries incl. non-ASCII) | `cargo test --release -p gitloom search_speed -- --ignored --nocapture` |
-| Hide/solo toggle, 100 000 commits (filter + layout) | **66 ms** | `cargo test --release -p gitloom filter_speed -- --ignored --nocapture` |
-| Palette filter, 100 000 file paths | **3.5–8.1 ms** per keystroke (6 queries) | `cargo test --release -p gitloom palette_filter_speed -- --ignored --nocapture` |
+| Metric | Target | Generated 100 000-commit repository | This repository (293 commits) |
+|---|---|---|---|
+| Commit search | < 50 ms | **7.6–15.5 ms** (5 queries) | 0.03 ms |
+| Hide / solo toggle incl. layout | < 200 ms | **147 ms** hide, **79 ms** solo, show all again 0.02 ms (the unfiltered snapshot is kept) | 0.2 ms |
+| Palette filter, 100 000 paths | < 30 ms | **4.2–4.6 ms** (paths of the repository repeated) | 5.4–7.8 ms |
+| File history | < 2 s for 2 000 commits | **0.52 s** (`hot.txt`, 2 000 commits) | 12 ms (`app.rs`, 69 commits) |
+| Blame | < 2 s for 10 000 lines | **0.63 s** (`big.txt`, 10 000 lines) | 94 ms (`app.rs`, 11 286 lines) |
+| Blame scrolling | smooth | 15 ms median, 19 ms max per wheel step (10 686 lines, X11 screenshot polling) | |
+
+Synthetic unit timings (no repository): commit search over 100 000 commits with bodies
+8.7–12.4 ms (`search_speed`), hide toggle 66 ms (`filter_speed`), palette filter 3.5–8.1 ms
+(`palette_filter_speed`), all `cargo test --release -p gitloom <name> -- --ignored --nocapture`.
+
+### Idle memory with avatars
+
+App started on the generated repository (release build), sampled from
+`/proc/<pid>/smaps_rollup` after 15 s idle:
+
+| Avatars | RSS | Anonymous | Network |
+|---|---|---|---|
+| Off | 307 MB | 117 MB | no TCP socket at all (sampled every 50 ms) |
+| On (50 authors, all misses, cached) | 313 MB | 120 MB | requests to gravatar.com, 4 at a time |
 
 ## Memory breakdown (rust-lang/rust)
 

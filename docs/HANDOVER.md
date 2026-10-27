@@ -69,6 +69,8 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M5-06: command palette with the keyboard: Ctrl+P, ↑/↓ (wraps), Enter runs, Esc closes; "Checkout branch…" then Backspace twice returns to the actions; Ctrl+Shift+O. (Opening and filtering checked by hand; the other keys did not reach the window in my WSLg session.)
 - [ ] M5-07: commit search with the keyboard: Ctrl+F, type (non-matching rows dim, "n of m"), Enter / Shift+Enter, Esc keeps the selection. (Opening by the magnifier checked by hand; typing did not reach the window in my WSLg session.)
 - [ ] M5-13: on Windows check Alt+T (Windows Terminal, else PowerShell/cmd in a new window, started in the repository) and Alt+O / "Open file location" (Explorer with the file selected); on macOS (if available) Terminal.app and Finder.
+- [ ] M5-14: M5 walkthrough on Windows in Dark and Light at 100 % and 200 %: Ctrl+/, Ctrl+, , Ctrl+P (arrows, Enter, sub-lists), Ctrl+F (typing, Enter/Shift+Enter), Ctrl+Shift+H, Ctrl+= / Ctrl+- / Ctrl+0, F11, Ctrl+D, Alt+T, Alt+O, hide/solo in the sidebar, file history and blame, avatars on/off, an external diff and merge tool.
+- [ ] GitHub Actions: after the billing is fixed, check the CI runs of `develop` (all M5 merges ran without CI) and fix anything red before the release.
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 - [ ] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0.
 
