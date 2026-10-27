@@ -227,6 +227,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   process. All other reads stay on gix (ADR-002).
 - Why: rename following, `.mailmap` and `blame.ignoreRevsFile` then behave exactly like
   Git; `git` is required since M2 anyway.
+- Implementation note (M5-09): both run through `GitWriter::run_network`, which already
+  reads stdout in a thread and kills the process tree when its `CancelToken` is set; the
+  app cancels by dropping the history view.
 
 ## ADR-025 Icon set
 
