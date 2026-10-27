@@ -27,6 +27,7 @@ mod tabs;
 mod toolbar;
 
 pub use graph::reveal_offset;
+pub use graph::visible_range as graph_visible_range;
 
 /// Id of the inline new-branch input in the graph.
 pub const NEW_BRANCH_INPUT: &str = "new-branch-input";
@@ -157,15 +158,15 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
         let content = match kind {
             PaneKind::Sidebar => sidebar::view(view),
             PaneKind::Center => match &view.center {
-                CenterView::Graph => graph::view(view),
+                CenterView::Graph => graph::view(view, &app.avatars),
                 CenterView::Diff(diff) => diff::view(view, diff),
                 CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
                 CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),
                 CenterView::FileHistory(history) => {
-                    with_background(file_history::view(view, history))
+                    with_background(file_history::view(view, history, &app.avatars))
                 }
             },
-            PaneKind::Panel => panel::view(view),
+            PaneKind::Panel => panel::view(view, &app.avatars),
         };
         pane_grid::Content::new(content)
     })
@@ -299,6 +300,28 @@ pub fn rows_in_view(
     let first = top.saturating_sub(overscan).min(total);
     let last = (bottom + overscan).min(total);
     (first, last.max(first))
+}
+
+/// Round avatar of size `size`, or the author's initials in a circle
+/// while there is none (avatars off, loading, or none on Gravatar).
+pub(crate) fn avatar<'a>(
+    handle: Option<&iced::widget::image::Handle>,
+    author: &str,
+    size: f32,
+) -> Element<'a, Message> {
+    match handle {
+        Some(handle) => iced::widget::image(handle.clone())
+            .width(size)
+            .height(size)
+            .border_radius(size / 2.0)
+            .into(),
+        None => container(text(crate::format::initials(author)).size(size * 0.4))
+            .width(size)
+            .height(size)
+            .center(size)
+            .style(theme::avatar)
+            .into(),
+    }
 }
 
 /// Muted secondary text.

@@ -16,12 +16,12 @@ use crate::ui::{change_badge, muted};
 
 const NOT_AVAILABLE: &str = "Not available yet";
 
-pub fn view(view: &RepoView) -> Element<'_, Message> {
+pub fn view<'a>(view: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Element<'a, Message> {
     let content = match &view.selection {
         _ if view.is_multi() => multi_selection(view),
         Some(Selection::Wip) => staging(view),
         Some(Selection::Commit(id)) => match view.snapshot.commit(id) {
-            Some(commit) => details(view, commit),
+            Some(commit) => details(view, commit, avatars),
             None => muted("Nothing selected").into(),
         },
         None => container(muted("Nothing selected")).padding(12).into(),
@@ -276,7 +276,11 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
 /// GitKraken counts down from 72 characters for the summary.
 const SUMMARY_LIMIT: usize = 72;
 
-fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
+fn details<'a>(
+    view: &'a RepoView,
+    commit: &'a Commit,
+    avatars: &crate::avatars::Avatars,
+) -> Element<'a, Message> {
     let id = row![
         muted("commit:"),
         text(short(&commit.id)).font(iced::Font::MONOSPACE),
@@ -285,11 +289,16 @@ fn details<'a>(view: &'a RepoView, commit: &'a Commit) -> Element<'a, Message> {
 
     let body = (!commit.body.is_empty()).then(|| text(&commit.body));
 
-    let author = column![
-        text(&commit.author),
-        muted(author_line(&commit.email, commit.author_time)).size(12),
+    let author = row![
+        crate::ui::avatar(avatars.get(&commit.email), &commit.author, 32.0),
+        column![
+            text(&commit.author),
+            muted(author_line(&commit.email, commit.author_time)).size(12),
+        ]
+        .spacing(2),
     ]
-    .spacing(2);
+    .spacing(10)
+    .align_y(iced::Center);
 
     let parents = commit.parents.iter().map(|p| {
         muted(format!("parent: {}", short(p)))

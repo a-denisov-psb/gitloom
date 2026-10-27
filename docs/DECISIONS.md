@@ -250,6 +250,12 @@ Architecture decision records in short form. New entries at the bottom. Change a
   4 requests in parallel and only for visible commits. When off, no HTTP client exists.
 - Why: privacy by default; the hash, not the email, leaves the machine, and the
   setting says so.
+- Implementation note (M5-11): `ureq 3.4` (locked to 3.4.2, the newest release at least
+  14 days old), `sha2 0.11`; images through iced's `image-without-codecs` feature plus
+  `image 0.25` with only the `png` and `jpeg` codecs, instead of iced's `image` feature,
+  which enables every codec of the `image` crate (AVIF encoder, TIFF, …) for nothing.
+  Graph nodes overlay an `image` widget on the canvas, because canvas images are not
+  clipped round.
 
 ## ADR-027 Theme system
 

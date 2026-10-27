@@ -308,6 +308,12 @@ pub enum Message {
     ZoomTo(u32),
     /// Light or dark mode of the operating system (start and changes).
     SystemTheme(iced::theme::Mode),
+    /// "Load avatars from Gravatar" switched in Appearance.
+    AvatarsToggled(bool),
+    AvatarLoaded {
+        hash: String,
+        result: Result<crate::avatars::Cached, String>,
+    },
     ThemeChosen(settings::ThemeChoice),
     /// Open the settings view (Ctrl+, , gear button, palette).
     SettingsOpened,
@@ -667,6 +673,13 @@ pub struct App {
     pub session: Session,
     /// User preferences (ADR-023).
     pub settings: Settings,
+    /// Loaded avatars of the authors seen (M5-11).
+    pub avatars: crate::avatars::Avatars,
+    /// HTTP client for avatars; only exists while avatars are on (ADR-026).
+    avatar_fetcher: Option<Arc<dyn crate::avatars::Fetcher>>,
+    /// Creates the client (replaced in tests).
+    avatar_fetcher_factory: fn() -> Arc<dyn crate::avatars::Fetcher>,
+    avatar_cache: Option<crate::avatars::DiskCache>,
     /// Open settings view; replaces the tab content.
     pub settings_page: Option<settings::Page>,
     settings_path: Option<PathBuf>,
@@ -730,6 +743,14 @@ impl App {
             start_path: String::new(),
             session: Session::default(),
             settings: Settings::default(),
+            avatars: Default::default(),
+            avatar_fetcher: None,
+            avatar_fetcher_factory: || Arc::new(crate::avatars::HttpFetcher::new()),
+            // No disk cache without a session (tests).
+            avatar_cache: session_path
+                .as_ref()
+                .and(crate::avatars::DiskCache::default_dir())
+                .map(crate::avatars::DiskCache::new),
             settings_page: None,
             settings_path: session_path
                 .as_deref()
@@ -2867,7 +2888,73 @@ impl App {
         let details = self.load_details();
         let scroll = self.restore_scroll();
         let timer = self.schedule_auto_fetch();
-        Task::batch([task, details, scroll, self.persist(), timer])
+        let avatars = self.request_avatars();
+        Task::batch([task, details, scroll, self.persist(), timer, avatars])
+    }
+
+    /// Asks for the avatars of the authors on screen: visible graph rows,
+    /// the selected commit and the file history (only with avatars on).
+    fn request_avatars(&mut self) -> Task<Message> {
+        if !self.settings.appearance.avatars {
+            return Task::none();
+        }
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let mut emails: Vec<String> = Vec::new();
+        let snapshot = &view.snapshot;
+        match &view.center {
+            CenterView::Graph => {
+                let total = snapshot.layout.len();
+                let (first, last) =
+                    crate::ui::graph_visible_range(view.scroll.offset, view.scroll.height, total);
+                let wip = usize::from(snapshot.has_wip);
+                emails.extend(
+                    (first.max(wip)..last)
+                        .filter_map(|row| snapshot.commits.get(row - wip))
+                        .map(|c| c.email.clone()),
+                );
+            }
+            CenterView::FileHistory(history) => {
+                if let Loadable::Ready(entries) = &history.entries {
+                    emails.extend(entries.iter().take(200).map(|e| e.email.clone()));
+                }
+            }
+            CenterView::Diff(_) | CenterView::Conflict(_) | CenterView::Rebase(_) => {}
+        }
+        if let Some(commit) = view.selected_commit().and_then(|id| snapshot.commit(id)) {
+            emails.push(commit.email.clone());
+        }
+        let start = self.avatars.request(emails.iter().map(String::as_str));
+        self.load_avatars(start)
+    }
+
+    /// Loads the avatars `hashes` in the background (cache, then network).
+    fn load_avatars(&mut self, hashes: Vec<String>) -> Task<Message> {
+        if hashes.is_empty() || !self.settings.appearance.avatars {
+            return Task::none();
+        }
+        let factory = self.avatar_fetcher_factory;
+        let fetcher = Arc::clone(self.avatar_fetcher.get_or_insert_with(factory));
+        Task::batch(hashes.into_iter().map(|hash| {
+            let fetcher = Arc::clone(&fetcher);
+            let cache = self.avatar_cache.clone();
+            Task::perform(
+                blocking(move || {
+                    let result = crate::avatars::load(
+                        &hash,
+                        cache.as_ref(),
+                        fetcher.as_ref(),
+                        std::time::SystemTime::now(),
+                    );
+                    Ok((hash, result))
+                }),
+                |result| match result {
+                    Ok((hash, result)) => Message::AvatarLoaded { hash, result },
+                    Err(error) => Message::StatusText(error),
+                },
+            )
+        }))
     }
 
     /// Starts a timer for the next auto-fetch check unless one is pending
@@ -3314,6 +3401,19 @@ impl App {
             }
             Message::SettingsOpened => return self.open_settings(),
             Message::SystemTheme(mode) => self.system_theme = mode,
+            Message::AvatarsToggled(on) => {
+                self.settings.appearance.avatars = on;
+                if !on {
+                    // Off: no client, no requests, initials everywhere.
+                    self.avatar_fetcher = None;
+                    self.avatars = Default::default();
+                }
+                return self.save_settings();
+            }
+            Message::AvatarLoaded { hash, result } => {
+                let next = self.avatars.finished(&hash, result);
+                return self.load_avatars(next);
+            }
             Message::StatusExpired(seq) => {
                 if seq == self.status_seq {
                     self.status.clear();
@@ -6965,6 +7065,76 @@ mod tests {
         assert_eq!(app.window_size(), iced::Size::new(500.0, 400.0));
         let _ = app.update(Message::WindowResized(iced::Size::new(600.0, 400.0)));
         assert_eq!(app.window_size(), iced::Size::new(600.0, 400.0));
+    }
+
+    /// Counts created HTTP clients (avatars, M5-11).
+    static FETCHERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    struct NoNetwork;
+
+    impl crate::avatars::Fetcher for NoNetwork {
+        fn fetch(&self, _url: &str) -> Result<Option<Vec<u8>>, String> {
+            Err("tests have no network".into())
+        }
+    }
+
+    fn counting_factory() -> Arc<dyn crate::avatars::Fetcher> {
+        FETCHERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(NoNetwork)
+    }
+
+    /// Ready app whose commits have distinct author emails.
+    fn avatar_app(count: usize) -> App {
+        let ids: Vec<String> = (0..count).map(|i| format!("c{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&refs);
+        app.avatar_fetcher_factory = counting_factory;
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        for (i, commit) in commits.iter_mut().enumerate() {
+            commit.email = format!("dev{i}@example.com");
+        }
+        snapshot.commits = Arc::new(commits);
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn avatars_off_means_no_client_and_no_request() {
+        let mut app = avatar_app(6);
+        let created = FETCHERS.load(std::sync::atomic::Ordering::SeqCst);
+        let _ = app.update(Message::GraphScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        let _ = app.update(Message::CommitSelected("c1".into()));
+        assert!(app.avatar_fetcher.is_none());
+        assert_eq!(app.avatars.in_flight(), 0);
+        assert_eq!(FETCHERS.load(std::sync::atomic::Ordering::SeqCst), created);
+    }
+
+    #[test]
+    fn avatars_on_request_visible_authors_four_at_a_time() {
+        let mut app = avatar_app(6);
+        let _ = app.update(Message::AvatarsToggled(true));
+        assert!(app.settings.appearance.avatars);
+        // Six authors on screen: four requests run, the rest waits.
+        assert!(app.avatar_fetcher.is_some());
+        assert_eq!(app.avatars.in_flight(), crate::avatars::MAX_PARALLEL);
+        let hash = crate::avatars::gravatar_hash("dev0@example.com");
+        let _ = app.update(Message::AvatarLoaded {
+            hash,
+            result: Ok(crate::avatars::Cached::Image(vec![1, 2, 3])),
+        });
+        assert!(app.avatars.get("dev0@example.com").is_some());
+        assert_eq!(app.avatars.in_flight(), crate::avatars::MAX_PARALLEL);
+
+        // Off again: the client is dropped and the avatars forgotten.
+        let _ = app.update(Message::AvatarsToggled(false));
+        assert!(app.avatar_fetcher.is_none());
+        assert!(app.avatars.get("dev0@example.com").is_none());
+        assert_eq!(app.avatars.in_flight(), 0);
     }
 
     #[test]

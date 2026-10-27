@@ -37,7 +37,7 @@ const DASH: [f32; 2] = [4.0, 3.0];
 /// Rows rendered above and below the viewport.
 const OVERSCAN: usize = 10;
 
-pub fn view(repo: &RepoView) -> Element<'_, Message> {
+pub fn view<'a>(repo: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Element<'a, Message> {
     let graph_width = graph_width(repo.snapshot.layout.max_width);
     // The available width decides which optional columns fit.
     let table = responsive(move |size| {
@@ -84,7 +84,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             .push(space::vertical().height(first as f32 * ROW_HEIGHT));
         for row_index in first..last {
             rows = rows.push(if row_index < graph_rows {
-                graph_row(repo, row_index, graph_width, columns)
+                graph_row(repo, avatars, row_index, graph_width, columns)
             } else {
                 truncated_row()
             });
@@ -241,12 +241,13 @@ pub fn graph_width(lanes: u16) -> f32 {
 }
 
 /// One table row: the WIP row or a commit row.
-pub fn graph_row(
-    repo: &RepoView,
+pub fn graph_row<'a>(
+    repo: &'a RepoView,
+    avatars: &crate::avatars::Avatars,
     row_index: usize,
     graph_width: f32,
     columns: Columns,
-) -> Element<'_, Message> {
+) -> Element<'a, Message> {
     let snapshot = &repo.snapshot;
     let Some(layout_row) = snapshot.layout.row(row_index) else {
         return container(text("")).height(ROW_HEIGHT).into();
@@ -299,7 +300,10 @@ pub fn graph_row(
     } else if commit.parents.len() > 1 {
         Node::Merge
     } else {
-        Node::Commit(format::initials(&commit.author))
+        Node::Commit {
+            initials: format::initials(&commit.author),
+            avatar: avatars.get(&commit.email).cloned(),
+        }
     };
     let summary = if dimmed {
         text(&commit.summary).style(theme::text_faint)
@@ -319,7 +323,7 @@ pub fn graph_row(
     };
     let mut content = row![
         cell(refs_cell, COL_REFS),
-        cell(graph_cell(layout_row, node, dimmed), graph_width),
+        cell(graph_with_avatar(layout_row, node, dimmed), graph_width),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
     if columns.author {
@@ -610,8 +614,11 @@ enum Node {
     Merge,
     /// Stash entry: hollow square.
     Stash,
-    /// Regular commit with the author's initials.
-    Commit(String),
+    /// Regular commit: the author's avatar, or initials without one.
+    Commit {
+        initials: String,
+        avatar: Option<iced::widget::image::Handle>,
+    },
 }
 
 /// Graph slice of one row.
@@ -620,6 +627,38 @@ struct GraphCell {
     node: Node,
     /// The commit does not match the search: faint node.
     dimmed: bool,
+}
+
+/// Graph cell; an avatar is an image widget on top of the node, because the
+/// canvas does not round images (M5-11).
+fn graph_with_avatar<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
+    let avatar = match &node {
+        Node::Commit {
+            avatar: Some(handle),
+            ..
+        } => Some(handle.clone()),
+        _ => None,
+    };
+    let x = lane_x(row.lane);
+    let cell = graph_cell(row, node, dimmed);
+    let Some(handle) = avatar else {
+        return cell;
+    };
+    let size = NODE_RADIUS * 2.0;
+    let image = iced::widget::image(handle)
+        .width(size)
+        .height(size)
+        .border_radius(NODE_RADIUS)
+        .opacity(if dimmed { 0.3_f32 } else { 1.0 });
+    iced::widget::Stack::with_children([
+        cell,
+        container(image)
+            .padding(iced::Padding::default().left(x - NODE_RADIUS))
+            .height(Fill)
+            .align_y(alignment::Vertical::Center)
+            .into(),
+    ])
+    .into()
 }
 
 fn graph_cell<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
@@ -698,7 +737,14 @@ impl canvas::Program<Message> for GraphCell {
                 frame.fill(&square, p.bg_graph);
                 frame.stroke(&square, line(color, false));
             }
-            Node::Commit(initials) => {
+            Node::Commit {
+                avatar: Some(_), ..
+            } => {
+                // The avatar itself is an image on top (`graph_with_avatar`);
+                // a ring in the lane color frames it.
+                frame.stroke(&Path::circle(node, NODE_RADIUS + 1.0), line(color, false));
+            }
+            Node::Commit { initials, .. } => {
                 frame.fill(&Path::circle(node, NODE_RADIUS), color);
                 frame.fill_text(canvas::Text {
                     content: initials.clone(),

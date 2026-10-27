@@ -1,6 +1,7 @@
 mod actions;
 mod app;
 mod askpass;
+mod avatars;
 mod conflict;
 mod fetch;
 mod file_history;

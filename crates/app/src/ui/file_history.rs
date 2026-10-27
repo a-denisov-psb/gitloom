@@ -19,7 +19,11 @@ const BLAME_ROW: f32 = 18.0;
 const BLAME_OVERSCAN: usize = 20;
 const GUTTER_WIDTH: f32 = 300.0;
 
-pub fn view<'a>(repo: &'a RepoView, history: &'a FileHistoryView) -> Element<'a, Message> {
+pub fn view<'a>(
+    repo: &'a RepoView,
+    history: &'a FileHistoryView,
+    avatars: &'a crate::avatars::Avatars,
+) -> Element<'a, Message> {
     let has_selection = history.selected_entry().is_some();
     let header = container(
         row![
@@ -62,11 +66,7 @@ pub fn view<'a>(repo: &'a RepoView, history: &'a FileHistoryView) -> Element<'a,
         Loadable::Ready(entries) => {
             let rows = Column::with_children(entries.iter().enumerate().map(|(index, entry)| {
                 let mut line = row![
-                    container(text(format::initials(&entry.author)).size(10))
-                        .width(24)
-                        .height(24)
-                        .center(24)
-                        .style(theme::avatar),
+                    crate::ui::avatar(avatars.get(&entry.email), &entry.author, 24.0),
                     column![
                         text(&entry.summary).size(13).wrapping(text::Wrapping::None),
                         muted(format!(
