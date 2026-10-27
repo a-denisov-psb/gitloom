@@ -776,10 +776,7 @@ fn table() -> Vec<Action> {
     }
     // Actions of later M5 tasks: listed, disabled until their task lands.
     for action in &mut actions {
-        if matches!(
-            action.id,
-            A::OpenTerminal | A::OpenFileManager | A::ExternalDiff
-        ) {
+        if matches!(action.id, A::OpenTerminal | A::OpenFileManager) {
             action.requires = Requires::NotYet;
         }
     }

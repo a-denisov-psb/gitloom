@@ -30,7 +30,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let form = match page.category {
         Category::General => general(page),
         Category::Appearance => appearance(app),
-        Category::ExternalTools => external_tools(&app.settings),
+        Category::ExternalTools => external_tools(&app.settings, page),
     };
 
     let header = row![
@@ -205,30 +205,123 @@ fn zoom_note() -> &'static str {
     }
 }
 
-fn tool_label(choice: &ToolChoice) -> String {
-    match choice {
-        ToolChoice::GitConfig => "Use Git config".to_owned(),
-        ToolChoice::Tool(name) => name.clone(),
-        ToolChoice::None => "None".to_owned(),
+/// Entry of the diff/merge tool lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolOption {
+    choice: ToolChoice,
+    label: String,
+}
+
+impl std::fmt::Display for ToolOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
     }
 }
 
-fn external_tools(settings: &Settings) -> Element<'_, Message> {
+/// "Use Git config (meld)", the installed tools, "None"; the current
+/// choice stays listed even if Git does not offer it (any more).
+fn tool_options(info: Option<&git_core::ToolInfo>, current: &ToolChoice) -> Vec<ToolOption> {
+    let configured = info
+        .and_then(|i| i.configured.clone())
+        .unwrap_or_else(|| "not configured".to_owned());
+    let mut options = vec![ToolOption {
+        choice: ToolChoice::GitConfig,
+        label: format!("Use Git config ({configured})"),
+    }];
+    let mut names: Vec<String> = info.map(|i| i.available.clone()).unwrap_or_default();
+    if let ToolChoice::Tool(name) = current {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
+    options.extend(names.into_iter().map(|name| ToolOption {
+        label: name.clone(),
+        choice: ToolChoice::Tool(name),
+    }));
+    options.push(ToolOption {
+        choice: ToolChoice::None,
+        label: "None".to_owned(),
+    });
+    options
+}
+
+fn tool_picker<'a>(
+    info: Option<&git_core::ToolInfo>,
+    current: &ToolChoice,
+    on_choose: fn(ToolChoice) -> Message,
+) -> Element<'a, Message> {
+    let options = tool_options(info, current);
+    let selected = options.iter().find(|o| &o.choice == current).cloned();
+    iced::widget::pick_list(options, selected, move |option: ToolOption| {
+        on_choose(option.choice)
+    })
+    .width(Length::Fixed(320.0))
+    .into()
+}
+
+fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
     let tools = &settings.tools;
     let terminal = if tools.terminal_command.is_empty() {
         "Detect automatically".to_owned()
     } else {
         tools.terminal_command.clone()
     };
-    column![
-        field("Diff tool", not_yet(tool_label(&tools.diff_tool)), None),
-        field("Merge tool", not_yet(tool_label(&tools.merge_tool)), None),
-        field(
+    let (diff_info, merge_info, note) = match &page.tools {
+        Some(Ok((diff, merge))) => (Some(diff), Some(merge), None),
+        Some(Err(error)) => (
+            None,
+            None,
+            Some(format!("Could not ask Git for its tools: {error}")),
+        ),
+        None => (
+            None,
+            None,
+            Some("Open a repository to list the tools Git offers.".to_owned()),
+        ),
+    };
+    let mut content = column![].spacing(18);
+    if let Some(note) = note {
+        content = content.push(muted(note).size(12));
+    }
+    content
+        .push(field(
+            "Diff tool",
+            tool_picker(diff_info, &tools.diff_tool, Message::DiffToolChosen),
+            "Used by Ctrl+D and \"Open in external diff tool\" (git difftool).",
+        ))
+        .push(field(
+            "Merge tool",
+            tool_picker(merge_info, &tools.merge_tool, Message::MergeToolChosen),
+            "Used by \"Open in merge tool\" for conflicted files (git mergetool).",
+        ))
+        .push(column![field(
             "Terminal",
             not_yet(terminal),
             "Command used by Alt+T; {path} is replaced by the repository folder.",
-        ),
-    ]
-    .spacing(18)
-    .into()
+        ),])
+        .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_options_list_git_config_tools_and_none() {
+        let info = git_core::ToolInfo {
+            configured: Some("meld".into()),
+            available: vec!["meld".into(), "kdiff3".into()],
+        };
+        let labels: Vec<String> = tool_options(Some(&info), &ToolChoice::GitConfig)
+            .into_iter()
+            .map(|o| o.label)
+            .collect();
+        assert_eq!(labels, ["Use Git config (meld)", "meld", "kdiff3", "None"]);
+        // A chosen tool Git does not list (any more) stays selectable.
+        let options = tool_options(None, &ToolChoice::Tool("custom".into()));
+        assert_eq!(options[0].label, "Use Git config (not configured)");
+        assert!(options
+            .iter()
+            .any(|o| o.choice == ToolChoice::Tool("custom".into())));
+    }
 }

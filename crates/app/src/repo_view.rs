@@ -344,6 +344,9 @@ pub struct RepoView {
     pub ref_filter: crate::ref_filter::RefFilter,
     /// Number of the latest filter request; older results are dropped.
     pub filter_seq: u64,
+    /// Conflicted file to show again once the refresh after a merge tool
+    /// run arrived (if it is still conflicted).
+    pub reopen_conflict: Option<String>,
     pub center: CenterView,
     pub filter: String,
     pub collapsed: HashSet<Section>,
@@ -571,6 +574,7 @@ impl RepoView {
             search: None,
             ref_filter: Default::default(),
             filter_seq: 0,
+            reopen_conflict: None,
             multi: crate::selection::MultiSelection::default(),
             details: None,
             center: CenterView::Graph,

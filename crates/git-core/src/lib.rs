@@ -11,6 +11,7 @@ mod conflict;
 mod diff;
 mod discard;
 mod editor;
+mod external_tools;
 mod file_history;
 mod gix_backend;
 mod history;
@@ -42,6 +43,10 @@ pub use discard::{
     FileSnapshot, IndexSnapshot,
 };
 pub use editor::{editor_call, editor_main, EditorInput, EditorKind, EDITOR_DIR_ENV, EDITOR_ENV};
+pub use external_tools::{
+    configured_tool, difftool_args, mergetool_args, parse_tool_help, run_difftool, run_mergetool,
+    tool_info, DiffTarget, ToolInfo, ToolKind,
+};
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use gix_backend::GixBackend;
 pub use history::{

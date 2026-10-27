@@ -99,7 +99,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |
 | Open repo in terminal | Alt+T | M5 |
 | Open repo in file manager | Alt+O | M5 |
-| Open diff/merge tool | Ctrl+D | M5 |
+| Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts) |
 | Close current repo | Ctrl+W | done (M1) |
 
 ### Interface
