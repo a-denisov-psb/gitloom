@@ -209,6 +209,20 @@ pub enum CenterView {
     Conflict(Box<crate::conflict::ConflictView>),
     /// Interactive rebase panel (M4-07), replacing the graph.
     Rebase(Box<crate::rebase_panel::RebasePanel>),
+    /// History of one file (M5-09), replacing the graph.
+    FileHistory(Box<crate::file_history::FileHistoryView>),
+}
+
+impl CenterView {
+    /// The diff shown in the center: the diff view, or the selected
+    /// commit's diff in the file history.
+    pub fn diff_mut(&mut self) -> Option<&mut DiffView> {
+        match self {
+            Self::Diff(diff) => Some(diff),
+            Self::FileHistory(history) => history.diff.as_mut(),
+            Self::Graph | Self::Conflict(_) | Self::Rebase(_) => None,
+        }
+    }
 }
 
 /// Vertical scroll state of the graph list (pixels).

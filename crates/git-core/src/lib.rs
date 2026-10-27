@@ -10,6 +10,7 @@ mod conflict;
 mod diff;
 mod discard;
 mod editor;
+mod file_history;
 mod gix_backend;
 mod history;
 mod history_ops;
@@ -39,6 +40,7 @@ pub use discard::{
     FileSnapshot, IndexSnapshot,
 };
 pub use editor::{editor_call, editor_main, EditorInput, EditorKind, EDITOR_DIR_ENV, EDITOR_ENV};
+pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,

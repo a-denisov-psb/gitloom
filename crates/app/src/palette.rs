@@ -15,8 +15,7 @@ pub enum Mode {
     Actions,
     OpenRepository,
     CheckoutBranch,
-    /// Tracked files, for the file history (filled by M5-09).
-    #[allow(dead_code)]
+    /// Tracked files at HEAD, for the file history.
     Files,
 }
 
@@ -41,7 +40,6 @@ pub enum Target {
     /// Folder dialog.
     Browse,
     Checkout(CheckoutTarget),
-    #[allow(dead_code)] // M5-09
     File(String),
 }
 
@@ -108,7 +106,6 @@ impl Palette {
     }
 
     /// A list that is still loading.
-    #[allow(dead_code)] // M5-09
     pub fn loading(mode: Mode) -> Self {
         Self {
             loading: true,
@@ -116,7 +113,6 @@ impl Palette {
         }
     }
 
-    #[allow(dead_code)] // M5-09
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
         self.entries = entries;
         self.loading = false;

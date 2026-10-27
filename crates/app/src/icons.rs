@@ -49,10 +49,11 @@ pub enum Icon {
     Plus,
     Minus,
     Search,
+    History,
 }
 
 impl Icon {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -89,6 +90,7 @@ impl Icon {
         Self::Plus,
         Self::Minus,
         Self::Search,
+        Self::History,
     ];
 
     /// SVG source of the icon.
@@ -135,6 +137,7 @@ impl Icon {
             Self::Plus => lucide!("plus"),
             Self::Minus => lucide!("minus"),
             Self::Search => lucide!("search"),
+            Self::History => lucide!("history"),
         }
     }
 

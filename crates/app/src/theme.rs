@@ -187,6 +187,17 @@ pub fn selected(theme: &Theme) -> container::Style {
     filled(palette(theme).bg_selected)
 }
 
+/// Initials badge in lists (file history).
+pub fn avatar(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.accent.scale_alpha(0.25))),
+        border: Border::default().rounded(12),
+        text_color: Some(p.text),
+        ..container::Style::default()
+    }
+}
+
 pub fn column_header(theme: &Theme) -> container::Style {
     filled(palette(theme).bg_panel)
 }
