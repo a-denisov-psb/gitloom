@@ -44,6 +44,14 @@ const STATUS_FLASH: Duration = Duration::from_secs(2);
 /// Settings changes are written after this quiet period.
 const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// Why an external diff or merge tool did not run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalToolError {
+    /// Neither the settings nor Git's config name a tool.
+    NotConfigured,
+    Failed(String),
+}
+
 /// What a discard affects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscardTarget {
@@ -308,6 +316,23 @@ pub enum Message {
     ZoomTo(u32),
     /// Light or dark mode of the operating system (start and changes).
     SystemTheme(iced::theme::Mode),
+    /// Ctrl+D or the diff header button: the shown diff in the external
+    /// diff tool (M5-12).
+    ExternalDiff,
+    /// Open the conflicted file in the merge tool.
+    OpenMergeTool(String),
+    ExternalToolFinished {
+        tab: TabId,
+        /// The conflicted file of a merge tool run.
+        merge_path: Option<String>,
+        result: Result<(), ExternalToolError>,
+    },
+    /// Tools listed in Preferences → External tools.
+    ToolsLoaded(Result<(git_core::ToolInfo, git_core::ToolInfo), String>),
+    DiffToolChosen(crate::settings::ToolChoice),
+    MergeToolChosen(crate::settings::ToolChoice),
+    /// Open the settings view at a category ("Open settings" in dialogs).
+    SettingsOpenedAt(settings::Category),
     /// "Load avatars from Gravatar" switched in Appearance.
     AvatarsToggled(bool),
     AvatarLoaded {
@@ -2010,8 +2035,9 @@ impl App {
             }
             Shortcut::SearchCommits => return self.update(Message::SearchOpened),
             Shortcut::FileHistory => return self.open_file_list(),
+            Shortcut::ExternalDiff => return self.external_diff(),
             // Disabled until their task lands (`static_block` above).
-            Shortcut::OpenTerminal | Shortcut::OpenFileManager | Shortcut::ExternalDiff => {}
+            Shortcut::OpenTerminal | Shortcut::OpenFileManager => {}
             Shortcut::ZoomIn => {
                 return self.set_zoom(settings::zoom_step(
                     self.settings.appearance.zoom_percent,
@@ -3173,6 +3199,134 @@ impl App {
         )
     }
 
+    /// Tool to pass as `--tool` for `choice`: `Err` when the choice is
+    /// "None"; `Ok(None)` for Git's configured tool.
+    fn tool_argument(choice: &settings::ToolChoice) -> Result<Option<String>, ExternalToolError> {
+        match choice {
+            settings::ToolChoice::GitConfig => Ok(None),
+            settings::ToolChoice::Tool(name) => Ok(Some(name.clone())),
+            settings::ToolChoice::None => Err(ExternalToolError::NotConfigured),
+        }
+    }
+
+    /// Opens the shown diff (diff view or file history) in the external
+    /// diff tool; the app stays usable while it runs.
+    fn external_diff(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let choice = self.settings.tools.diff_tool.clone();
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(request) = view.center.diff_mut().map(|d| d.request.clone()) else {
+            self.status = "Open the diff of a file first".to_owned();
+            return Task::none();
+        };
+        let target = match &request.kind {
+            git_core::DiffKind::Commit(id) => git_core::DiffTarget::Commit {
+                id: id.clone(),
+                parent: view
+                    .snapshot
+                    .commit(id)
+                    .and_then(|c| c.parents.first().cloned()),
+            },
+            git_core::DiffKind::Unstaged => git_core::DiffTarget::Unstaged,
+            git_core::DiffKind::Staged => git_core::DiffTarget::Staged,
+            git_core::DiffKind::Untracked | git_core::DiffKind::Stash { .. } => {
+                self.status = "The external diff tool is not available for this file".to_owned();
+                return Task::none();
+            }
+        };
+        let tool = match Self::tool_argument(&choice) {
+            Ok(tool) => tool,
+            Err(error) => {
+                return self.update(Message::ExternalToolFinished {
+                    tab,
+                    merge_path: None,
+                    result: Err(error),
+                })
+            }
+        };
+        let writer = Arc::clone(&view.writer);
+        self.status = format!(
+            "Waiting for {}…",
+            tool.as_deref().unwrap_or("the external diff tool")
+        );
+        Task::perform(
+            blocking(move || {
+                let result = run_tool(
+                    writer.as_ref(),
+                    git_core::ToolKind::Diff,
+                    tool.is_some(),
+                    |git| {
+                        git_core::run_difftool(
+                            git,
+                            &target,
+                            tool.as_deref(),
+                            &request.path,
+                            request.old_path.as_deref(),
+                        )
+                    },
+                );
+                Ok(result)
+            }),
+            move |result: Result<_, String>| Message::ExternalToolFinished {
+                tab,
+                merge_path: None,
+                result: result.unwrap_or_else(|e| Err(ExternalToolError::Failed(e))),
+            },
+        )
+    }
+
+    /// Opens a conflicted file in the merge tool; writes wait until it exits.
+    fn open_merge_tool(&mut self, path: String) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        if self.write_block().is_some() {
+            return Task::none();
+        }
+        let tool = match Self::tool_argument(&self.settings.tools.merge_tool) {
+            Ok(tool) => tool,
+            Err(error) => {
+                return self.update(Message::ExternalToolFinished {
+                    tab,
+                    merge_path: None,
+                    result: Err(error),
+                })
+            }
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        if view.busy.is_some() {
+            return Task::none();
+        }
+        let label = format!(
+            "Waiting for {}",
+            tool.as_deref().unwrap_or("the merge tool")
+        );
+        view.busy = Some(label);
+        let writer = Arc::clone(&view.writer);
+        let merge_path = Some(path.clone());
+        Task::perform(
+            blocking(move || {
+                Ok(run_tool(
+                    writer.as_ref(),
+                    git_core::ToolKind::Merge,
+                    tool.is_some(),
+                    |git| git_core::run_mergetool(git, tool.as_deref(), &path),
+                ))
+            }),
+            move |result: Result<_, String>| Message::ExternalToolFinished {
+                tab,
+                merge_path: merge_path.clone(),
+                result: result.unwrap_or_else(|e| Err(ExternalToolError::Failed(e))),
+            },
+        )
+    }
+
     /// Opens the palette's file list and loads the tracked files.
     fn open_file_list(&mut self) -> Task<Message> {
         let Some(view) = self.active_tab().and_then(Tab::view) else {
@@ -3401,6 +3555,57 @@ impl App {
             }
             Message::SettingsOpened => return self.open_settings(),
             Message::SystemTheme(mode) => self.system_theme = mode,
+            Message::ExternalDiff => return self.external_diff(),
+            Message::OpenMergeTool(path) => return self.open_merge_tool(path),
+            Message::ExternalToolFinished {
+                tab,
+                merge_path,
+                result,
+            } => {
+                let merge = merge_path.is_some();
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    if merge {
+                        view.busy = None;
+                        // Shown again after the refresh if still conflicted.
+                        view.reopen_conflict = merge_path;
+                    }
+                }
+                self.status.clear();
+                match result {
+                    Ok(()) => {}
+                    Err(ExternalToolError::NotConfigured) => {
+                        self.modal = Some(tool_missing_dialog(merge));
+                    }
+                    Err(ExternalToolError::Failed(error)) => {
+                        let title = if merge {
+                            "Merge tool failed"
+                        } else {
+                            "Diff tool failed"
+                        };
+                        self.modal = Some(Modal::error(title, error));
+                    }
+                }
+                if merge {
+                    return self.refresh(tab);
+                }
+            }
+            Message::ToolsLoaded(result) => {
+                if let Some(page) = &mut self.settings_page {
+                    page.tools = Some(result);
+                }
+            }
+            Message::DiffToolChosen(choice) => {
+                self.settings.tools.diff_tool = choice;
+                return self.save_settings();
+            }
+            Message::MergeToolChosen(choice) => {
+                self.settings.tools.merge_tool = choice;
+                return self.save_settings();
+            }
+            Message::SettingsOpenedAt(category) => {
+                let task = self.open_settings();
+                return Task::batch([task, self.update(Message::SettingsCategory(category))]);
+            }
             Message::AvatarsToggled(on) => {
                 self.settings.appearance.avatars = on;
                 if !on {
@@ -3430,6 +3635,35 @@ impl App {
             Message::SettingsCategory(category) => {
                 if let Some(page) = &mut self.settings_page {
                     page.category = category;
+                }
+                // The tool lists come from Git (needs a repository).
+                if category == settings::Category::ExternalTools {
+                    let writer = self
+                        .active_tab()
+                        .and_then(Tab::view)
+                        .map(|v| Arc::clone(&v.writer));
+                    if let (Some(writer), Some(page)) = (writer, &mut self.settings_page) {
+                        if page.tools.is_none() {
+                            return Task::perform(
+                                blocking(move || {
+                                    let diff = git_core::tool_info(
+                                        writer.as_ref(),
+                                        git_core::ToolKind::Diff,
+                                    );
+                                    let merge = git_core::tool_info(
+                                        writer.as_ref(),
+                                        git_core::ToolKind::Merge,
+                                    );
+                                    Ok(diff
+                                        .and_then(|d| merge.map(|m| (d, m)))
+                                        .map_err(|e| e.to_string()))
+                                }),
+                                |result: Result<_, String>| {
+                                    Message::ToolsLoaded(result.and_then(|r| r))
+                                },
+                            );
+                        }
+                    }
                 }
             }
             Message::AutoFetchInput(input) => {
@@ -3828,6 +4062,13 @@ impl App {
                         entries.push(MenuEntry::Separator);
                     }
                     FileArea::Commit => {}
+                }
+                if file.kind == git_core::ChangeKind::Conflicted {
+                    entries.push(write_item(
+                        "Open in merge tool",
+                        None,
+                        Message::OpenMergeTool(file.path.clone()),
+                    ));
                 }
                 // History of the file (M5-09); from a commit it starts there.
                 let start = match area {
@@ -5565,6 +5806,17 @@ impl App {
                 // Branches that no longer exist leave the filter; a filter
                 // changed while loading is applied now.
                 let filter = self.ensure_filter(id);
+                // After a merge tool: the conflict view shows the new state.
+                let reopen = self.tab_mut(id).and_then(Tab::view_mut).and_then(|view| {
+                    let path = view.reopen_conflict.take()?;
+                    let still = view.conflicted_files().contains(&path.as_str())
+                        && matches!(&view.center, CenterView::Conflict(c) if c.path == path);
+                    still.then_some(path)
+                });
+                let filter = match reopen {
+                    Some(path) => Task::batch([filter, self.update(Message::ConflictOpened(path))]),
+                    None => filter,
+                };
                 // Matches are commit indices: search the new history again.
                 let search = Task::batch([self.run_search(id, None), filter, self.persist()]);
                 if reload {
@@ -6340,6 +6592,45 @@ fn network_stream(
                 .await;
         },
     )
+}
+
+/// Runs an external tool unless no tool is configured (`explicit`: the
+/// settings name one). Blocking.
+fn run_tool(
+    git: &dyn git_core::GitWriter,
+    kind: git_core::ToolKind,
+    explicit: bool,
+    run: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<()>,
+) -> Result<(), ExternalToolError> {
+    if !explicit {
+        match git_core::configured_tool(git, kind) {
+            Ok(Some(_)) => {}
+            Ok(None) => return Err(ExternalToolError::NotConfigured),
+            Err(error) => return Err(ExternalToolError::Failed(error.to_string())),
+        }
+    }
+    run(git).map_err(|e| ExternalToolError::Failed(e.to_string()))
+}
+
+/// No diff or merge tool: explain where to choose one.
+fn tool_missing_dialog(merge: bool) -> Modal {
+    let (title, kind, key) = if merge {
+        ("No merge tool", "merge", "merge.tool")
+    } else {
+        ("No diff tool", "diff", "diff.tool")
+    };
+    let mut modal = Modal::confirm(
+        title,
+        format!(
+            "No external {kind} tool is configured. Choose one in Preferences → External \
+             tools, or set {key} in your Git configuration."
+        ),
+        "Open settings",
+        false,
+        Message::SettingsOpenedAt(settings::Category::ExternalTools),
+    );
+    modal.default = Some(1);
+    modal
 }
 
 /// Loads the diff of `request` in the background.
@@ -7135,6 +7426,98 @@ mod tests {
         assert!(app.avatar_fetcher.is_none());
         assert!(app.avatars.get("dev0@example.com").is_none());
         assert_eq!(app.avatars.in_flight(), 0);
+    }
+
+    #[test]
+    fn external_diff_needs_a_diff_and_a_tool() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        // "None" in the settings: explain where to choose a tool.
+        app.settings.tools.diff_tool = settings::ToolChoice::None;
+        let _ = app.update(checked(Shortcut::ExternalDiff, false));
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "No diff tool");
+        assert!(matches!(
+            modal.default_action(),
+            Some(Message::SettingsOpenedAt(settings::Category::ExternalTools))
+        ));
+
+        app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Waiting for meld…");
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: None,
+            result: Ok(()),
+        });
+        assert!(app.status.is_empty());
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: None,
+            result: Err(ExternalToolError::NotConfigured),
+        });
+        assert_eq!(
+            app.modal.take().map(|m| m.title),
+            Some("No diff tool".into())
+        );
+
+        // Without an open diff there is nothing to compare.
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Open the diff of a file first");
+    }
+
+    #[test]
+    fn merge_tool_blocks_writes_until_it_exits() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        app.settings.tools.merge_tool = settings::ToolChoice::Tool("kdiff3".into());
+        let _ = app.update(Message::OpenMergeTool("c.txt".into()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Waiting for kdiff3")
+        );
+        // A second start waits for the first.
+        let _ = app.update(Message::OpenMergeTool("c.txt".into()));
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: Some("c.txt".into()),
+            result: Ok(()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none());
+        assert_eq!(view.reopen_conflict.as_deref(), Some("c.txt"));
+    }
+
+    #[test]
+    fn tool_settings_are_stored() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::ExternalTools));
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::ExternalTools)
+        );
+        let info = git_core::ToolInfo {
+            configured: Some("meld".into()),
+            available: vec!["meld".into(), "vimdiff".into()],
+        };
+        let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
+        assert!(matches!(
+            app.settings_page.as_ref().and_then(|p| p.tools.as_ref()),
+            Some(Ok(_))
+        ));
+        let _ = app.update(Message::DiffToolChosen(settings::ToolChoice::Tool(
+            "vimdiff".into(),
+        )));
+        let _ = app.update(Message::MergeToolChosen(settings::ToolChoice::None));
+        assert_eq!(
+            app.settings.tools.diff_tool,
+            settings::ToolChoice::Tool("vimdiff".into())
+        );
+        assert_eq!(app.settings.tools.merge_tool, settings::ToolChoice::None);
     }
 
     #[test]

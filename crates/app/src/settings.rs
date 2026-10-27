@@ -129,6 +129,8 @@ pub struct Page {
     pub auto_fetch_input: String,
     /// Why the typed interval is not applied.
     pub error: Option<String>,
+    /// Diff and merge tools Git offers (External tools); `None` until loaded.
+    pub tools: Option<Result<(git_core::ToolInfo, git_core::ToolInfo), String>>,
 }
 
 impl Page {
@@ -137,6 +139,7 @@ impl Page {
             category: Category::General,
             auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
             error: None,
+            tools: None,
         }
     }
 

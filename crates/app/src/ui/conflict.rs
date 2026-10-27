@@ -19,10 +19,23 @@ const TEXT_SIZE: f32 = 12.0;
 
 pub fn view<'a>(repo: &'a RepoView, conflict: &'a ConflictView) -> Element<'a, Message> {
     let idle = repo.write_block.is_none() && repo.busy.is_none();
-    let close = button(text("Close").size(12))
-        .padding([2, 8])
-        .style(button::secondary)
-        .on_press(Message::DiffClosed);
+    let idle_tool = repo.write_block.is_none() && repo.busy.is_none();
+    let merge_tool = crate::ui::panel::with_tooltip_text(
+        button(text("Open in merge tool").size(12))
+            .padding([2, 8])
+            .style(button::secondary)
+            .on_press_maybe(idle_tool.then(|| Message::OpenMergeTool(conflict.path.clone())))
+            .into(),
+        "Resolve this file in the external merge tool (git mergetool)".to_owned(),
+    );
+    let close = row![
+        merge_tool,
+        button(text("Close").size(12))
+            .padding([2, 8])
+            .style(button::secondary)
+            .on_press(Message::DiffClosed)
+    ]
+    .spacing(6);
     let title = row![text(&conflict.path).size(14), space::horizontal()]
         .spacing(8)
         .align_y(iced::Center);
@@ -65,7 +78,7 @@ fn text_view<'a>(
     conflict: &'a ConflictView,
     conflict_text: &'a ConflictText,
     title: iced::widget::Row<'a, Message>,
-    close: iced::widget::Button<'a, Message>,
+    close: iced::widget::Row<'a, Message>,
     idle: bool,
 ) -> Element<'a, Message> {
     let save_blocker = conflict.save_blocker();

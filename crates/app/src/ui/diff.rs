@@ -90,6 +90,7 @@ fn view_with<'a>(repo: &'a RepoView, diff: &'a DiffView, standalone: bool) -> El
         .push(selection_action)
         .push(if standalone {
             row![
+                external_button(request),
                 history_button(request),
                 modes,
                 crate::ui::panel::with_tooltip_text(
@@ -103,7 +104,7 @@ fn view_with<'a>(repo: &'a RepoView, diff: &'a DiffView, standalone: bool) -> El
             ]
             .spacing(12)
         } else {
-            row![modes]
+            row![external_button(request), modes].spacing(12)
         })
         .spacing(12)
         .padding([6, 12])
@@ -125,6 +126,27 @@ fn view_with<'a>(repo: &'a RepoView, diff: &'a DiffView, standalone: bool) -> El
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// "Open in external diff tool" (M5-12; Ctrl+D).
+fn external_button<'a>(request: &DiffRequest) -> Element<'a, Message> {
+    let enabled = !matches!(request.kind, DiffKind::Untracked | DiffKind::Stash { .. });
+    let tip = match (
+        enabled,
+        crate::actions::ActionId::ExternalDiff.shortcut_text(),
+    ) {
+        (false, _) => "Not available for untracked files and stashes".to_owned(),
+        (true, Some(keys)) => format!("Open in external diff tool ({keys})"),
+        (true, None) => "Open in external diff tool".to_owned(),
+    };
+    crate::ui::panel::with_tooltip_text(
+        button(text("External").size(12))
+            .on_press_maybe(enabled.then_some(Message::ExternalDiff))
+            .padding([2, 8])
+            .style(button::secondary)
+            .into(),
+        tip,
+    )
 }
 
 /// "History" in the diff header (M5-09): the file's history, starting at
