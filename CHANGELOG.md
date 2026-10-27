@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Blame: the file history has a Blame mode (working copy or any commit of the history) with author, commit and age per block of lines; clicking a block shows that commit.
 - File history: right click a file → "File history", the "History" button of the diff, or Ctrl+Shift+H to pick a file. Shows every commit that changed the file (following renames) with its diff; "Show in graph" jumps to the commit.
 - Hide and solo branches: the eye on hover in the left panel or the branch menu hides a branch from the graph, "Solo" shows only the soloed branches (and HEAD); a remote's menu hides or shows all its branches. Remembered per repository.
 - Commit search (Ctrl+F or the magnifier above the graph): message, author, email or SHA; other commits are dimmed, Enter / Shift+Enter jump between matches.

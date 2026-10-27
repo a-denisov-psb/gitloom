@@ -187,6 +187,18 @@ pub fn selected(theme: &Theme) -> container::Style {
     filled(palette(theme).bg_selected)
 }
 
+/// Background of a blame group; neighbouring groups alternate.
+pub fn blame_band(odd: bool) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let p = palette(theme);
+        if odd {
+            filled(p.bg_panel)
+        } else {
+            filled(p.bg_graph)
+        }
+    }
+}
+
 /// Initials badge in lists (file history).
 pub fn avatar(theme: &Theme) -> container::Style {
     let p = palette(theme);
