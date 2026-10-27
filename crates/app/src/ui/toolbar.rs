@@ -57,30 +57,39 @@ fn tool_button<'a>(
     icon: Icon,
     label: &'a str,
     on_press: Option<Message>,
+    compact: bool,
 ) -> iced::widget::Button<'a, Message> {
     let enabled = on_press.is_some();
-    button(
+    // Compact (narrow window, high zoom): icons only, the label is in the
+    // tooltip.
+    let content: Element<'a, Message> = if compact {
+        icons::button_icon(icon, 18.0, enabled).into()
+    } else {
         column![
             icons::button_icon(icon, 18.0, enabled),
             text(label).size(11)
         ]
         .spacing(2)
-        .align_x(iced::Center),
-    )
-    .on_press_maybe(on_press)
-    .padding([3, 10])
-    .width(64)
-    .style(theme::flat)
+        .align_x(iced::Center)
+        .into()
+    };
+    button(content)
+        .on_press_maybe(on_press)
+        .padding(if compact { [8, 8] } else { [3, 10] })
+        .width(if compact { 36 } else { 64 })
+        .style(theme::flat)
 }
 
 fn toolbar_button<'a>(
     action: ToolbarAction,
     on_press: Option<Message>,
+    compact: bool,
 ) -> iced::widget::Button<'a, Message> {
-    tool_button(action.icon(), action.label(), on_press)
+    tool_button(action.icon(), action.label(), on_press, compact)
 }
 
-pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Message> {
+/// `compact`: the window is too narrow for labelled buttons (icons only).
+pub fn view(view: &RepoView, pull_mode: git_core::PullMode, compact: bool) -> Element<'_, Message> {
     let pickers = row![
         picker("repository", view.name().to_owned()),
         picker("branch", view.snapshot.branch_label()),
@@ -88,15 +97,15 @@ pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Messa
     .spacing(20);
 
     let actions = row![
-        action(view, ToolbarAction::Undo),
-        action(view, ToolbarAction::Redo),
+        action(view, compact, ToolbarAction::Undo),
+        action(view, compact, ToolbarAction::Redo),
         divider(),
-        row![pull_button(view, pull_mode), pull_dropdown()].align_y(iced::Center),
-        push_button(view),
+        row![pull_button(view, pull_mode, compact), pull_dropdown()].align_y(iced::Center),
+        push_button(view, compact),
         divider(),
-        branch_button(view),
-        action(view, ToolbarAction::Stash),
-        action(view, ToolbarAction::Pop),
+        branch_button(view, compact),
+        action(view, compact, ToolbarAction::Stash),
+        action(view, compact, ToolbarAction::Pop),
     ]
     .spacing(2)
     .align_y(iced::Center);
@@ -106,8 +115,8 @@ pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Messa
         space::horizontal(),
         actions,
         space::horizontal(),
-        action(view, ToolbarAction::Terminal),
-        settings_button(),
+        action(view, compact, ToolbarAction::Terminal),
+        settings_button(compact),
     ]
     .padding([4, 12])
     .align_y(iced::Center);
@@ -116,13 +125,19 @@ pub fn view(view: &RepoView, pull_mode: git_core::PullMode) -> Element<'_, Messa
 }
 
 /// Gear button: opens the settings view (Ctrl+,).
-fn settings_button<'a>() -> Element<'a, Message> {
+fn settings_button<'a>(compact: bool) -> Element<'a, Message> {
     let tip = match crate::actions::ActionId::Settings.shortcut_text() {
         Some(keys) => format!("Preferences ({keys})"),
         None => "Preferences".to_owned(),
     };
     with_tooltip_text(
-        tool_button(Icon::Settings, "Settings", Some(Message::SettingsOpened)).into(),
+        tool_button(
+            Icon::Settings,
+            "Settings",
+            Some(Message::SettingsOpened),
+            compact,
+        )
+        .into(),
         tip,
     )
 }
@@ -148,8 +163,8 @@ fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
     )
 }
 
-fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
-    let disabled = || -> Element<'a, Message> { toolbar_button(action, None).into() };
+fn action<'a>(view: &RepoView, compact: bool, action: ToolbarAction) -> Element<'a, Message> {
+    let disabled = || -> Element<'a, Message> { toolbar_button(action, None, compact).into() };
     let writable = view.write_block.is_none() && view.busy.is_none();
     // Undo/Redo name the action in their tooltip.
     if matches!(action, ToolbarAction::Undo | ToolbarAction::Redo) {
@@ -170,7 +185,7 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
         }
         return match stack.last() {
             Some(last) => with_tooltip_text(
-                toolbar_button(action, view.busy.is_none().then_some(message)).into(),
+                toolbar_button(action, view.busy.is_none().then_some(message), compact).into(),
                 format!("{verb}: {}", last.label()),
             ),
             None => with_tooltip_text(disabled(), format!("Nothing to {}", verb.to_lowercase())),
@@ -194,12 +209,16 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
     }
     match (action, message) {
         (ToolbarAction::Stash | ToolbarAction::Pop, Some(message)) if writable => {
-            toolbar_button(action, Some(message)).into()
+            // Labelled in the tooltip (needed when compact).
+            with_tooltip_text(
+                toolbar_button(action, Some(message), compact).into(),
+                action.label().to_owned(),
+            )
         }
         // Nothing to stash or pop: plain disabled button.
         (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => disabled(),
         (ToolbarAction::Terminal, _) => with_tooltip_text(
-            toolbar_button(action, Some(Message::OpenTerminal)).into(),
+            toolbar_button(action, Some(Message::OpenTerminal), compact).into(),
             match crate::actions::ActionId::OpenTerminal.shortcut_text() {
                 Some(keys) => format!("Open a terminal in this repository ({keys})"),
                 None => "Open a terminal in this repository".to_owned(),
@@ -210,14 +229,22 @@ fn action<'a>(view: &RepoView, action: ToolbarAction) -> Element<'a, Message> {
 }
 
 /// Pull in the current mode; the tooltip names the mode.
-fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Message> {
+fn pull_button<'a>(
+    view: &RepoView,
+    mode: git_core::PullMode,
+    compact: bool,
+) -> Element<'a, Message> {
     if view.write_block.is_some() {
-        return write_tooltip(toolbar_button(ToolbarAction::Pull, None).into(), view);
+        return write_tooltip(
+            toolbar_button(ToolbarAction::Pull, None, compact).into(),
+            view,
+        );
     }
     with_tooltip_text(
         toolbar_button(
             ToolbarAction::Pull,
             view.busy.is_none().then_some(Message::Pull(None)),
+            compact,
         )
         .into(),
         mode.label().to_owned(),
@@ -225,14 +252,18 @@ fn pull_button<'a>(view: &RepoView, mode: git_core::PullMode) -> Element<'a, Mes
 }
 
 /// New branch at the selected commit (inline input, Ctrl+B).
-fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
+fn branch_button<'a>(view: &RepoView, compact: bool) -> Element<'a, Message> {
     if view.write_block.is_some() {
-        return write_tooltip(toolbar_button(ToolbarAction::Branch, None).into(), view);
+        return write_tooltip(
+            toolbar_button(ToolbarAction::Branch, None, compact).into(),
+            view,
+        );
     }
     with_tooltip_text(
         toolbar_button(
             ToolbarAction::Branch,
             view.busy.is_none().then_some(Message::NewBranchStart(None)),
+            compact,
         )
         .into(),
         match crate::actions::ActionId::CreateBranch.shortcut_text() {
@@ -243,9 +274,12 @@ fn branch_button<'a>(view: &RepoView) -> Element<'a, Message> {
 }
 
 /// Push the current branch; the tooltip names the target.
-fn push_button<'a>(view: &RepoView) -> Element<'a, Message> {
+fn push_button<'a>(view: &RepoView, compact: bool) -> Element<'a, Message> {
     if view.write_block.is_some() {
-        return write_tooltip(toolbar_button(ToolbarAction::Push, None).into(), view);
+        return write_tooltip(
+            toolbar_button(ToolbarAction::Push, None, compact).into(),
+            view,
+        );
     }
     let tooltip = match view.snapshot.head_upstream() {
         Some((local, Some((remote, branch)))) => format!("Push {local} to {remote}/{branch}"),
@@ -258,6 +292,7 @@ fn push_button<'a>(view: &RepoView) -> Element<'a, Message> {
             view.busy
                 .is_none()
                 .then_some(Message::Push { force: false }),
+            compact,
         )
         .into(),
         tooltip,

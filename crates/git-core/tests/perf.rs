@@ -223,3 +223,32 @@ fn conflict_of_a_5000_line_file() {
         text.hunks().count()
     );
 }
+
+/// M5-14: file history of `GITLOOM_PERF_FILE` (default `hot.txt`) and blame
+/// of `GITLOOM_PERF_BLAME` (default `big.txt`) in the perf repository.
+#[test]
+#[ignore = "manual timing, needs GITLOOM_PERF_REPO"]
+fn file_history_and_blame() {
+    let Some(backend) = repo() else { return };
+    let cli = CliBackend::new(backend.path());
+    let file = std::env::var("GITLOOM_PERF_FILE").unwrap_or_else(|_| "hot.txt".into());
+    let big = std::env::var("GITLOOM_PERF_BLAME").unwrap_or_else(|_| "big.txt".into());
+    let mut entries = 0;
+    let history = median(3, || {
+        let start = Instant::now();
+        entries = git_core::file_history(&cli, &file, "HEAD", &git_core::CancelToken::new())
+            .unwrap()
+            .len();
+        start.elapsed()
+    });
+    let mut lines = 0;
+    let blame = median(3, || {
+        let start = Instant::now();
+        let blame =
+            git_core::blame(&cli, &big, Some("HEAD"), &git_core::CancelToken::new()).unwrap();
+        lines = blame.lines.len();
+        start.elapsed()
+    });
+    eprintln!("file history of {file}: {entries} commits in {history:?}");
+    eprintln!("blame of {big}: {lines} lines in {blame:?}");
+}
