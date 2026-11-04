@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
+### Added
+
+- Open the repository in a terminal (Alt+T or the toolbar's Terminal button) or in the file manager (Alt+O); the terminal command can be set in Preferences → External tools.
+- External diff and merge tools: Ctrl+D or "External" opens the shown diff in your diff tool, "Open in merge tool" resolves a conflict in your merge tool (Git's configuration, or a tool chosen in Preferences → External tools).
+- Avatars from Gravatar, opt-in (Preferences → Appearance, off by default): round author pictures in the graph, the commit details and the file history. Only a hash of the email address is sent; results are cached for seven days. When off, Gitloom makes no network requests besides Git's own.
+- Blame: the file history has a Blame mode (working copy or any commit of the history) with author, commit and age per block of lines; clicking a block shows that commit.
+- File history: right click a file → "File history", the "History" button of the diff, or Ctrl+Shift+H to pick a file. Shows every commit that changed the file (following renames) with its diff; "Show in graph" jumps to the commit.
+- Hide and solo branches: the eye on hover in the left panel or the branch menu hides a branch from the graph, "Solo" shows only the soloed branches (and HEAD); a remote's menu hides or shows all its branches. Remembered per repository.
+- Commit search (Ctrl+F or the magnifier above the graph): message, author, email or SHA; other commits are dimmed, Enter / Shift+Enter jump between matches.
+- Command palette (Ctrl+P): run any action by typing part of its name; open a recent repository (Ctrl+Shift+O) or check out a branch from the palette.
+- Keyboard shortcut list (Ctrl+/): all shortcuts grouped like GitKraken's, with a filter.
+- Icons (Lucide) in the toolbar, sidebar, graph, file lists and banners instead of text symbols; a combined local/remote pill shows a cloud icon with the remote names as tooltip.
+- Zoom (Ctrl+= / Ctrl+- / Ctrl+0, 70–200 %, remembered) and fullscreen (F11).
+- Light theme: Preferences → Appearance → Dark, Light or System (follows the operating system).
+- Preferences (Ctrl+, or the gear button): the auto-fetch interval can be changed (0 turns it off). Preferences are stored in `settings.json` next to the session; the interval set before is taken over.
+
+### Fixed
+
+- In a narrow window or at high zoom the toolbar shows icons only, so no button is cut off.
+- A context menu that fits neither below nor above the cursor (small window, high zoom) no longer jumps to the top of the window.
+
 ## [0.5.0] - 2026-10-26
 
 ### Added

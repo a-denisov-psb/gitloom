@@ -46,8 +46,10 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-008 License
 
-- Status: provisional
-- Decision: MIT OR Apache-2.0 (Rust ecosystem default). To be confirmed by the maintainer before the first public push.
+- Status: accepted (M6 plan, 2026-11-03; replaces the provisional MIT OR Apache-2.0)
+- Decision: GPL-3.0-or-later. Dependencies must have GPL-3.0 compatible licenses,
+  checked by `cargo-deny`; third-party notices ship with every package.
+- Why: maintainer decision; forks and redistributed builds stay open source.
 
 ## ADR-009 Privacy
 
@@ -112,13 +114,17 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-016 Release builds
 
-- Status: accepted (planned for M6)
-- Decision: release binaries are built and published by CI only from M6 on, signed
-  from the start. Every version tag triggers a build, including hotfixes.
-  Targets: Linux AppImage + tar.gz, macOS universal dmg, Windows x64 zip + msi,
-  Windows x86 zip + msi as best effort (allowed to fail without blocking the release).
-- Why: unsigned builds cause Gatekeeper/SmartScreen warnings; the maintainer prefers
-  to ship installers only once they are signed.
+- Status: accepted (updated in the M6 plan, 2026-11-03)
+- Decision: release binaries are built and published by CI only, from a version tag
+  on `master` (`vX.Y.Z`, `vX.Y.Z-rc.N`, hotfixes included), as a draft GitHub release
+  with `SHA256SUMS`. Targets: Linux AppImage + tar.gz, macOS universal dmg, Windows x64
+  zip + msi, Windows x86 zip + msi as best effort (allowed to fail).
+  Signing: Windows via SignPath Foundation (free for open source, needs the public
+  repository and builds on public CI); macOS ad-hoc signature without notarization;
+  Linux unsigned with checksums. The repository goes public with the first release
+  candidate so that SignPath can sign 1.0.
+- Why: signed Windows binaries avoid SmartScreen warnings without a paid certificate;
+  macOS notarization (Apple Developer ID) is deferred to the backlog.
 
 ## ADR-017 Autonomous task merges
 
@@ -215,6 +221,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   kept as `settings.json.bak`.
 - Why: preferences and state change at different rates; a broken session must not
   reset preferences and vice versa.
+- Implementation note (M5-02): the file sits next to `session.json` (same config dir);
+  missing and unknown fields fall back to defaults, a newer version or a broken value
+  resets the whole file to defaults (backup kept). Writes are debounced (300 ms).
 
 ## ADR-024 Git CLI for file history and blame
 
@@ -224,6 +233,9 @@ Architecture decision records in short form. New entries at the bottom. Change a
   process. All other reads stay on gix (ADR-002).
 - Why: rename following, `.mailmap` and `blame.ignoreRevsFile` then behave exactly like
   Git; `git` is required since M2 anyway.
+- Implementation note (M5-09): both run through `GitWriter::run_network`, which already
+  reads stdout in a thread and kills the process tree when its `CancelToken` is set; the
+  app cancels by dropping the history view.
 
 ## ADR-025 Icon set
 
@@ -244,6 +256,12 @@ Architecture decision records in short form. New entries at the bottom. Change a
   4 requests in parallel and only for visible commits. When off, no HTTP client exists.
 - Why: privacy by default; the hash, not the email, leaves the machine, and the
   setting says so.
+- Implementation note (M5-11): `ureq 3.4` (locked to 3.4.2, the newest release at least
+  14 days old), `sha2 0.11`; images through iced's `image-without-codecs` feature plus
+  `image 0.25` with only the `png` and `jpeg` codecs, instead of iced's `image` feature,
+  which enables every codec of the `image` crate (AVIF encoder, TIFF, …) for nothing.
+  Graph nodes overlay an `image` widget on the canvas, because canvas images are not
+  clipped round.
 
 ## ADR-027 Theme system
 
@@ -252,3 +270,34 @@ Architecture decision records in short form. New entries at the bottom. Change a
   A "System" option is added only if iced 0.14 can detect the OS theme (result recorded
   here by M5-03). Text colors reach WCAG AA contrast in both palettes.
 - Why: light theme parity with GitKraken; one place for colors.
+- Result (M5-03): iced 0.14 reports the OS theme (`iced::system::theme()` and the
+  `system::theme_changes()` subscription, no extra feature), so "System" is offered. When
+  the window system reports no preference (`Mode::None`), Dark is used. Style functions
+  pick the palette from the iced theme they receive (`extended_palette().is_dark`).
+
+## ADR-028 Product identity in one place
+
+- Status: accepted (M6 plan)
+- Decision: display name, binary name, application id, config/cache/data dir name,
+  repository and issue URLs live in one module; code uses only that module. The rename
+  from the working title "Gitloom" copies `settings.json` and `session.json` once from
+  the old config dir.
+- Why: "Gitloom" collides with an existing product; the final name must be a one-place
+  change.
+
+## ADR-029 Crash reports
+
+- Status: accepted (M6 plan)
+- Decision: a panic hook writes local crash reports (version, commit, OS, thread,
+  message, backtrace) to the data dir, keeps the newest 20 and offers them on the next
+  start. Nothing is uploaded.
+- Why: users can attach a report to an issue; privacy by default (ADR-009).
+
+## ADR-030 Update check
+
+- Status: accepted (M6 plan)
+- Decision: opt-in, off by default; at most once per day the latest GitHub release is
+  requested via `ureq`; a newer version shows a status bar notice with a link. No
+  download or installation; pre-releases only for pre-release builds.
+- Why: ADR-009 (network features are opt-in); installers differ per platform, so
+  automatic updates are a backlog item.

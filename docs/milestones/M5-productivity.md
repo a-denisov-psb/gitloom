@@ -70,13 +70,13 @@ Until answered, implement the decisions above; adjust afterwards.
 
 ## Milestone acceptance
 
-- [ ] Every shortcut marked M5 in UX-PARITY works (Windows/Linux; macOS mapping covered by tests); Ctrl+/ lists all registered shortcuts.
-- [ ] Every registered action is reachable from the command palette.
-- [ ] On this repository and a generated 100 000-commit repository, search, hide/solo, palette, file history and blame meet the targets of M5-14.
-- [ ] All views are readable in Light and Dark at 70 %, 100 % and 200 % zoom (screenshots in `docs/screenshots/`).
-- [ ] With avatars off, Gitloom opens no network connection besides Git's own fetch/pull/push.
-- [ ] `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
-- [ ] Released as `v0.6.0` (M5-15).
+- [ ] (Linux: Ctrl+/, Ctrl+, , Ctrl+P, Ctrl+= and F11 by hand, every chord dispatched by tests on both platform mappings; Windows and the keys WSLg did not deliver: maintainer to-do) Every shortcut marked M5 in UX-PARITY works (Windows/Linux; macOS mapping covered by tests); Ctrl+/ lists all registered shortcuts.
+- [x] Every registered action is reachable from the command palette.
+- [x] On this repository and a generated 100 000-commit repository, search, hide/solo, palette, file history and blame meet the targets of M5-14.
+- [x] All views are readable in Light and Dark at 70 %, 100 % and 200 % zoom (screenshots in `docs/screenshots/`).
+- [x] With avatars off, Gitloom opens no network connection besides Git's own fetch/pull/push.
+- [x] (CI of `develop` green on Linux, Windows, macOS and MSRV on 2026-11-04 after the billing was fixed) `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
+- [x] Released as `v0.6.0` (M5-15).
 
 ## Task overview
 
@@ -102,7 +102,9 @@ Until answered, implement the decisions above; adjust afterwards.
 
 ## Tasks
 
-### [ ] M5-01 Action registry and shortcut list
+### [x] M5-01 Action registry and shortcut list
+
+> Done: `actions.rs` holds `ActionId` (the former `Shortcut` enum, kept as an alias) and the registry with label, category, context (global, graph, staging, text field, plus "rebase panel" for P/R/S/F/D and Alt+↑/↓), chords and availability; `shortcuts.rs` maps keys through it. Chords match Shift exactly (Shift+F5, Shift+Ctrl+Home and Ctrl+Alt+Shift+F no longer trigger; nothing in UX-PARITY uses them). Punctuation that needs Shift on the layout is matched by the shifted key (Ctrl+/ on a German keyboard, Ctrl++). Ctrl+/ opens "Keyboard shortcuts" (grouped, filter, Esc closes even from the focused filter); M5 actions are listed and refused with "Not available yet" in the status bar. Menu and tooltip shortcut texts come from the registry. Tests: no duplicate chord per context (both platforms), every chord dispatches to its action (both platforms), macOS labels (⌘, ⇧, ⌥, ⌃), shifted punctuation, list filter, app (open, filter, Esc, disabled action). Checked by hand: Ctrl+/ → list, typing "zoom"/"tab" filters, Esc closes.
 
 - `actions.rs`: `ActionId` plus a table with label, category (the UX-PARITY sections: Repo actions, Navigation, Command palette and search, Interface, Tabs), context (global, graph, staging, text field), default shortcut (Ctrl → ⌘ on macOS) and an enabled rule returning the reason when disabled.
 - Existing shortcut handling (`shortcuts.rs`) dispatches through the registry; behavior unchanged.
@@ -111,7 +113,9 @@ Until answered, implement the decisions above; adjust afterwards.
 
 Acceptance: unit tests: no duplicate shortcut per context, macOS mapping, dispatch of all existing shortcuts (existing shortcut tests stay green); overlay checked by hand.
 
-### [ ] M5-02 Settings file and settings view
+### [x] M5-02 Settings file and settings view
+
+> Done: `settings.rs` (versioned `Settings` with general/appearance/tools, `#[serde(default)]` everywhere so missing and unknown fields fall back to defaults; a file without version counts as version 1, a newer version or a broken value resets to defaults and keeps `settings.json.bak`; atomic writes through `session::save`, debounced 300 ms). Path: `settings.json` next to `session.json`. Migration: without a settings file, `auto_fetch_minutes` is read from the session file and the new file is written once; the session no longer has the field (old files keep it until the next session save, it is not read again). Settings view replaces the tab content (tabs stay visible): General with the auto-fetch input (applies per valid keystroke, invalid input shows the reason, timer restarts), Appearance and External tools with disabled controls ("Not available yet"). Opens with Ctrl+, and the gear button (toolbar right, "Settings"); Esc (also from the focused input) or Close returns; other shortcuts wait while it is open. Tests: defaults, round trip, missing/unknown fields, broken values, newer version, migration (once), corrupted file, input parsing, app (open, apply, invalid, Esc, timer restart, loaded settings). Checked by hand: old session with 9 minutes → settings.json with 9; Ctrl+, → General shows 9; "1x" → red hint; 15 → written to settings.json; Appearance list; Esc back to the graph.
 
 - `settings.rs`: versioned `Settings` (general: auto-fetch interval; appearance: theme, zoom, avatars; external tools: diff tool, merge tool, terminal command), `settings.json` in the config dir, atomic writes, missing/unknown fields → defaults.
 - Migration: `auto_fetch_minutes` is read from the session file once and moved to settings.
@@ -122,7 +126,9 @@ Acceptance: unit tests: no duplicate shortcut per context, macOS mapping, dispat
 
 Acceptance: unit tests for defaults, roundtrip, unknown fields, migration, corrupted file; view checked by hand.
 
-### [ ] M5-03 Theme system: dark and light
+### [x] M5-03 Theme system: dark and light
+
+> Done: `theme.rs` has `ThemePalette` with `DARK` (today's values) and `LIGHT`; every style function takes the palette from the iced theme it gets (`palette(theme)`, by `extended_palette().is_dark`), text colors use `.style(theme::text_*)`, the graph canvas draws with the palette of its theme, and no view uses a color constant any more. Light warning text is darker (#875a00) to reach 4.5:1 on panels. iced 0.14 detects the OS theme (`iced::system::theme()` at start, `system::theme_changes()` subscription), so Appearance offers Dark / Light / System; an unknown mode (`Mode::None`, e.g. WSLg) falls back to Dark and the view says so. The askpass window reads the choice from `settings.json` (System counts as Dark there). Conflict and rebase views got the graph background (they showed the divider color, visible in Light). Tests: contrast of text (all backgrounds) and muted text (graph, panel, chrome) ≥ 4.5 in both palettes, light status colors ≥ 4.5 on panels, lanes ≥ 3:1 and distinct, palette follows the theme, app (choice, system mode, fallback). Screenshots `docs/screenshots/m5-{start,graph,diff,conflict,rebase}-{dark,light}.png`; switching Dark → Light in Preferences applies at once (graph included) and is saved.
 
 - `theme.rs`: constants become a `ThemePalette` (all current colors and lane colors) chosen at runtime; Dark keeps today's values, Light is new.
 - Text, muted text and selected text reach WCAG AA (4.5:1) on their backgrounds in both palettes; lane colors stay distinguishable on the light background.
@@ -131,7 +137,9 @@ Acceptance: unit tests for defaults, roundtrip, unknown fields, migration, corru
 
 Acceptance: unit tests for the contrast ratios of both palettes; screenshots of start screen, graph, staging, diff, conflict view and interactive rebase in both themes.
 
-### [ ] M5-04 Zoom and fullscreen
+### [x] M5-04 Zoom and fullscreen
+
+> Done: `settings::{zoom_step, clamp_zoom}` (70–200 %, 10 % grid, off-grid values from an edited file snap, out-of-range values are clamped on load); `App::scale_factor` feeds iced's `scale_factor`; Ctrl+= / Ctrl++ (also Ctrl+Shift+= and numpad +) / Ctrl+- / Ctrl+0 work also while an overlay or the settings view is open; the level is saved, shown in Appearance (−, value, +, Reset) and flashed in the status bar for 2 s ("Zoom 120 %"). F11 toggles fullscreen via `window::mode`/`set_mode` (not persisted). `App::window_size()` converts the last reported window size to the current zoom (iced sends no resize when only the scale changes), so menus are clamped correctly. Found by hand: at 200 % a menu that fits neither below nor above the cursor jumped to the top; `ContextMenu::origin` now keeps it as low as the window allows. Tests: steps and bounds, app (shortcuts, persistence, flash expiry, zoom while settings open, window size), menu origin without room. Checked by hand at 200 % and 70 % on this repository and a small one: wheel-scrolled graph, right click → menu at the cursor; branch pill dragged onto another → merge/rebase menu at the drop point; F11 → 2560×1440 and back; Ctrl+= → 110 % saved.
 
 - Ctrl+= (also Ctrl++ and numpad +), Ctrl+-, Ctrl+0: 70 %–200 % in 10 % steps via the iced scale factor; persisted in settings, shown in Appearance and briefly in the status bar ("Zoom 120 %").
 - F11 toggles fullscreen.
@@ -139,7 +147,9 @@ Acceptance: unit tests for the contrast ratios of both palettes; screenshots of 
 
 Acceptance: unit tests for steps and bounds; by hand at 70 % and 200 %: graph scrolling, context menu position in a scrolled graph, drag and drop of a branch.
 
-### [ ] M5-05 SVG icon set
+### [x] M5-05 SVG icon set
+
+> Done: iced feature `svg`; 35 Lucide 1.55.0 icons (newest release ≥ 14 days old) plus the ISC `LICENSE` in `crates/app/assets/icons/`; `icons.rs` embeds them with `include_bytes!`, caches one `svg::Handle` per icon and tints them from the palette (`tinted`, `button_icon` dims icons of disabled buttons, `change_icon` uses the change colors). Replaced: toolbar ↶ ↷ ↓ ↑ ⑂ ⊕ ⊖ ›_ ⚙ and the ▾ of pickers and the Pull dropdown; tab × and +; diff ×; sidebar ▾/▸, section icons (monitor, cloud, tag, archive, package), ✓ of the checked-out branch and the "+" of REMOTE; graph WIP ✎/✓, ✓ in the HEAD pill and the " · origin" remote text (now a cloud icon with the remote names as tooltip; the "+N" tooltip lists "main (origin)"); file status letters A/M/D/R/?/! (square-plus/pen/minus/arrow, dashed square, triangle); banner icons (info, merge, alert); ⋮⋮ grip in the rebase panel; ⟳ in the status bar; −/+ zoom buttons. Eye, eye-off and solo icons are vendored for M5-08, search for M5-07. Kept as text on purpose: ↑/↓ ahead/behind counts (numbers with arrows, like GitKraken), → in rename labels, · separators, and the ✓ in front of the current Pull mode inside the menu (menus have text labels only). Icon-only buttons have tooltips (tab close "Close tab", "New tab", diff close "Close diff (Esc)", "Add remote"). Tests: icon table order, every icon is a Lucide SVG with `currentColor`, license vendored; pill labels carry remotes separately. Screenshots `docs/screenshots/m5-*-{dark,light}.png` retaken with icons.
 
 - iced feature `svg`; Lucide SVGs in `crates/app/assets/icons/` with the license file; `icons.rs` embeds them (`include_bytes!`) and tints them with theme colors.
 - Replace the Unicode placeholders: toolbar (undo, redo, pull, push, branch, stash, pop, terminal, settings), sidebar sections, file status, banners, remote marker on pills (cloud icon, remote name as tooltip), eye/solo icons for M5-08.
@@ -148,7 +158,9 @@ Acceptance: unit tests for steps and bounds; by hand at 70 % and 200 %: graph sc
 
 Acceptance: no Unicode placeholder icons left (list the replaced ones in the task note); screenshots in both themes.
 
-### [ ] M5-06 Command palette
+### [x] M5-06 Command palette
+
+> Done: `fuzzy.rs` (subsequence; bonuses for word starts incl. camelCase humps and path separators, consecutive characters, same case, first character; gap penalty; a mid-word match is skipped when the character starts a word later; stable ties). `palette.rs` (mode, entries, query, top 200 matches, wrap-around selection, disabled entries not runnable, Backspace on an empty query leaves a sub-list without the Backspace that emptied it, recent actions first, loading state). App: Ctrl+P lists every registered action except the palette itself, with the shortcut right-aligned and the reason for disabled ones (later task, "Open a repository first", "Only in the interactive rebase panel"); arrows work while the query field has focus, Enter / click runs, Esc closes (also from the field). Sub-lists: "Open recent repository…" (Ctrl+Shift+O: Browse… + recent repositories with path), "Checkout branch…" (new registry action, local and remote branches, the checked-out one disabled, runs the existing checkout flow incl. "Stash and checkout"). The file list mode (loading state, entries) is prepared for M5-09. Registry: `Requires::Repository` for actions that need an open repository. Tests: scorer ordering, palette state, app (run + recent, disabled with reason, sub-lists, checkout). Filtering 100 000 paths: **≤ 8.1 ms** (release, `palette_filter_speed`). Checked by hand: Ctrl+P → list with shortcuts and disabled reasons, typing "chb" → "Checkout branch…" first. Enter, arrows and Backspace could not be injected (WSLg keyboard stopped reaching the window) → maintainer to-do; covered by app tests.
 
 - Pure module `fuzzy.rs`: subsequence match with bonuses for word starts, consecutive characters and case; stable order for ties.
 - Overlay at top center: query field, results with the shortcut right-aligned, disabled entries with their reason; ↑/↓, Enter, Esc, mouse. Empty query lists recently used actions first (in memory).
@@ -156,7 +168,9 @@ Acceptance: no Unicode placeholder icons left (list the replaced ones in the tas
 
 Acceptance: unit tests for scorer ordering and palette state (filter, selection wrap, disabled entries not executable, sub-list navigation); filtering 100 000 file paths < 30 ms (release build).
 
-### [ ] M5-07 Commit search
+### [x] M5-07 Commit search
+
+> Done: `search.rs` — `matches` (case-insensitive substring in summary, body, author, email; ASCII queries without allocation per commit, others via `to_lowercase`; SHA prefix from 4 hex digits, prefixes only) and `SearchState` (query, ascending commit indices, current match, request number, jump flag, "n of m", wrap-around steps). The snapshot holds full messages, so bodies are searched. App: Ctrl+F (also from the palette) or the magnifier at the right end of the column header opens the bar above the graph (field, counter, ↑/↓ buttons, ×); typing searches in `spawn_blocking` after 150 ms and jumps to the first match unless the selected commit matches; Enter / Shift+Enter step with wrap-around and scroll the match into view; stale results are dropped; a new snapshot runs the search again without moving the selection; Esc (also from the focused field) closes and keeps the selection. Non-matching rows: faint summary and a faint graph node (lines stay). Tests: match rules (fields, case, trim, SHA length/prefix, non-ASCII, ASCII search edges), state (counter, dimming, steps, kept current), app (jump, steps, wrap, Shift+Enter, kept selection, stale results, cleared query, refresh re-run, Esc). 100 000 commits with bodies: **≤ 12.4 ms** (release, `search_speed`). Checked by hand: magnifier → bar with field, buttons and tooltips. Typing could not be injected (WSLg keyboard) → maintainer to-do (typing, dimming, Enter/Shift+Enter, Esc).
 
 - Search field above the graph per planning decision; magnifier button and Ctrl+F open it, also from the palette.
 - Pure match function over the loaded snapshot: case-insensitive, summary/message, author name and email, SHA prefix (≥ 4 hex characters). If the snapshot holds summaries only, search summaries and note it.
@@ -164,7 +178,9 @@ Acceptance: unit tests for scorer ordering and palette state (filter, selection 
 
 Acceptance: unit tests for the match rules; app tests for next/previous with wrap-around and refresh; 100 000 commits < 50 ms (release build).
 
-### [ ] M5-08 Hide and solo branches
+### [x] M5-08 Hide and solo branches
+
+> Done: `git_graph::visible_commits(commits, tips)` (iterative reachability, ignores missing parents and unknown tips). App: `ref_filter.rs` (`RefFilter` with full ref names; shown = soloed-if-any and not hidden; remote "Hide all"/"Show all"; prune), `RepoSnapshot::with_filter` (tips = shown branches + HEAD, stash rows follow their base, tags stay in `refs` for the sidebar and appear on visible commits, `unfiltered` keeps the whole history, `applied_filter` records the filter) and `App::ensure_filter` (runs in `spawn_blocking`, stale results dropped; also after a refresh, which already filters in its loader). Sidebar: eye on hover (open eye = shown, click hides; eye-off on hidden entries shows again), hidden/not-soloed entries faint with eye-off, soloed ones with the solo icon; the checked-out branch is never dimmed and has no eye. Menus: Hide/Show and Solo/Unsolo on local and remote branches (sidebar and graph pills), Hide disabled with "Checked-out branch" on HEAD; remote menu "Hide all"/"Show all". Stored in the session (`ref_filters`, per repository root). Found by hand: restoring the session opened the tabs before taking over the loaded session, so stored filters were not applied at start — fixed (session first); covered by the manual restart check, the async loader capture is not reachable from app tests. Tests: reachability (shared history, merges, solo plus hide, nothing but HEAD, missing parents, 200 000-commit chain), filter rules and persistence, filtered snapshots (tags, stashes, working tree), menus, app (hide → graph and WIP selection, session entry, show again, HEAD not hideable, solo keeps HEAD, stale result, prune). Toggle on 100 000 commits incl. layout: **66 ms** (release, `filter_speed`). Checked by hand: hover eye → hide topic (still shown through origin/topic), origin → Hide all → only main's history; Solo/Show from the menu; restart restores the filter and drops a vanished ref.
 
 - `git-graph`: pure `visible_commits(tips, parents)`; the layout runs on the visible subset; the WIP row stays.
 - Sidebar: eye on hover toggles hide; hidden entries dimmed with an eye-off icon; context menu Hide/Show and Solo/Unsolo; soloed entries marked; while any branch is soloed only soloed branches and HEAD are visible. Remote header menu "Hide all" / "Show all". Graph pill menu "Hide".
@@ -174,7 +190,9 @@ Acceptance: unit tests for the match rules; app tests for next/previous with wra
 
 Acceptance: unit tests for reachability (shared history, merges, solo plus hide, nothing visible but HEAD) and persistence; toggling on 100 000 commits < 200 ms including layout.
 
-### [ ] M5-09 File history
+### [x] M5-09 File history
+
+> Done: `git_core::file_history(git, path, start, cancel)` runs `git --no-optional-locks log --follow -z --name-status --format=…` through `run_network` (process tree killed on cancel) and parses id, author (mailmap), email, time, summary, status, path and the previous path of renames/copies; `git_core::tracked_files` lists HEAD with `ls-tree -r -z`. App: `CenterView::FileHistory` (`file_history.rs`; dropping the view cancels its `git log`, so closing or replacing it stops the process), list left (initials badge, summary, author · date, rename icon with "Renamed from …"), the existing diff (without close/History buttons) of the file under its path in that commit right; ↑/↓ move in the list; "Show in graph" and double click close the view and select the commit (a commit outside the graph, e.g. on a hidden branch, gets a status message). Entry points: file context menu "File history" (commit files start at that commit, staging files at HEAD; disabled for untracked files), "History" button in the diff header, Ctrl+Shift+H → palette list of tracked files. Tests: parser (renames, copies, commits without diff, empty), integration with the real binary (linear, rename followed, deleted and re-added, merged branch, spaces + non-ASCII path and `ls-tree`, cancellation, unknown path), view state (selection, preselect, no wrap, drop cancels), app (load, select, ↓, stale result, Show in graph, Esc, error, palette file list, menu rules). Checked by hand: commit details → right click `actions.rs` → File history: five commits, diff of the newest; select another, Show in graph → selected and scrolled into view.
 
 - `git_core::file_history(path, start)`: `git --no-optional-locks log --follow -z` with a parseable format (id, author, date, summary, path at that commit); cancellable (the process is killed when the view closes or a new request starts). ADR-024.
 - Entry points: right click a file in commit details or staging → "File history"; "History" button in the diff view header; Ctrl+Shift+H → palette file list (tracked files at HEAD).
@@ -182,7 +200,9 @@ Acceptance: unit tests for reachability (shared history, merges, solo plus hide,
 
 Acceptance: integration tests: linear history, rename followed, file deleted and re-added, merge commits, path with spaces and non-ASCII characters, cancellation; checked by hand.
 
-### [ ] M5-10 Blame
+### [x] M5-10 Blame
+
+> Done: `git_core::blame(git, path, rev, cancel)` runs `git --no-optional-locks blame --porcelain [rev] -- path` through `run_network` and `parse_porcelain` builds commits (author from the mailmap, email, time, summary, boundary), lines (CR stripped) and groups of consecutive lines; NUL bytes mark the file binary; `UNCOMMITTED` marks working-copy lines. App: History / Blame toggle in the file history header (Blame defaults to the working copy for a history from HEAD, else the start commit), "Blame at this commit" in the entry menu (disabled on a deletion; the entry menu also offers Show in graph), a new blame replaces and cancels the running one (`BlameView` cancels on drop). Blame view: fixed 18 px rows, only visible rows built; gutter per group (short SHA, author, relative age via `format::relative`; "Not committed yet" for working-copy lines), repeated on the first fully visible row of a group; alternating group shading; tooltip with the summary; a click selects the commit in the history list (History mode, its diff); binary and empty files show a message. Found by hand: a horizontally scrollable list collapsed the `Fill` rows to nothing — the blame scrolls vertically and clips long lines. Tests: parser (repeated commits, boundary, uncommitted, CRLF + tabs, binary, empty), integration against `git blame` (HEAD and working copy) and with `.mailmap`, `format::relative`, view state (targets, deletion, gutter selection), app (toggle → working copy, stale result, Blame at commit cancels the previous blame, gutter click, entry menu). Checked by hand (release build): blame of `crates/app/src/app.rs` (10 686 lines) of the working copy; wheel scrolling 15 ms median / 19 ms max per step; gutter click → History with that commit's diff.
 
 - `git_core::blame(path, rev)`: `git --no-optional-locks blame --porcelain` (respects `.mailmap` and `blame.ignoreRevsFile`), parsed into line groups per commit.
 - Blame mode in the file history view (History / Blame toggle) and "Blame at this commit" in the history list; for the working copy, uncommitted lines are marked "Not committed yet".
@@ -191,7 +211,9 @@ Acceptance: integration tests: linear history, rename followed, file deleted and
 
 Acceptance: parser unit tests (repeated commits, boundary commits, uncommitted lines, CRLF); integration test compared against `git blame`; a 10 000-line file scrolls smoothly (checked by hand).
 
-### [ ] M5-11 Avatars (opt-in)
+### [x] M5-11 Avatars (opt-in)
+
+> Done: `avatars.rs` — `gravatar_hash` (SHA-256 of the trimmed, lower case email), `gravatar_url` (`s=64&d=404`), `Fetcher` trait with `HttpFetcher` (ureq, rustls, 10 s timeout, proxy from the environment by ureq's default config, 1 MiB body limit), `DiskCache` (`<cache dir>/gitloom/avatars/<hash>.img|.miss`, fresh for 7 days by file time, atomic writes), `load` (cache first, then network; misses cached) and `Avatars` (email → hash without allocation for known authors, queue, at most 4 in flight). App: Appearance toggle (with the privacy note); requests only for the authors of the visible graph rows, the selected commit and the file history list, after every update; the client is created lazily on the first request and dropped when the setting goes off (avatars forgotten). Rendering: round 18 px avatar on the graph node (an `image` widget on top of the canvas, because the canvas does not round images; a ring in the lane color, faint when dimmed by the search), 32 px in the commit details, 24 px in the file history; initials everywhere else and while loading. Dependencies: `ureq 3.4` locked to 3.4.2 (3.4.3/3.5.0 are younger than 14 days), `sha2 0.11`, and iced `image-without-codecs` plus `image 0.25` with only PNG and JPEG (iced's `image` feature pulls every codec incl. an AV1 encoder) — recorded in ADR-026. Tests: hash, URL, cache TTL for images and misses, miss → image replacement, request limit, app (off: no client is created and nothing requested; on: four requests, results shown; off again: client dropped). Checked by hand with a public address that has a Gravatar and one without: round avatar in the graph and the details, initials for the other; cache files `.img` and `.miss`; with avatars off the process opened no TCP socket at all (sampled from `/proc` for 8 s), with avatars on two.
 
 - Appearance → "Load avatars from Gravatar" (off), with the note "Sends a hash of each author's email address to gravatar.com".
 - `https://gravatar.com/avatar/<sha256 of trimmed lowercase email>?s=<px>&d=404` via `ureq` (rustls, proxy from env); cache in `<cache dir>/gitloom/avatars/`, TTL 7 days, misses cached; at most 4 parallel requests; only visible rows and the details panel. ADR-026.
@@ -200,7 +222,9 @@ Acceptance: parser unit tests (repeated commits, boundary commits, uncommitted l
 
 Acceptance: unit tests for the hash, cache TTL and misses, request limit, and "off means no request" (fetcher behind a trait, fake in tests); checked by hand against Gravatar.
 
-### [ ] M5-12 External diff and merge tools
+### [x] M5-12 External diff and merge tools
+
+> Done: `git_core::external_tools` — `tool_info` (`--tool-help` first section incl. user-defined `<name>.cmd`, plus the configured tool: `diff.tool` falling back to `merge.tool` like Git, or `merge.tool`), `difftool_args`/`mergetool_args`, `run_difftool` (commit → `<parent> <commit>`, root commit → empty tree from `git mktree`; unstaged; staged `--cached`; a rename passes old and new path) and `run_mergetool`; both through `GitWriter::run` (stdin closed, `GIT_EDITOR=:`), waiting until the tool exits. App: Ctrl+D (registry, also from the palette) and the "External" button in the diff header (also in the file history; disabled for untracked files and stashes) — the status bar says "Waiting for <tool>…" while the app stays usable; conflict view header and the conflicted file's context menu "Open in merge tool" — the tab is busy ("Waiting for <tool>") so writes wait, afterwards the repository is refreshed and the conflict view loads the file again if it is still conflicted (otherwise it closes). Preferences → External tools: pick lists "Use Git config (<configured> | not configured)", the tools Git lists (loaded when the category opens with a repository), "None"; a chosen tool Git no longer lists stays selectable. "None", or Git config without a configured tool → dialog "No diff tool"/"No merge tool" with "Open settings" (opens External tools). Tests: `--tool-help` parsing, argument building, integration with fake tools recording their arguments (commit, root commit, unstaged, staged, stdin closed: no hang, merge resolving the conflict), configured tool fallback; app (no diff open, "None" → dialog with Open settings, waiting status, finish, merge tool busy and conflict reload flag, tool settings stored), option list. Checked by hand with fake tools in a test repository: conflict view → Open in merge tool → resolved, refreshed, Continue merge ready; staged diff → External → the diff tool got the HEAD blob and the file.
 
 - External tools → Diff tool / Merge tool: "Use Git config" (default; shows the configured value or "not configured"), installed tools from `git difftool --tool-help` / `git mergetool --tool-help`, "None".
 - Ctrl+D and the diff header button "Open in external diff tool": commit file → `git difftool --no-prompt [--tool=X] <parent> <commit> -- <path>`; unstaged → `git difftool --no-prompt -- <path>`; staged → with `--cached`.
@@ -210,7 +234,9 @@ Acceptance: unit tests for the hash, cache TTL and misses, request limit, and "o
 
 Acceptance: integration tests with a fake tool (`difftool.<name>.cmd` / `mergetool.<name>.cmd` script recording its arguments) for commit, unstaged, staged and merge; no hang with stdin closed.
 
-### [ ] M5-13 Terminal and file manager
+### [x] M5-13 Terminal and file manager
+
+> Done: `launch.rs` — `terminal(platform, lookup, template, dir)` (Windows `wt.exe -d <path>` → `pwsh -NoExit` → `powershell -NoExit` → `cmd /K`, the last three in a new console; macOS `open -a Terminal <path>`; Linux `$TERMINAL`, `x-terminal-emulator`, `gnome-terminal --working-directory=`, `konsole --workdir`, `xfce4-terminal --working-directory=`, `alacritty --working-directory`, `kitty --directory`, `wezterm start --cwd`, `xterm`; always started in the repository root), template expansion (`split_words`: whitespace, single/double quotes, backslash escapes; `{path}` replaced in every word, so paths with spaces stay one argument), `file_manager` (`explorer`/`open`/`xdg-open`), `reveal_file` (takes over "Open file location": `explorer /select,`, `open -R`, `xdg-open <folder>`), `spawn` (detached, stdio null). App: Alt+T, Alt+O, the toolbar Terminal button (now enabled, tooltip with the shortcut) and the palette; Preferences → External tools → Terminal command input. Failure → status bar with the reason and a hint to the settings. With this task every registered action is implemented, so `Requires::NotYet`, `static_block` and the "Not available yet" marks of the registry were removed. Tests: detection order on all three platforms with an injected lookup (incl. a `$TERMINAL` that is not installed), template expansion (spaces, quotes, escapes, unclosed quote), file manager commands, app (every action available with a repository). Checked by hand on Linux with stub programs on `PATH` and a repository path containing a space: Terminal button → `xterm` started in the repository root; Open file location → `xdg-open <repository>`; a template `/bin/sh -c "…" {path} "second arg"` → two correct arguments; without any terminal → "Could not open a terminal: No terminal found. Set a terminal command in Preferences → External tools." Windows and macOS: maintainer to-do.
 
 - One module `launch.rs` (also takes over the existing "Open file location" code).
 - Terminal (Alt+T, toolbar Terminal button, palette) in the repository root. Detection order: Windows `wt.exe -d <path>` → `pwsh` → `powershell` → `cmd`; macOS `open -a Terminal <path>`; Linux `$TERMINAL`, `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `alacritty`, `kitty`, `wezterm`, `xterm`. Custom command template with `{path}` in settings.
@@ -220,12 +246,16 @@ Acceptance: integration tests with a fake tool (`difftool.<name>.cmd` / `mergeto
 
 Acceptance: unit tests for the detection order (injected executable lookup) and template expansion (spaces, quoting); checked by hand on Linux; Windows and macOS → maintainer to-do.
 
-### [ ] M5-14 End-to-end check, docs, performance
+### [x] M5-14 End-to-end check, docs, performance
+
+> Done: walkthrough on Linux (release build) of every M5 feature in Dark and Light, main view and Preferences at 70 %, 100 % and 200 % zoom, file history and blame in both themes (screenshots `docs/screenshots/m5-*`). Found and fixed: at 200 % in a 1 400 px window the toolbar cut off Pop, Terminal and Settings — below 1 100 logical pixels the toolbar is icon-only with labels in the tooltips. Measurements in PERFORMANCE.md "M5" with `scripts/perf_repo_m5.py` (100 000 commits) and this repository: search ≤ 15.5 ms, hide 147 ms / solo 79 ms, palette ≤ 4.6 ms, file history of 2 000 commits 0.52 s, blame of 10 000 lines 0.63 s; idle memory 117 MB anonymous (avatars off) / 120 MB (on), no TCP socket with avatars off. UX-PARITY: every M5 row done. Keyboard-only paths that WSLg did not deliver (palette arrows/Enter, search typing) and the Windows walkthrough are maintainer to-dos. CI could not run (billing), so the CI acceptance item stays open.
 
 - Walkthrough of all M5 features on Linux in both themes at 70 %, 100 % and 200 % zoom; Windows → maintainer to-do.
 - PERFORMANCE.md "M5" with a generated 100 000-commit repository: search < 50 ms, hide/solo toggle < 200 ms, palette filter < 30 ms; file history of a file with 2 000 commits < 2 s; blame of 10 000 lines < 2 s; idle memory with avatars on and off.
 - Update UX-PARITY (all M5 rows), CHANGELOG, screenshots, README.
 
-### [ ] M5-15 Release v0.6.0
+### [x] M5-15 Release v0.6.0
+
+> Done: released with `/release` on 2026-11-04 after the CI of `develop` was green on all platforms (Linux, Windows, macOS, MSRV). The Windows and keyboard to-dos stay open in HANDOVER and are bundled in M6-13; they did not block the release.
 
 Same procedure as before (`/release`), only when the maintainer asks.

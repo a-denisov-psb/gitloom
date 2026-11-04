@@ -46,6 +46,17 @@ pub fn prompt_from_args(args: &[String], marker_set: bool) -> Option<String> {
     }
 }
 
+/// The prompt follows the theme chosen in the settings (System counts as
+/// Dark here: the prompt has no time to ask the window system).
+fn prefers_light() -> bool {
+    crate::session::default_path()
+        .map(|path| path.with_file_name(crate::settings::FILE_NAME))
+        .is_some_and(|path| {
+            crate::settings::load(&path, None).settings.appearance.theme
+                == crate::settings::ThemeChoice::Light
+        })
+}
+
 /// Shows the prompt window, writes the answer to stdout and exits.
 pub fn main(prompt: String) -> iced::Result {
     let answer: Arc<Mutex<Option<String>>> = Arc::default();
@@ -59,7 +70,7 @@ pub fn main(prompt: String) -> iced::Result {
     .title("Gitloom – Authentication")
     // Also when the focused input captured the key.
     .subscription(|_: &Askpass| iced::event::listen_with(|event, _status, _window| escape(event)))
-    .theme(theme::app_theme())
+    .theme(theme::app_theme(prefers_light()))
     .settings(iced::Settings {
         default_text_size: 13.into(),
         ..iced::Settings::default()

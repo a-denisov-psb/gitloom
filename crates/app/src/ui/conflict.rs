@@ -19,17 +19,30 @@ const TEXT_SIZE: f32 = 12.0;
 
 pub fn view<'a>(repo: &'a RepoView, conflict: &'a ConflictView) -> Element<'a, Message> {
     let idle = repo.write_block.is_none() && repo.busy.is_none();
-    let close = button(text("Close").size(12))
-        .padding([2, 8])
-        .style(button::secondary)
-        .on_press(Message::DiffClosed);
+    let idle_tool = repo.write_block.is_none() && repo.busy.is_none();
+    let merge_tool = crate::ui::panel::with_tooltip_text(
+        button(text("Open in merge tool").size(12))
+            .padding([2, 8])
+            .style(button::secondary)
+            .on_press_maybe(idle_tool.then(|| Message::OpenMergeTool(conflict.path.clone())))
+            .into(),
+        "Resolve this file in the external merge tool (git mergetool)".to_owned(),
+    );
+    let close = row![
+        merge_tool,
+        button(text("Close").size(12))
+            .padding([2, 8])
+            .style(button::secondary)
+            .on_press(Message::DiffClosed)
+    ]
+    .spacing(6);
     let title = row![text(&conflict.path).size(14), space::horizontal()]
         .spacing(8)
         .align_y(iced::Center);
 
     let body: Element<'a, Message> = match &conflict.loaded {
         Loadable::Loading => muted("Loading conflict…").into(),
-        Loadable::Failed(error) => text(error).color(theme::DANGER).into(),
+        Loadable::Failed(error) => text(error).style(theme::text_danger).into(),
         Loadable::Ready(loaded) => match &loaded.content {
             ConflictContent::Text(conflict_text) => {
                 return text_view(repo, conflict, conflict_text, title, close, idle);
@@ -65,7 +78,7 @@ fn text_view<'a>(
     conflict: &'a ConflictView,
     conflict_text: &'a ConflictText,
     title: iced::widget::Row<'a, Message>,
-    close: iced::widget::Button<'a, Message>,
+    close: iced::widget::Row<'a, Message>,
     idle: bool,
 ) -> Element<'a, Message> {
     let save_blocker = conflict.save_blocker();
@@ -106,7 +119,7 @@ fn text_view<'a>(
             .push(
                 text("Edited by hand: picks no longer change the output")
                     .size(11)
-                    .color(theme::WARNING),
+                    .style(theme::text_warning),
             )
             .push(
                 button(text("Reset output").size(11))
@@ -163,7 +176,7 @@ fn side_panel<'a>(
                             text(display(line))
                                 .font(Font::MONOSPACE)
                                 .size(TEXT_SIZE)
-                                .color(theme::TEXT_MUTED),
+                                .style(theme::text_muted),
                         )
                         .padding([0, 26]),
                     );
@@ -239,9 +252,11 @@ fn side_panel<'a>(
         format!("B · theirs · {label}")
     };
     column![
-        text(heading)
-            .size(12)
-            .color(if ours { theme::ACCENT } else { theme::WARNING }),
+        text(heading).size(12).style(if ours {
+            theme::text_accent
+        } else {
+            theme::text_warning
+        }),
         container(scrollable(rows).height(Fill).width(Fill))
             .height(Fill)
             .width(Fill)

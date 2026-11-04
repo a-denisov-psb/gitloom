@@ -7,12 +7,14 @@ use iced::widget::pane_grid;
 use iced::{event, keyboard, window, Element, Event, Subscription, Task};
 
 use crate::overlay::{ContextMenu, Form, FormAction, FormField, MenuEntry, Modal};
+use crate::palette::{self, Palette};
 use crate::panes::Panes;
 use crate::repo_view::{
     CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkKind, NetworkOp,
     NetworkRequest, Queued, RepoView, Section, Selection, WatchState, WriteOp,
 };
 use crate::session::{self, Session};
+use crate::settings::{self, Settings};
 use crate::shortcuts::{self, Shortcut};
 use crate::snapshot::RepoSnapshot;
 use crate::ui;
@@ -24,12 +26,31 @@ const FOCUS_DEBOUNCE: Duration = Duration::from_millis(500);
 pub const FILTER_INPUT: &str = "sidebar-filter";
 pub const START_PATH_INPUT: &str = "start-path";
 pub const COMMIT_SUMMARY_INPUT: &str = "commit-summary";
+pub const SHORTCUT_FILTER_INPUT: &str = "shortcut-filter";
+pub const PALETTE_INPUT: &str = "command-palette";
+pub const SEARCH_INPUT: &str = "commit-search";
+/// Typing in the search field waits this long before searching.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Recently used palette actions remembered (in memory).
+const RECENT_ACTIONS: usize = 8;
 
 /// File system events are collected for this long before they are classified.
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Session changes are written after this quiet period.
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
+/// Short status bar messages (zoom level) disappear after this time.
+const STATUS_FLASH: Duration = Duration::from_secs(2);
+/// Settings changes are written after this quiet period.
+const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// Why an external diff or merge tool did not run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalToolError {
+    /// Neither the settings nor Git's config name a tool.
+    NotConfigured,
+    Failed(String),
+}
 
 /// What a discard affects.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +147,8 @@ impl Tab {
 pub struct Opened {
     backend: Arc<dyn GitBackend>,
     snapshot: Arc<RepoSnapshot>,
+    /// Stored hidden/soloed branches of the repository (pruned).
+    filter: crate::ref_filter::RefFilter,
 }
 
 impl std::fmt::Debug for Opened {
@@ -286,6 +309,140 @@ pub enum Message {
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
+    SettingsLoaded(settings::Loaded),
+    /// The status bar message number `seq` may disappear now.
+    StatusExpired(u64),
+    /// Zoom buttons in Preferences → Appearance.
+    ZoomTo(u32),
+    /// Light or dark mode of the operating system (start and changes).
+    SystemTheme(iced::theme::Mode),
+    /// Ctrl+D or the diff header button: the shown diff in the external
+    /// diff tool (M5-12).
+    ExternalDiff,
+    /// Alt+T or the toolbar Terminal button: a terminal in the repository (M5-13).
+    OpenTerminal,
+    /// Alt+O: the repository folder in the file manager.
+    OpenFileManager,
+    /// Terminal command template typed in Preferences → External tools.
+    TerminalCommandInput(String),
+    /// Open the conflicted file in the merge tool.
+    OpenMergeTool(String),
+    ExternalToolFinished {
+        tab: TabId,
+        /// The conflicted file of a merge tool run.
+        merge_path: Option<String>,
+        result: Result<(), ExternalToolError>,
+    },
+    /// Tools listed in Preferences → External tools.
+    ToolsLoaded(Result<(git_core::ToolInfo, git_core::ToolInfo), String>),
+    DiffToolChosen(crate::settings::ToolChoice),
+    MergeToolChosen(crate::settings::ToolChoice),
+    /// Open the settings view at a category ("Open settings" in dialogs).
+    SettingsOpenedAt(settings::Category),
+    /// "Load avatars from Gravatar" switched in Appearance.
+    AvatarsToggled(bool),
+    AvatarLoaded {
+        hash: String,
+        result: Result<crate::avatars::Cached, String>,
+    },
+    ThemeChosen(settings::ThemeChoice),
+    /// Open the settings view (Ctrl+, , gear button, palette).
+    SettingsOpened,
+    SettingsClosed,
+    SettingsCategory(settings::Category),
+    /// Typed auto-fetch interval (minutes).
+    AutoFetchInput(String),
+    SettingsSaveDue(u64),
+    SettingsSaved(Result<(), String>),
+    /// Filter of the keyboard shortcut list changed.
+    ShortcutFilterChanged(String),
+    ShortcutListClosed,
+    /// Esc taken by a focused text field.
+    EscapeCaptured,
+    /// Backspace, also when a text field took it (palette sub-lists).
+    BackspacePressed,
+    PaletteQuery(String),
+    /// Click on palette entry `index` (among the shown ones).
+    PaletteRun(usize),
+    /// Enter in the palette query field.
+    PaletteSubmit,
+    PaletteClosed,
+    /// Ctrl+F or the magnifier: open (or focus) the commit search.
+    SearchOpened,
+    SearchInput(String),
+    SearchDue {
+        tab: TabId,
+        seq: u64,
+    },
+    SearchResult {
+        tab: TabId,
+        seq: u64,
+        matches: Vec<usize>,
+    },
+    /// Enter (Shift+Enter: backwards) in the search field.
+    SearchSubmit,
+    SearchStep {
+        forward: bool,
+    },
+    SearchClosed,
+    /// Open the history of a file; `start`: commit to start at and select
+    /// (`None`: HEAD).
+    FileHistoryOpened {
+        path: String,
+        start: Option<String>,
+    },
+    FileHistoryLoaded {
+        tab: TabId,
+        path: String,
+        start: String,
+        result: Result<Vec<git_core::FileHistoryEntry>, String>,
+    },
+    FileHistorySelected(usize),
+    /// History / Blame toggle of the file history view (M5-10).
+    HistoryModeChosen(crate::file_history::HistoryMode),
+    /// "Blame at this commit" for history entry `index`.
+    BlameAt(usize),
+    BlameLoaded {
+        tab: TabId,
+        path: String,
+        rev: Option<String>,
+        result: Result<git_core::Blame, String>,
+    },
+    BlameScrolled {
+        offset: f32,
+        height: f32,
+    },
+    /// Click on a blame gutter: select that commit in the history list.
+    BlameCommitClicked(String),
+    /// Right click on history entry `index`.
+    FileHistoryEntryMenu {
+        index: usize,
+        position: iced::Point,
+    },
+    /// Close the file history and select its selected commit in the graph.
+    FileHistoryShowInGraph,
+    /// Tracked files for the palette's file list (Ctrl+Shift+H).
+    PaletteFilesLoaded(Result<Vec<String>, String>),
+    /// Hide or show a branch (eye in the sidebar, context menus).
+    ToggleHidden {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    ToggleSolo {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    /// "Hide all" / "Show all" branches of a remote.
+    HideRemote {
+        remote: String,
+        hide: bool,
+    },
+    /// The graph of `tab` was filtered for the hidden/soloed branches.
+    FilterApplied {
+        tab: TabId,
+        seq: u64,
+        result: Result<Arc<RepoSnapshot>, String>,
+    },
     /// A shortcut after checking whether a text input has focus.
     ShortcutChecked {
         shortcut: Shortcut,
@@ -545,6 +702,21 @@ pub struct App {
     pub start_path: String,
     /// Recent repositories and the last persisted state.
     pub session: Session,
+    /// User preferences (ADR-023).
+    pub settings: Settings,
+    /// Loaded avatars of the authors seen (M5-11).
+    pub avatars: crate::avatars::Avatars,
+    /// HTTP client for avatars; only exists while avatars are on (ADR-026).
+    avatar_fetcher: Option<Arc<dyn crate::avatars::Fetcher>>,
+    /// Creates the client (replaced in tests).
+    avatar_fetcher_factory: fn() -> Arc<dyn crate::avatars::Fetcher>,
+    avatar_cache: Option<crate::avatars::DiskCache>,
+    /// Open settings view; replaces the tab content.
+    pub settings_page: Option<settings::Page>,
+    settings_path: Option<PathBuf>,
+    settings_save_seq: u64,
+    /// Light or dark mode of the operating system (`None` if unknown).
+    pub system_theme: iced::theme::Mode,
     /// Result of looking for `git`; `None` until detected.
     pub git: Option<git_core::GitAvailability>,
     /// App-wide one-time notice (e.g. Git missing), dismissible.
@@ -556,8 +728,19 @@ pub struct App {
     /// Open commit message dialog (reword, squash).
     pub message_dialog: Option<crate::overlay::MessageDialog>,
     pub context_menu: Option<ContextMenu>,
-    /// Current window size, used to keep menus inside the window.
-    pub window_size: iced::Size,
+    /// Open keyboard shortcut list (Ctrl+/) with its filter text.
+    pub shortcut_list: Option<String>,
+    /// Open command palette (Ctrl+P).
+    pub palette: Option<Palette>,
+    /// Palette actions used recently, most recent first.
+    recent_actions: Vec<Shortcut>,
+    /// Last reported window size, in logical pixels of `window_scale`;
+    /// use [`App::window_size`].
+    window_size: iced::Size,
+    /// Scale factor when `window_size` was reported.
+    window_scale: f32,
+    /// Number of the last flashed status message.
+    status_seq: u64,
     /// Mode of the toolbar Pull button (persisted in the session).
     pub pull_mode: git_core::PullMode,
     /// When the pending auto-fetch timer fires, and its sequence number
@@ -590,13 +773,33 @@ impl App {
             status: String::new(),
             start_path: String::new(),
             session: Session::default(),
+            settings: Settings::default(),
+            avatars: Default::default(),
+            avatar_fetcher: None,
+            avatar_fetcher_factory: || Arc::new(crate::avatars::HttpFetcher::new()),
+            // No disk cache without a session (tests).
+            avatar_cache: session_path
+                .as_ref()
+                .and(crate::avatars::DiskCache::default_dir())
+                .map(crate::avatars::DiskCache::new),
+            settings_page: None,
+            settings_path: session_path
+                .as_deref()
+                .map(|path| path.with_file_name(settings::FILE_NAME)),
+            settings_save_seq: 0,
+            system_theme: iced::theme::Mode::None,
             git: None,
             notice: None,
             modal: None,
             message_dialog: None,
             form: None,
             context_menu: None,
+            shortcut_list: None,
+            palette: None,
+            recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
+            window_scale: 1.0,
+            status_seq: 0,
             pull_mode: git_core::PullMode::default(),
             auto_fetch_at: None,
             auto_fetch_seq: 0,
@@ -610,12 +813,32 @@ impl App {
             shown_center: None,
         };
         app.add_tab(TabState::Start);
+        let settings_path = app.settings_path.clone();
         let task = match session_path {
-            Some(path) => Task::perform(blocking(move || Ok(session::load(&path))), |loaded| {
-                Message::SessionLoaded(loaded.unwrap_or_else(|error| session::Loaded {
-                    session: Session::default(),
-                    notice: Some(error),
-                }))
+            Some(path) => Task::perform(
+                blocking(move || {
+                    // Settings first: they may take values over from the
+                    // session file (ADR-023).
+                    let settings = settings_path.map(|p| settings::load(&p, Some(&path)));
+                    Ok((settings, session::load(&path)))
+                }),
+                |loaded| loaded,
+            )
+            .then(|loaded| {
+                let (settings, session) = loaded.unwrap_or_else(|error| {
+                    (
+                        None,
+                        session::Loaded {
+                            session: Session::default(),
+                            notice: Some(error),
+                        },
+                    )
+                });
+                let session = Task::done(Message::SessionLoaded(session));
+                match settings {
+                    Some(settings) => Task::done(Message::SettingsLoaded(settings)).chain(session),
+                    None => session,
+                }
             }),
             None => Task::done(Message::SessionLoaded(session::Loaded {
                 session: Session::default(),
@@ -625,7 +848,8 @@ impl App {
         let detect = Task::perform(blocking(|| Ok(git_core::detect_git())), |result| {
             Message::GitDetected(result.unwrap_or(git_core::GitAvailability::Missing))
         });
-        (app, Task::batch([task, detect]))
+        let system_theme = iced::system::theme().map(Message::SystemTheme);
+        (app, Task::batch([task, detect, system_theme]))
     }
 
     /// Why write actions are blocked, if they are (unknown counts as blocked).
@@ -1431,7 +1655,7 @@ impl App {
 
     /// Starts an auto-fetch in every tab where one is due.
     fn auto_fetch(&mut self, now: std::time::Instant) -> Task<Message> {
-        let interval = self.session.auto_fetch_minutes;
+        let interval = self.settings.general.auto_fetch_minutes;
         let due: Vec<TabId> = self
             .tabs
             .iter()
@@ -1452,18 +1676,21 @@ impl App {
         }
         self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
+        let (paths, active) = (session.tabs.clone(), session.active);
+        // Before opening: the loaders read stored per-repository state
+        // (hidden branches).
+        self.session = session;
         let mut tasks = Vec::new();
-        if !session.tabs.is_empty() {
+        if !paths.is_empty() {
             // Replace the untouched start tab with the restored tabs.
             if self.tabs.len() == 1 && matches!(self.tabs[0].state, TabState::Start) {
                 self.tabs.clear();
             }
-            for path in &session.tabs {
-                tasks.push(self.open_in_new_tab(path.clone()));
+            for path in paths {
+                tasks.push(self.open_in_new_tab(path));
             }
-            self.active = session.active.min(self.tabs.len().saturating_sub(1));
+            self.active = active.min(self.tabs.len().saturating_sub(1));
         }
-        self.session = session;
         for path in std::mem::take(&mut self.pending_paths) {
             tasks.push(self.open_path(path));
         }
@@ -1488,9 +1715,62 @@ impl App {
             tabs,
             active,
             panes: self.panes.ratios,
-            auto_fetch_minutes: self.session.auto_fetch_minutes,
+            ref_filters: self.ref_filters(),
             pull_mode: self.pull_mode.into(),
         }
+    }
+
+    /// Stored hidden/soloed branches: those of open repositories replace
+    /// the stored ones.
+    fn ref_filters(&self) -> std::collections::BTreeMap<PathBuf, crate::ref_filter::RefFilter> {
+        let mut filters = self.session.ref_filters.clone();
+        for view in self.tabs.iter().filter_map(Tab::view) {
+            let root = view.backend.path().to_path_buf();
+            if view.ref_filter.is_active() {
+                filters.insert(root, view.ref_filter.clone());
+            } else {
+                filters.remove(&root);
+            }
+        }
+        filters
+    }
+
+    /// Changes the hidden/soloed branches of the active tab and filters the
+    /// graph again in the background.
+    fn change_filter(
+        &mut self,
+        change: impl FnOnce(&mut crate::ref_filter::RefFilter, &[git_core::Reference]),
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let refs = view.snapshot.refs.clone();
+        change(&mut view.ref_filter, &refs);
+        Task::batch([self.ensure_filter(tab), self.persist()])
+    }
+
+    /// Filters the graph of tab `tab` again if its snapshot was built with
+    /// another filter (prunes branches that no longer exist first).
+    fn ensure_filter(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let refs = view.snapshot.refs.clone();
+        view.ref_filter.prune(&refs);
+        if view.snapshot.applied_filter == view.ref_filter {
+            return Task::none();
+        }
+        view.filter_seq += 1;
+        let seq = view.filter_seq;
+        let filter = view.ref_filter.clone();
+        let snapshot = Arc::clone(&view.snapshot);
+        Task::perform(
+            blocking(move || snapshot.with_filter(&filter).map(Arc::new)),
+            move |result| Message::FilterApplied { tab, seq, result },
+        )
     }
 
     /// Schedules a debounced save when the persisted state changed.
@@ -1522,6 +1802,20 @@ impl App {
             blocking(move || session::save(&path, &json).map_err(|e| e.to_string())),
             Message::Saved,
         )
+    }
+
+    /// Theme of the window: the choice in the settings; "System" follows
+    /// the operating system and falls back to Dark when it is unknown.
+    pub fn theme(&self) -> iced::Theme {
+        crate::theme::app_theme(self.light_theme())
+    }
+
+    pub fn light_theme(&self) -> bool {
+        match self.settings.appearance.theme {
+            settings::ThemeChoice::Dark => false,
+            settings::ThemeChoice::Light => true,
+            settings::ThemeChoice::System => self.system_theme == iced::theme::Mode::Light,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -1593,10 +1887,36 @@ impl App {
     }
 
     fn shortcut(&mut self, shortcut: Shortcut) -> Task<Message> {
+        // The palette's query field has focus: arrows, Enter and Esc
+        // drive the list.
+        if let Some(palette) = &mut self.palette {
+            match shortcut {
+                Shortcut::Close => self.palette = None,
+                Shortcut::Confirm => return self.run_palette(),
+                Shortcut::Navigate(crate::nav::Move::Next) => palette.move_selection(true),
+                Shortcut::Navigate(crate::nav::Move::Previous) => palette.move_selection(false),
+                _ => {}
+            }
+            return Task::none();
+        }
         // An open dialog or menu only reacts to Esc and Enter.
-        let overlay_open =
-            self.modal.is_some() || self.context_menu.is_some() || self.message_dialog.is_some();
-        if overlay_open && !matches!(shortcut, Shortcut::Close | Shortcut::Confirm) {
+        let overlay_open = self.modal.is_some()
+            || self.context_menu.is_some()
+            || self.message_dialog.is_some()
+            || self.shortcut_list.is_some()
+            || self.settings_page.is_some();
+        // Zoom and fullscreen change nothing in the overlay's content.
+        if overlay_open
+            && !matches!(
+                shortcut,
+                Shortcut::Close
+                    | Shortcut::Confirm
+                    | Shortcut::ZoomIn
+                    | Shortcut::ZoomOut
+                    | Shortcut::ZoomReset
+                    | Shortcut::Fullscreen
+            )
+        {
             return Task::none();
         }
         if let Some(panel) = self.active_rebase_panel() {
@@ -1626,6 +1946,17 @@ impl App {
             Shortcut::ToggleSidebar => self.panes.toggle_sidebar(),
             Shortcut::TogglePanel => self.panes.toggle_panel(),
             Shortcut::Navigate(step) => {
+                // ↑/↓ move in the file history list while it is shown.
+                if let Some(view) = self.active_view_mut() {
+                    if matches!(view.center, CenterView::FileHistory(_)) {
+                        let down = match step {
+                            crate::nav::Move::Next => true,
+                            crate::nav::Move::Previous => false,
+                            _ => return Task::none(),
+                        };
+                        return self.file_history_select(|h| h.step(down));
+                    }
+                }
                 let target = self.active_tab().and_then(Tab::view).and_then(|view| {
                     crate::nav::navigate(&view.snapshot, view.selection.as_ref(), step)
                 });
@@ -1691,9 +2022,53 @@ impl App {
                 }
                 return iced::widget::operation::focus(FILTER_INPUT);
             }
+            Shortcut::ShortcutList => {
+                self.shortcut_list = Some(String::new());
+                return iced::widget::operation::focus(SHORTCUT_FILTER_INPUT);
+            }
+            Shortcut::CommandPalette => return self.open_palette(palette::Mode::Actions),
+            Shortcut::OpenRepoPalette => return self.open_palette(palette::Mode::OpenRepository),
+            Shortcut::CheckoutBranch => {
+                if self.active_tab().and_then(Tab::view).is_some() {
+                    return self.open_palette(palette::Mode::CheckoutBranch);
+                }
+            }
+            Shortcut::SearchCommits => return self.update(Message::SearchOpened),
+            Shortcut::FileHistory => return self.open_file_list(),
+            Shortcut::ExternalDiff => return self.external_diff(),
+            Shortcut::OpenTerminal => return self.update(Message::OpenTerminal),
+            Shortcut::OpenFileManager => return self.update(Message::OpenFileManager),
+            Shortcut::ZoomIn => {
+                return self.set_zoom(settings::zoom_step(
+                    self.settings.appearance.zoom_percent,
+                    true,
+                ))
+            }
+            Shortcut::ZoomOut => {
+                return self.set_zoom(settings::zoom_step(
+                    self.settings.appearance.zoom_percent,
+                    false,
+                ))
+            }
+            Shortcut::ZoomReset => return self.set_zoom(settings::ZOOM_DEFAULT),
+            Shortcut::Fullscreen => {
+                return window::latest().and_then(|id| {
+                    window::mode(id).then(move |mode| {
+                        let next = if mode == window::Mode::Fullscreen {
+                            window::Mode::Windowed
+                        } else {
+                            window::Mode::Fullscreen
+                        };
+                        window::set_mode(id, next)
+                    })
+                });
+            }
+            Shortcut::Settings => return self.open_settings(),
             Shortcut::Close => {
                 if self.modal.take().is_some()
                     || self.context_menu.take().is_some()
+                    || self.shortcut_list.take().is_some()
+                    || self.settings_page.take().is_some()
                     || self.form.take().is_some()
                     || self.message_dialog.take().is_some()
                     || self
@@ -1706,6 +2081,9 @@ impl App {
                     return Task::none();
                 }
                 if let Some(view) = self.active_view_mut() {
+                    if view.search.take().is_some() {
+                        return Task::none();
+                    }
                     view.center = CenterView::Graph;
                 }
             }
@@ -1732,12 +2110,22 @@ impl App {
         tab.generation += 1;
         let generation = tab.generation;
         tab.state = TabState::Loading { path: path.clone() };
+        let filters = self.session.ref_filters.clone();
         Task::perform(
             blocking(move || {
                 let backend: Arc<dyn GitBackend> =
                     Arc::new(GixBackend::discover(&path).map_err(|e| e.to_string())?);
-                let snapshot = Arc::new(RepoSnapshot::load(backend.as_ref())?);
-                Ok(Opened { backend, snapshot })
+                let mut snapshot = RepoSnapshot::load(backend.as_ref())?;
+                let mut filter = filters.get(backend.path()).cloned().unwrap_or_default();
+                filter.prune(&snapshot.refs);
+                if filter.is_active() {
+                    snapshot = snapshot.with_filter(&filter)?;
+                }
+                Ok(Opened {
+                    backend,
+                    snapshot: Arc::new(snapshot),
+                    filter,
+                })
             }),
             move |result| Message::RepoOpened {
                 tab: id,
@@ -1762,8 +2150,17 @@ impl App {
         tab.generation += 1;
         let generation = tab.generation;
         let backend = Arc::clone(&view.backend);
+        let mut filter = view.ref_filter.clone();
         Task::perform(
-            blocking(move || RepoSnapshot::load(backend.as_ref()).map(Arc::new)),
+            blocking(move || {
+                let snapshot = RepoSnapshot::load(backend.as_ref())?;
+                filter.prune(&snapshot.refs);
+                if filter.is_active() {
+                    snapshot.with_filter(&filter).map(Arc::new)
+                } else {
+                    Ok(Arc::new(snapshot))
+                }
+            }),
             move |result| Message::SnapshotLoaded {
                 tab: id,
                 generation,
@@ -2517,7 +2914,73 @@ impl App {
         let details = self.load_details();
         let scroll = self.restore_scroll();
         let timer = self.schedule_auto_fetch();
-        Task::batch([task, details, scroll, self.persist(), timer])
+        let avatars = self.request_avatars();
+        Task::batch([task, details, scroll, self.persist(), timer, avatars])
+    }
+
+    /// Asks for the avatars of the authors on screen: visible graph rows,
+    /// the selected commit and the file history (only with avatars on).
+    fn request_avatars(&mut self) -> Task<Message> {
+        if !self.settings.appearance.avatars {
+            return Task::none();
+        }
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let mut emails: Vec<String> = Vec::new();
+        let snapshot = &view.snapshot;
+        match &view.center {
+            CenterView::Graph => {
+                let total = snapshot.layout.len();
+                let (first, last) =
+                    crate::ui::graph_visible_range(view.scroll.offset, view.scroll.height, total);
+                let wip = usize::from(snapshot.has_wip);
+                emails.extend(
+                    (first.max(wip)..last)
+                        .filter_map(|row| snapshot.commits.get(row - wip))
+                        .map(|c| c.email.clone()),
+                );
+            }
+            CenterView::FileHistory(history) => {
+                if let Loadable::Ready(entries) = &history.entries {
+                    emails.extend(entries.iter().take(200).map(|e| e.email.clone()));
+                }
+            }
+            CenterView::Diff(_) | CenterView::Conflict(_) | CenterView::Rebase(_) => {}
+        }
+        if let Some(commit) = view.selected_commit().and_then(|id| snapshot.commit(id)) {
+            emails.push(commit.email.clone());
+        }
+        let start = self.avatars.request(emails.iter().map(String::as_str));
+        self.load_avatars(start)
+    }
+
+    /// Loads the avatars `hashes` in the background (cache, then network).
+    fn load_avatars(&mut self, hashes: Vec<String>) -> Task<Message> {
+        if hashes.is_empty() || !self.settings.appearance.avatars {
+            return Task::none();
+        }
+        let factory = self.avatar_fetcher_factory;
+        let fetcher = Arc::clone(self.avatar_fetcher.get_or_insert_with(factory));
+        Task::batch(hashes.into_iter().map(|hash| {
+            let fetcher = Arc::clone(&fetcher);
+            let cache = self.avatar_cache.clone();
+            Task::perform(
+                blocking(move || {
+                    let result = crate::avatars::load(
+                        &hash,
+                        cache.as_ref(),
+                        fetcher.as_ref(),
+                        std::time::SystemTime::now(),
+                    );
+                    Ok((hash, result))
+                }),
+                |result| match result {
+                    Ok((hash, result)) => Message::AvatarLoaded { hash, result },
+                    Err(error) => Message::StatusText(error),
+                },
+            )
+        }))
     }
 
     /// Starts a timer for the next auto-fetch check unless one is pending
@@ -2529,7 +2992,8 @@ impl App {
             .iter()
             .filter_map(|tab| tab.view().map(auto_fetch_state))
             .collect();
-        let Some(next) = crate::fetch::next_check(now, self.session.auto_fetch_minutes, &tabs)
+        let Some(next) =
+            crate::fetch::next_check(now, self.settings.general.auto_fetch_minutes, &tabs)
         else {
             self.auto_fetch_at = None;
             return Task::none();
@@ -2547,6 +3011,446 @@ impl App {
         )
     }
 
+    /// Why action `id` cannot run right now (listed disabled in the palette).
+    pub fn action_block(&self, id: Shortcut) -> Option<String> {
+        let action = crate::actions::find(id)?;
+        match action.requires {
+            crate::actions::Requires::Repository
+                if self.active_tab().and_then(Tab::view).is_none() =>
+            {
+                return Some("Open a repository first".to_owned());
+            }
+            _ => {}
+        }
+        let in_rebase_panel = self
+            .active_tab()
+            .and_then(Tab::view)
+            .is_some_and(|view| matches!(view.center, CenterView::Rebase(_)));
+        (action.context == crate::actions::Context::RebasePanel && !in_rebase_panel)
+            .then(|| "Only in the interactive rebase panel".to_owned())
+    }
+
+    /// Opens the palette with the list of `mode`.
+    fn open_palette(&mut self, mode: palette::Mode) -> Task<Message> {
+        self.context_menu = None;
+        self.shortcut_list = None;
+        self.palette = Some(Palette::new(mode, self.palette_entries(mode)));
+        iced::widget::operation::focus(PALETTE_INPUT)
+    }
+
+    fn palette_entries(&self, mode: palette::Mode) -> Vec<palette::Entry> {
+        use palette::{Entry, Mode, Target};
+        match mode {
+            Mode::Actions => {
+                let all: Vec<Shortcut> = crate::actions::registry()
+                    .iter()
+                    .map(|a| a.id)
+                    .filter(|id| *id != Shortcut::CommandPalette)
+                    .collect();
+                palette::order_recent(&all, &self.recent_actions)
+                    .into_iter()
+                    .filter_map(crate::actions::find)
+                    .map(|action| {
+                        let target = match action.id {
+                            Shortcut::OpenRepoPalette => Target::Mode(Mode::OpenRepository),
+                            Shortcut::CheckoutBranch => Target::Mode(Mode::CheckoutBranch),
+                            Shortcut::FileHistory => Target::Mode(Mode::Files),
+                            id => Target::Action(id),
+                        };
+                        let mut entry = Entry::new(action.label.clone(), target)
+                            .disabled(self.action_block(action.id));
+                        if let Some(keys) = action.shortcut_label(crate::actions::MAC) {
+                            entry = entry.detail(keys);
+                        }
+                        entry
+                    })
+                    .collect()
+            }
+            Mode::OpenRepository => {
+                let mut entries = vec![Entry::new("Browse…", Target::Browse)];
+                entries.extend(self.session.recent.iter().map(|repo| {
+                    let name = repo.path.file_name().map_or_else(
+                        || repo.path.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    Entry::new(name, Target::OpenRepo(repo.path.clone()))
+                        .detail(repo.path.display().to_string())
+                }));
+                entries
+            }
+            Mode::CheckoutBranch => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Vec::new();
+                };
+                let mut entries = Vec::new();
+                for kind in [
+                    git_core::RefKind::LocalBranch,
+                    git_core::RefKind::RemoteBranch,
+                ] {
+                    for reference in view.snapshot.refs.iter().filter(|r| r.kind == kind) {
+                        let local = kind == git_core::RefKind::LocalBranch;
+                        let target = if local {
+                            CheckoutTarget::Local(reference.name.clone())
+                        } else {
+                            CheckoutTarget::Remote(reference.name.clone())
+                        };
+                        entries.push(
+                            Entry::new(reference.name.clone(), Target::Checkout(target))
+                                .detail(if local { "local" } else { "remote" })
+                                .disabled(reference.is_head.then(|| "Checked out".to_owned())),
+                        );
+                    }
+                }
+                entries
+            }
+            Mode::Files => Vec::new(),
+        }
+    }
+
+    /// Runs the selected palette entry (disabled entries do nothing).
+    fn run_palette(&mut self) -> Task<Message> {
+        let Some(target) = self.palette.as_ref().and_then(Palette::chosen) else {
+            return Task::none();
+        };
+        use palette::Target;
+        if let Target::Mode(mode) = target {
+            if mode == palette::Mode::Files {
+                return self.open_file_list();
+            }
+            return self.open_palette(mode);
+        }
+        self.palette = None;
+        match target {
+            Target::Action(id) => {
+                palette::touch_recent(&mut self.recent_actions, id, RECENT_ACTIONS);
+                self.shortcut(id)
+            }
+            Target::OpenRepo(path) => self.update(Message::OpenRecent(path)),
+            Target::Browse => self.update(Message::OpenRepository),
+            Target::Checkout(target) => self.update(Message::Checkout(target)),
+            Target::File(path) => self.update(Message::FileHistoryOpened { path, start: None }),
+            Target::Mode(_) => Task::none(),
+        }
+    }
+
+    /// Changes the selection of the file history and loads the diff.
+    fn file_history_select(
+        &mut self,
+        change: impl FnOnce(&mut crate::file_history::FileHistoryView) -> Option<DiffRequest>,
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let backend = Arc::clone(&view.backend);
+        let CenterView::FileHistory(history) = &mut view.center else {
+            return Task::none();
+        };
+        match change(history) {
+            Some(request) => load_diff(tab, backend, request),
+            None => Task::none(),
+        }
+    }
+
+    /// Replaces the blame of the file history (the old one is cancelled)
+    /// and loads the new one.
+    fn start_blame(
+        &mut self,
+        make: impl FnOnce(
+            &crate::file_history::FileHistoryView,
+        ) -> Option<crate::file_history::BlameView>,
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let writer = Arc::clone(&view.writer);
+        let CenterView::FileHistory(history) = &mut view.center else {
+            return Task::none();
+        };
+        let Some(blame) = make(history) else {
+            return Task::none();
+        };
+        let (path, rev, cancel) = (blame.path.clone(), blame.rev.clone(), blame.cancel.clone());
+        history.mode = crate::file_history::HistoryMode::Blame;
+        history.blame = Some(blame);
+        Task::perform(
+            blocking(move || {
+                let result = git_core::blame(writer.as_ref(), &path, rev.as_deref(), &cancel)
+                    .map_err(|e| e.to_string());
+                Ok((path, rev, result))
+            }),
+            move |result| match result {
+                Ok((path, rev, result)) => Message::BlameLoaded {
+                    tab,
+                    path,
+                    rev,
+                    result,
+                },
+                Err(error) => Message::StatusText(error),
+            },
+        )
+    }
+
+    /// Tool to pass as `--tool` for `choice`: `Err` when the choice is
+    /// "None"; `Ok(None)` for Git's configured tool.
+    fn tool_argument(choice: &settings::ToolChoice) -> Result<Option<String>, ExternalToolError> {
+        match choice {
+            settings::ToolChoice::GitConfig => Ok(None),
+            settings::ToolChoice::Tool(name) => Ok(Some(name.clone())),
+            settings::ToolChoice::None => Err(ExternalToolError::NotConfigured),
+        }
+    }
+
+    /// Opens the shown diff (diff view or file history) in the external
+    /// diff tool; the app stays usable while it runs.
+    fn external_diff(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let choice = self.settings.tools.diff_tool.clone();
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(request) = view.center.diff_mut().map(|d| d.request.clone()) else {
+            self.status = "Open the diff of a file first".to_owned();
+            return Task::none();
+        };
+        let target = match &request.kind {
+            git_core::DiffKind::Commit(id) => git_core::DiffTarget::Commit {
+                id: id.clone(),
+                parent: view
+                    .snapshot
+                    .commit(id)
+                    .and_then(|c| c.parents.first().cloned()),
+            },
+            git_core::DiffKind::Unstaged => git_core::DiffTarget::Unstaged,
+            git_core::DiffKind::Staged => git_core::DiffTarget::Staged,
+            git_core::DiffKind::Untracked | git_core::DiffKind::Stash { .. } => {
+                self.status = "The external diff tool is not available for this file".to_owned();
+                return Task::none();
+            }
+        };
+        let tool = match Self::tool_argument(&choice) {
+            Ok(tool) => tool,
+            Err(error) => {
+                return self.update(Message::ExternalToolFinished {
+                    tab,
+                    merge_path: None,
+                    result: Err(error),
+                })
+            }
+        };
+        let writer = Arc::clone(&view.writer);
+        self.status = format!(
+            "Waiting for {}…",
+            tool.as_deref().unwrap_or("the external diff tool")
+        );
+        Task::perform(
+            blocking(move || {
+                let result = run_tool(
+                    writer.as_ref(),
+                    git_core::ToolKind::Diff,
+                    tool.is_some(),
+                    |git| {
+                        git_core::run_difftool(
+                            git,
+                            &target,
+                            tool.as_deref(),
+                            &request.path,
+                            request.old_path.as_deref(),
+                        )
+                    },
+                );
+                Ok(result)
+            }),
+            move |result: Result<_, String>| Message::ExternalToolFinished {
+                tab,
+                merge_path: None,
+                result: result.unwrap_or_else(|e| Err(ExternalToolError::Failed(e))),
+            },
+        )
+    }
+
+    /// Opens a conflicted file in the merge tool; writes wait until it exits.
+    fn open_merge_tool(&mut self, path: String) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        if self.write_block().is_some() {
+            return Task::none();
+        }
+        let tool = match Self::tool_argument(&self.settings.tools.merge_tool) {
+            Ok(tool) => tool,
+            Err(error) => {
+                return self.update(Message::ExternalToolFinished {
+                    tab,
+                    merge_path: None,
+                    result: Err(error),
+                })
+            }
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        if view.busy.is_some() {
+            return Task::none();
+        }
+        let label = format!(
+            "Waiting for {}",
+            tool.as_deref().unwrap_or("the merge tool")
+        );
+        view.busy = Some(label);
+        let writer = Arc::clone(&view.writer);
+        let merge_path = Some(path.clone());
+        Task::perform(
+            blocking(move || {
+                Ok(run_tool(
+                    writer.as_ref(),
+                    git_core::ToolKind::Merge,
+                    tool.is_some(),
+                    |git| git_core::run_mergetool(git, tool.as_deref(), &path),
+                ))
+            }),
+            move |result: Result<_, String>| Message::ExternalToolFinished {
+                tab,
+                merge_path: merge_path.clone(),
+                result: result.unwrap_or_else(|e| Err(ExternalToolError::Failed(e))),
+            },
+        )
+    }
+
+    /// Opens the palette's file list and loads the tracked files.
+    fn open_file_list(&mut self) -> Task<Message> {
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let writer = Arc::clone(&view.writer);
+        self.context_menu = None;
+        self.shortcut_list = None;
+        self.palette = Some(Palette::loading(palette::Mode::Files));
+        let load = Task::perform(
+            blocking(move || {
+                git_core::tracked_files(writer.as_ref(), "HEAD", &git_core::CancelToken::new())
+                    .map_err(|e| e.to_string())
+            }),
+            Message::PaletteFilesLoaded,
+        );
+        Task::batch([load, iced::widget::operation::focus(PALETTE_INPUT)])
+    }
+
+    /// Searches the loaded commits of tab `tab` off the UI thread; `seq`
+    /// must still be the latest request (`None`: re-run after a refresh).
+    fn run_search(&mut self, tab: TabId, seq: Option<u64>) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let Some(search) = view.search.as_mut() else {
+            return Task::none();
+        };
+        if seq.is_some_and(|seq| seq != search.seq) || !search.active() {
+            return Task::none();
+        }
+        let seq = search.seq;
+        let query = search.query.clone();
+        let commits = Arc::clone(&view.snapshot.commits);
+        Task::perform(
+            blocking(move || Ok(crate::search::matches(&commits, &query))),
+            move |result| Message::SearchResult {
+                tab,
+                seq,
+                matches: result.unwrap_or_default(),
+            },
+        )
+    }
+
+    /// Selects the next (or previous) match and scrolls it into view.
+    fn search_step(&mut self, forward: bool) -> Task<Message> {
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(index) = view.search.as_mut().and_then(|s| s.step(forward)) else {
+            return Task::none();
+        };
+        let Some(id) = view.snapshot.commits.get(index).map(|c| c.id.clone()) else {
+            return Task::none();
+        };
+        select_multi(view, &id, false, false);
+        let task = self.select(Selection::Commit(id));
+        Task::batch([task, self.reveal_selection()])
+    }
+
+    /// Drops the pending auto-fetch timer and plans the next one with the
+    /// current interval.
+    fn restart_auto_fetch(&mut self) -> Task<Message> {
+        self.auto_fetch_at = None;
+        self.auto_fetch_seq += 1;
+        self.schedule_auto_fetch()
+    }
+
+    /// Writes the settings after a short quiet period (typing an interval
+    /// changes them per key).
+    fn save_settings(&mut self) -> Task<Message> {
+        if self.settings_path.is_none() {
+            return Task::none();
+        }
+        self.settings_save_seq += 1;
+        let seq = self.settings_save_seq;
+        Task::perform(
+            async { tokio::time::sleep(SETTINGS_SAVE_DEBOUNCE).await },
+            move |()| Message::SettingsSaveDue(seq),
+        )
+    }
+
+    /// Window scale from the zoom setting (M5-04).
+    pub fn scale_factor(&self) -> f32 {
+        self.settings.appearance.zoom_percent as f32 / 100.0
+    }
+
+    /// Window size in the current zoom's logical pixels (menus are kept
+    /// inside it).
+    pub fn window_size(&self) -> iced::Size {
+        let ratio = self.window_scale / self.scale_factor();
+        iced::Size::new(
+            self.window_size.width * ratio,
+            self.window_size.height * ratio,
+        )
+    }
+
+    /// Applies a zoom level, stores it and names it in the status bar.
+    fn set_zoom(&mut self, percent: u32) -> Task<Message> {
+        let percent = settings::clamp_zoom(percent);
+        let text = format!("Zoom {percent} %");
+        let flash = self.flash_status(text);
+        if percent == self.settings.appearance.zoom_percent {
+            return flash;
+        }
+        self.settings.appearance.zoom_percent = percent;
+        Task::batch([flash, self.save_settings()])
+    }
+
+    /// Shows `text` in the status bar for a moment.
+    fn flash_status(&mut self, text: String) -> Task<Message> {
+        self.status = text;
+        self.status_seq += 1;
+        let seq = self.status_seq;
+        // Created lazily: the timer needs the runtime that runs the task.
+        Task::perform(
+            async { tokio::time::sleep(STATUS_FLASH).await },
+            move |()| Message::StatusExpired(seq),
+        )
+    }
+
+    fn open_settings(&mut self) -> Task<Message> {
+        self.context_menu = None;
+        self.settings_page = Some(settings::Page::new(&self.settings));
+        iced::widget::operation::focus(crate::ui::settings::AUTO_FETCH_INPUT)
+    }
+
     /// Re-applies the stored offset when a different graph or diff became visible.
     fn restore_scroll(&mut self) -> Task<Message> {
         let shown = self.active_tab().and_then(|tab| {
@@ -2554,7 +3458,9 @@ impl App {
             let (is_diff, id, offset) = match &view.center {
                 CenterView::Graph => (false, &view.graph_scroll_id, view.scroll.offset),
                 CenterView::Diff(diff) => (true, &diff.scroll_id, diff.scroll.offset),
-                CenterView::Conflict(_) | CenterView::Rebase(_) => return None,
+                CenterView::Conflict(_) | CenterView::Rebase(_) | CenterView::FileHistory(_) => {
+                    return None
+                }
             };
             let task = (offset > 0.0).then(|| scroll_by_id(id.clone(), offset));
             Some(((tab.id, is_diff), task))
@@ -2618,6 +3524,555 @@ impl App {
                 }
             }
             Message::MenuClosed => self.context_menu = None,
+            Message::ShortcutFilterChanged(filter) => {
+                if let Some(list) = &mut self.shortcut_list {
+                    *list = filter;
+                }
+            }
+            Message::ShortcutListClosed => self.shortcut_list = None,
+            Message::SettingsLoaded(loaded) => {
+                let settings::Loaded {
+                    settings,
+                    notice,
+                    write,
+                } = loaded;
+                if let Some(notice) = notice {
+                    self.status = notice;
+                }
+                self.settings = settings;
+                if let Some(page) = &mut self.settings_page {
+                    *page = settings::Page::new(&self.settings).with_category(page.category);
+                }
+                let save = if write {
+                    self.save_settings()
+                } else {
+                    Task::none()
+                };
+                return Task::batch([save, self.restart_auto_fetch()]);
+            }
+            Message::SettingsOpened => return self.open_settings(),
+            Message::SystemTheme(mode) => self.system_theme = mode,
+            Message::ExternalDiff => return self.external_diff(),
+            Message::OpenTerminal => {
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|v| v.backend.path().to_path_buf())
+                else {
+                    return Task::none();
+                };
+                let template = self.settings.tools.terminal_command.clone();
+                return Task::perform(
+                    blocking(move || {
+                        let launch = crate::launch::terminal(
+                            crate::launch::Platform::current(),
+                            &crate::launch::SystemLookup,
+                            &template,
+                            &root,
+                        )?;
+                        crate::launch::spawn(&launch).map_err(|e| {
+                            format!(
+                                "{e}. Check the terminal command in Preferences → External tools."
+                            )
+                        })
+                    }),
+                    |result| {
+                        Message::StatusText(match result {
+                            Ok(()) => String::new(),
+                            Err(error) => format!("Could not open a terminal: {error}"),
+                        })
+                    },
+                );
+            }
+            Message::OpenFileManager => {
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .map(|v| v.backend.path().to_path_buf())
+                else {
+                    return Task::none();
+                };
+                return Task::perform(
+                    blocking(move || {
+                        crate::launch::spawn(&crate::launch::file_manager(
+                            crate::launch::Platform::current(),
+                            &root,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
+            Message::TerminalCommandInput(command) => {
+                self.settings.tools.terminal_command = command;
+                return self.save_settings();
+            }
+            Message::OpenMergeTool(path) => return self.open_merge_tool(path),
+            Message::ExternalToolFinished {
+                tab,
+                merge_path,
+                result,
+            } => {
+                let merge = merge_path.is_some();
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    if merge {
+                        view.busy = None;
+                        // Shown again after the refresh if still conflicted.
+                        view.reopen_conflict = merge_path;
+                    }
+                }
+                self.status.clear();
+                match result {
+                    Ok(()) => {}
+                    Err(ExternalToolError::NotConfigured) => {
+                        self.modal = Some(tool_missing_dialog(merge));
+                    }
+                    Err(ExternalToolError::Failed(error)) => {
+                        let title = if merge {
+                            "Merge tool failed"
+                        } else {
+                            "Diff tool failed"
+                        };
+                        self.modal = Some(Modal::error(title, error));
+                    }
+                }
+                if merge {
+                    return self.refresh(tab);
+                }
+            }
+            Message::ToolsLoaded(result) => {
+                if let Some(page) = &mut self.settings_page {
+                    page.tools = Some(result);
+                }
+            }
+            Message::DiffToolChosen(choice) => {
+                self.settings.tools.diff_tool = choice;
+                return self.save_settings();
+            }
+            Message::MergeToolChosen(choice) => {
+                self.settings.tools.merge_tool = choice;
+                return self.save_settings();
+            }
+            Message::SettingsOpenedAt(category) => {
+                let task = self.open_settings();
+                return Task::batch([task, self.update(Message::SettingsCategory(category))]);
+            }
+            Message::AvatarsToggled(on) => {
+                self.settings.appearance.avatars = on;
+                if !on {
+                    // Off: no client, no requests, initials everywhere.
+                    self.avatar_fetcher = None;
+                    self.avatars = Default::default();
+                }
+                return self.save_settings();
+            }
+            Message::AvatarLoaded { hash, result } => {
+                let next = self.avatars.finished(&hash, result);
+                return self.load_avatars(next);
+            }
+            Message::StatusExpired(seq) => {
+                if seq == self.status_seq {
+                    self.status.clear();
+                }
+            }
+            Message::ZoomTo(percent) => return self.set_zoom(percent),
+            Message::ThemeChosen(choice) => {
+                if self.settings.appearance.theme != choice {
+                    self.settings.appearance.theme = choice;
+                    return self.save_settings();
+                }
+            }
+            Message::SettingsClosed => self.settings_page = None,
+            Message::SettingsCategory(category) => {
+                if let Some(page) = &mut self.settings_page {
+                    page.category = category;
+                }
+                // The tool lists come from Git (needs a repository).
+                if category == settings::Category::ExternalTools {
+                    let writer = self
+                        .active_tab()
+                        .and_then(Tab::view)
+                        .map(|v| Arc::clone(&v.writer));
+                    if let (Some(writer), Some(page)) = (writer, &mut self.settings_page) {
+                        if page.tools.is_none() {
+                            return Task::perform(
+                                blocking(move || {
+                                    let diff = git_core::tool_info(
+                                        writer.as_ref(),
+                                        git_core::ToolKind::Diff,
+                                    );
+                                    let merge = git_core::tool_info(
+                                        writer.as_ref(),
+                                        git_core::ToolKind::Merge,
+                                    );
+                                    Ok(diff
+                                        .and_then(|d| merge.map(|m| (d, m)))
+                                        .map_err(|e| e.to_string()))
+                                }),
+                                |result: Result<_, String>| {
+                                    Message::ToolsLoaded(result.and_then(|r| r))
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Message::AutoFetchInput(input) => {
+                let Some(page) = &mut self.settings_page else {
+                    return Task::none();
+                };
+                page.error = None;
+                match settings::parse_auto_fetch(&input) {
+                    Ok(minutes) => {
+                        page.auto_fetch_input = input;
+                        if minutes != self.settings.general.auto_fetch_minutes {
+                            self.settings.general.auto_fetch_minutes = minutes;
+                            return Task::batch([self.save_settings(), self.restart_auto_fetch()]);
+                        }
+                    }
+                    Err(error) => {
+                        page.auto_fetch_input = input;
+                        page.error = Some(error);
+                    }
+                }
+            }
+            Message::SettingsSaveDue(seq) => {
+                if seq != self.settings_save_seq {
+                    return Task::none();
+                }
+                let Some(path) = self.settings_path.clone() else {
+                    return Task::none();
+                };
+                let json = settings::to_json(&self.settings);
+                return Task::perform(
+                    blocking(move || settings::save(&path, &json).map_err(|e| e.to_string())),
+                    Message::SettingsSaved,
+                );
+            }
+            Message::SettingsSaved(result) => {
+                if let Err(error) = result {
+                    self.status = format!("Could not save the settings: {error}");
+                }
+            }
+            Message::EscapeCaptured => {
+                if self.palette.take().is_none()
+                    && self.shortcut_list.take().is_none()
+                    && self.settings_page.take().is_none()
+                {
+                    // Esc in the search field closes the search.
+                    if let Some(view) = self.active_view_mut() {
+                        view.search = None;
+                    }
+                }
+            }
+            Message::BackspacePressed => {
+                if self
+                    .palette
+                    .as_mut()
+                    .is_some_and(Palette::leave_on_backspace)
+                {
+                    return self.open_palette(palette::Mode::Actions);
+                }
+            }
+            Message::PaletteQuery(query) => {
+                if let Some(palette) = &mut self.palette {
+                    palette.set_query(query);
+                }
+            }
+            Message::PaletteRun(index) => {
+                if let Some(palette) = &mut self.palette {
+                    palette.select(index);
+                    return self.run_palette();
+                }
+            }
+            Message::PaletteSubmit => return self.run_palette(),
+            Message::PaletteClosed => self.palette = None,
+            Message::SearchOpened => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                view.center = CenterView::Graph;
+                view.search.get_or_insert_with(Default::default);
+                return iced::widget::operation::focus(SEARCH_INPUT);
+            }
+            Message::SearchInput(query) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(search) = self.active_view_mut().and_then(|v| v.search.as_mut()) else {
+                    return Task::none();
+                };
+                search.query = query;
+                search.seq += 1;
+                search.jump = true;
+                let seq = search.seq;
+                if !search.active() {
+                    search.set_matches(Vec::new(), None);
+                    return Task::none();
+                }
+                return Task::perform(
+                    async { tokio::time::sleep(SEARCH_DEBOUNCE).await },
+                    move |()| Message::SearchDue { tab, seq },
+                );
+            }
+            Message::SearchDue { tab, seq } => return self.run_search(tab, Some(seq)),
+            Message::SearchResult { tab, seq, matches } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let selected = view
+                    .selected_commit()
+                    .and_then(|id| view.snapshot.index.get(id).copied());
+                let Some(search) = view.search.as_mut().filter(|s| s.seq == seq) else {
+                    return Task::none();
+                };
+                let any = !matches.is_empty();
+                search.set_matches(matches, selected);
+                // Like GitKraken: typing jumps to the first match, unless the
+                // selected commit matches.
+                let jump = std::mem::take(&mut search.jump);
+                if jump
+                    && any
+                    && search.current.is_none()
+                    && self.active_tab().is_some_and(|t| t.id == tab)
+                {
+                    return self.search_step(true);
+                }
+            }
+            Message::SearchSubmit => {
+                let forward = !self.modifiers.shift();
+                return self.search_step(forward);
+            }
+            Message::SearchStep { forward } => return self.search_step(forward),
+            Message::ToggleHidden { name, kind } => {
+                // The checked-out branch stays visible.
+                let is_head = self.active_tab().and_then(Tab::view).is_some_and(|v| {
+                    kind == git_core::RefKind::LocalBranch
+                        && v.snapshot.head.branch() == Some(name.as_str())
+                });
+                if is_head {
+                    return Task::none();
+                }
+                return self.change_filter(|filter, _| filter.toggle_hidden(&name, kind));
+            }
+            Message::ToggleSolo { name, kind } => {
+                return self.change_filter(|filter, _| filter.toggle_soloed(&name, kind));
+            }
+            Message::HideRemote { remote, hide } => {
+                return self
+                    .change_filter(|filter, refs| filter.set_remote_hidden(refs, &remote, hide));
+            }
+            Message::FilterApplied { tab, seq, result } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                if view.filter_seq != seq {
+                    return Task::none();
+                }
+                match result {
+                    // A hidden selection moves to the WIP row (apply_snapshot).
+                    Ok(snapshot) => view.apply_snapshot(snapshot),
+                    Err(error) => {
+                        self.status = format!("Could not filter the graph: {error}");
+                        return Task::none();
+                    }
+                }
+                return Task::batch([
+                    self.load_details(),
+                    self.run_search(tab, None),
+                    self.reveal_selection(),
+                ]);
+            }
+            Message::FileHistoryOpened { path, start } => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let rev = start.clone().unwrap_or_else(|| "HEAD".to_owned());
+                let history =
+                    crate::file_history::FileHistoryView::new(path.clone(), rev.clone(), start);
+                let cancel = history.cancel.clone();
+                // Replacing a running history drops it, which stops its `git log`.
+                view.center = CenterView::FileHistory(Box::new(history));
+                view.search = None;
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        Ok(
+                            git_core::file_history(writer.as_ref(), &path, &rev, &cancel)
+                                .map(|entries| (path, rev, entries)),
+                        )
+                    }),
+                    move |result| match result.and_then(|r| r.map_err(|e| e.to_string())) {
+                        Ok((path, start, entries)) => Message::FileHistoryLoaded {
+                            tab,
+                            path,
+                            start,
+                            result: Ok(entries),
+                        },
+                        Err(error) => Message::FileHistoryLoaded {
+                            tab,
+                            path: String::new(),
+                            start: String::new(),
+                            result: Err(error),
+                        },
+                    },
+                );
+            }
+            Message::FileHistoryLoaded {
+                tab,
+                path,
+                start,
+                result,
+            } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let backend = Arc::clone(&view.backend);
+                let CenterView::FileHistory(history) = &mut view.center else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(entries) if history.path == path && history.start == start => {
+                        if let Some(request) = history.set_entries(entries) {
+                            return load_diff(tab, backend, request);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        if matches!(history.entries, Loadable::Loading) {
+                            history.entries = Loadable::Failed(error);
+                        }
+                    }
+                }
+            }
+            Message::FileHistorySelected(index) => {
+                return self.file_history_select(|h| h.select(index));
+            }
+            Message::HistoryModeChosen(mode) => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let CenterView::FileHistory(history) = &mut view.center else {
+                    return Task::none();
+                };
+                history.mode = mode;
+                if mode == crate::file_history::HistoryMode::Blame && history.blame.is_none() {
+                    return self.start_blame(|h| Some(h.default_blame()));
+                }
+            }
+            Message::BlameAt(index) => return self.start_blame(|h| h.blame_at(index)),
+            Message::BlameLoaded {
+                tab,
+                path,
+                rev,
+                result,
+            } => {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let CenterView::FileHistory(history) = &mut view.center else {
+                    return Task::none();
+                };
+                if let Some(blame) = history
+                    .blame
+                    .as_mut()
+                    .filter(|b| b.path == path && b.rev == rev)
+                {
+                    blame.blame = match result {
+                        Ok(blame) => Loadable::Ready(blame),
+                        Err(error) => Loadable::Failed(error),
+                    };
+                }
+            }
+            Message::BlameScrolled { offset, height } => {
+                if let Some(view) = self.active_view_mut() {
+                    if let CenterView::FileHistory(history) = &mut view.center {
+                        if let Some(blame) = history.blame.as_mut() {
+                            blame.scroll = crate::repo_view::Scroll { offset, height };
+                        }
+                    }
+                }
+            }
+            Message::BlameCommitClicked(id) => {
+                if let Some(view) = self.active_view_mut() {
+                    if let CenterView::FileHistory(history) = &mut view.center {
+                        history.mode = crate::file_history::HistoryMode::History;
+                    }
+                }
+                return self.file_history_select(|h| h.select_commit(&id));
+            }
+            Message::FileHistoryEntryMenu { index, position } => {
+                let deletion = self.active_tab().and_then(Tab::view).is_some_and(|view| {
+                    matches!(&view.center, CenterView::FileHistory(h)
+                        if matches!(&h.entries, Loadable::Ready(e)
+                            if e.get(index).is_some_and(|e| e.status == "D")))
+                });
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    vec![
+                        MenuEntry::Item {
+                            label: "Blame at this commit".into(),
+                            shortcut: None,
+                            enabled: !deletion,
+                            message: Box::new(Message::BlameAt(index)),
+                            hint: deletion.then(|| "The file is deleted in this commit".to_owned()),
+                        },
+                        MenuEntry::item("Show in graph", Message::FileHistoryShowInGraph),
+                    ],
+                ));
+                return self.file_history_select(|h| h.select(index));
+            }
+            Message::FileHistoryShowInGraph => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                let CenterView::FileHistory(history) = &view.center else {
+                    return Task::none();
+                };
+                let Some(id) = history.selected_entry().map(|e| e.id.clone()) else {
+                    return Task::none();
+                };
+                view.center = CenterView::Graph;
+                if !view.snapshot.index.contains_key(&id) {
+                    self.status = format!(
+                        "Commit {} is not in the graph (hidden branch or truncated history)",
+                        &id[..id.len().min(7)]
+                    );
+                    return Task::none();
+                }
+                select_multi(view, &id, false, false);
+                let task = self.select(Selection::Commit(id));
+                return Task::batch([task, self.reveal_selection()]);
+            }
+            Message::PaletteFilesLoaded(result) => {
+                if let Some(palette) = self
+                    .palette
+                    .as_mut()
+                    .filter(|p| p.mode == palette::Mode::Files)
+                {
+                    match result {
+                        Ok(files) => palette.set_entries(
+                            files
+                                .into_iter()
+                                .map(|path| {
+                                    palette::Entry::new(path.clone(), palette::Target::File(path))
+                                })
+                                .collect(),
+                        ),
+                        Err(error) => {
+                            palette.set_entries(Vec::new());
+                            self.status = format!("Could not list the files: {error}");
+                        }
+                    }
+                }
+            }
+            Message::SearchClosed => {
+                if let Some(view) = self.active_view_mut() {
+                    view.search = None;
+                }
+            }
             Message::FileContextMenu {
                 file,
                 area,
@@ -2658,6 +4113,32 @@ impl App {
                     }
                     FileArea::Commit => {}
                 }
+                if file.kind == git_core::ChangeKind::Conflicted {
+                    entries.push(write_item(
+                        "Open in merge tool",
+                        None,
+                        Message::OpenMergeTool(file.path.clone()),
+                    ));
+                }
+                // History of the file (M5-09); from a commit it starts there.
+                let start = match area {
+                    FileArea::Commit => self
+                        .active_tab()
+                        .and_then(Tab::view)
+                        .and_then(|v| v.selected_commit().map(str::to_owned)),
+                    FileArea::Unstaged | FileArea::Staged => None,
+                };
+                entries.push(MenuEntry::Item {
+                    label: "File history".into(),
+                    shortcut: None,
+                    enabled: file.kind != git_core::ChangeKind::Untracked,
+                    message: Box::new(Message::FileHistoryOpened {
+                        path: file.path.clone(),
+                        start,
+                    }),
+                    hint: (file.kind == git_core::ChangeKind::Untracked)
+                        .then(|| "Untracked files have no history".to_owned()),
+                });
                 if area != FileArea::Commit {
                     entries.push(MenuEntry::item(
                         "Open file location",
@@ -2686,7 +4167,10 @@ impl App {
                 self.status = "Copied to the clipboard".into();
                 return iced::clipboard::write(text);
             }
-            Message::WindowResized(size) => self.window_size = size,
+            Message::WindowResized(size) => {
+                self.window_size = size;
+                self.window_scale = self.scale_factor();
+            }
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
             Message::DiffLineClicked(row) => {
                 let mode = if self.modifiers.shift() {
@@ -2696,10 +4180,8 @@ impl App {
                 } else {
                     crate::repo_view::ClickMode::Replace
                 };
-                if let Some(view) = self.active_view_mut() {
-                    if let CenterView::Diff(diff) = &mut view.center {
-                        diff.click(row, mode);
-                    }
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    diff.click(row, mode);
                 }
             }
             Message::ApplyHunk(index) => return self.apply_diff_lines(move |_, h, _| h == index),
@@ -2904,7 +4386,7 @@ impl App {
                     MenuEntry::Item {
                         hint: None,
                         label: "Fetch all".into(),
-                        shortcut: Some("Ctrl+L".into()),
+                        shortcut: Shortcut::FetchAll.shortcut_text(),
                         enabled: writable,
                         message: Box::new(Message::FetchAll),
                     },
@@ -3053,6 +4535,8 @@ impl App {
                             writable,
                             head: head_name(&view.snapshot),
                             head_can_fast_forward: view.snapshot.head_can_fast_forward(target),
+                            hidden: view.ref_filter.is_hidden(&name, kind),
+                            soloed: view.ref_filter.is_soloed(&name, kind),
                         })
                     }
                     git_core::RefKind::RemoteBranch => {
@@ -3068,6 +4552,8 @@ impl App {
                             head: head_name(snapshot),
                             head_can_fast_forward: snapshot.head_can_fast_forward(target),
                             behind_local: behind_local(snapshot, &name, target),
+                            hidden: view.ref_filter.is_hidden(&name, kind),
+                            soloed: view.ref_filter.is_soloed(&name, kind),
                         })
                     }
                     git_core::RefKind::Tag => crate::menus::tag(&name, writable),
@@ -3178,9 +4664,30 @@ impl App {
             }
             Message::RemoteContextMenu { name, position } => {
                 let writable = self.write_block().is_none();
+                let (any_shown, any_hidden) =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .map_or((false, false), |view| {
+                            let branches: Vec<_> = view
+                                .snapshot
+                                .refs
+                                .iter()
+                                .filter(|r| {
+                                    r.kind == git_core::RefKind::RemoteBranch
+                                        && r.remote() == Some(name.as_str())
+                                })
+                                .collect();
+                            let hidden = |r: &&git_core::Reference| {
+                                view.ref_filter.is_hidden(&r.name, r.kind)
+                            };
+                            (
+                                branches.iter().any(|r| !hidden(r)),
+                                branches.iter().any(hidden),
+                            )
+                        });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::remote(&name, writable),
+                    crate::menus::remote(&name, writable, any_shown, any_hidden),
                 ));
             }
             Message::FetchRemote(name) => {
@@ -3592,7 +5099,12 @@ impl App {
                     .map(|p| p.to_path_buf())
                 {
                     return Task::perform(
-                        blocking(move || reveal_in_file_manager(&root.join(&path))),
+                        blocking(move || {
+                            crate::launch::spawn(&crate::launch::reveal_file(
+                                crate::launch::Platform::current(),
+                                &root.join(&path),
+                            ))
+                        }),
                         |result| Message::StatusText(result.err().unwrap_or_default()),
                     );
                 }
@@ -3686,7 +5198,7 @@ impl App {
                     return Task::none();
                 };
                 let writer = Arc::clone(&view.writer);
-                let CenterView::Diff(diff) = &mut view.center else {
+                let Some(diff) = view.center.diff_mut() else {
                     return Task::none();
                 };
                 if diff.request != request {
@@ -3722,7 +5234,7 @@ impl App {
                     return Task::none();
                 };
                 let backend = Arc::clone(&view.backend);
-                let CenterView::Diff(diff) = &mut view.center else {
+                let Some(diff) = view.center.diff_mut() else {
                     return Task::none();
                 };
                 if diff.request != request {
@@ -3742,10 +5254,8 @@ impl App {
                 }
             }
             Message::DiffScrolled { offset, height } => {
-                if let Some(view) = self.active_view_mut() {
-                    if let CenterView::Diff(diff) = &mut view.center {
-                        diff.scroll = crate::repo_view::Scroll { offset, height };
-                    }
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    diff.scroll = crate::repo_view::Scroll { offset, height };
                 }
             }
             Message::GraphScrolled { offset, height } => {
@@ -4152,7 +5662,8 @@ impl App {
                 shortcut,
                 text_input_focused,
             } => {
-                if !text_input_focused {
+                // The palette handles arrows itself while its field has focus.
+                if !text_input_focused || self.palette.is_some() {
                     return self.shortcut(shortcut);
                 }
             }
@@ -4273,7 +5784,9 @@ impl App {
                 let id = tab.id;
                 tab.state = match result {
                     Ok(opened) => {
-                        TabState::Ready(Box::new(RepoView::new(opened.backend, opened.snapshot)))
+                        let mut view = RepoView::new(opened.backend, opened.snapshot);
+                        view.ref_filter = opened.filter;
+                        TabState::Ready(Box::new(view))
                     }
                     Err(error) => TabState::Failed { path, error },
                 };
@@ -4345,10 +5858,26 @@ impl App {
                 if let Some(dialog) = empty_pick.flatten() {
                     self.modal = Some(dialog);
                 }
+                // Branches that no longer exist leave the filter; a filter
+                // changed while loading is applied now.
+                let filter = self.ensure_filter(id);
+                // After a merge tool: the conflict view shows the new state.
+                let reopen = self.tab_mut(id).and_then(Tab::view_mut).and_then(|view| {
+                    let path = view.reopen_conflict.take()?;
+                    let still = view.conflicted_files().contains(&path.as_str())
+                        && matches!(&view.center, CenterView::Conflict(c) if c.path == path);
+                    still.then_some(path)
+                });
+                let filter = match reopen {
+                    Some(path) => Task::batch([filter, self.update(Message::ConflictOpened(path))]),
+                    None => filter,
+                };
+                // Matches are commit indices: search the new history again.
+                let search = Task::batch([self.run_search(id, None), filter, self.persist()]);
                 if reload {
-                    return Task::batch([self.reload_diff(id), self.load_details()]);
+                    return Task::batch([self.reload_diff(id), self.load_details(), search]);
                 }
-                return self.load_details();
+                return Task::batch([self.load_details(), search]);
             }
             Message::CommitChangesLoaded { tab, id, result } => {
                 if let Some(details) = self
@@ -4380,6 +5909,7 @@ impl App {
             [
                 event::listen_with(global_event),
                 window::close_requests().map(Message::CloseRequested),
+                iced::system::theme_changes().map(Message::SystemTheme),
             ]
             .into_iter()
             .chain(watchers),
@@ -5119,6 +6649,45 @@ fn network_stream(
     )
 }
 
+/// Runs an external tool unless no tool is configured (`explicit`: the
+/// settings name one). Blocking.
+fn run_tool(
+    git: &dyn git_core::GitWriter,
+    kind: git_core::ToolKind,
+    explicit: bool,
+    run: impl FnOnce(&dyn git_core::GitWriter) -> git_core::Result<()>,
+) -> Result<(), ExternalToolError> {
+    if !explicit {
+        match git_core::configured_tool(git, kind) {
+            Ok(Some(_)) => {}
+            Ok(None) => return Err(ExternalToolError::NotConfigured),
+            Err(error) => return Err(ExternalToolError::Failed(error.to_string())),
+        }
+    }
+    run(git).map_err(|e| ExternalToolError::Failed(e.to_string()))
+}
+
+/// No diff or merge tool: explain where to choose one.
+fn tool_missing_dialog(merge: bool) -> Modal {
+    let (title, kind, key) = if merge {
+        ("No merge tool", "merge", "merge.tool")
+    } else {
+        ("No diff tool", "diff", "diff.tool")
+    };
+    let mut modal = Modal::confirm(
+        title,
+        format!(
+            "No external {kind} tool is configured. Choose one in Preferences → External \
+             tools, or set {key} in your Git configuration."
+        ),
+        "Open settings",
+        false,
+        Message::SettingsOpenedAt(settings::Category::ExternalTools),
+    );
+    modal.default = Some(1);
+    modal
+}
+
 /// Loads the diff of `request` in the background.
 fn load_diff(tab: TabId, backend: Arc<dyn GitBackend>, request: DiffRequest) -> Task<Message> {
     let load = request.clone();
@@ -5169,11 +6738,24 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
         }
-        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-            if status == event::Status::Ignored =>
-        {
-            shortcuts::shortcut(&key, modifiers).map(Message::Shortcut)
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modified_key,
+            modifiers,
+            ..
+        }) if status == event::Status::Ignored => {
+            shortcuts::shortcut_with_modified(&key, &modified_key, modifiers).map(Message::Shortcut)
         }
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Backspace),
+            ..
+        }) => Some(Message::BackspacePressed),
+        // A focused text field takes the first Esc; overlays with a query
+        // field close right away anyway.
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        }) => Some(Message::EscapeCaptured),
         _ => None,
     }
 }
@@ -5379,26 +6961,6 @@ fn gitignore_pattern(path: &str) -> String {
 }
 
 /// Opens the system file manager at `path` (selecting it where supported).
-fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
-    let mut command = if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("explorer");
-        c.arg(format!("/select,{}", path.display()));
-        c
-    } else if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        c.arg("-R").arg(path);
-        c
-    } else {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(path.parent().unwrap_or(path));
-        c
-    };
-    command
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("Could not open the file manager: {e}"))
-}
-
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -5726,6 +7288,326 @@ mod tests {
         assert_eq!(selected(&app), Some(Selection::Commit("c".into())));
         let _ = app.update(checked(Shortcut::NewTab, true));
         assert_eq!(app.tabs.len(), 1);
+    }
+
+    #[test]
+    fn shortcut_list_opens_filters_and_closes() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::ShortcutList, false));
+        assert_eq!(app.shortcut_list.as_deref(), Some(""));
+        let _ = app.update(Message::ShortcutFilterChanged("fetch".into()));
+        assert_eq!(app.shortcut_list.as_deref(), Some("fetch"));
+        // Other shortcuts wait while the list is open; Esc closes it.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.shortcut_list.is_none());
+        // Esc in the focused filter field closes it too.
+        let _ = app.update(checked(Shortcut::ShortcutList, false));
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.shortcut_list.is_none());
+    }
+
+    #[test]
+    fn every_action_is_available_once_a_repository_is_open() {
+        // M5 complete: no action is left disabled for a later task.
+        let app = ready_app(&["c"]);
+        let blocked: Vec<&str> = crate::actions::registry()
+            .iter()
+            .filter(|a| a.context != crate::actions::Context::RebasePanel)
+            .filter(|a| app.action_block(a.id).is_some())
+            .map(|a| a.label.as_str())
+            .collect();
+        assert!(blocked.is_empty(), "{blocked:?}");
+        // Without a repository the terminal has nothing to open.
+        let (empty, _) = App::new(Vec::new(), None);
+        assert_eq!(
+            empty.action_block(Shortcut::OpenTerminal).as_deref(),
+            Some("Open a repository first")
+        );
+    }
+
+    #[test]
+    fn settings_view_opens_applies_and_closes() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, settings::Category::General);
+        assert_eq!(page.auto_fetch_input, "5");
+
+        // Valid input applies immediately; invalid input keeps the old value.
+        let _ = app.update(Message::AutoFetchInput("12".into()));
+        assert_eq!(app.settings.general.auto_fetch_minutes, 12);
+        let _ = app.update(Message::AutoFetchInput("12x".into()));
+        assert_eq!(app.settings.general.auto_fetch_minutes, 12);
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.auto_fetch_input, "12x");
+        assert!(page.error.is_some());
+        let _ = app.update(Message::AutoFetchInput("0".into()));
+        assert_eq!(app.settings.general.auto_fetch_minutes, 0);
+        assert!(app.settings_page.as_ref().unwrap().error.is_none());
+
+        // Other shortcuts wait; Esc returns to the repository.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(Message::SettingsCategory(settings::Category::Appearance));
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::Appearance)
+        );
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.settings_page.is_none());
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.settings_page.is_none());
+    }
+
+    #[test]
+    fn zoom_shortcuts_step_persist_and_flash() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::ZoomIn, false));
+        assert_eq!(app.settings.appearance.zoom_percent, 110);
+        assert!((app.scale_factor() - 1.1).abs() < 1e-6);
+        assert_eq!(app.status, "Zoom 110 %");
+        let seq = app.status_seq;
+        let _ = app.update(Message::StatusExpired(seq));
+        assert!(app.status.is_empty());
+
+        for _ in 0..20 {
+            let _ = app.update(checked(Shortcut::ZoomIn, false));
+        }
+        assert_eq!(app.settings.appearance.zoom_percent, 200);
+        // Zoom also works while the settings view is open.
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(checked(Shortcut::ZoomReset, false));
+        assert_eq!(app.settings.appearance.zoom_percent, 100);
+        for _ in 0..20 {
+            let _ = app.update(checked(Shortcut::ZoomOut, false));
+        }
+        assert_eq!(app.settings.appearance.zoom_percent, 70);
+        let _ = app.update(Message::ZoomTo(120));
+        assert_eq!(app.settings.appearance.zoom_percent, 120);
+        // An older flash does not clear a newer message.
+        let old = app.status_seq;
+        let _ = app.update(Message::ZoomTo(130));
+        let _ = app.update(Message::StatusExpired(old));
+        assert_eq!(app.status, "Zoom 130 %");
+    }
+
+    #[test]
+    fn window_size_follows_the_zoom() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::WindowResized(iced::Size::new(1000.0, 800.0)));
+        assert_eq!(app.window_size(), iced::Size::new(1000.0, 800.0));
+        let _ = app.update(Message::ZoomTo(200));
+        assert_eq!(app.window_size(), iced::Size::new(500.0, 400.0));
+        let _ = app.update(Message::WindowResized(iced::Size::new(600.0, 400.0)));
+        assert_eq!(app.window_size(), iced::Size::new(600.0, 400.0));
+    }
+
+    /// Counts created HTTP clients (avatars, M5-11).
+    static FETCHERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    struct NoNetwork;
+
+    impl crate::avatars::Fetcher for NoNetwork {
+        fn fetch(&self, _url: &str) -> Result<Option<Vec<u8>>, String> {
+            Err("tests have no network".into())
+        }
+    }
+
+    fn counting_factory() -> Arc<dyn crate::avatars::Fetcher> {
+        FETCHERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(NoNetwork)
+    }
+
+    /// Ready app whose commits have distinct author emails.
+    fn avatar_app(count: usize) -> App {
+        let ids: Vec<String> = (0..count).map(|i| format!("c{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&refs);
+        app.avatar_fetcher_factory = counting_factory;
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        for (i, commit) in commits.iter_mut().enumerate() {
+            commit.email = format!("dev{i}@example.com");
+        }
+        snapshot.commits = Arc::new(commits);
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    #[test]
+    fn avatars_off_means_no_client_and_no_request() {
+        let mut app = avatar_app(6);
+        let created = FETCHERS.load(std::sync::atomic::Ordering::SeqCst);
+        let _ = app.update(Message::GraphScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        let _ = app.update(Message::CommitSelected("c1".into()));
+        assert!(app.avatar_fetcher.is_none());
+        assert_eq!(app.avatars.in_flight(), 0);
+        assert_eq!(FETCHERS.load(std::sync::atomic::Ordering::SeqCst), created);
+    }
+
+    #[test]
+    fn avatars_on_request_visible_authors_four_at_a_time() {
+        let mut app = avatar_app(6);
+        let _ = app.update(Message::AvatarsToggled(true));
+        assert!(app.settings.appearance.avatars);
+        // Six authors on screen: four requests run, the rest waits.
+        assert!(app.avatar_fetcher.is_some());
+        assert_eq!(app.avatars.in_flight(), crate::avatars::MAX_PARALLEL);
+        let hash = crate::avatars::gravatar_hash("dev0@example.com");
+        let _ = app.update(Message::AvatarLoaded {
+            hash,
+            result: Ok(crate::avatars::Cached::Image(vec![1, 2, 3])),
+        });
+        assert!(app.avatars.get("dev0@example.com").is_some());
+        assert_eq!(app.avatars.in_flight(), crate::avatars::MAX_PARALLEL);
+
+        // Off again: the client is dropped and the avatars forgotten.
+        let _ = app.update(Message::AvatarsToggled(false));
+        assert!(app.avatar_fetcher.is_none());
+        assert!(app.avatars.get("dev0@example.com").is_none());
+        assert_eq!(app.avatars.in_flight(), 0);
+    }
+
+    #[test]
+    fn external_diff_needs_a_diff_and_a_tool() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        // "None" in the settings: explain where to choose a tool.
+        app.settings.tools.diff_tool = settings::ToolChoice::None;
+        let _ = app.update(checked(Shortcut::ExternalDiff, false));
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "No diff tool");
+        assert!(matches!(
+            modal.default_action(),
+            Some(Message::SettingsOpenedAt(settings::Category::ExternalTools))
+        ));
+
+        app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Waiting for meld…");
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: None,
+            result: Ok(()),
+        });
+        assert!(app.status.is_empty());
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: None,
+            result: Err(ExternalToolError::NotConfigured),
+        });
+        assert_eq!(
+            app.modal.take().map(|m| m.title),
+            Some("No diff tool".into())
+        );
+
+        // Without an open diff there is nothing to compare.
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Open the diff of a file first");
+    }
+
+    #[test]
+    fn merge_tool_blocks_writes_until_it_exits() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        app.settings.tools.merge_tool = settings::ToolChoice::Tool("kdiff3".into());
+        let _ = app.update(Message::OpenMergeTool("c.txt".into()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Waiting for kdiff3")
+        );
+        // A second start waits for the first.
+        let _ = app.update(Message::OpenMergeTool("c.txt".into()));
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: Some("c.txt".into()),
+            result: Ok(()),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none());
+        assert_eq!(view.reopen_conflict.as_deref(), Some("c.txt"));
+    }
+
+    #[test]
+    fn tool_settings_are_stored() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::ExternalTools));
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::ExternalTools)
+        );
+        let info = git_core::ToolInfo {
+            configured: Some("meld".into()),
+            available: vec!["meld".into(), "vimdiff".into()],
+        };
+        let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
+        assert!(matches!(
+            app.settings_page.as_ref().and_then(|p| p.tools.as_ref()),
+            Some(Ok(_))
+        ));
+        let _ = app.update(Message::DiffToolChosen(settings::ToolChoice::Tool(
+            "vimdiff".into(),
+        )));
+        let _ = app.update(Message::MergeToolChosen(settings::ToolChoice::None));
+        assert_eq!(
+            app.settings.tools.diff_tool,
+            settings::ToolChoice::Tool("vimdiff".into())
+        );
+        assert_eq!(app.settings.tools.merge_tool, settings::ToolChoice::None);
+    }
+
+    #[test]
+    fn theme_choice_and_system_mode() {
+        let mut app = ready_app(&["c"]);
+        assert!(!app.light_theme(), "dark by default");
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
+        assert!(app.light_theme());
+        assert_eq!(app.settings.appearance.theme, settings::ThemeChoice::Light);
+        assert_eq!(crate::theme::palette(&app.theme()), &crate::theme::LIGHT);
+
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::System));
+        assert!(!app.light_theme(), "unknown system mode falls back to dark");
+        let _ = app.update(Message::SystemTheme(iced::theme::Mode::Light));
+        assert!(app.light_theme());
+        let _ = app.update(Message::SystemTheme(iced::theme::Mode::Dark));
+        assert!(!app.light_theme());
+    }
+
+    #[test]
+    fn auto_fetch_interval_change_restarts_the_timer() {
+        let mut app = ready_app(&["c"]);
+        let seq = app.auto_fetch_seq;
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::AutoFetchInput("7".into()));
+        assert!(app.auto_fetch_seq > seq, "the pending timer is replaced");
+        // A timer of the old interval does nothing.
+        let _ = app.update(Message::AutoFetchDue(seq));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn loaded_settings_apply_and_report_a_reset_file() {
+        let mut app = ready_app(&["c"]);
+        let mut loaded = Settings::default();
+        loaded.general.auto_fetch_minutes = 30;
+        let _ = app.update(Message::SettingsLoaded(settings::Loaded {
+            settings: loaded.clone(),
+            notice: Some("The settings file was unreadable; defaults are used.".into()),
+            write: true,
+        }));
+        assert_eq!(app.settings, loaded);
+        assert!(app.status.contains("defaults are used"));
     }
 
     #[test]
@@ -7445,6 +9327,7 @@ mod tests {
                 "Discard changes",
                 "-",
                 "Ignore",
+                "File history",
                 "Open file location",
                 "Copy file path"
             ]
@@ -7483,9 +9366,214 @@ mod tests {
         // Other shortcuts are ignored while the menu is open.
         let _ = app.update(checked(Shortcut::NewTab, false));
         assert_eq!(app.tabs.len(), 1);
-        let _ = app.update(Message::MenuSelected(0));
+        // "File history", then "Copy file path".
+        let _ = app.update(Message::MenuSelected(1));
         assert!(app.context_menu.is_none());
         assert_eq!(app.status, "Copied to the clipboard");
+    }
+
+    fn file_entry(id: &str, path: &str) -> git_core::FileHistoryEntry {
+        git_core::FileHistoryEntry {
+            id: id.into(),
+            author: "A".into(),
+            email: "a@x".into(),
+            time: 0,
+            summary: id.into(),
+            path: path.into(),
+            old_path: None,
+            status: "M".into(),
+        }
+    }
+
+    fn history(app: &App) -> &crate::file_history::FileHistoryView {
+        match &app.tabs[0].view().unwrap().center {
+            CenterView::FileHistory(history) => history,
+            other => panic!("no file history: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_history_loads_selects_and_shows_in_graph() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        assert_eq!(history(&app).entries, Loadable::Loading);
+        let cancel = history(&app).cancel.clone();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![file_entry("c", "f.txt"), file_entry("a", "f.txt")]),
+        });
+        assert_eq!(history(&app).selected, Some(0));
+        assert_eq!(
+            history(&app).diff.as_ref().map(|d| d.request.kind.clone()),
+            Some(git_core::DiffKind::Commit("c".into()))
+        );
+        // ↓ moves in the list (the graph selection stays).
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        assert_eq!(history(&app).selected, Some(1));
+        // A result for another request is ignored.
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "other.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(Vec::new()),
+        });
+        assert_eq!(history(&app).selected, Some(1));
+
+        let _ = app.update(Message::FileHistoryShowInGraph);
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Graph
+        ));
+        assert_eq!(selected(&app), Some(Selection::Commit("a".into())));
+        assert!(cancel.is_cancelled(), "closing stops git log");
+    }
+
+    #[test]
+    fn file_history_closes_with_escape_and_reports_errors() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: Some("c".into()),
+        });
+        assert_eq!(history(&app).start, "c");
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: String::new(),
+            start: String::new(),
+            result: Err("Git error: bad revision".into()),
+        });
+        assert_eq!(
+            history(&app).entries,
+            Loadable::Failed("Git error: bad revision".into())
+        );
+        let cancel = history(&app).cancel.clone();
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(matches!(
+            app.tabs[0].view().unwrap().center,
+            CenterView::Graph
+        ));
+        assert!(cancel.is_cancelled());
+    }
+
+    fn blame_of(app: &App) -> &crate::file_history::BlameView {
+        history(app).blame.as_ref().unwrap()
+    }
+
+    #[test]
+    fn blame_mode_loads_and_gutter_selects_the_commit() {
+        use crate::file_history::HistoryMode;
+        let mut app = ready_app(&["c", "a"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![file_entry("c", "f.txt"), file_entry("a", "f.txt")]),
+        });
+        let _ = app.update(Message::HistoryModeChosen(HistoryMode::Blame));
+        assert_eq!(history(&app).mode, HistoryMode::Blame);
+        assert_eq!(blame_of(&app).rev, None, "working copy from HEAD");
+        let first_cancel = blame_of(&app).cancel.clone();
+
+        let blame = git_core::parse_porcelain(
+            b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1\nauthor A\nsummary s\n\tline\n",
+        );
+        // A result for another revision is ignored.
+        let _ = app.update(Message::BlameLoaded {
+            tab,
+            path: "f.txt".into(),
+            rev: Some("x".into()),
+            result: Ok(blame.clone()),
+        });
+        assert_eq!(blame_of(&app).blame, Loadable::Loading);
+        let _ = app.update(Message::BlameLoaded {
+            tab,
+            path: "f.txt".into(),
+            rev: None,
+            result: Ok(blame),
+        });
+        assert!(matches!(blame_of(&app).blame, Loadable::Ready(_)));
+
+        // "Blame at this commit" replaces (and cancels) the running blame.
+        let _ = app.update(Message::BlameAt(1));
+        assert_eq!(blame_of(&app).rev.as_deref(), Some("a"));
+        assert!(first_cancel.is_cancelled());
+
+        // Gutter click: back to the history with that commit selected.
+        let _ = app.update(Message::BlameCommitClicked("a".into()));
+        assert_eq!(history(&app).mode, HistoryMode::History);
+        assert_eq!(history(&app).selected, Some(1));
+        // Switching back keeps the loaded blame.
+        let _ = app.update(Message::HistoryModeChosen(HistoryMode::Blame));
+        assert_eq!(blame_of(&app).rev.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn history_entry_menu_offers_blame() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        let tab = app.tabs[0].id;
+        let mut deleted = file_entry("c", "f.txt");
+        deleted.status = "D".into();
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![deleted]),
+        });
+        let _ = app.update(Message::FileHistoryEntryMenu {
+            index: 0,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.as_ref().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, enabled: false, .. } if label == "Blame at this commit")));
+    }
+
+    #[test]
+    fn palette_file_list_opens_the_history() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::FileHistory, false));
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.mode, palette::Mode::Files);
+        assert!(palette.loading);
+        let _ = app.update(Message::PaletteFilesLoaded(Ok(vec![
+            "README.md".into(),
+            "src/main.rs".into(),
+        ])));
+        let _ = app.update(Message::PaletteQuery("main".into()));
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        assert_eq!(history(&app).path, "src/main.rs");
+    }
+
+    #[test]
+    fn file_menu_offers_the_history_except_for_untracked_files() {
+        let mut app = ready_app(&["c"]);
+        let mut untracked = file("new.txt");
+        untracked.kind = git_core::ChangeKind::Untracked;
+        let _ = app.update(Message::FileContextMenu {
+            file: untracked,
+            area: FileArea::Unstaged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.as_ref().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, enabled: false, .. } if label == "File history")));
     }
 
     #[test]
@@ -7723,7 +9811,7 @@ mod tests {
         let op = view.network.as_ref().unwrap();
         assert_eq!(
             crate::ui::statusbar::network_label(op),
-            "⟳ Fetch: Receiving objects 45%"
+            "Fetch: Receiving objects 45%"
         );
 
         let _ = app.update(Message::CancelNetwork(tab));
@@ -7899,7 +9987,7 @@ mod tests {
 
         // Off when the interval is 0.
         let mut app = app_with_remote();
-        app.session.auto_fetch_minutes = 0;
+        app.settings.general.auto_fetch_minutes = 0;
         let _ = app.auto_fetch(later + std::time::Duration::from_secs(3600));
         assert!(app.tabs[0].view().unwrap().busy.is_none());
     }
@@ -8147,6 +10235,351 @@ mod tests {
         let _ = app.update(Message::Checkout(CheckoutTarget::Remote(
             "origin/feature".into(),
         )));
+        assert_eq!(running_args(&app), ["Checkout origin/feature"]);
+    }
+
+    /// Ready app whose commits `c0`, `c1`, … have the given summaries.
+    fn search_app(summaries: &[&str]) -> App {
+        let ids: Vec<String> = (0..summaries.len()).map(|i| format!("c{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&refs);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        for (commit, summary) in commits.iter_mut().zip(summaries) {
+            commit.summary = (*summary).to_owned();
+        }
+        snapshot.commits = Arc::new(commits);
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    fn search(app: &App) -> &crate::search::SearchState {
+        app.tabs[0].view().unwrap().search.as_ref().unwrap()
+    }
+
+    /// Runs the search the way the debounced task would.
+    fn search_for(app: &mut App, query: &str) {
+        let _ = app.update(Message::SearchInput(query.into()));
+        let seq = search(app).seq;
+        let matches = crate::search::matches(&app.tabs[0].view().unwrap().snapshot.commits, query);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SearchResult { tab, seq, matches });
+    }
+
+    #[test]
+    fn search_jumps_steps_and_wraps() {
+        let mut app = search_app(&["fix a", "add b", "fix c", "docs", "fix d"]);
+        let _ = app.update(checked(Shortcut::SearchCommits, false));
+        assert!(app.tabs[0].view().unwrap().search.is_some());
+        search_for(&mut app, "fix");
+        // Typing jumps to the first match.
+        assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
+        assert_eq!(search(&app).counter(), "1 of 3");
+        assert!(search(&app).dims(1) && !search(&app).dims(2));
+
+        let _ = app.update(Message::SearchSubmit);
+        assert_eq!(selected(&app), Some(Selection::Commit("c2".into())));
+        let _ = app.update(Message::SearchStep { forward: true });
+        let _ = app.update(Message::SearchStep { forward: true });
+        assert_eq!(
+            selected(&app),
+            Some(Selection::Commit("c0".into())),
+            "wraps"
+        );
+        // Shift+Enter goes back (and wraps to the last match).
+        let _ = app.update(Message::ModifiersChanged(keyboard::Modifiers::SHIFT));
+        let _ = app.update(Message::SearchSubmit);
+        assert_eq!(selected(&app), Some(Selection::Commit("c4".into())));
+        assert_eq!(search(&app).counter(), "3 of 3");
+    }
+
+    #[test]
+    fn search_keeps_a_matching_selection_and_drops_stale_results() {
+        let mut app = search_app(&["fix a", "add b", "fix c"]);
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::SearchOpened);
+        search_for(&mut app, "fix");
+        assert_eq!(selected(&app), Some(Selection::Commit("c2".into())));
+        assert_eq!(search(&app).counter(), "2 of 2");
+
+        // A result for an older query is ignored.
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SearchInput("add".into()));
+        let old = search(&app).seq - 1;
+        let _ = app.update(Message::SearchResult {
+            tab,
+            seq: old,
+            matches: vec![0],
+        });
+        assert_eq!(search(&app).matches, [0, 2], "previous matches stay");
+
+        // Clearing the query clears the matches.
+        let _ = app.update(Message::SearchInput(String::new()));
+        assert!(search(&app).matches.is_empty());
+        assert!(!search(&app).dims(1));
+    }
+
+    #[test]
+    fn search_runs_again_after_a_refresh_and_esc_keeps_the_selection() {
+        let mut app = search_app(&["fix a", "add b", "fix c"]);
+        let _ = app.update(Message::SearchOpened);
+        search_for(&mut app, "fix");
+        let seq = search(&app).seq;
+        // A new snapshot (refresh) starts the same search again (same seq).
+        let tab = app.tabs[0].id;
+        let generation = app.tabs[0].generation;
+        let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+        let _ = app.update(Message::SnapshotLoaded {
+            tab,
+            generation,
+            result: Ok(snapshot),
+        });
+        assert_eq!(search(&app).seq, seq);
+        let _ = app.update(Message::SearchResult {
+            tab,
+            seq,
+            matches: vec![2],
+        });
+        assert_eq!(search(&app).matches, [2]);
+        // The refresh does not move the selection.
+        assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
+        assert_eq!(search(&app).counter(), "0 of 1");
+
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.tabs[0].view().unwrap().search.is_none());
+        assert_eq!(selected(&app), Some(Selection::Commit("c0".into())));
+    }
+
+    /// main: m1 → base (checked out), topic: t1 → base; changes in the
+    /// working tree (WIP row).
+    fn filter_app() -> App {
+        use git_core::{Commit, FileChange, Head, Log, RefKind, Reference, WorkingTree};
+        let commit = |id: &str, parents: &[&str], time| Commit {
+            id: id.into(),
+            parents: parents.iter().map(|p| p.to_string()).collect(),
+            summary: id.into(),
+            body: String::new(),
+            author: String::new(),
+            email: String::new(),
+            author_time: time,
+            commit_time: time,
+        };
+        let branch = |name: &str, target: &str| Reference {
+            name: name.into(),
+            kind: RefKind::LocalBranch,
+            target: target.into(),
+            is_head: name == "main",
+            upstream: None,
+            ahead_behind: None,
+        };
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits: vec![
+                    commit("t1", &["base"], 30),
+                    commit("m1", &["base"], 20),
+                    commit("base", &[], 10),
+                ],
+                truncated: false,
+            },
+            Head::Branch {
+                name: "main".into(),
+                target: "m1".into(),
+            },
+            vec![branch("main", "m1"), branch("topic", "t1")],
+            Vec::new(),
+            WorkingTree {
+                unstaged: vec![FileChange {
+                    path: "f".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                }],
+                staged: Vec::new(),
+            },
+        )
+        .unwrap();
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("/repo"));
+        app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
+        app
+    }
+
+    /// Runs the background filter of the active tab synchronously.
+    fn apply_filter(app: &mut App) {
+        let view = app.tabs[0].view().unwrap();
+        let (seq, filter) = (view.filter_seq, view.ref_filter.clone());
+        let result = view.snapshot.with_filter(&filter).map(Arc::new);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FilterApplied { tab, seq, result });
+    }
+
+    fn graph_ids(app: &App) -> Vec<String> {
+        let view = app.tabs[0].view().unwrap();
+        view.snapshot.commits.iter().map(|c| c.id.clone()).collect()
+    }
+
+    #[test]
+    fn hiding_a_branch_filters_the_graph_and_moves_a_hidden_selection() {
+        let mut app = filter_app();
+        let _ = app.update(Message::CommitSelected("t1".into()));
+        let _ = app.update(Message::ToggleHidden {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        assert!(app.tabs[0].view().unwrap().ref_filter.is_active());
+        apply_filter(&mut app);
+        assert_eq!(graph_ids(&app), ["m1", "base"]);
+        assert_eq!(selected(&app), Some(Selection::Wip));
+        // Stored per repository by full name.
+        let root = app.tabs[0].view().unwrap().backend.path().to_path_buf();
+        assert_eq!(
+            app.current_session().ref_filters[&root]
+                .hidden
+                .iter()
+                .collect::<Vec<_>>(),
+            ["refs/heads/topic"]
+        );
+
+        // Show again: everything is back, the filter leaves the session.
+        let _ = app.update(Message::ToggleHidden {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        apply_filter(&mut app);
+        assert_eq!(graph_ids(&app), ["t1", "m1", "base"]);
+        assert!(app.current_session().ref_filters.is_empty());
+    }
+
+    #[test]
+    fn checked_out_branch_cannot_be_hidden_and_solo_keeps_head() {
+        let mut app = filter_app();
+        let _ = app.update(Message::ToggleHidden {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        assert!(!app.tabs[0].view().unwrap().ref_filter.is_active());
+
+        let _ = app.update(Message::ToggleSolo {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        apply_filter(&mut app);
+        // Soloed topic plus HEAD (main).
+        assert_eq!(graph_ids(&app), ["t1", "m1", "base"]);
+
+        // A stale result (older request) is ignored.
+        let tab = app.tabs[0].id;
+        let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+        let _ = app.update(Message::ToggleSolo {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        let stale = app.tabs[0].view().unwrap().filter_seq - 1;
+        let _ = app.update(Message::FilterApplied {
+            tab,
+            seq: stale,
+            result: Ok(snapshot),
+        });
+        assert!(app.tabs[0]
+            .view()
+            .unwrap()
+            .snapshot
+            .applied_filter
+            .is_active());
+    }
+
+    #[test]
+    fn stored_filters_of_vanished_branches_are_dropped() {
+        let mut app = filter_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.ref_filter
+            .toggle_hidden("gone", git_core::RefKind::LocalBranch);
+        let tab = app.tabs[0].id;
+        // Pruned before filtering: nothing to apply.
+        let _ = app.ensure_filter(tab);
+        assert!(!app.tabs[0].view().unwrap().ref_filter.is_active());
+    }
+
+    fn palette_labels(app: &App) -> Vec<String> {
+        app.palette
+            .as_ref()
+            .map(|p| p.shown().map(|e| e.label.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn palette_runs_actions_and_remembers_them() {
+        let mut app = checkout_app();
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        assert!(app.palette.is_some());
+        // Every registered action is listed (the palette itself excepted).
+        assert_eq!(
+            app.palette.as_ref().unwrap().shown_count(),
+            crate::actions::registry().len() - 1
+        );
+        let sidebar = app.panes.sidebar_visible;
+        let _ = app.update(Message::PaletteQuery("toggle left".into()));
+        assert_eq!(palette_labels(&app)[0], "Toggle left panel");
+        // Arrows move the selection although the query field has focus.
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), true));
+        let _ = app.update(checked(
+            Shortcut::Navigate(crate::nav::Move::Previous),
+            true,
+        ));
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        assert_ne!(app.panes.sidebar_visible, sidebar);
+
+        // The action used last comes first with an empty query.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        assert_eq!(palette_labels(&app)[0], "Toggle left panel");
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn palette_lists_disabled_actions_with_their_reason() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("fetch all".into()));
+        let palette = app.palette.as_ref().unwrap();
+        let entry = palette.selected_entry().unwrap();
+        assert_eq!(entry.label, "Fetch all");
+        assert_eq!(entry.disabled.as_deref(), Some("Open a repository first"));
+        // Enter on a disabled entry does nothing and keeps the palette.
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_some());
+        let _ = app.update(Message::PaletteQuery("interactive rebase: pick".into()));
+        let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
+        assert!(entry.disabled.is_some());
+    }
+
+    #[test]
+    fn palette_sub_lists() {
+        let mut app = checkout_app();
+        app.session
+            .touch_recent(std::path::Path::new("/repos/other"), 1);
+        let _ = app.update(checked(Shortcut::OpenRepoPalette, false));
+        assert_eq!(palette_labels(&app), ["Browse…", "other"]);
+        // Backspace on the empty query goes back to the actions.
+        let _ = app.update(Message::BackspacePressed);
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::Actions)
+        );
+
+        // "Checkout branch…" opens the branch list; the current one is disabled.
+        let _ = app.update(Message::PaletteQuery("checkout branch".into()));
+        let _ = app.update(Message::PaletteSubmit);
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.mode, palette::Mode::CheckoutBranch);
+        let main = palette.shown().find(|e| e.label == "main").unwrap();
+        assert_eq!(main.disabled.as_deref(), Some("Checked out"));
+        let _ = app.update(Message::PaletteQuery("o/feature".into()));
+        assert_eq!(palette_labels(&app)[0], "origin/feature");
+        let _ = app.update(Message::PaletteRun(0));
+        assert!(app.palette.is_none());
         assert_eq!(running_args(&app), ["Checkout origin/feature"]);
     }
 
@@ -8729,7 +11162,7 @@ mod tests {
         assert!(app.tabs[0].view().unwrap().busy.is_none());
 
         // Off: no timer.
-        app.session.auto_fetch_minutes = 0;
+        app.settings.general.auto_fetch_minutes = 0;
         let _ = app.update(Message::Refresh);
         assert_eq!(app.auto_fetch_at, None);
     }

@@ -14,6 +14,7 @@ use iced::{alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, 
 
 use crate::app::Message;
 use crate::format;
+use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Selection};
 use crate::theme;
 use crate::ui::muted;
@@ -36,7 +37,7 @@ const DASH: [f32; 2] = [4.0, 3.0];
 /// Rows rendered above and below the viewport.
 const OVERSCAN: usize = 10;
 
-pub fn view(repo: &RepoView) -> Element<'_, Message> {
+pub fn view<'a>(repo: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Element<'a, Message> {
     let graph_width = graph_width(repo.snapshot.layout.max_width);
     // The available width decides which optional columns fit.
     let table = responsive(move |size| {
@@ -55,6 +56,20 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         if columns.sha {
             header = header.push(cell(muted("SHA").size(11), COL_SHA));
         }
+        if repo.search.is_none() {
+            let tip = match crate::actions::ActionId::SearchCommits.shortcut_text() {
+                Some(keys) => format!("Search commits ({keys})"),
+                None => "Search commits".to_owned(),
+            };
+            header = header.push(crate::ui::panel::with_tooltip_text(
+                iced::widget::button(icons::tinted(Icon::Search, 13.0, |p| p.text_muted))
+                    .on_press(Message::SearchOpened)
+                    .padding([2, 6])
+                    .style(theme::flat)
+                    .into(),
+                tip,
+            ));
+        }
         let header = container(header.padding([0, ROW_PADDING]).align_y(iced::Center))
             .height(24)
             .align_y(alignment::Vertical::Center)
@@ -69,7 +84,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             .push(space::vertical().height(first as f32 * ROW_HEIGHT));
         for row_index in first..last {
             rows = rows.push(if row_index < graph_rows {
-                graph_row(repo, row_index, graph_width, columns)
+                graph_row(repo, avatars, row_index, graph_width, columns)
             } else {
                 truncated_row()
             });
@@ -84,13 +99,70 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             })
             .height(Fill);
 
-        column![header, list].into()
+        match &repo.search {
+            Some(search) => column![search_bar(search), header, list].into(),
+            None => column![header, list].into(),
+        }
     });
 
     container(table)
         .width(Fill)
         .height(Fill)
         .style(theme::graph)
+        .into()
+}
+
+/// Commit search above the graph (M5-07): query, "n of m", previous/next,
+/// close.
+fn search_bar(search: &crate::search::SearchState) -> Element<'_, Message> {
+    let button = |icon: Icon, message: Message, tip: &str, enabled: bool| {
+        crate::ui::panel::with_tooltip_text(
+            iced::widget::button(icons::button_icon(icon, 14.0, enabled))
+                .on_press_maybe(enabled.then_some(message))
+                .padding([3, 6])
+                .style(theme::flat)
+                .into(),
+            tip.to_owned(),
+        )
+    };
+    let any = !search.matches.is_empty();
+    let content = row![
+        icons::tinted(Icon::Search, 14.0, |p| p.text_muted),
+        iced::widget::text_input(
+            "Search commits: message, author, email or SHA",
+            &search.query
+        )
+        .id(crate::app::SEARCH_INPUT)
+        .on_input(Message::SearchInput)
+        .on_submit(Message::SearchSubmit)
+        .padding([4, 8])
+        .size(13),
+        muted(search.counter()).size(12).width(70),
+        button(
+            Icon::ChevronUp,
+            Message::SearchStep { forward: false },
+            "Previous match (Shift+Enter)",
+            any
+        ),
+        button(
+            Icon::ChevronDown,
+            Message::SearchStep { forward: true },
+            "Next match (Enter)",
+            any
+        ),
+        button(
+            Icon::Close,
+            Message::SearchClosed,
+            "Close search (Esc)",
+            true
+        ),
+    ]
+    .spacing(6)
+    .padding([4, ROW_PADDING])
+    .align_y(iced::Center);
+    container(content)
+        .width(Fill)
+        .style(theme::column_header)
         .into()
 }
 
@@ -169,33 +241,43 @@ pub fn graph_width(lanes: u16) -> f32 {
 }
 
 /// One table row: the WIP row or a commit row.
-pub fn graph_row(
-    repo: &RepoView,
+pub fn graph_row<'a>(
+    repo: &'a RepoView,
+    avatars: &crate::avatars::Avatars,
     row_index: usize,
     graph_width: f32,
     columns: Columns,
-) -> Element<'_, Message> {
+) -> Element<'a, Message> {
     let snapshot = &repo.snapshot;
     let Some(layout_row) = snapshot.layout.row(row_index) else {
         return container(text("")).height(ROW_HEIGHT).into();
     };
-    let color = theme::lane_color(layout_row.color.0);
+    let color = layout_row.color.0;
 
     if snapshot.has_wip && row_index == 0 {
         let tree = &snapshot.working_tree;
+        let count = |icon: Icon, n: usize| {
+            row![
+                icons::tinted(icon, 12.0, |p| p.text_muted),
+                muted(n.to_string())
+            ]
+            .spacing(4)
+            .align_y(iced::Center)
+        };
         let summary = row![
             muted("// WIP"),
-            muted(format!("✎ {}", tree.unstaged.len())),
-            muted(format!("✓ {}", tree.staged.len())),
+            count(Icon::Pencil, tree.unstaged.len()),
+            count(Icon::Check, tree.staged.len()),
         ]
-        .spacing(12);
+        .spacing(12)
+        .align_y(iced::Center);
         let refs: Element<'_, Message> = match &repo.new_branch {
             Some(input) if input.row.is_none() => new_branch_input(input),
             _ => text("").into(),
         };
         let content = row![
             cell(refs, COL_REFS),
-            cell(graph_cell(layout_row, Node::Wip), graph_width),
+            cell(graph_cell(layout_row, Node::Wip, false), graph_width),
             cell(summary, Fill),
         ];
         return row_button(
@@ -211,14 +293,21 @@ pub fn graph_row(
         return container(text("")).height(ROW_HEIGHT).into();
     };
     let is_stash = snapshot.is_stash(&commit.id);
+    // Rows that do not match an active search are dimmed (M5-07).
+    let dimmed = repo.search.as_ref().is_some_and(|s| s.dims(index));
     let node = if is_stash {
         Node::Stash
     } else if commit.parents.len() > 1 {
         Node::Merge
     } else {
-        Node::Commit(format::initials(&commit.author))
+        Node::Commit {
+            initials: format::initials(&commit.author),
+            avatar: avatars.get(&commit.email).cloned(),
+        }
     };
-    let summary = if commit.parents.len() > 1 {
+    let summary = if dimmed {
+        text(&commit.summary).style(theme::text_faint)
+    } else if commit.parents.len() > 1 {
         muted(&commit.summary)
     } else {
         text(&commit.summary)
@@ -234,7 +323,7 @@ pub fn graph_row(
     };
     let mut content = row![
         cell(refs_cell, COL_REFS),
-        cell(graph_cell(layout_row, node), graph_width),
+        cell(graph_with_avatar(layout_row, node, dimmed), graph_width),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
     if columns.author {
@@ -302,12 +391,26 @@ fn new_branch_input(input: &crate::repo_view::NewBranch) -> Element<'_, Message>
 /// What a reference pill shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefLabel {
+    /// Branch or tag name ("HEAD" for a detached HEAD).
     pub text: String,
+    /// Remotes with a same-named branch on the same commit (combined pill).
+    pub remotes: Vec<String>,
     pub kind: LabelKind,
     /// The checked-out branch (or the detached HEAD marker).
     pub head: bool,
     /// Double click on the pill checks this out.
     pub checkout: Option<crate::app::CheckoutTarget>,
+}
+
+impl RefLabel {
+    /// Name plus the remotes of a combined pill: "main (origin, upstream)".
+    pub fn description(&self) -> String {
+        if self.remotes.is_empty() {
+            self.text.clone()
+        } else {
+            format!("{} ({})", self.text, self.remotes.join(", "))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +431,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
         if *target == commit.id {
             labels.push(RefLabel {
                 text: "HEAD".into(),
+                remotes: Vec::new(),
                 kind: LabelKind::DetachedHead,
                 head: true,
                 checkout: None,
@@ -353,14 +457,9 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                 remotes.extend(remote.remote().map(str::to_owned));
             }
         }
-        let check = if local.is_head { "✓ " } else { "" };
-        let text = if remotes.is_empty() {
-            format!("{check}{}", local.name)
-        } else {
-            format!("{check}{} · {}", local.name, remotes.join(", "))
-        };
         labels.push(RefLabel {
-            text,
+            text: local.name.clone(),
+            remotes,
             kind: LabelKind::Local,
             head: local.is_head,
             checkout: Some(crate::app::CheckoutTarget::Local(local.name.clone())),
@@ -372,6 +471,7 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
                 used[j] = true;
                 labels.push(RefLabel {
                     text: reference.name.clone(),
+                    remotes: Vec::new(),
                     kind: if kind == RefKind::Tag {
                         LabelKind::Tag
                     } else {
@@ -400,7 +500,7 @@ fn ref_pills<'a>(
         let rest = Column::with_children(
             labels[1..]
                 .iter()
-                .map(|label| text(label.text.clone()).size(12).into()),
+                .map(|label| text(label.description()).size(12).into()),
         )
         .spacing(2);
         pills = pills.push(tooltip(
@@ -419,14 +519,30 @@ fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> El
         LabelKind::Tag => RefKind::Tag,
         LabelKind::DetachedHead => RefKind::LocalBranch,
     };
-    let pill = container(
+    let mut content = row![].spacing(4).align_y(iced::Center);
+    if label.head && label.kind == LabelKind::Local {
+        content = content.push(icons::icon(Icon::Check, 11.0));
+    }
+    content = content.push(
         text(label.text.clone())
             .size(12)
             .wrapping(text::Wrapping::None),
-    )
-    .padding([1, 6])
-    .clip(true)
-    .style(theme::ref_pill(kind, label.head));
+    );
+    if !label.remotes.is_empty() {
+        // GitKraken shows a remote icon on combined pills; the names are
+        // in the tooltip.
+        content = content.push(tooltip(
+            icons::tinted(Icon::Cloud, 12.0, |p| p.text_muted),
+            container(text(label.remotes.join(", ")).size(12))
+                .padding([4, 8])
+                .style(theme::tooltip),
+            tooltip::Position::Bottom,
+        ));
+    }
+    let pill = container(content)
+        .padding([1, 6])
+        .clip(true)
+        .style(theme::ref_pill(kind, label.head));
     let pill: Element<'_, Message> = match &label.checkout {
         Some(target) => {
             crate::ui::context_area::double_click_area(pill, Message::Checkout(target.clone()))
@@ -480,7 +596,7 @@ fn cell<'a>(
 fn row_button<'a>(
     content: iced::widget::Row<'a, Message>,
     selected: bool,
-    lane_color: Color,
+    lane_color: u32,
     on_press: Message,
 ) -> Element<'a, Message> {
     button(content.padding([0, ROW_PADDING]).height(Fill))
@@ -498,18 +614,55 @@ enum Node {
     Merge,
     /// Stash entry: hollow square.
     Stash,
-    /// Regular commit with the author's initials.
-    Commit(String),
+    /// Regular commit: the author's avatar, or initials without one.
+    Commit {
+        initials: String,
+        avatar: Option<iced::widget::image::Handle>,
+    },
 }
 
 /// Graph slice of one row.
 struct GraphCell {
     row: Row,
     node: Node,
+    /// The commit does not match the search: faint node.
+    dimmed: bool,
 }
 
-fn graph_cell<'a>(row: Row, node: Node) -> Element<'a, Message> {
-    canvas::Canvas::new(GraphCell { row, node })
+/// Graph cell; an avatar is an image widget on top of the node, because the
+/// canvas does not round images (M5-11).
+fn graph_with_avatar<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
+    let avatar = match &node {
+        Node::Commit {
+            avatar: Some(handle),
+            ..
+        } => Some(handle.clone()),
+        _ => None,
+    };
+    let x = lane_x(row.lane);
+    let cell = graph_cell(row, node, dimmed);
+    let Some(handle) = avatar else {
+        return cell;
+    };
+    let size = NODE_RADIUS * 2.0;
+    let image = iced::widget::image(handle)
+        .width(size)
+        .height(size)
+        .border_radius(NODE_RADIUS)
+        .opacity(if dimmed { 0.3_f32 } else { 1.0 });
+    iced::widget::Stack::with_children([
+        cell,
+        container(image)
+            .padding(iced::Padding::default().left(x - NODE_RADIUS))
+            .height(Fill)
+            .align_y(alignment::Vertical::Center)
+            .into(),
+    ])
+    .into()
+}
+
+fn graph_cell<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
+    canvas::Canvas::new(GraphCell { row, node, dimmed })
         .width(Fill)
         .height(Fill)
         .into()
@@ -526,10 +679,11 @@ impl canvas::Program<Message> for GraphCell {
         &self,
         _state: &(),
         renderer: &Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
+        let p = theme::palette(theme);
         let mut frame = Frame::new(renderer, bounds.size());
         let height = bounds.height;
         let mid = height / 2.0;
@@ -558,14 +712,19 @@ impl canvas::Program<Message> for GraphCell {
                     (curve(node, Point::new(lane_x(to), height)), color, dashed)
                 }
             };
-            frame.stroke(&path, line(theme::lane_color(color.0), dashed));
+            frame.stroke(&path, line(theme::lane_color(p, color.0), dashed));
         }
 
-        let color = theme::lane_color(self.row.color.0);
+        let color = theme::lane_color(p, self.row.color.0);
+        let color = if self.dimmed {
+            color.scale_alpha(0.3)
+        } else {
+            color
+        };
         match &self.node {
             Node::Wip => {
                 let circle = Path::circle(node, NODE_RADIUS - 2.0);
-                frame.fill(&circle, theme::BG_GRAPH);
+                frame.fill(&circle, p.bg_graph);
                 frame.stroke(&circle, line(color, true));
             }
             Node::Merge => frame.fill(&Path::circle(node, MERGE_RADIUS), color),
@@ -575,15 +734,22 @@ impl canvas::Program<Message> for GraphCell {
                     Point::new(node.x - size / 2.0, node.y - size / 2.0),
                     iced::Size::new(size, size),
                 );
-                frame.fill(&square, theme::BG_GRAPH);
+                frame.fill(&square, p.bg_graph);
                 frame.stroke(&square, line(color, false));
             }
-            Node::Commit(initials) => {
+            Node::Commit {
+                avatar: Some(_), ..
+            } => {
+                // The avatar itself is an image on top (`graph_with_avatar`);
+                // a ring in the lane color frames it.
+                frame.stroke(&Path::circle(node, NODE_RADIUS + 1.0), line(color, false));
+            }
+            Node::Commit { initials, .. } => {
                 frame.fill(&Path::circle(node, NODE_RADIUS), color);
                 frame.fill_text(canvas::Text {
                     content: initials.clone(),
                     position: node,
-                    color: Color::WHITE,
+                    color: p.node_text,
                     size: 8.into(),
                     align_x: iced::widget::text::Alignment::Center,
                     align_y: alignment::Vertical::Center,
@@ -678,15 +844,10 @@ mod tests {
         ];
         let refs: Vec<&Reference> = refs.iter().collect();
         let labels = ref_labels(&refs, &on_branch(), &commit());
-        assert_eq!(
-            texts(&labels),
-            [
-                "✓ main · origin, upstream",
-                "feature",
-                "origin/other",
-                "v1.0"
-            ]
-        );
+        assert_eq!(texts(&labels), ["main", "feature", "origin/other", "v1.0"]);
+        assert_eq!(labels[0].remotes, ["origin", "upstream"]);
+        assert_eq!(labels[0].description(), "main (origin, upstream)");
+        assert_eq!(labels[1].description(), "feature");
         assert!(labels[0].head);
         assert_eq!(labels[3].kind, LabelKind::Tag);
     }

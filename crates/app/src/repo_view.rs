@@ -209,6 +209,20 @@ pub enum CenterView {
     Conflict(Box<crate::conflict::ConflictView>),
     /// Interactive rebase panel (M4-07), replacing the graph.
     Rebase(Box<crate::rebase_panel::RebasePanel>),
+    /// History of one file (M5-09), replacing the graph.
+    FileHistory(Box<crate::file_history::FileHistoryView>),
+}
+
+impl CenterView {
+    /// The diff shown in the center: the diff view, or the selected
+    /// commit's diff in the file history.
+    pub fn diff_mut(&mut self) -> Option<&mut DiffView> {
+        match self {
+            Self::Diff(diff) => Some(diff),
+            Self::FileHistory(history) => history.diff.as_mut(),
+            Self::Graph | Self::Conflict(_) | Self::Rebase(_) => None,
+        }
+    }
 }
 
 /// Vertical scroll state of the graph list (pixels).
@@ -324,6 +338,15 @@ pub struct RepoView {
     /// multi-selection panel.
     pub multi: crate::selection::MultiSelection,
     pub details: Option<CommitDetails>,
+    /// Open commit search bar above the graph (M5-07).
+    pub search: Option<crate::search::SearchState>,
+    /// Hidden and soloed branches (M5-08); the snapshot is filtered by it.
+    pub ref_filter: crate::ref_filter::RefFilter,
+    /// Number of the latest filter request; older results are dropped.
+    pub filter_seq: u64,
+    /// Conflicted file to show again once the refresh after a merge tool
+    /// run arrived (if it is still conflicted).
+    pub reopen_conflict: Option<String>,
     pub center: CenterView,
     pub filter: String,
     pub collapsed: HashSet<Section>,
@@ -548,6 +571,10 @@ impl RepoView {
             backend,
             snapshot,
             selection,
+            search: None,
+            ref_filter: Default::default(),
+            filter_seq: 0,
+            reopen_conflict: None,
             multi: crate::selection::MultiSelection::default(),
             details: None,
             center: CenterView::Graph,

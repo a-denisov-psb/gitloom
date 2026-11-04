@@ -11,7 +11,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Area | GitKraken behavior | Status |
 |---|---|---|
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
-| Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | layout done, actions M2–M4 |
+| Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it) |
 | Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts | done (M0), real data M1 |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M1) |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
@@ -36,7 +36,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu) |
-| Auto-fetch | Periodic fetch in the background | done (M3, every 5 min, `auto_fetch_minutes` in the session file) |
+| Auto-fetch | Periodic fetch in the background | done (M3, every 5 min; interval in Preferences → General since M5-02) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
@@ -53,11 +53,12 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Reset | Commit menu "Reset <branch> to this commit" → Soft / Mixed / Hard | done (M4-10) as a dialog with three buttons instead of GitKraken's submenu (the context menu has no submenus); Hard is always confirmed and lists the files whose changes are lost |
 | Cherry-pick and revert | Commit menu "Cherry-pick commit" / "Revert commit"; multi-selection "Cherry-pick N commits" (oldest first) | done (M4-09); a merge commit asks for the parent to revert against; an empty result opens "Skip" / "Commit empty" (verify wording in GitKraken) |
 | Conflicted files | "Conflicted Files" section above "Unstaged Files" | done (M4-03) |
-| Local + remote branch on same commit | One combined pill | done (M1, remote names as text until the icon set in M5) |
-| Commit node | Avatar (placeholder: initials) | initials done (M1), avatars M5 |
+| Local + remote branch on same commit | One combined pill | done (M1; since M5-05 a cloud icon, the remote names in its tooltip) |
+| Commit node | Avatar (placeholder: initials) | done (M5-11; Gravatar opt-in in Preferences → Appearance, initials otherwise) |
 | Conflicted file | Opens conflict view (ours, theirs, output) | done (M4-05); with both sides picked in one conflict, ours lines come first (GitKraken keeps the click order) |
 | Interactive rebase | Panel with actions per commit, reorder by drag | done (M4-07): commit menu "Interactive rebase from here"; newest on top until the maintainer verifies GitKraken's order; P/R/S/F/D, ↑/↓, Alt+↑/↓ reorder; inline message editors for rewords and squash chains |
 | Multi-select commits | Ctrl+click, Shift+click | done (M4-01; also Shift+↑/↓; panel "N commits selected") |
+| Hide / solo branches | Eye on hover in the left panel hides a branch; context menu Hide/Show, Solo; remote: Hide all / Show all | done (M5-08; the checked-out branch cannot be hidden until verified in GitKraken; stored per repository) |
 
 ## Keyboard shortcuts
 
@@ -91,26 +92,27 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Command palette | Ctrl+P | M5 |
-| Search commits | Ctrl+F | M5 |
-| Open repo via palette | Ctrl+Shift+O | M5 |
-| File history and blame | Ctrl+Shift+H | M5 |
+| Command palette | Ctrl+P | done (M5-06; all actions with shortcuts, disabled ones with the reason; sub-lists for repositories and branch checkout) |
+| Search commits | Ctrl+F | done (M5-07; field above the graph, non-matching rows dimmed, n of m, Enter / Shift+Enter; verify in GitKraken: dim or filter) |
+| Open repo via palette | Ctrl+Shift+O | done (M5-06; recent repositories and Browse…) |
+| File history and blame | Ctrl+Shift+H | done (M5-09 history: palette list of tracked files, also the file context menu and the History button of the diff; M5-10 blame: History / Blame toggle, "Blame at this commit"; verify layout in GitKraken) |
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |
-| Open repo in terminal | Alt+T | M5 |
-| Open repo in file manager | Alt+O | M5 |
-| Open diff/merge tool | Ctrl+D | M5 |
+| Open repo in terminal | Alt+T | done (M5-13; the system terminal, see deviations) |
+| Open repo in file manager | Alt+O | done (M5-13) |
+| Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts) |
 | Close current repo | Ctrl+W | done (M1) |
 
 ### Interface
 
 | Action | Shortcut | Status |
 |---|---|---|
-| Fullscreen | F11 | M5 |
-| Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | M5 |
+| Fullscreen | F11 | done (M5-04) |
+| Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | done (M5-04; 70–200 % in 10 % steps, also Ctrl++ and numpad +, saved in the settings) |
 | Toggle left panel | Ctrl+J | done (M1) |
 | Toggle commit detail panel | Ctrl+K | done (M1) |
 | Close current panel | Esc | done (M1, diff view) |
-| Keyboard shortcut list | Ctrl+/ | M5 |
+| Keyboard shortcut list | Ctrl+/ | done (M5-01; grouped by category, with a filter) |
+| Preferences | Ctrl+, | done (M5-02; replaces the tab content, categories left; also the gear button in the toolbar) |
 
 ### Tabs
 
@@ -125,7 +127,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Deviation | Reason |
 |---|---|
-| Ctrl+O opens a folder dialog directly | Quick access before the command palette exists (M5); does not collide with a GitKraken shortcut |
+| Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
 | Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
@@ -140,4 +142,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | A pull that stops in a conflict shows a dialog offering "Abort merge"/"Abort rebase" | The user is not left in a half-finished state without a way back; resolving and continuing works from the banner |
 | The commit message of a rebase step is editable before Continue (prefilled with the original message) | Git asks for the message on `rebase --continue` after a conflict; the commit panel answers instead of a terminal editor |
 | Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
+| The toolbar's Terminal button and Alt+T open the system terminal in the repository instead of a terminal inside the app | M5 plan: an integrated terminal is a backlog item; the command can be set in Preferences → External tools |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

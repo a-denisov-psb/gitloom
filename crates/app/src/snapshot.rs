@@ -53,6 +53,11 @@ pub struct RepoSnapshot {
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
     pub commit_template: Option<String>,
+    /// The whole history when this snapshot shows only the commits of
+    /// visible branches (hidden or soloed branches, M5-08).
+    pub unfiltered: Option<Arc<RepoSnapshot>>,
+    /// Filter this snapshot was built with.
+    pub applied_filter: crate::ref_filter::RefFilter,
 }
 
 impl RepoSnapshot {
@@ -187,7 +192,84 @@ impl RepoSnapshot {
             remote_urls: Vec::new(),
             merge_message: None,
             commit_template: None,
+            unfiltered: None,
+            applied_filter: Default::default(),
         })
+    }
+
+    /// The history restricted to commits reachable from the branches
+    /// `filter` shows and HEAD; tags and stashes stay when their commit
+    /// does. Without an active filter: the whole history. Keeps this
+    /// snapshot's working tree.
+    pub fn with_filter(&self, filter: &crate::ref_filter::RefFilter) -> Result<Self, String> {
+        // The unfiltered history may still carry an older working tree.
+        let base = self
+            .unfiltered
+            .as_deref()
+            .unwrap_or(self)
+            .with_working_tree(self.working_tree.clone())?;
+        if !filter.is_active() {
+            return Ok(Self {
+                unfiltered: None,
+                applied_filter: Default::default(),
+                ..base
+            });
+        }
+        // Graph ids are positions in the loaded log; `order[row]` is the id
+        // of `commits[row]`.
+        let graph = &base.graph;
+        let id_of = |commit: &str| base.index.get(commit).map(|&row| graph.order[row]);
+        let mut tips: Vec<git_graph::Id> = base
+            .refs
+            .iter()
+            .filter(|r| filter.shows(r))
+            .filter_map(|r| id_of(&r.target))
+            .collect();
+        tips.extend(graph.head);
+        let mut visible = git_graph::visible_commits(&graph.commits, &tips);
+        // Stash rows hang below their base commit.
+        for stash in &graph.dashed {
+            let base_visible = graph.commits[stash.index()]
+                .parents
+                .first()
+                .is_some_and(|p| visible.get(p.index()) == Some(&true));
+            visible[stash.index()] = base_visible;
+        }
+        let commits: Vec<Commit> = base
+            .commits
+            .iter()
+            .zip(&graph.order)
+            .filter(|(c, id)| visible[id.index()] && !base.is_stash(&c.id))
+            .map(|(c, _)| c.clone())
+            .collect();
+        let stashes: Vec<Stash> = base
+            .stashes
+            .iter()
+            .filter(|s| {
+                base.index
+                    .get(&s.id)
+                    .is_some_and(|&row| visible[graph.order[row].index()])
+            })
+            .cloned()
+            .collect();
+        let mut filtered = Self::build(
+            Log {
+                commits,
+                truncated: base.truncated,
+            },
+            base.head.clone(),
+            base.refs.clone(),
+            stashes,
+            base.working_tree.clone(),
+        )?;
+        filtered.state = base.state.clone();
+        filtered.remotes = base.remotes.clone();
+        filtered.remote_urls = base.remote_urls.clone();
+        filtered.merge_message = base.merge_message.clone();
+        filtered.commit_template = base.commit_template.clone();
+        filtered.unfiltered = Some(Arc::new(base));
+        filtered.applied_filter = filter.clone();
+        Ok(filtered)
     }
 
     /// Same history with a new working tree status; the layout is only
@@ -711,6 +793,279 @@ mod tests {
         .unwrap();
         assert!(snapshot.commits.is_empty());
         assert_eq!(snapshot.layout.len(), 1);
+    }
+
+    /// main: m2 → m1 → base; topic: t1 → base; merged: g → (m1, t0) with
+    /// t0 → base; a stash on t1; tag v1 on t1.
+    fn branches() -> RepoSnapshot {
+        let log = Log {
+            commits: vec![
+                commit("g", &["m1", "t0"], 70),
+                commit("m2", &["m1"], 60),
+                commit("t1", &["base"], 50),
+                commit("t0", &["base"], 40),
+                commit("m1", &["base"], 30),
+                commit("base", &[], 10),
+            ],
+            truncated: false,
+        };
+        let mut refs = vec![
+            reference("main", "m2"),
+            reference("topic", "t1"),
+            reference("merged", "g"),
+        ];
+        refs.push(Reference {
+            kind: RefKind::Tag,
+            ..reference("v1", "t1")
+        });
+        let stash = Stash {
+            index: 0,
+            message: "WIP on topic".into(),
+            id: "s".into(),
+            base: Some("t1".into()),
+            time: 55,
+            author: "A".into(),
+        };
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "m2".into(),
+        };
+        RepoSnapshot::build(log, head, refs, vec![stash], WorkingTree::default()).unwrap()
+    }
+
+    fn ids(snapshot: &RepoSnapshot) -> Vec<&str> {
+        let mut ids: Vec<&str> = snapshot.commits.iter().map(|c| c.id.as_str()).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn filter(hidden: &[&str], soloed: &[&str]) -> crate::ref_filter::RefFilter {
+        let mut filter = crate::ref_filter::RefFilter::default();
+        for name in hidden {
+            filter.toggle_hidden(name, RefKind::LocalBranch);
+        }
+        for name in soloed {
+            filter.toggle_soloed(name, RefKind::LocalBranch);
+        }
+        filter
+    }
+
+    #[test]
+    fn hidden_branches_leave_the_graph() {
+        let full = branches();
+        assert_eq!(full.commits.len(), 7, "six commits and the stash");
+
+        // Hiding topic drops t1 and its stash; the tag on t1 stays in refs.
+        let hidden = full.with_filter(&filter(&["topic"], &[])).unwrap();
+        assert_eq!(ids(&hidden), ["base", "g", "m1", "m2", "t0"]);
+        assert!(
+            hidden.refs.iter().any(|r| r.name == "v1"),
+            "sidebar keeps all refs"
+        );
+        assert!(!hidden
+            .refs_by_commit
+            .values()
+            .flatten()
+            .any(|&r| hidden.refs[r].name == "v1"));
+        assert!(hidden.stashes.is_empty());
+        assert_eq!(hidden.layout.len(), hidden.commits.len());
+
+        // Merges bring in both parents: merged keeps t0.
+        let merged_only = full.with_filter(&filter(&[], &["merged"])).unwrap();
+        assert_eq!(
+            ids(&merged_only),
+            ["base", "g", "m1", "m2", "t0"],
+            "plus HEAD (main)"
+        );
+
+        // Solo plus hide: hidden wins; HEAD stays.
+        let nothing = full.with_filter(&filter(&["topic"], &["topic"])).unwrap();
+        assert_eq!(
+            ids(&nothing),
+            ["base", "m1", "m2"],
+            "nothing visible but HEAD"
+        );
+
+        // Back to everything, from the filtered snapshot.
+        let all = nothing.with_filter(&filter(&[], &[])).unwrap();
+        assert_eq!(all.commits.len(), 7);
+        assert!(all.unfiltered.is_none());
+        assert_eq!(all.applied_filter, crate::ref_filter::RefFilter::default());
+        assert_eq!(nothing.applied_filter, filter(&["topic"], &["topic"]));
+    }
+
+    #[test]
+    fn filtering_keeps_the_current_working_tree() {
+        let full = branches();
+        let hidden = full.with_filter(&filter(&["topic"], &[])).unwrap();
+        let dirty_hidden = hidden.with_working_tree(dirty()).unwrap();
+        assert!(dirty_hidden.has_wip);
+        // Showing everything again uses the newer working tree.
+        let all = dirty_hidden.with_filter(&filter(&[], &[])).unwrap();
+        assert!(all.has_wip);
+        assert_eq!(all.layout.len(), all.commits.len() + 1);
+    }
+}
+
+/// Acceptance M5-08: hide/solo toggle on 100 000 commits < 200 ms
+/// including the layout.
+/// `cargo test --release -p gitloom filter_speed -- --ignored --nocapture`
+#[cfg(test)]
+mod filter_perf {
+    use super::*;
+
+    #[test]
+    #[ignore = "timing; run in release"]
+    fn filter_speed() {
+        // Two long branches from a common root plus merges every 1 000 commits.
+        let count = 100_000usize;
+        let mut commits = Vec::with_capacity(count);
+        for i in 0..count {
+            let id = format!("c{i}");
+            let mut parents = Vec::new();
+            if i + 2 < count {
+                parents.push(format!("c{}", i + 2));
+            }
+            if i % 1000 == 0 && i + 3 < count {
+                parents.push(format!("c{}", i + 3));
+            }
+            commits.push(Commit {
+                id,
+                parents,
+                summary: format!("commit {i}"),
+                body: String::new(),
+                author: "A".into(),
+                email: String::new(),
+                author_time: (count - i) as i64,
+                commit_time: (count - i) as i64,
+            });
+        }
+        let branch = |name: &str, target: &str| Reference {
+            name: name.into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: target.into(),
+            is_head: name == "main",
+            upstream: None,
+            ahead_behind: None,
+        };
+        let refs = vec![branch("main", "c0"), branch("side", "c1")];
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "c0".into(),
+        };
+        let full = RepoSnapshot::build(
+            Log {
+                commits,
+                truncated: false,
+            },
+            head,
+            refs,
+            Vec::new(),
+            WorkingTree::default(),
+        )
+        .unwrap();
+        let mut filter = crate::ref_filter::RefFilter::default();
+        filter.toggle_hidden("side", git_core::RefKind::LocalBranch);
+
+        let start = std::time::Instant::now();
+        let hidden = full.with_filter(&filter).unwrap();
+        let hide = start.elapsed();
+        let start = std::time::Instant::now();
+        let shown = hidden
+            .with_filter(&crate::ref_filter::RefFilter::default())
+            .unwrap();
+        let show = start.elapsed();
+        eprintln!(
+            "hide: {hide:?} ({} rows), show again: {show:?} ({} rows)",
+            hidden.commits.len(),
+            shown.commits.len()
+        );
+        assert!(hide.as_millis() < 200 && show.as_millis() < 200);
+    }
+}
+
+/// M5-14: search, hide/solo toggle and palette filter on a real repository.
+/// `GITLOOM_PERF_REPO=<path> cargo test -p gitloom --release m5_timings -- --ignored --nocapture`
+#[cfg(test)]
+mod m5_perf {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "manual timing, needs GITLOOM_PERF_REPO"]
+    fn m5_timings() {
+        let Ok(path) = std::env::var("GITLOOM_PERF_REPO") else {
+            return;
+        };
+        let backend = git_core::GixBackend::discover(path).unwrap();
+        let snapshot = RepoSnapshot::load(&backend).unwrap();
+        eprintln!(
+            "{} commits, {} refs",
+            snapshot.commits.len(),
+            snapshot.refs.len()
+        );
+
+        for query in [
+            "module 7",
+            "Change 99999",
+            "dev3@",
+            "no such text",
+            "deadbeef",
+        ] {
+            let start = Instant::now();
+            let found = crate::search::matches(&snapshot.commits, query).len();
+            eprintln!(
+                "search {query:>14}: {:?} ({found} matches)",
+                start.elapsed()
+            );
+        }
+
+        // Hide the first non-HEAD branch, then show everything again.
+        let branch = snapshot
+            .refs
+            .iter()
+            .find(|r| r.kind == git_core::RefKind::LocalBranch && !r.is_head)
+            .map(|r| r.name.clone());
+        if let Some(branch) = branch {
+            let mut filter = crate::ref_filter::RefFilter::default();
+            filter.toggle_hidden(&branch, git_core::RefKind::LocalBranch);
+            let start = Instant::now();
+            let hidden = snapshot.with_filter(&filter).unwrap();
+            let hide = start.elapsed();
+            let mut solo = crate::ref_filter::RefFilter::default();
+            solo.toggle_soloed(&branch, git_core::RefKind::LocalBranch);
+            let start = Instant::now();
+            let soloed = snapshot.with_filter(&solo).unwrap();
+            let solo_time = start.elapsed();
+            let start = Instant::now();
+            let _ = hidden.with_filter(&Default::default()).unwrap();
+            let show = start.elapsed();
+            eprintln!(
+                "hide {branch}: {hide:?} ({} rows); solo: {solo_time:?} ({} rows); show all: {show:?}",
+                hidden.commits.len(),
+                soloed.commits.len()
+            );
+        }
+
+        // Palette file list: the repository's files repeated to 100 000 paths.
+        let cli = git_core::CliBackend::new(backend.path());
+        let files = git_core::tracked_files(&cli, "HEAD", &git_core::CancelToken::new()).unwrap();
+        let entries: Vec<crate::palette::Entry> = files
+            .iter()
+            .cycle()
+            .take(100_000)
+            .enumerate()
+            .map(|(i, f)| {
+                let path = format!("{i}/{f}");
+                crate::palette::Entry::new(path.clone(), crate::palette::Target::File(path))
+            })
+            .collect();
+        let mut palette = crate::palette::Palette::new(crate::palette::Mode::Files, entries);
+        for query in ["hot", "src f1", "big.txt"] {
+            let start = Instant::now();
+            palette.set_query(query.into());
+            eprintln!("palette {query:>8}: {:?}", start.elapsed());
+        }
     }
 }
 

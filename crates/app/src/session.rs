@@ -30,12 +30,12 @@ pub struct Session {
     /// Index into `tabs`.
     pub active: usize,
     pub panes: PaneRatios,
-    /// Auto-fetch interval in minutes; 0 turns it off (UI in M5).
-    #[serde(default = "default_auto_fetch")]
-    pub auto_fetch_minutes: u32,
     /// Mode of the toolbar Pull button (last one chosen in its dropdown).
     #[serde(default)]
     pub pull_mode: PullModeSetting,
+    /// Hidden and soloed branches per repository root (M5-08).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ref_filters: std::collections::BTreeMap<PathBuf, crate::ref_filter::RefFilter>,
 }
 
 /// [`git_core::PullMode`] as stored in the session file.
@@ -68,10 +68,6 @@ impl From<git_core::PullMode> for PullModeSetting {
     }
 }
 
-fn default_auto_fetch() -> u32 {
-    crate::fetch::DEFAULT_INTERVAL_MINUTES
-}
-
 impl Default for Session {
     fn default() -> Self {
         Self {
@@ -80,8 +76,8 @@ impl Default for Session {
             tabs: Vec::new(),
             active: 0,
             panes: PaneRatios::default(),
-            auto_fetch_minutes: default_auto_fetch(),
             pull_mode: PullModeSetting::default(),
+            ref_filters: Default::default(),
         }
     }
 }
@@ -224,6 +220,10 @@ mod tests {
         };
         session.touch_recent(Path::new("/a"), 10);
         session.touch_recent(Path::new("/b"), 20);
+        let mut filter = crate::ref_filter::RefFilter::default();
+        filter.toggle_hidden("topic", git_core::RefKind::LocalBranch);
+        filter.toggle_soloed("origin/main", git_core::RefKind::RemoteBranch);
+        session.ref_filters.insert(PathBuf::from("/a"), filter);
         session
     }
 

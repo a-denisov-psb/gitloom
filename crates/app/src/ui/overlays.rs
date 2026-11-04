@@ -104,7 +104,7 @@ pub fn form(form: &Form) -> Element<'_, Message> {
         content = content.push(column![muted(&field.label).size(12), input].spacing(4));
     }
     if let Some(error) = &form.error {
-        content = content.push(text(error).size(12).color(theme::DANGER));
+        content = content.push(text(error).size(12).style(theme::text_danger));
     }
     content = content.push(
         row![
@@ -130,6 +130,135 @@ pub fn form(form: &Form) -> Element<'_, Message> {
     )
 }
 
+/// Keyboard shortcut list (Ctrl+/): all registered shortcuts grouped by
+/// category, with a filter; actions of later tasks are marked disabled.
+pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
+    use crate::actions::{self, MAC};
+
+    let mut rows = Column::new().spacing(2);
+    let groups = actions::shortcut_rows(filter, MAC);
+    if groups.is_empty() {
+        rows = rows.push(muted("No matching shortcut"));
+    }
+    for (category, entries) in groups {
+        rows = rows.push(
+            container(text(category.title()).size(13)).padding(Padding::default().top(8).bottom(2)),
+        );
+        for action in entries {
+            let label = row![text(&action.label).size(13)].spacing(8);
+            let keys = text(action.shortcut_labels(MAC))
+                .size(12)
+                .font(Font::MONOSPACE);
+            rows = rows.push(
+                row![label, space::horizontal(), keys]
+                    .align_y(iced::Center)
+                    .padding([2, 4]),
+            );
+        }
+    }
+    let content = column![
+        row![
+            text("Keyboard shortcuts").size(17),
+            space::horizontal(),
+            button(text("Close"))
+                .on_press(Message::ShortcutListClosed)
+                .padding([4, 12])
+                .style(button::secondary),
+        ]
+        .align_y(iced::Center),
+        text_input("Filter shortcuts", filter)
+            .id(crate::app::SHORTCUT_FILTER_INPUT)
+            .on_input(Message::ShortcutFilterChanged)
+            .padding(6),
+        scrollable(rows.padding(Padding::default().right(12))).height(Fill),
+    ]
+    .spacing(12);
+    let dialog = container(content)
+        .width(DIALOG_WIDTH + 80.0)
+        .max_height(640)
+        .padding(20)
+        .style(theme::dialog);
+    // Clicks inside the list must not reach the backdrop, which closes it.
+    opaque(
+        mouse_area(
+            container(opaque(dialog))
+                .center(Fill)
+                .style(theme::backdrop),
+        )
+        .on_press(Message::ShortcutListClosed)
+        .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
+/// Command palette (Ctrl+P): query field at the top center, results with
+/// the shortcut or path on the right, disabled entries with their reason.
+pub fn palette(palette: &crate::palette::Palette) -> Element<'_, Message> {
+    let mut rows = Column::new().spacing(1);
+    if palette.loading {
+        rows = rows.push(container(muted("Loading…")).padding([6, 10]));
+    } else if palette.shown_count() == 0 {
+        rows = rows.push(container(muted("No matches")).padding([6, 10]));
+    }
+    for (index, entry) in palette.shown().enumerate() {
+        let mut line = row![text(&entry.label).size(13).wrapping(text::Wrapping::None)]
+            .spacing(8)
+            .align_y(iced::Center);
+        if let Some(reason) = &entry.disabled {
+            line = line.push(muted(reason).size(11));
+        }
+        line = line.push(space::horizontal());
+        if let Some(detail) = &entry.detail {
+            line = line.push(
+                muted(detail)
+                    .size(11)
+                    .wrapping(text::Wrapping::None)
+                    .font(Font::MONOSPACE),
+            );
+        }
+        let style = if entry.disabled.is_some() {
+            theme::menu_item_disabled
+        } else {
+            theme::menu_item
+        };
+        rows = rows.push(
+            button(line)
+                .on_press(Message::PaletteRun(index))
+                .padding([5, 10])
+                .width(Fill)
+                .style(move |theme, status| {
+                    if index == palette.selected {
+                        theme::menu_item(theme, iced::widget::button::Status::Hovered)
+                    } else {
+                        style(theme, status)
+                    }
+                }),
+        );
+    }
+    let list = scrollable(rows).height(Length::Shrink);
+    let content = column![
+        text_input(palette.mode.placeholder(), &palette.query)
+            .id(crate::app::PALETTE_INPUT)
+            .on_input(Message::PaletteQuery)
+            .on_submit(Message::PaletteSubmit)
+            .padding(8)
+            .size(14),
+        container(list).max_height(420),
+    ]
+    .spacing(8);
+    let dialog = container(content).width(620).padding(10).style(theme::menu);
+    opaque(
+        mouse_area(
+            container(opaque(dialog))
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::Center)
+                .padding(Padding::default().top(60)),
+        )
+        .on_press(Message::PaletteClosed)
+        .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
 /// Menu at its origin; a click anywhere else closes it.
 /// Commit message dialog (reword, squash).
 pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Message> {
@@ -142,7 +271,7 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
     ]
     .spacing(12);
     if let Some(error) = &dialog.error {
-        content = content.push(text(error).size(12).color(theme::DANGER));
+        content = content.push(text(error).size(12).style(theme::text_danger));
     }
     content = content.push(
         row![

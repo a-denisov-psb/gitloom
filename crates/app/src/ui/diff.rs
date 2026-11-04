@@ -1,6 +1,6 @@
 //! Center pane: read-only file diff (replaces the graph while open).
 
-use git_core::{DiffHunk, DiffKind, DiffLine, DiffLineKind, FileDiff};
+use git_core::{DiffHunk, DiffKind, DiffLine, DiffLineKind, DiffRequest, FileDiff};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text, Column};
 use iced::{alignment, Element, Fill, Font};
 
@@ -17,6 +17,15 @@ const OVERSCAN: usize = 20;
 const TEXT_SIZE: f32 = 12.0;
 
 pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
+    view_with(repo, diff, true)
+}
+
+/// Diff inside another view (file history): no close or history button.
+pub fn embedded<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
+    view_with(repo, diff, false)
+}
+
+fn view_with<'a>(repo: &'a RepoView, diff: &'a DiffView, standalone: bool) -> Element<'a, Message> {
     let request = &diff.request;
     let source = match &request.kind {
         DiffKind::Unstaged => "Unstaged".to_string(),
@@ -79,16 +88,24 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
             space::horizontal(),
         ]
         .push(selection_action)
-        .push(
+        .push(if standalone {
             row![
+                external_button(request),
+                history_button(request),
                 modes,
-                button(text("×").size(15))
-                    .on_press(Message::DiffClosed)
-                    .padding([0, 8])
-                    .style(theme::flat),
+                crate::ui::panel::with_tooltip_text(
+                    button(crate::icons::icon(crate::icons::Icon::Close, 15.0))
+                        .on_press(Message::DiffClosed)
+                        .padding([2, 6])
+                        .style(theme::flat)
+                        .into(),
+                    "Close diff (Esc)".to_owned(),
+                ),
             ]
-            .spacing(12),
-        )
+            .spacing(12)
+        } else {
+            row![external_button(request), modes].spacing(12)
+        })
         .spacing(12)
         .padding([6, 12])
         .align_y(iced::Center),
@@ -100,7 +117,7 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
     let body: Element<'a, Message> = match &diff.diff {
         Loadable::Loading if diff.fetching => centered(muted("Fetching missing content…")),
         Loadable::Loading => centered(muted("Loading diff…")),
-        Loadable::Failed(error) => centered(text(error).color(theme::DANGER)),
+        Loadable::Failed(error) => centered(text(error).style(theme::text_danger)),
         Loadable::Ready(file) => content(repo, diff, file),
     };
 
@@ -109,6 +126,53 @@ pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> 
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// "Open in external diff tool" (M5-12; Ctrl+D).
+fn external_button<'a>(request: &DiffRequest) -> Element<'a, Message> {
+    let enabled = !matches!(request.kind, DiffKind::Untracked | DiffKind::Stash { .. });
+    let tip = match (
+        enabled,
+        crate::actions::ActionId::ExternalDiff.shortcut_text(),
+    ) {
+        (false, _) => "Not available for untracked files and stashes".to_owned(),
+        (true, Some(keys)) => format!("Open in external diff tool ({keys})"),
+        (true, None) => "Open in external diff tool".to_owned(),
+    };
+    crate::ui::panel::with_tooltip_text(
+        button(text("External").size(12))
+            .on_press_maybe(enabled.then_some(Message::ExternalDiff))
+            .padding([2, 8])
+            .style(button::secondary)
+            .into(),
+        tip,
+    )
+}
+
+/// "History" in the diff header (M5-09): the file's history, starting at
+/// the commit of a commit diff.
+fn history_button<'a>(request: &DiffRequest) -> Element<'a, Message> {
+    let (start, enabled) = match &request.kind {
+        DiffKind::Commit(id) => (Some(id.clone()), true),
+        DiffKind::Untracked | DiffKind::Stash { .. } => (None, false),
+        DiffKind::Unstaged | DiffKind::Staged => (None, true),
+    };
+    let tip = if enabled {
+        "History of this file"
+    } else {
+        "No history for this file here"
+    };
+    crate::ui::panel::with_tooltip_text(
+        button(text("History").size(12))
+            .on_press_maybe(enabled.then(|| Message::FileHistoryOpened {
+                path: request.path.clone(),
+                start,
+            }))
+            .padding([2, 8])
+            .style(button::secondary)
+            .into(),
+        tip.to_owned(),
+    )
 }
 
 fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> Element<'a, Message> {
@@ -184,7 +248,7 @@ fn hunk_header<'a>(
     let mut content = row![text(&hunk.header)
         .font(Font::MONOSPACE)
         .size(TEXT_SIZE)
-        .color(theme::TEXT_MUTED)
+        .style(theme::text_muted)
         .wrapping(text::Wrapping::None)]
     .align_y(iced::Center);
     if let Some(staged) = staged {
@@ -222,7 +286,7 @@ fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
             text(n.map_or_else(String::new, |n| n.to_string()))
                 .font(Font::MONOSPACE)
                 .size(TEXT_SIZE)
-                .color(theme::TEXT_MUTED),
+                .style(theme::text_muted),
         )
         .width(NUMBER_WIDTH)
         .padding([0, 6])

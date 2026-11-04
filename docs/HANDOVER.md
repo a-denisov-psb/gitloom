@@ -20,16 +20,17 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M4, version 0.5.0)
+## Current state (end of M5, version 0.6.0)
 
 Done (M4-01 … M4-15, see the notes in `docs/milestones/M4-merge-rebase.md`; M1–M3 in their milestone files):
 
 - `git-core`: reads via `GixBackend`; writes via `CliBackend` / `GitWriter`, now also merge and fast-forward, rebase and interactive rebase, cherry-pick, revert, reset, continue/skip/abort, conflict model and resolution (ADR-022); Gitloom as Git's editor (ADR-021); undo/redo entries for all history operations.
 - `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
 - `app`: everything from M3 plus multi-selection in the graph, merge/rebase/cherry-pick/revert/reset from the menus, interactive rebase panel, reword and squash shortcuts, conflict resolution view, operation banner with Continue/Skip/Abort, drag and drop of branches.
-- Planning: M5 is planned in task-level detail (`docs/milestones/M5-productivity.md`, ADR-023 … ADR-027).
+- M5 (see `docs/milestones/M5-productivity.md`): action registry and shortcut list, settings, light/dark theme, zoom, icons, command palette, commit search, hide/solo, file history, blame, avatars, external tools, terminal and file manager.
+- Planning: M6 is planned in task-level detail (`docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030). The final project name is pending and blocks M6-02.
 - Measurements: `docs/PERFORMANCE.md` (M1 … M4 sections).
-- Branches: `master` with `v0.1.0` … `v0.4.0` (`v0.5.0` after the maintainer pushes it); `develop` (default branch on GitHub).
+- Branches: `master` with `v0.1.0` … `v0.5.0` (`v0.6.0` after the maintainer pushes it); `develop` (default branch on GitHub).
 
 Verified:
 
@@ -42,7 +43,6 @@ Not done / known limitations:
 - M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict notice): ROADMAP ideas backlog (open question 9).
 - Real credential prompts (GCM on Windows, SSH passphrase on Linux), keyboard parts of the M3/M4 walkthroughs and the Windows runs of M2–M4 are open maintainer checks.
 - Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
-- Icons are Unicode placeholders (M5-05); remote markers on pills are text.
 - Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
 ## Maintainer to-dos
@@ -67,6 +67,11 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M4-07: in the interactive rebase panel, check the keys P/R/S/F/D, ↑/↓ and Alt+↑/↓ and typing into a reword message (keyboard input did not reach the window in my WSLg session; actions, drag and the combined squash message were verified by mouse). Also check in GitKraken whether its list shows the newest commit on top (Gitloom does).
 - [ ] M4-08: "Edit commit message" with a typed change (HEAD and an older commit) and "Squash N commits" after a Ctrl/Shift+click multi-selection (keyboard input and modifiers did not reach the window in my WSLg session; covered by integration tests).
 - [ ] M4-14: on Linux, the M4 acceptance walkthrough was done by mouse on a clone of this repo (merge with the conflict view, rebase with a conflict, interactive rebase with reorder/squash/reword/drop, cherry-pick, revert, reset soft/mixed/hard, each undone and redone; trees compared with the CLI). Please add the keyboard parts: cherry-pick of three commits via Ctrl/Shift+click multi-selection and a typed reword message. Then repeat the whole M4 walkthrough on Windows (also checks CRLF and Git for Windows' shell running Gitloom as editor).
+- [ ] M5-06: command palette with the keyboard: Ctrl+P, ↑/↓ (wraps), Enter runs, Esc closes; "Checkout branch…" then Backspace twice returns to the actions; Ctrl+Shift+O. (Opening and filtering checked by hand; the other keys did not reach the window in my WSLg session.)
+- [ ] M5-07: commit search with the keyboard: Ctrl+F, type (non-matching rows dim, "n of m"), Enter / Shift+Enter, Esc keeps the selection. (Opening by the magnifier checked by hand; typing did not reach the window in my WSLg session.)
+- [ ] M5-13: on Windows check Alt+T (Windows Terminal, else PowerShell/cmd in a new window, started in the repository) and Alt+O / "Open file location" (Explorer with the file selected); on macOS (if available) Terminal.app and Finder.
+- [ ] M5-14: M5 walkthrough on Windows in Dark and Light at 100 % and 200 %: Ctrl+/, Ctrl+, , Ctrl+P (arrows, Enter, sub-lists), Ctrl+F (typing, Enter/Shift+Enter), Ctrl+Shift+H, Ctrl+= / Ctrl+- / Ctrl+0, F11, Ctrl+D, Alt+T, Alt+O, hide/solo in the sidebar, file history and blame, avatars on/off, an external diff and merge tool.
+- [x] GitHub Actions: CI of `develop` checked on 2026-11-04 (billing fixed), green on Linux, Windows, macOS and MSRV.
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 - [ ] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0.
 
@@ -101,8 +106,8 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 
 | # | Question | Raised | Status |
 |---|---|---|---|
-| 1 | Final project name ("Gitloom" is a working title) | M0 | open |
-| 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
+| 1 | Final project name ("Gitloom" is a working title) | M0 | decided (maintainer, 2026-11-03): rename before 1.0 because "GitLoom" exists as a product; name pending, task M6-02 |
+| 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | decided (maintainer, 2026-11-03): GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
 | 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | done: confirmed by maintainer (J down/older, K up/newer) |
 | 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |

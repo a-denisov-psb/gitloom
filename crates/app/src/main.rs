@@ -1,16 +1,26 @@
+mod actions;
 mod app;
 mod askpass;
+mod avatars;
 mod conflict;
 mod fetch;
+mod file_history;
 mod format;
+mod fuzzy;
+mod icons;
+mod launch;
 mod menus;
 mod nav;
 mod overlay;
+mod palette;
 mod panes;
 mod rebase_panel;
+mod ref_filter;
 mod repo_view;
+mod search;
 mod selection;
 mod session;
+mod settings;
 mod shortcuts;
 mod snapshot;
 mod theme;
@@ -55,7 +65,8 @@ fn main() -> iced::Result {
     )
     .title(App::title)
     .subscription(App::subscription)
-    .theme(theme::app_theme())
+    .theme(App::theme)
+    .scale_factor(App::scale_factor)
     .settings(iced::Settings {
         default_text_size: 13.into(),
         ..iced::Settings::default()

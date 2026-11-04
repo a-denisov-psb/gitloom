@@ -13,11 +13,13 @@
 
 mod conflict;
 pub mod context_area;
-mod diff;
+pub(crate) mod diff;
+mod file_history;
 mod graph;
 pub(crate) mod overlays;
 pub(crate) mod panel;
 mod rebase;
+pub(crate) mod settings;
 mod sidebar;
 mod start;
 pub(crate) mod statusbar;
@@ -25,6 +27,7 @@ mod tabs;
 mod toolbar;
 
 pub use graph::reveal_offset;
+pub use graph::visible_range as graph_visible_range;
 
 /// Id of the inline new-branch input in the graph.
 pub const NEW_BRANCH_INPUT: &str = "new-branch-input";
@@ -76,9 +79,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(notice) = &app.notice {
         layout = layout.push(notice_banner(notice));
     }
-    layout = match app.active_tab() {
-        Some(tab) => layout.push(tab_body(app, tab)),
-        None => layout.push(space::vertical()),
+    layout = match (&app.settings_page, app.active_tab()) {
+        (Some(page), _) => layout.push(settings::view(app, page)),
+        (None, Some(tab)) => layout.push(tab_body(app, tab)),
+        (None, None) => layout.push(space::vertical()),
     };
     layout = layout.push(statusbar::view(app));
 
@@ -91,13 +95,19 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let base = context_area::release_area(base, Message::BranchDragEnd);
     let mut layers = vec![base];
     if let Some(menu) = &app.context_menu {
-        layers.push(overlays::context_menu(menu, app.window_size));
+        layers.push(overlays::context_menu(menu, app.window_size()));
     }
     if let Some(form) = &app.form {
         layers.push(overlays::form(form));
     }
     if let Some(dialog) = &app.message_dialog {
         layers.push(overlays::message_dialog(dialog));
+    }
+    if let Some(palette) = &app.palette {
+        layers.push(overlays::palette(palette));
+    }
+    if let Some(filter) = &app.shortcut_list {
+        layers.push(overlays::shortcut_list(filter));
     }
     if let Some(modal) = &app.modal {
         layers.push(overlays::modal(modal));
@@ -131,7 +141,9 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
             centered(content)
         }
         TabState::Ready(view) => {
-            let mut content = column![toolbar::view(view, app.pull_mode)].spacing(1);
+            // Labelled toolbar buttons need about 1 100 logical pixels.
+            let compact = app.window_size().width < 1100.0;
+            let mut content = column![toolbar::view(view, app.pull_mode, compact)].spacing(1);
             if let Some(state) = view.snapshot.state_banner() {
                 content = content.push(state_banner(view, state));
             }
@@ -148,12 +160,15 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
         let content = match kind {
             PaneKind::Sidebar => sidebar::view(view),
             PaneKind::Center => match &view.center {
-                CenterView::Graph => graph::view(view),
+                CenterView::Graph => graph::view(view, &app.avatars),
                 CenterView::Diff(diff) => diff::view(view, diff),
-                CenterView::Conflict(conflict) => conflict::view(view, conflict),
-                CenterView::Rebase(panel) => rebase::view(view, panel),
+                CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
+                CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),
+                CenterView::FileHistory(history) => {
+                    with_background(file_history::view(view, history, &app.avatars))
+                }
             },
-            PaneKind::Panel => panel::view(view),
+            PaneKind::Panel => panel::view(view, &app.avatars),
         };
         pane_grid::Content::new(content)
     })
@@ -164,11 +179,21 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     .into()
 }
 
+/// Center views without a background of their own get the graph's.
+fn with_background(content: Element<'_, Message>) -> Element<'_, Message> {
+    container(content)
+        .width(Fill)
+        .height(Fill)
+        .style(theme::graph)
+        .into()
+}
+
 /// App-wide one-time notice with a dismiss button.
 fn notice_banner(notice: &str) -> Element<'_, Message> {
     container(
         row![
-            text(notice).color(theme::TEXT),
+            crate::icons::tinted(crate::icons::Icon::Info, 15.0, |p| p.warning),
+            text(notice).style(theme::text_normal),
             space::horizontal(),
             button(text("Dismiss").size(12))
                 .on_press(Message::DismissNotice)
@@ -220,7 +245,8 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
     );
     container(
         row![
-            text(state).color(theme::TEXT),
+            crate::icons::tinted(crate::icons::Icon::Merge, 15.0, |p| p.accent),
+            text(state).style(theme::text_normal),
             muted(hint).size(12),
             space::horizontal(),
             actions,
@@ -238,7 +264,8 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
 fn banner<'a>(error: &'a str, tab: crate::app::TabId) -> Element<'a, Message> {
     container(
         row![
-            text(error).color(theme::TEXT),
+            crate::icons::tinted(crate::icons::Icon::Alert, 15.0, |p| p.danger),
+            text(error).style(theme::text_normal),
             space::horizontal(),
             button(text("Retry").size(12))
                 .on_press(Message::Retry(tab))
@@ -277,24 +304,37 @@ pub fn rows_in_view(
     (first, last.max(first))
 }
 
-/// Muted secondary text.
-pub(crate) fn muted<'a>(content: impl text::IntoFragment<'a>) -> text::Text<'a> {
-    text(content).color(theme::TEXT_MUTED)
+/// Round avatar of size `size`, or the author's initials in a circle
+/// while there is none (avatars off, loading, or none on Gravatar).
+pub(crate) fn avatar<'a>(
+    handle: Option<&iced::widget::image::Handle>,
+    author: &str,
+    size: f32,
+) -> Element<'a, Message> {
+    match handle {
+        Some(handle) => iced::widget::image(handle.clone())
+            .width(size)
+            .height(size)
+            .border_radius(size / 2.0)
+            .into(),
+        None => container(text(crate::format::initials(author)).size(size * 0.4))
+            .width(size)
+            .height(size)
+            .center(size)
+            .style(theme::avatar)
+            .into(),
+    }
 }
 
-/// Single-letter badge for a file change (M, A, D, R, ?, !).
-pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> text::Text<'a> {
-    use git_core::ChangeKind;
-    let letter = match kind {
-        ChangeKind::Added => "A",
-        ChangeKind::Modified => "M",
-        ChangeKind::Deleted => "D",
-        ChangeKind::Renamed => "R",
-        ChangeKind::Untracked => "?",
-        ChangeKind::Conflicted => "!",
-    };
-    text(letter)
-        .color(theme::change_color(kind))
-        .width(16)
-        .font(iced::Font::MONOSPACE)
+/// Muted secondary text.
+pub(crate) fn muted<'a>(content: impl text::IntoFragment<'a>) -> text::Text<'a> {
+    text(content).style(theme::text_muted)
+}
+
+/// Icon for a file change (added, modified, deleted, renamed, untracked,
+/// conflicted) in the change's color.
+pub(crate) fn change_badge<'a>(kind: git_core::ChangeKind) -> Element<'a, Message> {
+    container(crate::icons::change_icon(kind, 14.0))
+        .width(20)
+        .into()
 }
