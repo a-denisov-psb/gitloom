@@ -20,16 +20,17 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M4, version 0.5.0)
+## Current state (end of M5, version 0.6.0)
 
 Done (M4-01 … M4-15, see the notes in `docs/milestones/M4-merge-rebase.md`; M1–M3 in their milestone files):
 
 - `git-core`: reads via `GixBackend`; writes via `CliBackend` / `GitWriter`, now also merge and fast-forward, rebase and interactive rebase, cherry-pick, revert, reset, continue/skip/abort, conflict model and resolution (ADR-022); Gitloom as Git's editor (ADR-021); undo/redo entries for all history operations.
 - `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
 - `app`: everything from M3 plus multi-selection in the graph, merge/rebase/cherry-pick/revert/reset from the menus, interactive rebase panel, reword and squash shortcuts, conflict resolution view, operation banner with Continue/Skip/Abort, drag and drop of branches.
-- Planning: M5 is planned in task-level detail (`docs/milestones/M5-productivity.md`, ADR-023 … ADR-027).
+- M5 (see `docs/milestones/M5-productivity.md`): action registry and shortcut list, settings, light/dark theme, zoom, icons, command palette, commit search, hide/solo, file history, blame, avatars, external tools, terminal and file manager.
+- Planning: M6 is planned in task-level detail (`docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030). The final project name is pending and blocks M6-02.
 - Measurements: `docs/PERFORMANCE.md` (M1 … M4 sections).
-- Branches: `master` with `v0.1.0` … `v0.4.0` (`v0.5.0` after the maintainer pushes it); `develop` (default branch on GitHub).
+- Branches: `master` with `v0.1.0` … `v0.5.0` (`v0.6.0` after the maintainer pushes it); `develop` (default branch on GitHub).
 
 Verified:
 
@@ -70,7 +71,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M5-07: commit search with the keyboard: Ctrl+F, type (non-matching rows dim, "n of m"), Enter / Shift+Enter, Esc keeps the selection. (Opening by the magnifier checked by hand; typing did not reach the window in my WSLg session.)
 - [ ] M5-13: on Windows check Alt+T (Windows Terminal, else PowerShell/cmd in a new window, started in the repository) and Alt+O / "Open file location" (Explorer with the file selected); on macOS (if available) Terminal.app and Finder.
 - [ ] M5-14: M5 walkthrough on Windows in Dark and Light at 100 % and 200 %: Ctrl+/, Ctrl+, , Ctrl+P (arrows, Enter, sub-lists), Ctrl+F (typing, Enter/Shift+Enter), Ctrl+Shift+H, Ctrl+= / Ctrl+- / Ctrl+0, F11, Ctrl+D, Alt+T, Alt+O, hide/solo in the sidebar, file history and blame, avatars on/off, an external diff and merge tool.
-- [ ] GitHub Actions: after the billing is fixed, check the CI runs of `develop` (all M5 merges ran without CI) and fix anything red before the release.
+- [x] GitHub Actions: CI of `develop` checked on 2026-11-04 (billing fixed), green on Linux, Windows, macOS and MSRV.
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
 - [ ] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0.
 

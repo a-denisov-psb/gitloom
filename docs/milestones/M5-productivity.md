@@ -75,8 +75,8 @@ Until answered, implement the decisions above; adjust afterwards.
 - [x] On this repository and a generated 100 000-commit repository, search, hide/solo, palette, file history and blame meet the targets of M5-14.
 - [x] All views are readable in Light and Dark at 70 %, 100 % and 200 % zoom (screenshots in `docs/screenshots/`).
 - [x] With avatars off, Gitloom opens no network connection besides Git's own fetch/pull/push.
-- [ ] (`check.sh` green on Linux and clippy for the Windows target after every merge; GitHub Actions did not start any job since 2026-10-26 — account billing, maintainer to-do) `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
-- [ ] Released as `v0.6.0` (M5-15).
+- [x] (CI of `develop` green on Linux, Windows, macOS and MSRV on 2026-11-04 after the billing was fixed) `./scripts/check.sh` green on all CI platforms, docs and CHANGELOG up to date.
+- [x] Released as `v0.6.0` (M5-15).
 
 ## Task overview
 
@@ -254,6 +254,8 @@ Acceptance: unit tests for the detection order (injected executable lookup) and 
 - PERFORMANCE.md "M5" with a generated 100 000-commit repository: search < 50 ms, hide/solo toggle < 200 ms, palette filter < 30 ms; file history of a file with 2 000 commits < 2 s; blame of 10 000 lines < 2 s; idle memory with avatars on and off.
 - Update UX-PARITY (all M5 rows), CHANGELOG, screenshots, README.
 
-### [ ] M5-15 Release v0.6.0
+### [x] M5-15 Release v0.6.0
+
+> Done: released with `/release` on 2026-11-04 after the CI of `develop` was green on all platforms (Linux, Windows, macOS, MSRV). The Windows and keyboard to-dos stay open in HANDOVER and are bundled in M6-13; they did not block the release.
 
 Same procedure as before (`/release`), only when the maintainer asks.

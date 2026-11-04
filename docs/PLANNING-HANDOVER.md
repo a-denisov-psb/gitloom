@@ -97,8 +97,8 @@ One line per milestone: version, date, scope, notable deviations.
 | M2 Working copy | 0.3.0 | 2026-10-23 | File watcher, stage/unstage/discard by file, hunk and line, commit and amend, stashes in the graph, undo/redo, `CliBackend`, context menu and modal infrastructure (moved from M3), `LaneHints` (M2-15) | Discard asks for confirmation also for hunks and lines; "Discard all" asks whether to discard staged changes too; partial clones show renames as delete + add when blobs are missing |
 | M3 Branches and remotes | 0.4.0 | 2026-10-25 | Checkout, branch/tag create/rename/delete, fetch (manual + auto), pull modes, push incl. force-with-lease, upstream and remote management, context menus, undo/redo for ref operations, progress + cancel, Gitloom as askpass helper | Askpass mode detected via `GITLOOM_ASKPASS` env (ADR-019); credentials never stored |
 | M4 Merge, rebase, conflicts, undo | 0.5.0 | 2026-10-26 | Merge/ff, rebase and interactive rebase, cherry-pick, revert, reset, conflict resolution view, continue/skip/abort, drag and drop, multi-selection, undo/redo; Gitloom as Git's editor | Shift+↑/↓ select ranges instead of parent/child navigation; reset uses a mode dialog instead of a submenu; hard reset is undoable via a snapshot; editor input is a message queue; released with keyboard parts and the Windows walkthrough still open (maintainer to-dos); three known limitations moved to the backlog |
-| M5 Productivity parity | 0.6.0 | – | In progress, planned in detail (`docs/milestones/M5-productivity.md`): action registry, settings, themes, zoom, icons, palette, search, hide/solo, file history, blame, avatars, external tools, terminal | – |
-| M6 Release readiness | 1.0.0 | – | Planned: installers, signing, update check | – |
+| M5 Productivity parity | 0.6.0 | 2026-11-04 | Action registry and shortcut list, settings, light/dark theme, zoom and fullscreen, Lucide icons, command palette, commit search, hide/solo branches, file history and blame, opt-in avatars, external diff/merge tools, terminal and file manager, end-to-end check | Released with the Windows and keyboard to-dos still open (bundled in M6-13); GitHub Actions did not run from 2026-10-26 until the billing was fixed, CI of `develop` verified before the release |
+| M6 Release readiness | 1.0.0 | – | Planned in detail (`docs/milestones/M6-release-readiness.md`): rename, GPL-3.0-or-later, icon, crash reports, update check, accessibility, packaging, release workflow, SignPath, public repository, user docs, walkthrough | – |
 
 ## 6. Pending changes
 
@@ -107,6 +107,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - `LaneHints` preparation: done as M2-15 (`docs/ARCHITECTURE.md`, "Lane groups").
 - Backlog entry "Git flow graph layout": in `docs/ROADMAP.md` → "Ideas backlog".
 - M5 detailed plan (2026-10-26): `docs/milestones/M5-productivity.md`, ADR-023 … ADR-027, ROADMAP backlog entries.
+- M6 detailed plan (2026-11-03): `docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030, ADR-008/016 updated, ROADMAP backlog entries.
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -116,8 +117,8 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Final project name ("Gitloom" is a working title) | Open |
-| 2 | Confirm license (MIT OR Apache-2.0) | Open |
+| 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-03: rename before 1.0 because "GitLoom" exists as a product; the name itself is still open and blocks M6-02 |
+| 2 | Confirm license (MIT OR Apache-2.0) | decided 2026-11-03: GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
 | 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0 |
 | 5 | M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict without notice): keep or plan follow-ups? | decided 2026-10-26: backlog (ROADMAP) |
@@ -127,8 +128,8 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. M5 is being implemented (`docs/milestones/M5-productivity.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed.
-2. Answer the M5 maintainer verification items (milestone file) as the related tasks come up.
+1. Implement M6 (`docs/milestones/M6-release-readiness.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed. The maintainer's name decision is pending and blocks M6-02.
+2. Answer the M6 maintainer verification items (milestone file) as the related tasks come up.
 3. Collect the maintainer's own ideas; place them in the roadmap.
 
 ## 9. Document map
