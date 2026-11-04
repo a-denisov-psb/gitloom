@@ -301,3 +301,13 @@ Architecture decision records in short form. New entries at the bottom. Change a
   download or installation; pre-releases only for pre-release builds.
 - Why: ADR-009 (network features are opt-in); installers differ per platform, so
   automatic updates are a backlog item.
+
+## ADR-032 CI budget until the repository is public
+
+- Status: accepted
+- Decision: Linux check and MSRV run on every push and pull request. Windows and macOS
+  run only on pushes to `master` and `release/**`, on tags and via `workflow_dispatch`.
+  Runs are grouped per ref with `cancel-in-progress`. Before every merge the maintainer
+  workflow runs `./scripts/check.sh` and clippy for the Windows target locally.
+- Why: private repositories bill Windows and macOS minutes at a multiple of Linux; the
+  budget is limited until the repository is public (M6-11). Revisit after that.

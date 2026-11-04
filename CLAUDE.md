@@ -64,7 +64,8 @@ Details: `docs/ARCHITECTURE.md`.
 - Merging a feature: when all acceptance criteria are met and `./scripts/check.sh` is green, merge it yourself (`git switch develop && git merge --no-ff feature/...`), push `develop`, delete the feature branch. Ask first only for plan deviations, scope changes or open decisions (ADR-017).
 - Tasks blocked by the maintainer: do everything else, record the open items under "Maintainer to-dos" in `docs/HANDOVER.md`, continue with the next unblocked task.
 - Never commit directly to `master` or `develop`. Never rewrite published history.
-- After pushing `develop`, check the CI run with `gh run watch`; a red run takes priority over the next task.
+- CI budget (ADR-032): pushes to `develop` and `feature/**` run only the Linux check and MSRV. Windows and macOS run on `master`, `release/**`, tags and `workflow_dispatch`. So before every merge run `./scripts/check.sh` and clippy for the Windows target (`cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`, see `docs/HANDOVER.md`); the Windows/macOS CI is not a safety net for `develop`.
+- After pushing `develop`, check the CI run with `gh run watch`; a red run takes priority over the next task. Superseded runs of the same branch are cancelled automatically.
 - Push feature branches (`git push -u origin feature/...`) and `develop`. Never push `master` or tags; the maintainer does that. Never force-push.
 
 ## Definition of done (per task)
