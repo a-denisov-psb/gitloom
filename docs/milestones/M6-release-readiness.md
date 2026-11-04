@@ -1,0 +1,216 @@
+# M6 – Release readiness
+
+Target version: **1.0.0** (preceded by `1.0.0-rc.N`)
+
+## Goal
+
+Gitloom (final name pending) ships as version 1.0: installers for Linux, macOS and Windows built by CI from a version tag, Windows binaries signed, the project licensed GPL-3.0-or-later, with crash reports, an opt-in update check, user documentation and a public repository. All open Windows checks and GitKraken verification items from M2–M5 are closed.
+
+## Scope
+
+In scope:
+
+- Product identity in one place and the rename to the final name
+- License switch to GPL-3.0-or-later, third-party notices, About dialog
+- App icon and desktop metadata
+- Crash reports (local only)
+- Opt-in update check
+- Accessibility pass
+- Packaging for all targets and a release workflow on GitHub Actions
+- Windows code signing via SignPath Foundation; macOS ad-hoc signature
+- Public repository preparation and user documentation
+- Consolidated Windows walkthrough and GitKraken parity verification
+- Release candidate(s) and release 1.0.0
+
+Out of scope (later):
+
+- macOS notarization (Apple Developer ID) → backlog
+- Flatpak, `.deb`/`.rpm`, Homebrew, winget → backlog
+- Automatic download/installation of updates → backlog
+- Screen reader support (iced 0.14 exposes no accessibility tree) → backlog, documented as known limitation
+- Ideas backlog items (git flow layout, diff modes, …) → after 1.0
+
+## Decisions taken in planning
+
+| Topic | Decision |
+|---|---|
+| Name | "Gitloom" collides with an existing product (GitLoom SaaS) and the `git-loom` crate; the project gets a new name before the release candidate. All name-dependent values live in one place (ADR-028); the rename is one task once the maintainer has decided. |
+| License | GPL-3.0-or-later (ADR-008 updated). `cargo-deny` checks that every dependency license is GPL-3.0 compatible; third-party notices are generated and shipped with every package and shown in the About dialog. |
+| Code signing | Windows: SignPath Foundation (free for open source; needs a public repository and builds on public CI). macOS: ad-hoc signature (`codesign -s -`), not notarized; the user documentation explains the Gatekeeper prompt. Linux: unsigned, SHA256 checksums. (ADR-016 updated.) |
+| Public repository | The repository goes public with the first release candidate. Before that: secret scan of the whole history, review of internal content, maintainer decision on commit author emails. |
+| Release flow | Tag `vX.Y.Z` or `vX.Y.Z-rc.N` on `master` → workflow builds all targets, attaches artifacts and `SHA256SUMS` to a draft GitHub release (pre-release for `-rc`), release notes from the CHANGELOG section. The maintainer publishes the draft. Windows x86 may fail without blocking. |
+| Packaging | `cargo-packager` for AppImage, dmg and msi from one configuration; plain archives (`.tar.gz`, `.zip`) built by the workflow. Fallbacks per target only if `cargo-packager` cannot do it (ADR-031, written by M6-08). Linux builds run on the oldest Ubuntu LTS available as a GitHub runner or container (glibc compatibility). |
+| Crash reports | A panic hook writes a local report (version, OS, thread, message, backtrace; no repository paths or file contents) to the data dir; the next start offers "Open report folder" and "Copy report". Nothing is uploaded (ADR-029). |
+| Update check | Opt-in, off by default: at most once per day, `GET` of the latest release from the GitHub API with `ureq`; a newer version shows a notice in the status bar with a link to the release page. No download, no installation (ADR-030). Pre-releases are ignored unless the running version is one. |
+| Accessibility | Every action reachable by keyboard (palette), visible focus everywhere, contrast already AA (ADR-027), zoom to 200 %, no information by color alone. Screen readers are not supported by iced 0.14 → documented limitation. |
+| About dialog | Help entry in the palette and the gear menu: name, version, commit, license (GPL-3.0-or-later with link), third-party notices, links to repository and issue tracker. |
+
+## Maintainer decisions and verification items
+
+| Item | Used in |
+|---|---|
+| Final project name (checked for trademark, domain, crates.io, GitHub) | M6-02 |
+| Commit author email in the history (`the old personal address`) becomes public: keep, or rewrite to a GitHub noreply address before going public (one-time exception to "never rewrite published history", maintainer decision) | M6-11 |
+| SignPath Foundation application after the repository is public | M6-10 |
+| GitHub Actions billing fixed (until the repository is public the release workflow runs on the private plan) | M6-09 |
+| GitKraken checks from M4/M5: drag and drop onto a branch that is not checked out; interactive rebase list order; commit search dims or filters; hide the checked-out branch; file history/blame layout; palette sub-lists | M6-13 |
+| macOS machine available for a smoke test of the dmg? (otherwise CI only) | M6-13 |
+
+## Milestone acceptance
+
+- [ ] A tag on `master` produces a draft release with AppImage, Linux `.tar.gz`, macOS universal dmg, Windows x64 `.zip` + `.msi` (signed), Windows x86 (best effort) and `SHA256SUMS`.
+- [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
+- [ ] The project carries the final name everywhere (binary, window title, packages, config dirs with migration, docs); no "Gitloom" left except in the CHANGELOG history and the migration code.
+- [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
+- [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
+- [ ] With crash reports and update check, Gitloom still opens no network connection by default (update check off).
+- [ ] The repository is public, CI runs on GitHub Actions for all platforms, `./scripts/check.sh` green.
+- [ ] Released as `v1.0.0` (M6-15) after at least one release candidate.
+
+## Task overview
+
+| ID | Task | Depends on |
+|---|---|---|
+| M6-01 | Product identity in one place | – |
+| M6-02 | Rename to the final name | M6-01, maintainer decision |
+| M6-03 | License switch, third-party notices, About dialog | – |
+| M6-04 | App icon and desktop metadata | M6-01 |
+| M6-05 | Crash reports | M6-01 |
+| M6-06 | Opt-in update check | M6-01 |
+| M6-07 | Accessibility pass | – |
+| M6-08 | Packaging configuration | M6-01, M6-03, M6-04 |
+| M6-09 | Release workflow | M6-08 |
+| M6-10 | Windows code signing (SignPath) | M6-09, M6-14 |
+| M6-11 | Public repository preparation | M6-02, M6-03 |
+| M6-12 | User documentation | M6-02 |
+| M6-13 | Consolidated walkthrough and GitKraken verification | M6-02 … M6-09 |
+| M6-14 | Release candidate v1.0.0-rc.1 | M6-02 … M6-09, M6-11, M6-12 |
+| M6-15 | Release v1.0.0 | all |
+
+---
+
+## Tasks
+
+### [ ] M6-01 Product identity in one place
+
+- One module (e.g. `crates/app/src/identity.rs`) with display name, binary name, application id (reverse DNS), config/cache/data dir name, repository URL, issue URL; Cargo metadata (`description`, `repository`, `homepage`) in the workspace.
+- Every use of the name in code (window title, dirs, askpass/editor env names such as `GITLOOM_ASKPASS`/`GITLOOM_EDITOR`, temp file prefixes, user agent of avatars/update check) goes through it.
+- Env names keep a compatibility note: they are internal between Gitloom processes, so they simply follow the new name.
+- ADR-028.
+
+Acceptance: a test (or `grep` in `check.sh`) fails if the literal name appears in `crates/` outside the identity module, tests and the migration code; behavior unchanged.
+
+### [ ] M6-02 Rename to the final name
+
+Blocked until the maintainer has decided the name.
+
+- Change the identity values, the app crate/binary name, README, docs, screenshots captions, window title, `CLAUDE.md` mentions (with the maintainer's OK for `CLAUDE.md`).
+- Migration: if the new config dir does not exist and the old `gitloom` dir does, copy `settings.json` and `session.json` once (old dir stays); avatar cache is not migrated.
+- Maintainer: rename the GitHub repository (redirects keep working), update the local remote.
+
+Acceptance: unit tests for the migration (old only, new only, both, broken old file); app starts with the migrated session; CHANGELOG entry ("Gitloom is now …").
+
+### [ ] M6-03 License switch, third-party notices, About dialog
+
+- Replace `LICENSE-MIT` and `LICENSE-APACHE` by `LICENSE` (GPL-3.0 text), workspace `license = "GPL-3.0-or-later"`, README and CONTRIBUTING license sections, SPDX note in CONTRIBUTING for contributions.
+- `cargo-deny` (`deny.toml`): license allow list compatible with GPL-3.0 (e.g. MIT, Apache-2.0, ISC, BSD-2/3-Clause, Zlib, Unicode-3.0, MPL-2.0, CDLA-Permissive-2.0 — verify each against the actual dependency tree), advisories and bans; run in `check.sh` (skipped with a hint if the tool is missing) and in CI.
+- Third-party notices generated (e.g. `cargo-about`) into `THIRD-PARTY-LICENSES.md`/`.html` incl. Lucide icons and bundled fonts; regenerated by a script, checked in CI for being current.
+- About dialog per planning decision (palette "About", gear menu).
+- ADR-008 status → accepted.
+
+Acceptance: `cargo deny check` green; notices file contains every crate of `cargo tree` and the icons; About dialog checked by hand.
+
+### [ ] M6-04 App icon and desktop metadata
+
+- Own app icon (SVG master, no GitKraken resemblance) and generated sizes: PNG set, `.ico`, `.icns`; window icon at runtime.
+- Linux `.desktop` file (name, comment, categories `Development;RevisionControl;`, MimeType none), AppStream metainfo optional.
+- macOS `Info.plist` values (bundle id from identity, minimum macOS version, high-DPI), Windows version resource (product name, version, copyright).
+
+Acceptance: icon visible in the window, taskbar/dock and package; generation reproducible by a script.
+
+### [ ] M6-05 Crash reports
+
+- Panic hook (main process only, not in askpass/editor mode): writes `<data dir>/<name>/crashes/<UTC timestamp>.txt` with version, commit, OS/arch, thread name, panic message, backtrace (`std::backtrace`, forced capture); no repository paths, file contents or emails. Keeps the newest 20 reports.
+- Next start: status bar notice "Gitloom closed unexpectedly" with "Open report folder" and "Copy report"; shown once per report.
+- ADR-029.
+
+Acceptance: unit tests for formatting (no path leak from a panic message containing a path is not filtered — document that panic messages are written as is), rotation and "shown once"; integration test with a debug-only panic trigger (env var, compiled only in tests/debug).
+
+### [ ] M6-06 Opt-in update check
+
+- Settings → General: "Check for updates" (off), note that it contacts api.github.com once a day.
+- Check at start and every 24 h while running (stored last check time in the session file): latest release from the GitHub API via `ureq` (timeout 10 s, proxy from env), semver comparison, pre-releases only when running a pre-release. Newer → status bar notice with "Release notes" (opens the release page in the browser) and "Dismiss" (per version).
+- Off → no request, no client.
+- ADR-030.
+
+Acceptance: unit tests (semver comparison incl. rc, pre-release rule, 24 h scheduling, dismiss per version, "off means no request" with a fake fetcher); checked by hand against a real release once one exists (M6-14).
+
+### [ ] M6-07 Accessibility pass
+
+- Keyboard: every action reachable (palette), Tab order in dialogs, settings and forms; Esc closes every overlay; focus ring visible in both themes.
+- Information not by color alone: check conflict view, search dimming, hidden branches, file status (icons exist).
+- Tooltips on all icon-only controls (re-check after M5-05).
+- Document the screen reader limitation in the user docs and README.
+
+Acceptance: checklist in the task note with every view; fixes for every gap found; app tests for new keyboard paths.
+
+### [ ] M6-08 Packaging configuration
+
+- `cargo-packager` configuration (or per-target fallback, ADR-031): AppImage, macOS `.app` + `.dmg` (universal binary via `lipo` of arm64 and x86_64), Windows `.msi` (x64, x86); plus `.tar.gz` and `.zip` of the plain binary with LICENSE and notices.
+- Packages contain LICENSE, THIRD-PARTY-LICENSES, icon, desktop metadata; installers install per user where the format allows.
+- Script `scripts/package.sh`/`.ps1` to build the local platform's packages.
+
+Acceptance: Linux packages built and started locally (AppImage on Ubuntu 22.04 or the oldest supported LTS in a container); Windows/macOS packaging verified in M6-09.
+
+### [ ] M6-09 Release workflow
+
+- `.github/workflows/release.yml` on tags `v*.*.*` and `v*.*.*-rc.*`: matrix Linux x64, macOS universal, Windows x64, Windows x86 (`continue-on-error`); runs `check` first; ad-hoc `codesign -s -` for macOS; `SHA256SUMS`; draft release (pre-release for `-rc`) with notes from the CHANGELOG section of that version.
+- A Windows signing step prepared for M6-10 (skipped while not configured).
+- Manual dry run via `workflow_dispatch` that uploads artifacts without creating a release.
+
+Acceptance: dry run green on all required targets; artifacts downloaded and started (Linux by Claude Code, Windows by the maintainer); no secrets needed for the unsigned path.
+
+### [ ] M6-10 Windows code signing (SignPath)
+
+- Maintainer: apply at SignPath Foundation once the repository is public (M6-14); set up the project, signing policy and the GitHub integration.
+- Workflow: Windows artifacts (`.exe` inside zip and msi) are submitted to SignPath from the release workflow and replaced by the signed versions; signature verified (`signtool verify` or `Get-AuthenticodeSignature`) before upload.
+- Code signing policy page required by SignPath (`docs/CODE-SIGNING.md`, linked from README).
+
+Acceptance: an rc tag produces signed Windows artifacts; verification step green; SmartScreen behavior noted by the maintainer.
+
+### [ ] M6-11 Public repository preparation
+
+- Secret scan of the full history (e.g. `gitleaks`), findings fixed or confirmed harmless with the maintainer.
+- Review of internal content: `CLAUDE.md`, `.claude/`, `docs/PLANNING-HANDOVER.md`, HANDOVER environment notes, scripts (local paths, SSH host aliases); keep or move with the maintainer's OK.
+- Commit author email: apply the maintainer decision before the first public push.
+- Add `SECURITY.md` (GitHub private vulnerability reporting), issue templates (bug with version/OS/crash report, feature request), PR template, `CODE_OF_CONDUCT.md` (Contributor Covenant), CONTRIBUTING update (DCO or not: maintainer decision, default none).
+- README for the public: what it is, screenshots, install per platform incl. the macOS Gatekeeper note, GitKraken shortcut compatibility, privacy statement, license.
+
+Acceptance: scan report in the task note; maintainer approves the repository content before it goes public.
+
+### [ ] M6-12 User documentation
+
+- `docs/user/` (Markdown, rendered on GitHub): getting started, coming from GitKraken (shortcuts and deviations from UX-PARITY in user language), daily workflow, branches and remotes, merge/rebase/conflicts, undo, settings, privacy (what contacts the network and when), troubleshooting (credentials, askpass, external tools, crash reports), known limitations.
+- Linked from README and the About dialog.
+
+Acceptance: every feature in the CHANGELOG since 0.1.0 is covered; screenshots current.
+
+### [ ] M6-13 Consolidated walkthrough and GitKraken verification
+
+- Claude Code merges all open maintainer to-dos (Windows, keyboard, credentials) from HANDOVER into one checklist `docs/RELEASE-CHECKLIST.md`, grouped by area, run against the packaged build (not `cargo run`).
+- The maintainer runs it on Windows (and macOS if available) and answers the GitKraken verification items; Claude Code fixes findings, adjusts behavior/UX-PARITY per the answers and re-runs affected tests.
+- Old to-dos in HANDOVER are ticked off or moved to the backlog explicitly.
+
+Acceptance: checklist complete; HANDOVER "Maintainer to-dos" contains no M2–M5 items.
+
+### [ ] M6-14 Release candidate v1.0.0-rc.1
+
+- Release branch `release/1.0.0`, version `1.0.0-rc.1`, CHANGELOG section, tag on `master` by the maintainer, draft pre-release by the workflow.
+- Maintainer: make the repository public, apply at SignPath (M6-10), announce where desired.
+- Further release candidates (`rc.2`, …) for findings from M6-10/M6-13.
+
+Acceptance: pre-release published with all artifacts; update check (M6-06) of a `rc.1` build sees a later `rc.2`.
+
+### [ ] M6-15 Release v1.0.0
+
+Same procedure as before (`/release`), only when the maintainer asks; Windows artifacts signed.
