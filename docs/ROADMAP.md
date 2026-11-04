@@ -48,15 +48,7 @@ Action registry with shortcut list (Ctrl+/), settings view, light and dark theme
 
 ### M6 – Release readiness (1.0)
 
-- Automated release builds via GitHub Actions on every version tag (`v*.*.*`,
-  including hotfixes), attached to a draft GitHub release with SHA256 checksums:
-  - Linux: AppImage + `.tar.gz` (built on the oldest supported Ubuntu LTS for glibc compatibility)
-  - macOS: universal binary (arm64 + x86_64 via `lipo`) as signed and notarized `.app` in `.dmg`
-  - Windows x64: portable `.zip` + `.msi`, signed
-  - Windows x86: portable `.zip` + `.msi`, best effort (a failing x86 build must not block the release)
-  - Packaging tool candidate: `cargo-packager` (AppImage, dmg, msi from one config)
-- Code signing: Apple Developer ID (notarization), Windows code signing certificate or cloud signing service
-- Opt-in update check, crash logs, accessibility pass, user documentation
+Final project name (rename), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with the first release candidate, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
 
 ## Non-goals
 
@@ -87,3 +79,7 @@ Own ideas and deferred items. To be assigned to milestones with the maintainer.
 - **Graph columns**: resizable columns and a column menu like GitKraken's.
 - **Git identity in settings**: edit `user.name` / `user.email` (global and per repository).
 - **Integrated terminal** instead of opening the system terminal.
+- **macOS notarization** with an Apple Developer ID (removes the Gatekeeper prompt).
+- **More packages**: Flatpak, `.deb`/`.rpm`, Homebrew cask, winget.
+- **Automatic updates**: download and install instead of a notice.
+- **Screen reader support** once iced exposes an accessibility tree.

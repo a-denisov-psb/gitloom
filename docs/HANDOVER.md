@@ -105,8 +105,8 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 
 | # | Question | Raised | Status |
 |---|---|---|---|
-| 1 | Final project name ("Gitloom" is a working title) | M0 | open |
-| 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | open |
+| 1 | Final project name ("Gitloom" is a working title) | M0 | decided (maintainer, 2026-11-03): rename before 1.0 because "GitLoom" exists as a product; name pending, task M6-02 |
+| 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | decided (maintainer, 2026-11-03): GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
 | 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | done: confirmed by maintainer (J down/older, K up/newer) |
 | 5 | Release flow: create `master` (and tag `v0.1.0` on the initial commit?) before M1-16 | M1 | done: `master` on the M0 commit, annotated `v0.1.0` |
