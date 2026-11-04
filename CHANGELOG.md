@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
 ### Added
 
 - Open the repository in a terminal (Alt+T or the toolbar's Terminal button) or in the file manager (Alt+O); the terminal command can be set in Preferences → External tools.

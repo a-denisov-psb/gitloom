@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M5 – Productivity parity** → [`milestones/M5-productivity.md`](milestones/M5-productivity.md)
+**M6 – Release readiness (1.0)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md)
 
 ## Vision
 
@@ -42,7 +42,7 @@ Checkout (local, remote → tracking branch, detached HEAD), create/rename/delet
 
 Merge and fast-forward, rebase and interactive rebase (pick, reword, squash, fixup, drop, reorder), cherry-pick (one or many), revert, reset soft/mixed/hard, a conflict resolution view (ours, theirs, editable output), continue/skip/abort for running operations, drag and drop of branches, multi-selection in the graph and undo/redo for all of them. Gitloom acts as Git's editor, so no command waits for a terminal. Details: [`milestones/M4-merge-rebase.md`](milestones/M4-merge-rebase.md).
 
-### M5 – Productivity parity
+### M5 – Productivity parity (done)
 
 Action registry with shortcut list (Ctrl+/), settings view, light and dark theme, zoom and fullscreen, SVG icon set, command palette, commit search, hide and solo branches, file history and blame, opt-in avatars, external diff/merge tools, open in terminal and file manager. Details: [`milestones/M5-productivity.md`](milestones/M5-productivity.md).
 
