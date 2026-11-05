@@ -43,7 +43,7 @@ impl HttpFetcher {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(10)))
             .http_status_as_error(false)
-            .user_agent(concat!("Gitloom/", env!("CARGO_PKG_VERSION")))
+            .user_agent(git_core::identity::user_agent(env!("CARGO_PKG_VERSION")))
             .build();
         Self {
             agent: ureq::Agent::new_with_config(config),
@@ -88,7 +88,7 @@ impl DiskCache {
     }
 
     pub fn default_dir() -> Option<PathBuf> {
-        directories::ProjectDirs::from("", "", "Gitloom")
+        directories::ProjectDirs::from("", "", git_core::identity::DIR_NAME)
             .map(|dirs| dirs.cache_dir().join("avatars"))
     }
 

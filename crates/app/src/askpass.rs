@@ -67,7 +67,7 @@ pub fn main(prompt: String) -> iced::Result {
         Askpass::update,
         Askpass::view,
     )
-    .title("Gitloom – Authentication")
+    .title(|_: &Askpass| format!("{} – Authentication", git_core::identity::DISPLAY_NAME))
     // Also when the focused input captured the key.
     .subscription(|_: &Askpass| iced::event::listen_with(|event, _status, _window| escape(event)))
     .theme(theme::app_theme(prefers_light()))

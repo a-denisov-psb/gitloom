@@ -147,7 +147,8 @@ pub struct Loaded {
 
 /// Default location: `<config dir>/session.json`.
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "Gitloom").map(|dirs| dirs.config_dir().join(FILE_NAME))
+    directories::ProjectDirs::from("", "", git_core::identity::DIR_NAME)
+        .map(|dirs| dirs.config_dir().join(FILE_NAME))
 }
 
 /// Reads the session; a corrupt or unknown file is moved to `session.json.bak`.

@@ -89,7 +89,14 @@ fn check(git: &dyn GitWriter, change: &HistoryChange, expected: &str) -> Result<
 fn move_branch(git: &dyn GitWriter, name: &str, from: &str, to: &str) -> Result<()> {
     let reference = format!("refs/heads/{name}");
     git.run(
-        &["update-ref", "-m", "gitloom: undo", &reference, to, from],
+        &[
+            "update-ref",
+            "-m",
+            &crate::identity::reflog_message("undo"),
+            &reference,
+            to,
+            from,
+        ],
         RunOptions::default(),
     )
     .map(drop)

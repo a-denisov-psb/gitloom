@@ -284,6 +284,10 @@ Architecture decision records in short form. New entries at the bottom. Change a
   the old config dir.
 - Why: "Gitloom" collides with an existing product; the final name must be a one-place
   change.
+- Implementation (M6-01): `git_core::identity` (`crates/git-core/src/identity.rs`), because
+  `git-core` needs env names, temp prefixes and reflog messages and must not depend on
+  `app`. `crates/git-core/tests/identity_guard.rs` fails when the name appears in code
+  outside that module, test code and the migration file.
 
 ## ADR-029 Crash reports
 
