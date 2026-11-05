@@ -50,7 +50,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
 
     let content = column![
-        text("Gitloom").size(22),
+        text(git_core::identity::DISPLAY_NAME).size(22),
         open,
         muted(
             crate::actions::ActionId::OpenRepository

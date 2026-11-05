@@ -15,10 +15,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{Error, Result};
 
-/// Set (to `1`) for every editor call started by [`crate::CliBackend`].
-pub const EDITOR_ENV: &str = "GITLOOM_EDITOR";
-/// Directory with the prepared content of one command.
-pub const EDITOR_DIR_ENV: &str = "GITLOOM_EDITOR_DIR";
+// `EDITOR_ENV` is set (to `1`) for every editor call started by
+// [`crate::CliBackend`]; `EDITOR_DIR_ENV` names the directory with the prepared
+// content of one command. Both live in [`crate::identity`].
 
 /// First argument of an editor call; the file to edit follows.
 const SEQUENCE_FLAG: &str = "--git-editor=sequence";
@@ -75,7 +74,7 @@ pub fn editor_main(kind: EditorKind, file: &Path, dir: Option<&Path>) -> i32 {
         Ok(()) => 0,
         Err(error) => {
             // Git shows the editor's stderr above its own error.
-            eprintln!("gitloom: {error}");
+            eprintln!("{}: {error}", crate::identity::BINARY_NAME);
             1
         }
     }
@@ -157,7 +156,7 @@ impl PreparedEditor {
     /// Writes `input` into a new directory below the system temp dir.
     pub(crate) fn new(input: &EditorInput) -> Result<Self> {
         let prepared = Self {
-            temp: TempDir::new("gitloom-editor")?,
+            temp: TempDir::new(&crate::identity::temp_prefix("editor"))?,
         };
         if let Some(sequence) = &input.sequence {
             fs::write(prepared.dir().join(SEQUENCE_FILE), sequence)

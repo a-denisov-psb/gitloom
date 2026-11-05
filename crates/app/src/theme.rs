@@ -104,9 +104,12 @@ pub fn palette(theme: &Theme) -> &'static ThemePalette {
 /// iced theme for a palette.
 pub fn app_theme(light: bool) -> Theme {
     let (name, p) = if light {
-        ("Gitloom Light", &LIGHT)
+        (
+            format!("{} Light", git_core::identity::DISPLAY_NAME),
+            &LIGHT,
+        )
     } else {
-        ("Gitloom Dark", &DARK)
+        (format!("{} Dark", git_core::identity::DISPLAY_NAME), &DARK)
     };
     Theme::custom(
         name,

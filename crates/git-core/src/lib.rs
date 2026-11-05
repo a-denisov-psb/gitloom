@@ -16,6 +16,7 @@ mod file_history;
 mod gix_backend;
 mod history;
 mod history_ops;
+pub mod identity;
 mod merge;
 #[cfg(any(test, feature = "mock"))]
 mod mock;
@@ -33,7 +34,7 @@ mod watch;
 pub use blame::{blame, parse_porcelain, Blame, BlameCommit, BlameGroup, UNCOMMITTED};
 pub use cli_backend::{
     branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
-    GitVersion, GitWriter, RunOptions, ASKPASS_ENV, MIN_GIT_VERSION,
+    GitVersion, GitWriter, RunOptions, MIN_GIT_VERSION,
 };
 pub use conflict::{
     with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,
@@ -42,7 +43,7 @@ pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
     FileSnapshot, IndexSnapshot,
 };
-pub use editor::{editor_call, editor_main, EditorInput, EditorKind, EDITOR_DIR_ENV, EDITOR_ENV};
+pub use editor::{editor_call, editor_main, EditorInput, EditorKind};
 pub use external_tools::{
     configured_tool, difftool_args, mergetool_args, parse_tool_help, run_difftool, run_mergetool,
     tool_info, DiffTarget, ToolInfo, ToolKind,
@@ -57,6 +58,7 @@ pub use history_ops::{
     current_branch, current_state, index_tree, redo_history, undo_history, HistoryChange,
     HistoryUndo,
 };
+pub use identity::{ASKPASS_ENV, EDITOR_DIR_ENV, EDITOR_ENV};
 pub use merge::{
     fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
     rebase_commits, rebase_interactive, MergeOutcome,

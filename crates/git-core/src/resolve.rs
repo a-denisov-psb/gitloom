@@ -140,7 +140,7 @@ pub fn load_conflict(git: &dyn GitWriter, path: &str) -> Result<LoadedConflict> 
         return Ok(loaded(ConflictContent::WholeFile(WholeFileReason::Binary)));
     }
 
-    let temp = TempDir::new("gitloom-conflict")?;
+    let temp = TempDir::new(&crate::identity::temp_prefix("conflict"))?;
     let write = |name: &str, data: &[u8]| {
         let file = temp.path().join(name);
         std::fs::write(&file, data)

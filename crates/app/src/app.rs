@@ -1230,7 +1230,11 @@ impl App {
                 Some(id.clone()),
             ),
         };
-        let stash_message = format!("Gitloom: before {}", label.to_lowercase());
+        let stash_message = format!(
+            "{}: before {}",
+            git_core::identity::DISPLAY_NAME,
+            label.to_lowercase()
+        );
         let task = self.run_undoable(tab, label, move |git| {
             if stash_first {
                 git.stash_push(Some(&stash_message))?;
@@ -1819,10 +1823,8 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        match self.active_tab().and_then(Tab::view) {
-            Some(view) => format!("{} – Gitloom", view.name()),
-            None => "Gitloom".into(),
-        }
+        let view = self.active_tab().and_then(Tab::view);
+        git_core::identity::window_title(view.map(|view| view.name()))
     }
 
     pub fn active_tab(&self) -> Option<&Tab> {
@@ -2612,9 +2614,19 @@ impl App {
                     after,
                 } => {
                     if undo {
-                        git_core::move_head(git, Some(&after), before.as_deref(), "gitloom: undo")?;
+                        git_core::move_head(
+                            git,
+                            Some(&after),
+                            before.as_deref(),
+                            &git_core::identity::reflog_message("undo"),
+                        )?;
                     } else {
-                        git_core::move_head(git, before.as_deref(), Some(&after), "gitloom: redo")?;
+                        git_core::move_head(
+                            git,
+                            before.as_deref(),
+                            Some(&after),
+                            &git_core::identity::reflog_message("redo"),
+                        )?;
                     }
                     UndoAction::Commit {
                         amend,
@@ -4975,8 +4987,9 @@ impl App {
                     DiscardTarget::File(file) => (
                         "Discard changes".to_string(),
                         format!(
-                            "Discard all changes to {}? This cannot be undone outside Gitloom.",
-                            file.path
+                            "Discard all changes to {}? This cannot be undone outside {}.",
+                            file.path,
+                            git_core::identity::DISPLAY_NAME
                         ),
                     ),
                     DiscardTarget::All => (
@@ -6575,18 +6588,19 @@ fn auto_fetch_state(view: &RepoView) -> crate::fetch::TabState {
 }
 
 /// Hint for authentication failures in Git's output (ADR-019).
-fn auth_hint(error: &str) -> Option<&'static str> {
+fn auth_hint(error: &str) -> Option<String> {
+    let name = git_core::identity::DISPLAY_NAME;
     let lower = error.to_lowercase();
     if lower.contains("host key verification failed") {
-        Some("The server's SSH host key was not accepted. Check the host and confirm its key, then try again.")
+        Some("The server's SSH host key was not accepted. Check the host and confirm its key, then try again.".into())
     } else if lower.contains("permission denied (publickey") {
-        Some("The server rejected your SSH key. Check that the key is added to your account and loaded in ssh-agent (or protected by a passphrase Gitloom can ask for).")
+        Some(format!("The server rejected your SSH key. Check that the key is added to your account and loaded in ssh-agent (or protected by a passphrase {name} can ask for)."))
     } else if lower.contains("authentication failed")
         || lower.contains("could not read username")
         || lower.contains("could not read password")
         || lower.contains("invalid username or password")
     {
-        Some("Authentication failed. Check your credentials or your Git credential helper (e.g. Git Credential Manager); Gitloom does not store passwords.")
+        Some(format!("Authentication failed. Check your credentials or your Git credential helper (e.g. Git Credential Manager); {name} does not store passwords."))
     } else {
         None
     }
