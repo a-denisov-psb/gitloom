@@ -2,7 +2,7 @@
 
 A fast, open-source Git client with the workflow GitKraken users already know. Native Rust, no webview, no subscription.
 
-> Working title. Not affiliated with GitKraken or Axosoft.
+> Not affiliated with GitKraken or Axosoft.
 
 ![Gitloom showing a repository with its lane graph](docs/screenshots/m5-main-dark-100.png)
 

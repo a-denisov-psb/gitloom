@@ -55,7 +55,7 @@ The milestone files are the contract: Claude Code does not change scope on its o
 - Open-source, cross-platform Git client in Rust that looks and behaves like (older) GitKraken, without subscription and without bloat.
 - **Hard requirement:** layout and interaction must match GitKraken so long-time users feel at home immediately. Colors and icons are free; no GitKraken name, logo or assets.
 - Native UI, no webview (performance and footprint).
-- Working title "Gitloom".
+- Name "Gitloom" (kept for 1.0, ADR-033).
 
 ### Key decisions (details in `docs/DECISIONS.md`)
 
@@ -117,7 +117,7 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-03: rename before 1.0 because "GitLoom" exists as a product; the name itself is still open and blocks M6-02 |
+| 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-05: keep "Gitloom" despite the collision with the GitLoom product (ADR-033, supersedes the rename decision of 2026-11-03); repository `github.com/a-denisov-psb/gitloom` |
 | 2 | Confirm license (MIT OR Apache-2.0) | decided 2026-11-03: GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
 | 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0 |
@@ -128,7 +128,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Implement M6 (`docs/milestones/M6-release-readiness.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed. The maintainer's name decision is pending and blocks M6-02.
+1. Implement M6 (`docs/milestones/M6-release-readiness.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed. The name is decided (ADR-033), so M6-02 is no longer blocked.
 2. Answer the M6 maintainer verification items (milestone file) as the related tasks come up.
 3. Collect the maintainer's own ideas; place them in the roadmap.
 

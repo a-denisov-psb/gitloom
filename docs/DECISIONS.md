@@ -279,15 +279,14 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 - Status: accepted (M6 plan)
 - Decision: display name, binary name, application id, config/cache/data dir name,
-  repository and issue URLs live in one module; code uses only that module. The rename
-  from the working title "Gitloom" copies `settings.json` and `session.json` once from
-  the old config dir.
-- Why: "Gitloom" collides with an existing product; the final name must be a one-place
-  change.
+  repository and issue URLs live in one module; code uses only that module. A rename
+  would be one task (the name was kept, ADR-033, so no config migration exists).
+- Why: "Gitloom" collides with an existing product; the name must be a one-place
+  change whichever way the decision falls (kept in ADR-033).
 - Implementation (M6-01): `git_core::identity` (`crates/git-core/src/identity.rs`), because
   `git-core` needs env names, temp prefixes and reflog messages and must not depend on
   `app`. `crates/git-core/tests/identity_guard.rs` fails when the name appears in code
-  outside that module, test code and the migration file.
+  outside that module and test code.
 
 ## ADR-029 Crash reports
 
@@ -315,3 +314,20 @@ Architecture decision records in short form. New entries at the bottom. Change a
   workflow runs `./scripts/check.sh` and clippy for the Windows target locally.
 - Why: private repositories bill Windows and macOS minutes at a multiple of Linux; the
   budget is limited until the repository is public (M6-11). Revisit after that.
+
+## ADR-033 Keep the name Gitloom
+
+- Status: accepted (maintainer, 2026-11-05; supersedes the rename decision of 2026-11-03)
+- Context: the M6 plan intended a rename because "GitLoom" exists as a product (an
+  LLM-memory SaaS, GitHub org `gitloom`, crate `gitloom` on crates.io) and several small
+  Git tools use similar names (e.g. `AidinD/git-loom`, `pedrohperalta/gitloom`). A check on
+  2026-11-05 confirmed all of this. Alternatives were brainstormed; none was clearly
+  better. Trademark and domain checks were not done.
+- Decision: keep the name "Gitloom" for 1.0. The repository is
+  `github.com/a-denisov-psb/gitloom`; the application id is derived from the GitHub
+  account (`io.github.a_denisov_psb.Gitloom`) because no own domain exists. The collision
+  is a known and accepted risk (discoverability, possible trademark objection).
+- Consequences: no rename migration (config dir `Gitloom` stays); the values in
+  `git_core::identity` are final; the crate is not published on crates.io under this
+  name (taken). A later rename stays possible as one task because of ADR-028. ADR-031 is
+  reserved for M6-08 (packaging), so the numbering has a gap until then.

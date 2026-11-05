@@ -4,13 +4,13 @@ Target version: **1.0.0** (preceded by `1.0.0-rc.N`)
 
 ## Goal
 
-Gitloom (final name pending) ships as version 1.0: installers for Linux, macOS and Windows built by CI from a version tag, Windows binaries signed, the project licensed GPL-3.0-or-later, with crash reports, an opt-in update check, user documentation and a public repository. All open Windows checks and GitKraken verification items from M2–M5 are closed.
+Gitloom ships as version 1.0: installers for Linux, macOS and Windows built by CI from a version tag, Windows binaries signed, the project licensed GPL-3.0-or-later, with crash reports, an opt-in update check, user documentation and a public repository. All open Windows checks and GitKraken verification items from M2–M5 are closed.
 
 ## Scope
 
 In scope:
 
-- Product identity in one place and the rename to the final name
+- Product identity in one place and its finalization (the name "Gitloom" is kept, ADR-033)
 - License switch to GPL-3.0-or-later, third-party notices, About dialog
 - App icon and desktop metadata
 - Crash reports (local only)
@@ -34,7 +34,7 @@ Out of scope (later):
 
 | Topic | Decision |
 |---|---|
-| Name | "Gitloom" collides with an existing product (GitLoom SaaS) and the `git-loom` crate; the project gets a new name before the release candidate. All name-dependent values live in one place (ADR-028); the rename is one task once the maintainer has decided. |
+| Name | Kept: "Gitloom" (ADR-033, maintainer 2026-11-05). It collides with an existing product (GitLoom SaaS) and the crates `gitloom`/`git-loom`; the maintainer accepted that risk. Repository `github.com/a-denisov-psb/gitloom`. All name-dependent values live in one place (ADR-028), so a later rename stays one task. |
 | License | GPL-3.0-or-later (ADR-008 updated). `cargo-deny` checks that every dependency license is GPL-3.0 compatible; third-party notices are generated and shipped with every package and shown in the About dialog. |
 | Code signing | Windows: SignPath Foundation (free for open source; needs a public repository and builds on public CI). macOS: ad-hoc signature (`codesign -s -`), not notarized; the user documentation explains the Gatekeeper prompt. Linux: unsigned, SHA256 checksums. (ADR-016 updated.) |
 | Public repository | The repository goes public with the first release candidate. Before that: secret scan of the whole history, review of internal content, maintainer decision on commit author emails. |
@@ -49,7 +49,7 @@ Out of scope (later):
 
 | Item | Used in |
 |---|---|
-| Final project name (checked for trademark, domain, crates.io, GitHub) | M6-02 |
+| ~~Final project name~~ decided: "Gitloom" kept (ADR-033); trademark and domain not checked, accepted risk | – |
 | Commit author email in the history (`the old personal address`) becomes public: keep, or rewrite to a GitHub noreply address before going public (one-time exception to "never rewrite published history", maintainer decision) | M6-11 |
 | SignPath Foundation application after the repository is public | M6-10 |
 | GitHub Actions billing fixed (until the repository is public the release workflow runs on the private plan) | M6-09 |
@@ -60,7 +60,7 @@ Out of scope (later):
 
 - [ ] A tag on `master` produces a draft release with AppImage, Linux `.tar.gz`, macOS universal dmg, Windows x64 `.zip` + `.msi` (signed), Windows x86 (best effort) and `SHA256SUMS`.
 - [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
-- [ ] The project carries the final name everywhere (binary, window title, packages, config dirs with migration, docs); no "Gitloom" left except in the CHANGELOG history and the migration code.
+- [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
 - [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
 - [ ] With crash reports and update check, Gitloom still opens no network connection by default (update check off).
@@ -72,7 +72,7 @@ Out of scope (later):
 | ID | Task | Depends on |
 |---|---|---|
 | M6-01 | Product identity in one place | – |
-| M6-02 | Rename to the final name | M6-01, maintainer decision |
+| M6-02 | Finalize the identity values (name kept) | M6-01 |
 | M6-03 | License switch, third-party notices, About dialog | – |
 | M6-04 | App icon and desktop metadata | M6-01 |
 | M6-05 | Crash reports | M6-01 |
@@ -98,19 +98,21 @@ Out of scope (later):
 - Env names keep a compatibility note: they are internal between Gitloom processes, so they simply follow the new name.
 - ADR-028.
 
-Acceptance: a test (or `grep` in `check.sh`) fails if the literal name appears in `crates/` outside the identity module, tests and the migration code; behavior unchanged.
+Acceptance: a test (or `grep` in `check.sh`) fails if the literal name appears in `crates/` outside the identity module, tests and the identity module; behavior unchanged.
 
-Note: the module lives in `crates/git-core/src/identity.rs` (not in `app`) because `git-core` needs the env names, temp prefixes and reflog messages and must not depend on `app`; `app` uses `git_core::identity`. The guard is `crates/git-core/tests/identity_guard.rs` (skips comments, test code and `app/src/migrate.rs`, the planned home of the M6-02 migration). The crate name `gitloom` in `Cargo.toml` and the URLs/app id in the module are placeholders until M6-02.
+Note: the module lives in `crates/git-core/src/identity.rs` (not in `app`) because `git-core` needs the env names, temp prefixes and reflog messages and must not depend on `app`; `app` uses `git_core::identity`. The guard is `crates/git-core/tests/identity_guard.rs` (skips comments and test code; only the identity module may spell the name).
 
-### [ ] M6-02 Rename to the final name
+### [x] M6-02 Finalize the identity values (name kept)
 
-Blocked until the maintainer has decided the name.
+Decision 2026-11-05 (ADR-033): the name "Gitloom" is kept, so there is no rename and no config migration. The task confirms the identity values.
 
-- Change the identity values, the app crate/binary name, README, docs, screenshots captions, window title, `CLAUDE.md` mentions (with the maintainer's OK for `CLAUDE.md`).
-- Migration: if the new config dir does not exist and the old `gitloom` dir does, copy `settings.json` and `session.json` once (old dir stays); avatar cache is not migrated.
-- Maintainer: rename the GitHub repository (redirects keep working), update the local remote.
+- `git_core::identity`: repository and issue URLs point to `github.com/a-denisov-psb/gitloom`; the application id is `io.github.a_denisov_psb.Gitloom` (derived from the GitHub account, no own domain); placeholder comments removed. `[workspace.package]` carries the same URL.
+- README no longer calls the name a working title; the guard test allows the name only in the identity module.
+- A later rename remains possible as one task (ADR-028).
 
-Acceptance: unit tests for the migration (old only, new only, both, broken old file); app starts with the migrated session; CHANGELOG entry ("Gitloom is now …").
+Acceptance: `./scripts/check.sh` green including the guard test; docs no longer describe the name as pending.
+
+Note: ADR-033 documents the accepted collision risk; trademark and domain checks were not done. The crate `gitloom` on crates.io is taken, so Gitloom is not published there under this name.
 
 ### [ ] M6-03 License switch, third-party notices, About dialog
 
