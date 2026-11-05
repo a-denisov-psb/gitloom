@@ -8,8 +8,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88"
 description = "Native, open-source Git client with a GitKraken-style interface"
-repository = "https://github.com/gitloom/gitloom"
-homepage = "https://github.com/gitloom/gitloom"
+repository = "https://github.com/a-denisov-psb/gitloom"
+homepage = "https://github.com/a-denisov-psb/gitloom"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
