@@ -91,7 +91,7 @@ Out of scope (later):
 
 ## Tasks
 
-### [ ] M6-01 Product identity in one place
+### [x] M6-01 Product identity in one place
 
 - One module (e.g. `crates/app/src/identity.rs`) with display name, binary name, application id (reverse DNS), config/cache/data dir name, repository URL, issue URL; Cargo metadata (`description`, `repository`, `homepage`) in the workspace.
 - Every use of the name in code (window title, dirs, askpass/editor env names such as `GITLOOM_ASKPASS`/`GITLOOM_EDITOR`, temp file prefixes, user agent of avatars/update check) goes through it.
@@ -99,6 +99,8 @@ Out of scope (later):
 - ADR-028.
 
 Acceptance: a test (or `grep` in `check.sh`) fails if the literal name appears in `crates/` outside the identity module, tests and the migration code; behavior unchanged.
+
+Note: the module lives in `crates/git-core/src/identity.rs` (not in `app`) because `git-core` needs the env names, temp prefixes and reflog messages and must not depend on `app`; `app` uses `git_core::identity`. The guard is `crates/git-core/tests/identity_guard.rs` (skips comments, test code and `app/src/migrate.rs`, the planned home of the M6-02 migration). The crate name `gitloom` in `Cargo.toml` and the URLs/app id in the module are placeholders until M6-02.
 
 ### [ ] M6-02 Rename to the final name
 
