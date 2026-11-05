@@ -28,7 +28,7 @@ Done (M4-01 … M4-15, see the notes in `docs/milestones/M4-merge-rebase.md`; M1
 - `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
 - `app`: everything from M3 plus multi-selection in the graph, merge/rebase/cherry-pick/revert/reset from the menus, interactive rebase panel, reword and squash shortcuts, conflict resolution view, operation banner with Continue/Skip/Abort, drag and drop of branches.
 - M5 (see `docs/milestones/M5-productivity.md`): action registry and shortcut list, settings, light/dark theme, zoom, icons, command palette, commit search, hide/solo, file history, blame, avatars, external tools, terminal and file manager.
-- Planning: M6 is planned in task-level detail (`docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030). The final project name is pending and blocks M6-02.
+- Planning: M6 is planned in task-level detail (`docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030). The name "Gitloom" is kept (ADR-033); M6-01 is done, M6-02 finalizes the identity values.
 - Measurements: `docs/PERFORMANCE.md` (M1 … M4 sections).
 - Branches: `master` with `v0.1.0` … `v0.5.0` (`v0.6.0` after the maintainer pushes it); `develop` (default branch on GitHub).
 
@@ -73,6 +73,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M5-14: M5 walkthrough on Windows in Dark and Light at 100 % and 200 %: Ctrl+/, Ctrl+, , Ctrl+P (arrows, Enter, sub-lists), Ctrl+F (typing, Enter/Shift+Enter), Ctrl+Shift+H, Ctrl+= / Ctrl+- / Ctrl+0, F11, Ctrl+D, Alt+T, Alt+O, hide/solo in the sidebar, file history and blame, avatars on/off, an external diff and merge tool.
 - [x] GitHub Actions: CI of `develop` checked on 2026-11-04 (billing fixed), green on Linux, Windows, macOS and MSRV.
 - [ ] Manual end-to-end walkthrough of M2 on Windows (line staging in a CRLF repo, commit, amend, undo, stash with untracked, pop).
+- [ ] ADR-033 (name kept): optional trademark/domain check for "Gitloom"; decide before the repository goes public (M6-11) whether it stays under `a-denisov-psb` or moves to an own organization (then update `git_core::identity` and the remote).
 - [ ] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0.
 
 ## Environment notes
@@ -106,7 +107,7 @@ Later, when moving to GitHub: create an empty repo, `git remote add origin <url>
 
 | # | Question | Raised | Status |
 |---|---|---|---|
-| 1 | Final project name ("Gitloom" is a working title) | M0 | decided (maintainer, 2026-11-03): rename before 1.0 because "GitLoom" exists as a product; name pending, task M6-02 |
+| 1 | Final project name ("Gitloom" is a working title) | M0 | decided (maintainer, 2026-11-05): keep "Gitloom" despite the collision with the GitLoom product (ADR-033); repository `github.com/a-denisov-psb/gitloom`; trademark/domain not checked |
 | 2 | License confirmation (MIT OR Apache-2.0 provisional) | M0 | decided (maintainer, 2026-11-03): GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Own ideas beyond GitKraken for the ideas backlog | M0 | open |
 | 4 | Navigation direction of J/K (GitKraken docs table looks swapped) | M1 plan | done: confirmed by maintainer (J down/older, K up/newer) |

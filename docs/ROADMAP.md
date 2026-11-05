@@ -48,7 +48,7 @@ Action registry with shortcut list (Ctrl+/), settings view, light and dark theme
 
 ### M6 – Release readiness (1.0)
 
-Final project name (rename), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with the first release candidate, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
+Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with the first release candidate, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
 
 ## Non-goals
 

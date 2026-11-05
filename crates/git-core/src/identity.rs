@@ -2,8 +2,8 @@
 //!
 //! Every name-dependent value of the product lives here. Code elsewhere in
 //! `crates/` must not spell the product name; `tests/identity_guard.rs` in
-//! this crate enforces that. The final rename (M6-02) only changes this file
-//! (plus the crate name in `Cargo.toml`).
+//! this crate enforces that. The values are final (ADR-033); a later rename
+//! would only change this file plus the crate name in `Cargo.toml`.
 
 /// Name shown to the user (window titles, texts, theme names).
 pub const DISPLAY_NAME: &str = "Gitloom";
@@ -11,18 +11,19 @@ pub const DISPLAY_NAME: &str = "Gitloom";
 /// Lowercase name for the binary, temp file prefixes and reflog messages.
 pub const BINARY_NAME: &str = "gitloom";
 
-/// Application id (reverse DNS) for desktop metadata and packaging.
-pub const APP_ID: &str = "dev.gitloom.Gitloom";
+/// Application id (reverse DNS) for desktop metadata and packaging. Derived
+/// from the GitHub account because no own domain exists.
+pub const APP_ID: &str = "io.github.a_denisov_psb.Gitloom";
 
 /// Name of the config/cache/data directory (the `application` part of
 /// `directories::ProjectDirs`).
 pub const DIR_NAME: &str = "Gitloom";
 
 /// Public repository.
-pub const REPOSITORY_URL: &str = "https://github.com/gitloom/gitloom";
+pub const REPOSITORY_URL: &str = "https://github.com/a-denisov-psb/gitloom";
 
 /// Issue tracker.
-pub const ISSUES_URL: &str = "https://github.com/gitloom/gitloom/issues";
+pub const ISSUES_URL: &str = "https://github.com/a-denisov-psb/gitloom/issues";
 
 /// Environment variable that tells a program started as `GIT_ASKPASS` /
 /// `SSH_ASKPASS` that it runs in askpass mode. Internal between our own

@@ -1,12 +1,12 @@
 //! ADR-028: the product name is spelled only in `identity.rs`, in tests and in
-//! the config migration code (M6-02). Everything else goes through
+//! test code. Everything else goes through
 //! `git_core::identity`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Files that may spell the name: the identity module and the migration code.
-const ALLOWED: &[&str] = &["git-core/src/identity.rs", "app/src/migrate.rs"];
+/// Files that may spell the name: the identity module.
+const ALLOWED: &[&str] = &["git-core/src/identity.rs"];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
