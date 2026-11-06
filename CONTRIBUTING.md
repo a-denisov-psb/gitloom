@@ -1,5 +1,7 @@
 # Contributing
 
+Bug reports and ideas are welcome as [issues](https://github.com/a-denisov-psb/gitloom/issues); security problems go through a private report (see [SECURITY.md](SECURITY.md)). Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Gitloom follows GitKraken's layout and shortcuts, so a feature request should say how GitKraken does it; accounts, cloud features, integrations and AI features are out of scope.
+
 ## Setup
 
 - Rust via [rustup](https://rustup.rs). `rust-toolchain.toml` selects stable with rustfmt and clippy. MSRV: 1.88.
@@ -77,7 +79,7 @@ Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`.
 
 ## License of contributions
 
-Gitloom is licensed under `GPL-3.0-or-later` (see [LICENSE](LICENSE)). By submitting a contribution you agree that it is licensed under the same terms. New source files need no license header; if you add one, use the SPDX form:
+Gitloom is licensed under `GPL-3.0-or-later` (see [LICENSE](LICENSE)). By submitting a contribution you agree that it is licensed under the same terms. No CLA and no DCO sign-off are required. New source files need no license header; if you add one, use the SPDX form:
 
 ```rust
 // SPDX-License-Identifier: GPL-3.0-or-later
