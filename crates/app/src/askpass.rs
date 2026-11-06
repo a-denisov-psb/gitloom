@@ -75,7 +75,9 @@ pub fn main(prompt: String) -> iced::Result {
         default_text_size: 13.into(),
         ..iced::Settings::default()
     })
-    .window_size((480.0, height))
+    .window(crate::app_icon::window_settings(iced::Size::new(
+        480.0, height,
+    )))
     .resizable(false)
     .centered()
     .level(iced::window::Level::AlwaysOnTop)

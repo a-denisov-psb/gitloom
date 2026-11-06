@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- App icon for the window, taskbar/dock and packages; Windows executables carry version information; Linux desktop entry and AppStream metadata.
 - About dialog (command palette "About Gitloom", or the button at the bottom of the Preferences): version, commit, license, links to the repository and the issue tracker, and all third-party components with their licenses.
 
 ### Changed

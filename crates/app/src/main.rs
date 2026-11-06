@@ -1,6 +1,7 @@
 mod about;
 mod actions;
 mod app;
+mod app_icon;
 mod askpass;
 mod avatars;
 mod conflict;
@@ -74,7 +75,7 @@ fn main() -> iced::Result {
         default_text_size: 13.into(),
         ..iced::Settings::default()
     })
-    .window_size((1400.0, 860.0))
+    .window(app_icon::window_settings(iced::Size::new(1400.0, 860.0)))
     // The session is saved before the window closes.
     .exit_on_close_request(false)
     .run()

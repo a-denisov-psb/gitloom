@@ -23,10 +23,15 @@ sha2 = "0.11"
 tokio = { version = "1.53", features = ["rt", "time"] }
 ureq = "3.4"
 
+[build-dependencies]
+# Windows version resource and exe icon (M6-04); only used for Windows targets.
+winresource = "0.1"
+
 [dev-dependencies]
 git-core = { path = "../git-core", features = ["mock"] }
 tempfile = "3.27"
 iced_test = "0.14"
+resvg = "0.48"
 
 [lints]
 workspace = true
