@@ -359,6 +359,11 @@ pub enum Message {
     ShortcutListClosed,
     AboutOpened,
     AboutClosed,
+    /// Result of the crash report check at start (M6-05).
+    CrashReportFound(Option<crate::crash::Pending>),
+    CrashReportOpenFolder,
+    CrashReportCopy,
+    CrashReportDismissed,
     /// Opens a URL in the browser or a file in its default application.
     OpenLink(String),
     /// Esc taken by a focused text field.
@@ -736,6 +741,8 @@ pub struct App {
     pub shortcut_list: Option<String>,
     /// About dialog open (M6-03).
     pub about: bool,
+    /// Crash report of the previous run, offered once in the status bar.
+    pub crash_notice: Option<crate::crash::Pending>,
     /// Open command palette (Ctrl+P).
     pub palette: Option<Palette>,
     /// Palette actions used recently, most recent first.
@@ -802,6 +809,7 @@ impl App {
             context_menu: None,
             shortcut_list: None,
             about: false,
+            crash_notice: None,
             palette: None,
             recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
@@ -856,7 +864,15 @@ impl App {
             Message::GitDetected(result.unwrap_or(git_core::GitAvailability::Missing))
         });
         let system_theme = iced::system::theme().map(Message::SystemTheme);
-        (app, Task::batch([task, detect, system_theme]))
+        // Only the real app (with a session) looks for crash reports.
+        let crashes = match app.session_path.as_ref().and(crate::crash::default_dir()) {
+            Some(dir) => Task::perform(
+                blocking(move || Ok(crate::crash::take_pending(&dir))),
+                |found| Message::CrashReportFound(found.ok().flatten()),
+            ),
+            None => Task::none(),
+        };
+        (app, Task::batch([task, detect, system_theme, crashes]))
     }
 
     /// Why write actions are blocked, if they are (unknown counts as blocked).
@@ -3559,6 +3575,28 @@ impl App {
                 self.about = true;
             }
             Message::AboutClosed => self.about = false,
+            Message::CrashReportFound(pending) => self.crash_notice = pending,
+            Message::CrashReportOpenFolder => {
+                let Some(file) = self.crash_notice.as_ref().map(|c| c.path.clone()) else {
+                    return Task::none();
+                };
+                return Task::perform(
+                    blocking(move || {
+                        crate::launch::spawn(&crate::launch::reveal_file(
+                            crate::launch::Platform::current(),
+                            &file,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
+            Message::CrashReportCopy => {
+                if let Some(crash) = &self.crash_notice {
+                    self.status = "Crash report copied".into();
+                    return iced::clipboard::write(crash.text.clone());
+                }
+            }
+            Message::CrashReportDismissed => self.crash_notice = None,
             Message::OpenLink(target) => {
                 return Task::perform(
                     blocking(move || {
@@ -10582,6 +10620,24 @@ pub(crate) mod tests {
         assert_eq!(palette_labels(&app)[0], "Toggle left panel");
         let _ = app.update(Message::Shortcut(Shortcut::Close));
         assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn crash_report_notice_offers_copy_and_dismiss() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::CrashReportFound(None));
+        assert!(app.crash_notice.is_none());
+        let pending = crate::crash::Pending {
+            path: "/data/crashes/x.txt".into(),
+            text: "report text".into(),
+            fatal: true,
+        };
+        let _ = app.update(Message::CrashReportFound(Some(pending.clone())));
+        assert_eq!(app.crash_notice.as_ref(), Some(&pending));
+        let _ = app.update(Message::CrashReportCopy);
+        assert_eq!(app.status, "Crash report copied");
+        let _ = app.update(Message::CrashReportDismissed);
+        assert!(app.crash_notice.is_none());
     }
 
     #[test]

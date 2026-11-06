@@ -74,4 +74,20 @@ mod tests {
         click(&mut app, "Close");
         assert!(!app.about);
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_crash_notice() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::CrashReportFound(Some(crate::crash::Pending {
+            path: "/tmp/crashes/x.txt".into(),
+            text: "report".into(),
+            fatal: true,
+        })));
+        snapshot(&app, "crash-notice");
+        click(&mut app, "Copy report");
+        assert_eq!(app.status, "Crash report copied");
+        click(&mut app, "Dismiss");
+        assert!(app.crash_notice.is_none());
+    }
 }

@@ -24,4 +24,5 @@ print_stdout = "warn"
 
 [profile.release]
 lto = "thin"
-strip = true
+# Keep the symbol table so crash report backtraces name functions (ADR-029).
+strip = "debuginfo"

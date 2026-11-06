@@ -36,6 +36,10 @@ pub const EDITOR_ENV: &str = "GITLOOM_EDITOR";
 /// Environment variable naming the private directory that carries editor content.
 pub const EDITOR_DIR_ENV: &str = "GITLOOM_EDITOR_DIR";
 
+/// Debug builds only: names a directory; the app installs the crash report
+/// hook for it and panics at once (integration test of crash reports).
+pub const DEBUG_PANIC_ENV: &str = "GITLOOM_DEBUG_PANIC";
+
 /// User agent for outgoing HTTP requests (avatars, update check).
 pub fn user_agent(version: &str) -> String {
     format!("{DISPLAY_NAME}/{version}")

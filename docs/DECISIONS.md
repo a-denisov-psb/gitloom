@@ -304,6 +304,18 @@ Architecture decision records in short form. New entries at the bottom. Change a
   message, backtrace) to the data dir, keeps the newest 20 and offers them on the next
   start. Nothing is uploaded.
 - Why: users can attach a report to an issue; privacy by default (ADR-009).
+- Implementation (M6-05): `crates/app/src/crash.rs`. Reports are
+  `<data dir>/crashes/<UTC>Z.txt` (Linux `~/.local/share/gitloom/crashes`, macOS
+  `~/Library/Application Support/Gitloom/crashes`, Windows `%APPDATA%\Gitloom\data\crashes`).
+  The hook is installed after the askpass/editor checks, so helper processes never
+  write reports. Panics on other threads are reported too ("had an internal error"
+  instead of "closed unexpectedly"). `shown.txt` lists the reports already offered; the
+  next start offers the newest unseen one in the status bar ("Open report folder",
+  "Copy report", "Dismiss"). The panic message is written as is (a path inside it is
+  not filtered). Release builds keep the symbol table (`strip = "debuginfo"`) so
+  backtraces name functions; Windows MSVC builds have no PDB in the packages, so their
+  frames may stay unnamed. Debug builds panic at start when `GITLOOM_DEBUG_PANIC`
+  names a directory (integration test).
 
 ## ADR-030 Update check
 

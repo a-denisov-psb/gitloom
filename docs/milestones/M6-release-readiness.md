@@ -136,13 +136,15 @@ Acceptance: icon visible in the window, taskbar/dock and package; generation rep
 
 Note: ADR-036. Checked: Windows exe (cross-built) shows the icon and version info (extracted with PowerShell), the Linux app starts with the window icon set; taskbar/dock and package icons are verified with the packages (M6-08/M6-09) and in the release checklist (M6-13), because the Windows desktop was locked. Minimum macOS version 11.0.
 
-### [ ] M6-05 Crash reports
+### [x] M6-05 Crash reports
 
 - Panic hook (main process only, not in askpass/editor mode): writes `<data dir>/<name>/crashes/<UTC timestamp>.txt` with version, commit, OS/arch, thread name, panic message, backtrace (`std::backtrace`, forced capture); no repository paths, file contents or emails. Keeps the newest 20 reports.
 - Next start: status bar notice "Gitloom closed unexpectedly" with "Open report folder" and "Copy report"; shown once per report.
 - ADR-029.
 
 Acceptance: unit tests for formatting (no path leak from a panic message containing a path is not filtered — document that panic messages are written as is), rotation and "shown once"; integration test with a debug-only panic trigger (env var, compiled only in tests/debug).
+
+Note: panics on background threads also get a report, offered as "Gitloom had an internal error" (they do not end the app). Release profile changed to `strip = "debuginfo"` so backtraces carry function names. Checked: debug trigger wrote a report, the next real start marked it shown; the status bar notice checked headless (ADR-035).
 
 ### [ ] M6-06 Opt-in update check
 

@@ -8,9 +8,13 @@ use crate::theme;
 use crate::ui::muted;
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let mut content = row![text(&app.status).size(12), space::horizontal()]
-        .spacing(16)
-        .padding([3, 12]);
+    let mut content = row![].spacing(16).padding([3, 12]);
+    if let Some(crash) = &app.crash_notice {
+        content = content.push(crash_notice(crash));
+    }
+    content = content
+        .push(text(&app.status).size(12))
+        .push(space::horizontal());
 
     if let Some(view) = app.active_tab().and_then(|t| t.view()) {
         let snapshot = &view.snapshot;
@@ -72,4 +76,30 @@ fn commit_count(count: usize, truncated: bool) -> String {
     } else {
         format!("{count} commits")
     }
+}
+
+/// "Gitloom closed unexpectedly" with the report actions (M6-05).
+fn crash_notice(crash: &crate::crash::Pending) -> Element<'_, Message> {
+    let name = git_core::identity::DISPLAY_NAME;
+    let label = if crash.fatal {
+        format!("{name} closed unexpectedly.")
+    } else {
+        format!("{name} had an internal error.")
+    };
+    let action = |label: &'static str, message: Message| {
+        button(text(label).size(11))
+            .on_press(message)
+            .padding([0, 8])
+            .style(button::secondary)
+    };
+    row![
+        crate::icons::tinted(crate::icons::Icon::Alert, 12.0, |p| p.warning),
+        text(label).size(12).style(crate::theme::text_warning),
+        action("Open report folder", Message::CrashReportOpenFolder),
+        action("Copy report", Message::CrashReportCopy),
+        action("Dismiss", Message::CrashReportDismissed),
+    ]
+    .spacing(6)
+    .align_y(iced::Center)
+    .into()
 }
