@@ -14,7 +14,7 @@ Download the package for your system from the [releases page](https://github.com
 
 - Start screen: **Open repository** (native folder dialog), a typed path, or a recent repository.
 - **Ctrl+O** opens the folder dialog, **Ctrl+Shift+O** the list of recent repositories.
-- From a terminal: `gitloom <path> [<path>...]` opens each path in its own tab. A subfolder opens its repository; an already open repository switches to its tab.
+- From a terminal: `gitloom <path> [<path>...]` opens each path in its own tab. A subfolder opens its repository; an already open repository switches to its tab. On Windows the terminal returns to the prompt right away.
 
 Gitloom remembers the open tabs, the active tab and the pane sizes and restores them on the next start. The start screen lists up to 20 recent repositories; a missing one can be removed from the list.
 

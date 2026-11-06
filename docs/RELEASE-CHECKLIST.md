@@ -34,6 +34,8 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 ## 3. Daily workflow on Windows (formerly M2)
 
 - [ ] No console window flashes up when Gitloom runs `git`.
+- [ ] No console window when starting Gitloom from the Start menu, the zip and a terminal; the terminal returns to the prompt right away (M6-16).
+- [ ] HTTPS credential prompt and interactive rebase still work with the release build (M6-16).
 - [ ] Line staging in a CRLF repository (`core.autocrlf=true`): stage and unstage single lines and hunks; `git diff --cached` matches.
 - [ ] Commit, amend (message only and with changes), undo and redo of both.
 - [ ] Stash with an untracked file, Pop; discard a file and a hunk, then undo.
