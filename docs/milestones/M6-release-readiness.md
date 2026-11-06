@@ -204,6 +204,8 @@ Note: ADR-031. AppImage and tar.gz built and started locally (Debian 13, WSL); n
 
 Acceptance: dry run green on all required targets; artifacts downloaded and started (Linux by Claude Code, Windows by the maintainer); no secrets needed for the unsigned path.
 
+Note: `.github/workflows/release.yml` (check job with tag/version and CHANGELOG check; Linux on `ubuntu-22.04` with an AppImage start under Xvfb; macOS universal with signature, `lipo` and dmg checks and a 15 s start; Windows x64 and x86 (`continue-on-error`) with a 15 s start and the version resource; SHA256SUMS; draft release via `gh release create --draft [--prerelease]` with notes from `scripts/release-notes.sh`). The SignPath step is skipped until the repository variable `SIGNPATH_ORGANIZATION_ID` exists (M6-10). Validated with a temporary push trigger on the feature branch (dispatch needs the workflow on the default branch), then by `workflow_dispatch` on `develop`. The first run found that cargo-packager rebuilds the `.app` for the dmg without the ad-hoc signature; `package.sh` now makes the dmg with `hdiutil` from the signed app. Linux artifacts downloaded and started by Claude Code; the Windows artifacts are for the maintainer (release checklist).
+
 ### [ ] M6-10 Windows code signing (SignPath)
 
 - Maintainer: apply at SignPath Foundation once the repository is public (M6-14); set up the project, signing policy and the GitHub integration.
