@@ -59,7 +59,7 @@ if ($version -match '^(\d+\.\d+\.\d+)-rc\.(\d+)$') {
     $packagerArgs = @("packager", "--config", $configFile, "--target", $Target, "-f", "wix",
         "--binaries-dir", $bins, "--out-dir", $work)
 } elseif ($version -match '-') {
-    throw "Pre-release version $version: only -rc.N can be mapped to an MSI version"
+    throw "Pre-release version ${version}: only -rc.N can be mapped to an MSI version"
 }
 try {
     Run cargo $packagerArgs
