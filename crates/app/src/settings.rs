@@ -40,12 +40,15 @@ impl Default for Settings {
 pub struct General {
     /// Auto-fetch interval in minutes; 0 turns it off.
     pub auto_fetch_minutes: u32,
+    /// Opt-in update check (ADR-030); off by default.
+    pub check_updates: bool,
 }
 
 impl Default for General {
     fn default() -> Self {
         Self {
             auto_fetch_minutes: crate::fetch::DEFAULT_INTERVAL_MINUTES,
+            check_updates: false,
         }
     }
 }

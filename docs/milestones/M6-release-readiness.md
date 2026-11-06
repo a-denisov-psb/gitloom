@@ -146,7 +146,7 @@ Acceptance: unit tests for formatting (no path leak from a panic message contain
 
 Note: panics on background threads also get a report, offered as "Gitloom had an internal error" (they do not end the app). Release profile changed to `strip = "debuginfo"` so backtraces carry function names. Checked: debug trigger wrote a report, the next real start marked it shown; the status bar notice checked headless (ADR-035).
 
-### [ ] M6-06 Opt-in update check
+### [x] M6-06 Opt-in update check
 
 - Settings → General: "Check for updates" (off), note that it contacts api.github.com once a day.
 - Check at start and every 24 h while running (stored last check time in the session file): latest release from the GitHub API via `ureq` (timeout 10 s, proxy from env), semver comparison, pre-releases only when running a pre-release. Newer → status bar notice with "Release notes" (opens the release page in the browser) and "Dismiss" (per version).
@@ -154,6 +154,8 @@ Note: panics on background threads also get a report, offered as "Gitloom had an
 - ADR-030.
 
 Acceptance: unit tests (semver comparison incl. rc, pre-release rule, 24 h scheduling, dismiss per version, "off means no request" with a fake fetcher); checked by hand against a real release once one exists (M6-14).
+
+Note: the release list endpoint is used (not `/releases/latest`, which hides pre-releases); the last attempt counts, so a failed request also waits a day and stays silent. The HTTP part was checked against a public repository (ignored test `live_github_release_list`), the setting and the notice headless (ADR-035); the check against our own release follows in M6-14.
 
 ### [ ] M6-07 Accessibility pass
 

@@ -36,7 +36,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     .height(Fill);
 
     let form = match page.category {
-        Category::General => general(page),
+        Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
         Category::ExternalTools => external_tools(&app.settings, page),
     };
@@ -85,7 +85,7 @@ fn field<'a>(
     content.into()
 }
 
-fn general(page: &Page) -> Element<'_, Message> {
+fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
     let mut input = column![row![
         text_input("5", &page.auto_fetch_input)
             .id(AUTO_FETCH_INPUT)
@@ -100,11 +100,25 @@ fn general(page: &Page) -> Element<'_, Message> {
     if let Some(error) = &page.error {
         input = input.push(text(error).size(12).style(theme::text_danger));
     }
-    field(
-        "Auto-fetch interval",
-        input.into(),
-        "Fetches all remotes of open repositories in the background. 0 turns auto-fetch off.",
-    )
+    let updates = settings.general.check_updates;
+    column![
+        field(
+            "Auto-fetch interval",
+            input.into(),
+            "Fetches all remotes of open repositories in the background. 0 turns auto-fetch off.",
+        ),
+        field(
+            "Check for updates",
+            iced::widget::toggler(updates)
+                .on_toggle(Message::UpdatesToggled)
+                .label(if updates { "On" } else { "Off" })
+                .into(),
+            "Asks api.github.com for the latest release once a day and shows a notice in the \
+             status bar. Nothing is downloaded or installed.",
+        ),
+    ]
+    .spacing(18)
+    .into()
 }
 
 /// Segmented control: one button per option, the chosen one highlighted.

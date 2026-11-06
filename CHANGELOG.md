@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Update check, opt-in (Preferences → General, off by default): once a day Gitloom asks GitHub for the latest release and shows "Gitloom X is available" in the status bar with a link to the release notes. Nothing is downloaded or installed.
 - Crash reports: if Gitloom crashes, a local report (version, OS, message, backtrace) is written to the data folder; the next start offers "Open report folder" and "Copy report" in the status bar. Nothing is uploaded.
 - App icon for the window, taskbar/dock and packages; Windows executables carry version information; Linux desktop entry and AppStream metadata.
 - About dialog (command palette "About Gitloom", or the button at the bottom of the Preferences): version, commit, license, links to the repository and the issue tracker, and all third-party components with their licenses.
