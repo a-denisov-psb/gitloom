@@ -17,8 +17,8 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M2 | 0.3.0 | Working copy: stage, commit, stash | Done |
 | M3 | 0.4.0 | Branches and remotes | Done |
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Done |
-| M5 | 0.6.0 | Productivity parity | In progress |
-| M6 | 1.0.0 | Release readiness | Planned |
+| M5 | 0.6.0 | Productivity parity | Done |
+| M6 | 1.0.0 | Release readiness | In progress (maintainer steps open) |
 
 Only the current and the next milestone are planned in task-level detail.
 

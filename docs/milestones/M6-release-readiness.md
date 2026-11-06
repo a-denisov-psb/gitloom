@@ -196,7 +196,7 @@ Acceptance: Linux packages built and started locally (AppImage on Ubuntu 22.04 o
 
 Note: ADR-031. AppImage and tar.gz built and started locally (Debian 13, WSL); no container runtime is available here, so the Ubuntu 22.04 start moves to the release workflow (M6-09 builds the Linux packages on `ubuntu-22.04` and starts the AppImage there under Xvfb). The MSI installs per machine (cargo-packager's WiX template); the zip is the per-user option.
 
-### [ ] M6-09 Release workflow
+### [x] M6-09 Release workflow
 
 - `.github/workflows/release.yml` on tags `v*.*.*` and `v*.*.*-rc.*`: matrix Linux x64, macOS universal, Windows x64, Windows x86 (`continue-on-error`); runs `check` first; ad-hoc `codesign -s -` for macOS; `SHA256SUMS`; draft release (pre-release for `-rc`) with notes from the CHANGELOG section of that version.
 - A Windows signing step prepared for M6-10 (skipped while not configured).
@@ -204,7 +204,7 @@ Note: ADR-031. AppImage and tar.gz built and started locally (Debian 13, WSL); n
 
 Acceptance: dry run green on all required targets; artifacts downloaded and started (Linux by Claude Code, Windows by the maintainer); no secrets needed for the unsigned path.
 
-Note: `.github/workflows/release.yml` (check job with tag/version and CHANGELOG check; Linux on `ubuntu-22.04` with an AppImage start under Xvfb; macOS universal with signature, `lipo` and dmg checks and a 15 s start; Windows x64 and x86 (`continue-on-error`) with a 15 s start and the version resource; SHA256SUMS; draft release via `gh release create --draft [--prerelease]` with notes from `scripts/release-notes.sh`). The SignPath step is skipped until the repository variable `SIGNPATH_ORGANIZATION_ID` exists (M6-10). Validated with a temporary push trigger on the feature branch (dispatch needs the workflow on the default branch), then by `workflow_dispatch` on `develop`. The first run found that cargo-packager rebuilds the `.app` for the dmg without the ad-hoc signature; `package.sh` now makes the dmg with `hdiutil` from the signed app. Linux artifacts downloaded and started by Claude Code; the Windows artifacts are for the maintainer (release checklist).
+Note: `.github/workflows/release.yml` (check job with tag/version and CHANGELOG check; Linux on `ubuntu-22.04` with an AppImage start under Xvfb; macOS universal with signature, `lipo` and dmg checks and a 15 s start; Windows x64 and x86 (`continue-on-error`) with a 15 s start and the version resource; SHA256SUMS; draft release via `gh release create --draft [--prerelease]` with notes from `scripts/release-notes.sh`). The SignPath step is skipped until the repository variable `SIGNPATH_ORGANIZATION_ID` exists (M6-10). Validated with a temporary push trigger on the feature branch (dispatch needs the workflow on the default branch), then by `workflow_dispatch` on `develop` (run 42206890371: all jobs green, incl. Windows x86). The first run found that cargo-packager rebuilds the `.app` for the dmg without the ad-hoc signature; `package.sh` now makes the dmg with `hdiutil` from the signed app. Linux artifacts downloaded and started by Claude Code; the Windows artifacts are for the maintainer (release checklist).
 
 ### [ ] M6-10 Windows code signing (SignPath)
 
