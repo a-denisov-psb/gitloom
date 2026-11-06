@@ -19,6 +19,7 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Done |
 | M5 | 0.6.0 | Productivity parity | Done |
 | M6 | 1.0.0 | Release readiness | In progress (maintainer steps open) |
+| M7 | 1.1.0 | Diff view modes and Git flow | Planned |
 
 Only the current and the next milestone are planned in task-level detail.
 
@@ -50,6 +51,10 @@ Action registry with shortcut list (Ctrl+/), settings view, light and dark theme
 
 Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with the first release candidate, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
 
+### M7 – Diff view modes and Git flow (1.1)
+
+Hunk, Inline and Split diff views with staging in every mode, and GitKraken's Git flow: initialize per repository (git-flow compatible config), GITFLOW section in the left panel, start and finish of features, releases and hotfixes with conflict resume and undo. Details: [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md).
+
 ## Non-goals
 
 - Pull request, issue tracker or Jira integrations
@@ -61,7 +66,7 @@ Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or
 
 Own ideas and deferred items. To be assigned to milestones with the maintainer.
 
-- **Git flow graph layout** (after 1.0): if git flow is initialized (`gitflow.*` config),
+- **Git flow graph layout** (after M7; builds on the Git flow configuration model of M7-06): if git flow is initialized (`gitflow.*` config),
   render the graph like the classic git flow diagram: fixed lane groups from left to right
   (master, hotfix/*, release/*, develop, feature/*), one color per branch type.
   Branch membership is inferred from git flow config, first-parent chains of branch tips
@@ -75,7 +80,6 @@ Own ideas and deferred items. To be assigned to milestones with the maintainer.
   offer "Commit empty" like the empty cherry-pick dialog instead of showing Git's error.
 - **Autostash conflict notice** (M4 known limitation): when re-applying an autostash after
   merge/rebase conflicts, show a dedicated notice that the stash was kept.
-- **Diff view modes**: inline and split view in addition to the hunk view.
 - **Graph columns**: resizable columns and a column menu like GitKraken's.
 - **Git identity in settings**: edit `user.name` / `user.email` (global and per repository).
 - **Integrated terminal** instead of opening the system terminal.
