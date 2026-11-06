@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- About dialog (command palette "About Gitloom", or the button at the bottom of the Preferences): version, commit, license, links to the repository and the issue tracker, and all third-party components with their licenses.
+
+### Changed
+
+- Gitloom is now licensed under the GNU General Public License v3.0 or later (previously MIT OR Apache-2.0). Third-party licenses are listed in `THIRD-PARTY-LICENSES.md`.
+
 ## [0.6.1] - 2026-11-06
 
 ### Fixed

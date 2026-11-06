@@ -7,6 +7,7 @@ rust-version.workspace = true
 description.workspace = true
 repository.workspace = true
 homepage.workspace = true
+publish = false
 
 [dependencies]
 git-core = { path = "../git-core" }
@@ -25,6 +26,7 @@ ureq = "3.4"
 [dev-dependencies]
 git-core = { path = "../git-core", features = ["mock"] }
 tempfile = "3.27"
+iced_test = "0.14"
 
 [lints]
 workspace = true

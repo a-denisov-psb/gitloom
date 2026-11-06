@@ -11,4 +11,10 @@ function Step($name, $cmd) {
 Step "fmt"    "cargo fmt --all --check"
 Step "clippy" "cargo clippy --workspace --all-targets --locked -- -D warnings"
 Step "test"   "cargo test --workspace --locked"
+if (Get-Command cargo-deny -ErrorAction SilentlyContinue) {
+    Step "deny" "cargo deny --locked check --hide-inclusion-graph"
+} else {
+    Write-Host "==> deny skipped: cargo install --locked cargo-deny"
+}
+# The third-party notices are checked by CI and ./scripts/check.sh (bash).
 Write-Host "All checks passed."

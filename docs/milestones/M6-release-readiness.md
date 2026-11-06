@@ -114,7 +114,7 @@ Acceptance: `./scripts/check.sh` green including the guard test; docs no longer 
 
 Note: ADR-033 documents the accepted collision risk; trademark and domain checks were not done. The crate `gitloom` on crates.io is taken, so Gitloom is not published there under this name.
 
-### [ ] M6-03 License switch, third-party notices, About dialog
+### [x] M6-03 License switch, third-party notices, About dialog
 
 - Replace `LICENSE-MIT` and `LICENSE-APACHE` by `LICENSE` (GPL-3.0 text), workspace `license = "GPL-3.0-or-later"`, README and CONTRIBUTING license sections, SPDX note in CONTRIBUTING for contributions.
 - `cargo-deny` (`deny.toml`): license allow list compatible with GPL-3.0 (e.g. MIT, Apache-2.0, ISC, BSD-2/3-Clause, Zlib, Unicode-3.0, MPL-2.0, CDLA-Permissive-2.0 — verify each against the actual dependency tree), advisories and bans; run in `check.sh` (skipped with a hint if the tool is missing) and in CI.
@@ -123,6 +123,8 @@ Note: ADR-033 documents the accepted collision risk; trademark and domain checks
 - ADR-008 status → accepted.
 
 Acceptance: `cargo deny check` green; notices file contains every crate of `cargo tree` and the icons; About dialog checked by hand.
+
+Note: there is no gear menu (the gear opens the Preferences), so "About" sits in the palette and at the bottom of the Preferences categories (UX-PARITY deviation). Notices: `THIRD-PARTY-LICENSES.md` only (no HTML); "Third-party licenses" in the dialog opens the shipped file, or the repository copy of the version. `cargo deny` required tokio 1.53.3 (RUSTSEC-2026-0386) and replacing yanked `clipboard-win`/`async-executor` versions. Checked headless with `iced_test` (ADR-035; the Windows desktop was locked): Preferences → "About" → dialog → Close.
 
 ### [ ] M6-04 App icon and desktop metadata
 

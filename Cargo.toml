@@ -5,7 +5,7 @@ members = ["crates/git-core", "crates/git-graph", "crates/app"]
 [workspace.package]
 version = "0.6.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 rust-version = "1.88"
 description = "Native, open-source Git client with a GitKraken-style interface"
 repository = "https://github.com/a-denisov-psb/gitloom"

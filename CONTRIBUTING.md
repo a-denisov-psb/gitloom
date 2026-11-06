@@ -74,3 +74,13 @@ Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`.
 - No `unwrap`/`expect`/`panic!` outside tests.
 - UI follows GitKraken (`docs/UX-PARITY.md`); deviations are documented there.
 - See `CLAUDE.md` for the full rule set.
+
+## License of contributions
+
+Gitloom is licensed under `GPL-3.0-or-later` (see [LICENSE](LICENSE)). By submitting a contribution you agree that it is licensed under the same terms. New source files need no license header; if you add one, use the SPDX form:
+
+```rust
+// SPDX-License-Identifier: GPL-3.0-or-later
+```
+
+New dependencies must have a license compatible with GPL-3.0; `cargo deny check` (part of `./scripts/check.sh` when installed, and of CI) enforces the allow list in `deny.toml`. After adding or updating a dependency, regenerate the third-party notices with `./scripts/third-party-licenses.sh`.

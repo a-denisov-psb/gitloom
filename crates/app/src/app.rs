@@ -357,6 +357,10 @@ pub enum Message {
     /// Filter of the keyboard shortcut list changed.
     ShortcutFilterChanged(String),
     ShortcutListClosed,
+    AboutOpened,
+    AboutClosed,
+    /// Opens a URL in the browser or a file in its default application.
+    OpenLink(String),
     /// Esc taken by a focused text field.
     EscapeCaptured,
     /// Backspace, also when a text field took it (palette sub-lists).
@@ -730,6 +734,8 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
+    /// About dialog open (M6-03).
+    pub about: bool,
     /// Open command palette (Ctrl+P).
     pub palette: Option<Palette>,
     /// Palette actions used recently, most recent first.
@@ -795,6 +801,7 @@ impl App {
             form: None,
             context_menu: None,
             shortcut_list: None,
+            about: false,
             palette: None,
             recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
@@ -1906,6 +1913,7 @@ impl App {
             || self.context_menu.is_some()
             || self.message_dialog.is_some()
             || self.shortcut_list.is_some()
+            || self.about
             || self.settings_page.is_some();
         // Zoom and fullscreen change nothing in the overlay's content.
         if overlay_open
@@ -2066,8 +2074,10 @@ impl App {
                 });
             }
             Shortcut::Settings => return self.open_settings(),
+            Shortcut::About => return self.update(Message::AboutOpened),
             Shortcut::Close => {
-                if self.modal.take().is_some()
+                if std::mem::take(&mut self.about)
+                    || self.modal.take().is_some()
                     || self.context_menu.take().is_some()
                     || self.shortcut_list.take().is_some()
                     || self.settings_page.take().is_some()
@@ -3542,6 +3552,24 @@ impl App {
                 }
             }
             Message::ShortcutListClosed => self.shortcut_list = None,
+            Message::AboutOpened => {
+                self.context_menu = None;
+                self.shortcut_list = None;
+                self.palette = None;
+                self.about = true;
+            }
+            Message::AboutClosed => self.about = false,
+            Message::OpenLink(target) => {
+                return Task::perform(
+                    blocking(move || {
+                        crate::launch::spawn(&crate::launch::open_target(
+                            crate::launch::Platform::current(),
+                            &target,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
             Message::SettingsLoaded(loaded) => {
                 let settings::Loaded {
                     settings,
@@ -3767,6 +3795,7 @@ impl App {
             }
             Message::EscapeCaptured => {
                 if self.palette.take().is_none()
+                    && !std::mem::take(&mut self.about)
                     && self.shortcut_list.take().is_none()
                     && self.settings_page.take().is_none()
                 {
@@ -6996,7 +7025,7 @@ async fn blocking<T: Send + 'static>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn app_with_tabs(count: usize) -> App {
@@ -7231,7 +7260,7 @@ mod tests {
     }
 
     /// App with one ready tab showing commits `ids` (linear, newest first).
-    fn ready_app(ids: &[&str]) -> App {
+    pub(crate) fn ready_app(ids: &[&str]) -> App {
         use git_core::{Commit, Head, Log, WorkingTree};
 
         let (mut app, _) = App::new(Vec::new(), None);
@@ -7274,7 +7303,7 @@ mod tests {
             .and_then(|v| v.selection.clone())
     }
 
-    fn checked(shortcut: Shortcut, text_input_focused: bool) -> Message {
+    pub(crate) fn checked(shortcut: Shortcut, text_input_focused: bool) -> Message {
         Message::ShortcutChecked {
             shortcut,
             text_input_focused,
@@ -10553,6 +10582,37 @@ mod tests {
         assert_eq!(palette_labels(&app)[0], "Toggle left panel");
         let _ = app.update(Message::Shortcut(Shortcut::Close));
         assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn about_opens_from_palette_and_preferences_and_closes() {
+        let mut app = ready_app(&["c"]);
+        // Palette: "About <name>".
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("about".into()));
+        assert_eq!(
+            palette_labels(&app)[0],
+            format!("About {}", git_core::identity::DISPLAY_NAME)
+        );
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        assert!(app.about);
+        // Other shortcuts wait while it is open; Esc closes it.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(checked(Shortcut::Close, false));
+        assert!(!app.about);
+
+        // From the Preferences: Esc closes the dialog first, then the view.
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let _ = app.update(Message::AboutOpened);
+        assert!(app.about && app.settings_page.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(!app.about);
+        assert!(app.settings_page.is_some());
+        let _ = app.update(Message::AboutOpened);
+        let _ = app.update(Message::AboutClosed);
+        assert!(!app.about);
     }
 
     #[test]

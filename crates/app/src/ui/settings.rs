@@ -23,8 +23,17 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
             .into()
     }))
     .spacing(2)
+    .push(space::vertical())
+    .push(
+        button(text(format!("About {}", git_core::identity::DISPLAY_NAME)))
+            .on_press(Message::AboutOpened)
+            .padding([6, 12])
+            .width(Fill)
+            .style(theme::list_item(false)),
+    )
     .padding(8)
-    .width(220);
+    .width(220)
+    .height(Fill);
 
     let form = match page.category {
         Category::General => general(page),

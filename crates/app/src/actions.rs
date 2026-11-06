@@ -76,6 +76,8 @@ pub enum ActionId {
     ZoomOut,
     ZoomReset,
     Settings,
+    /// About dialog (palette and Preferences).
+    About,
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -702,6 +704,13 @@ fn table() -> Vec<Action> {
         Interface,
         Global,
         &[ch(',').cmd()],
+    );
+    add(
+        A::About,
+        &format!("About {}", git_core::identity::DISPLAY_NAME),
+        Interface,
+        Global,
+        &[],
     );
 
     // Tabs
