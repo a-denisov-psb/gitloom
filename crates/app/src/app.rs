@@ -7419,8 +7419,11 @@ mod tests {
         assert_eq!(app.window_size(), iced::Size::new(600.0, 400.0));
     }
 
-    /// Counts created HTTP clients (avatars, M5-11).
-    static FETCHERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    thread_local! {
+        /// Counts created HTTP clients (avatars, M5-11). Per test thread, so
+        /// tests running in parallel do not see each other's clients.
+        static FETCHERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
 
     struct NoNetwork;
 
@@ -7431,7 +7434,7 @@ mod tests {
     }
 
     fn counting_factory() -> Arc<dyn crate::avatars::Fetcher> {
-        FETCHERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        FETCHERS.with(|n| n.set(n.get() + 1));
         Arc::new(NoNetwork)
     }
 
@@ -7455,7 +7458,7 @@ mod tests {
     #[test]
     fn avatars_off_means_no_client_and_no_request() {
         let mut app = avatar_app(6);
-        let created = FETCHERS.load(std::sync::atomic::Ordering::SeqCst);
+        let created = FETCHERS.with(std::cell::Cell::get);
         let _ = app.update(Message::GraphScrolled {
             offset: 0.0,
             height: 600.0,
@@ -7463,7 +7466,7 @@ mod tests {
         let _ = app.update(Message::CommitSelected("c1".into()));
         assert!(app.avatar_fetcher.is_none());
         assert_eq!(app.avatars.in_flight(), 0);
-        assert_eq!(FETCHERS.load(std::sync::atomic::Ordering::SeqCst), created);
+        assert_eq!(FETCHERS.with(std::cell::Cell::get), created);
     }
 
     #[test]
