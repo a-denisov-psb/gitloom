@@ -16,18 +16,18 @@ Setup in Cowork:
 
 | Who | Does | Does not |
 |---|---|---|
-| Maintainer | Decides, approves merges and releases | – |
+| Maintainer | Decides scope, reviews milestone reports, does maintainer-only actions | Approve single tasks, merges or releases (ADR-034) |
 | Planning chat (you) | Product decisions with the maintainer, roadmap, detailed milestone plans, reviews of Claude Code's results | Write or change code |
-| Claude Code | Implements milestone tasks on feature branches, tests, keeps docs in sync | Change scope on its own |
+| Claude Code | Works through a whole milestone autonomously (one chat per milestone): tasks, plan-gap decisions, merges, release | Extend scope with new features |
 
 ### How planning works
 
 1. Maintainer and planning chat decide scope and write the milestone file (`docs/milestones/Mx-*.md`): tasks, dependencies, acceptance criteria, UX parity references.
 2. The planning chat hands the maintainer prompts for Claude Code (with full file contents, see section 3). The maintainer pastes them into Claude Code.
-3. Claude Code implements task by task (`/next-task`, `/finish-task`), merges green features into `develop` and reports back in German.
-4. The planning chat reviews the result (checkboxes, notes under each task, `git log`), adjusts the plan and prepares the next prompts.
+3. The maintainer starts one Claude Code chat per milestone. Claude Code implements task by task (`/next-task`, `/finish-task`) without asking back, merges green features into `develop`, reports one line per task and releases the milestone itself (`/release`, ADR-034) with a final report.
+4. The planning chat reviews the milestone report (checkboxes, deviation notes, new ADRs, `git log`), adjusts the plan and prepares the next milestone.
 
-The milestone files are the contract: Claude Code does not change scope on its own and records open points in `docs/HANDOVER.md` → "Open questions"; the planning chat answers them and updates the plan.
+The milestone files are the contract: Claude Code does not extend scope. It decides plan gaps itself (most conservative, GitKraken-closest variant) and documents them as ADR, milestone note or `docs/UX-PARITY.md` deviation; it stops only for the reasons in ADR-034. Skipped maintainer-only tasks land in `docs/HANDOVER.md` → "Maintainer to-dos". The planning chat reviews these decisions after the milestone.
 
 ### Rules for editing files
 
@@ -128,7 +128,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Implement M6 (`docs/milestones/M6-release-readiness.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed. The name is decided (ADR-033), so M6-02 is no longer blocked.
+1. M6 (`docs/milestones/M6-release-readiness.md`) runs autonomously in one Claude Code chat (ADR-034). Review the milestone report after the release (deviations, new ADRs, maintainer to-dos) instead of each task.
 2. Answer the M6 maintainer verification items (milestone file) as the related tasks come up.
 3. Collect the maintainer's own ideas; place them in the roadmap.
 
