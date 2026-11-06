@@ -334,6 +334,29 @@ Architecture decision records in short form. New entries at the bottom. Change a
   request also waits a day and stays silent. The `ureq` agent is created only when a
   check runs; with the setting off nothing is scheduled.
 
+## ADR-031 Packaging
+
+- Status: accepted (M6-08)
+- Decision: `cargo-packager 0.11` (installed as a tool, not a dependency) builds AppImage,
+  macOS `.app`/`.dmg` and Windows `.msi` from `[package.metadata.packager]` in
+  `crates/app/Cargo.toml`, so name, version and description come from Cargo.
+  `scripts/package.sh` (Linux, macOS) and `scripts/package.ps1` (Windows x64/x86) build the
+  local platform's packages into `dist/`; the plain archives (`.tar.gz` with binary,
+  licenses, desktop entry, metainfo and icon; `.zip` with exe, licenses, README) are made
+  by the scripts. macOS: arm64 and x86_64 builds joined with `lipo`, packaged as
+  `universal-apple-darwin`, ad-hoc signed (`codesign -s -`) before the dmg is made.
+  Every package carries `LICENSE` and `THIRD-PARTY-LICENSES.md` (AppImage
+  `usr/lib/gitloom/`, msi and zip next to the exe, app bundle `Resources/`), where the
+  About dialog finds them.
+- Install scope: the MSI uses cargo-packager's WiX template, which installs per machine
+  (elevation). A per-user MSI needs a custom WiX template with registry key paths for
+  every component (ICE38/ICE64), which cannot be validated without Windows; the portable
+  zip is the per-user option. AppImage, tar.gz and dmg need no installation rights.
+- Linux: AppImage and tar.gz are built on the oldest Ubuntu LTS runner (22.04, glibc 2.35)
+  in the release workflow; builds on newer systems need a newer glibc. linuxdeploy runs
+  with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE needed); appimagetool needs `file`.
+- Why: one configuration for three installer formats; fallbacks were not needed.
+
 ## ADR-032 CI budget until the repository is public
 
 - Status: accepted
@@ -359,7 +382,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Consequences: no rename migration (config dir `Gitloom` stays); the values in
   `git_core::identity` are final; the crate is not published on crates.io under this
   name (taken). A later rename stays possible as one task because of ADR-028. ADR-031 is
-  reserved for M6-08 (packaging), so the numbering has a gap until then.
+  reserved for M6-08 (packaging), so the numbering has a gap until then (filled by M6-08).
 
 ## ADR-034 Autonomous milestone execution
 
