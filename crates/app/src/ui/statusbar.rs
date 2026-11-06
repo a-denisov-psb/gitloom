@@ -12,6 +12,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(crash) = &app.crash_notice {
         content = content.push(crash_notice(crash));
     }
+    if let Some(release) = &app.update_available {
+        content = content.push(update_notice(release));
+    }
     content = content
         .push(text(&app.status).size(12))
         .push(space::horizontal());
@@ -98,6 +101,31 @@ fn crash_notice(crash: &crate::crash::Pending) -> Element<'_, Message> {
         action("Open report folder", Message::CrashReportOpenFolder),
         action("Copy report", Message::CrashReportCopy),
         action("Dismiss", Message::CrashReportDismissed),
+    ]
+    .spacing(6)
+    .align_y(iced::Center)
+    .into()
+}
+
+/// "Gitloom X is available" with the release page link (M6-06).
+fn update_notice(release: &crate::update::Release) -> Element<'_, Message> {
+    let action = |label: &'static str, message: Message| {
+        button(text(label).size(11))
+            .on_press(message)
+            .padding([0, 8])
+            .style(button::secondary)
+    };
+    row![
+        crate::icons::tinted(crate::icons::Icon::Info, 12.0, |p| p.accent),
+        text(format!(
+            "{} {} is available.",
+            git_core::identity::DISPLAY_NAME,
+            release.version
+        ))
+        .size(12)
+        .style(crate::theme::text_accent),
+        action("Release notes", Message::OpenLink(release.url.clone())),
+        action("Dismiss", Message::UpdateDismissed),
     ]
     .spacing(6)
     .align_y(iced::Center)

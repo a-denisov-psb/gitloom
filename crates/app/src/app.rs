@@ -364,6 +364,12 @@ pub enum Message {
     CrashReportOpenFolder,
     CrashReportCopy,
     CrashReportDismissed,
+    /// Preferences → General → Check for updates (M6-06).
+    UpdatesToggled(bool),
+    /// The timer of the update check with this sequence number ran out.
+    UpdateDue(u64),
+    UpdateChecked(Result<Vec<crate::update::Release>, String>),
+    UpdateDismissed,
     /// Opens a URL in the browser or a file in its default application.
     OpenLink(String),
     /// Esc taken by a focused text field.
@@ -743,6 +749,14 @@ pub struct App {
     pub about: bool,
     /// Crash report of the previous run, offered once in the status bar.
     pub crash_notice: Option<crate::crash::Pending>,
+    /// Last check and dismissed version, stored in the session (M6-06).
+    update_state: crate::update::UpdateState,
+    /// Newer release found by the update check.
+    pub update_available: Option<crate::update::Release>,
+    /// Creates the release source only when a check runs (ADR-030).
+    update_source_factory: fn() -> Option<Arc<dyn crate::update::ReleaseSource>>,
+    /// Invalidates pending update timers.
+    update_seq: u64,
     /// Open command palette (Ctrl+P).
     pub palette: Option<Palette>,
     /// Palette actions used recently, most recent first.
@@ -810,6 +824,10 @@ impl App {
             shortcut_list: None,
             about: false,
             crash_notice: None,
+            update_state: Default::default(),
+            update_available: None,
+            update_source_factory: crate::update::github_source,
+            update_seq: 0,
             palette: None,
             recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
@@ -1703,6 +1721,7 @@ impl App {
         }
         self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
+        self.update_state = session.update.clone();
         let (paths, active) = (session.tabs.clone(), session.active);
         // Before opening: the loaders read stored per-repository state
         // (hidden branches).
@@ -1721,7 +1740,34 @@ impl App {
         for path in std::mem::take(&mut self.pending_paths) {
             tasks.push(self.open_path(path));
         }
+        // Settings are loaded before the session.
+        tasks.push(self.schedule_update_check(crate::update::now()));
         Task::batch(tasks)
+    }
+
+    /// Runs the update check now if it is due, else arms a timer for it.
+    /// Nothing happens (no client, no request) while the setting is off.
+    fn schedule_update_check(&mut self, now: u64) -> Task<Message> {
+        self.update_seq += 1;
+        if !self.settings.general.check_updates || !self.session_loaded {
+            return Task::none();
+        }
+        let seq = self.update_seq;
+        let wait = crate::update::due_in(self.update_state.last_check, now);
+        if wait > 0 {
+            // Created lazily: the timer needs the runtime that runs the task.
+            return Task::perform(
+                async move { tokio::time::sleep(std::time::Duration::from_secs(wait)).await },
+                move |()| Message::UpdateDue(seq),
+            );
+        }
+        let Some(source) = (self.update_source_factory)() else {
+            return Task::none();
+        };
+        // Also a failed check waits a day: at most one request per day.
+        self.update_state.last_check = Some(now);
+        let check = Task::perform(blocking(move || source.releases()), Message::UpdateChecked);
+        Task::batch([check, self.persist()])
     }
 
     /// Session as it should be on disk for the current state.
@@ -1744,6 +1790,7 @@ impl App {
             panes: self.panes.ratios,
             ref_filters: self.ref_filters(),
             pull_mode: self.pull_mode.into(),
+            update: self.update_state.clone(),
         }
     }
 
@@ -3597,6 +3644,38 @@ impl App {
                 }
             }
             Message::CrashReportDismissed => self.crash_notice = None,
+            Message::UpdatesToggled(on) => {
+                self.settings.general.check_updates = on;
+                if !on {
+                    self.update_available = None;
+                }
+                let check = self.schedule_update_check(crate::update::now());
+                return Task::batch([self.save_settings(), check]);
+            }
+            Message::UpdateDue(seq) => {
+                if seq == self.update_seq {
+                    return self.schedule_update_check(crate::update::now());
+                }
+            }
+            Message::UpdateChecked(result) => {
+                // Failures stay silent: the check is a background convenience.
+                if let (Ok(releases), Some(running)) = (
+                    result,
+                    crate::update::Version::parse(crate::about::version()),
+                ) {
+                    self.update_available = crate::update::newer_release(&running, &releases)
+                        .filter(|r| crate::update::should_notify(r, &self.update_state));
+                }
+                if self.settings.general.check_updates {
+                    return self.schedule_update_check(crate::update::now());
+                }
+            }
+            Message::UpdateDismissed => {
+                if let Some(release) = self.update_available.take() {
+                    self.update_state.dismissed = Some(release.version.to_string());
+                    return self.persist();
+                }
+            }
             Message::OpenLink(target) => {
                 return Task::perform(
                     blocking(move || {
@@ -10620,6 +10699,99 @@ pub(crate) mod tests {
         assert_eq!(palette_labels(&app)[0], "Toggle left panel");
         let _ = app.update(Message::Shortcut(Shortcut::Close));
         assert!(app.palette.is_none());
+    }
+
+    thread_local! {
+        /// Release sources created by the update check (M6-06), per test thread.
+        static UPDATE_SOURCES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    struct NoReleases;
+
+    impl crate::update::ReleaseSource for NoReleases {
+        fn releases(&self) -> Result<Vec<crate::update::Release>, String> {
+            Err("tests have no network".into())
+        }
+    }
+
+    fn counting_update_source() -> Option<Arc<dyn crate::update::ReleaseSource>> {
+        UPDATE_SOURCES.with(|n| n.set(n.get() + 1));
+        Some(Arc::new(NoReleases))
+    }
+
+    fn update_sources() -> usize {
+        UPDATE_SOURCES.with(std::cell::Cell::get)
+    }
+
+    fn release(tag: &str) -> crate::update::Release {
+        crate::update::Release {
+            version: crate::update::Version::parse(tag).unwrap(),
+            url: format!("https://example.com/{tag}"),
+        }
+    }
+
+    fn update_app() -> App {
+        let (mut app, _) = App::new(Vec::new(), None);
+        app.update_source_factory = counting_update_source;
+        app
+    }
+
+    #[test]
+    fn update_check_off_means_no_source_and_no_request() {
+        let mut app = update_app();
+        let before = update_sources();
+        let _ = app.update(loaded(Session::default()));
+        let seq = app.update_seq;
+        let _ = app.update(Message::UpdateDue(seq));
+        assert_eq!(update_sources(), before);
+        assert!(app.update_state.last_check.is_none());
+        // On, then off again: the pending timer is void.
+        let _ = app.update(Message::UpdatesToggled(true));
+        assert_eq!(update_sources(), before + 1);
+        let _ = app.update(Message::UpdatesToggled(false));
+        let stale = app.update_seq;
+        let _ = app.update(Message::UpdateDue(stale));
+        assert_eq!(update_sources(), before + 1);
+        assert!(!app.settings.general.check_updates);
+    }
+
+    #[test]
+    fn update_check_runs_once_a_day_and_offers_newer_releases() {
+        let mut app = update_app();
+        app.settings.general.check_updates = true;
+        let before = update_sources();
+        let _ = app.update(loaded(Session::default()));
+        // Due at start: one request, time stored in the session.
+        assert_eq!(update_sources(), before + 1);
+        let last = app.update_state.last_check.unwrap();
+        assert_eq!(app.current_session().update.last_check, Some(last));
+        // A timer that fires early does not request again.
+        let seq = app.update_seq;
+        let _ = app.update(Message::UpdateDue(seq));
+        assert_eq!(update_sources(), before + 1);
+
+        let running = crate::update::Version::parse(crate::about::version()).unwrap();
+        let newer = format!("{}.{}.{}", running.major + 1, 0, 0);
+        let _ = app.update(Message::UpdateChecked(Ok(vec![
+            release("0.0.1"),
+            release(&newer),
+        ])));
+        assert_eq!(
+            app.update_available.as_ref().unwrap().version.to_string(),
+            newer
+        );
+        // Dismissed per version.
+        let _ = app.update(Message::UpdateDismissed);
+        assert!(app.update_available.is_none());
+        assert_eq!(app.update_state.dismissed.as_deref(), Some(newer.as_str()));
+        let _ = app.update(Message::UpdateChecked(Ok(vec![release(&newer)])));
+        assert!(app.update_available.is_none());
+        let newest = format!("{}.{}.{}", running.major + 2, 0, 0);
+        let _ = app.update(Message::UpdateChecked(Ok(vec![release(&newest)])));
+        assert!(app.update_available.is_some());
+        // Failures are silent.
+        let _ = app.update(Message::UpdateChecked(Err("offline".into())));
+        assert!(app.status.is_empty());
     }
 
     #[test]

@@ -325,6 +325,14 @@ Architecture decision records in short form. New entries at the bottom. Change a
   download or installation; pre-releases only for pre-release builds.
 - Why: ADR-009 (network features are opt-in); installers differ per platform, so
   automatic updates are a backlog item.
+- Implementation (M6-06): `crates/app/src/update.rs`. Preferences → General → "Check
+  for updates" (off). The check requests
+  `api.github.com/repos/<owner>/<repo>/releases?per_page=30` (derived from
+  `identity::REPOSITORY_URL`; the list instead of `/releases/latest`, which hides
+  pre-releases), takes the version from the tag and skips drafts. The time of the last
+  attempt and the dismissed version are stored in the session file (`update`); a failed
+  request also waits a day and stays silent. The `ureq` agent is created only when a
+  check runs; with the setting off nothing is scheduled.
 
 ## ADR-032 CI budget until the repository is public
 

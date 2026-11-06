@@ -31,6 +31,7 @@ mod ui;
 #[cfg(test)]
 mod ui_check;
 mod undo;
+mod update;
 
 use std::path::PathBuf;
 

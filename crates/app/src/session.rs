@@ -36,6 +36,12 @@ pub struct Session {
     /// Hidden and soloed branches per repository root (M5-08).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub ref_filters: std::collections::BTreeMap<PathBuf, crate::ref_filter::RefFilter>,
+    /// Last update check and the dismissed version (M6-06).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::update::UpdateState::is_default"
+    )]
+    pub update: crate::update::UpdateState,
 }
 
 /// [`git_core::PullMode`] as stored in the session file.
@@ -78,6 +84,7 @@ impl Default for Session {
             panes: PaneRatios::default(),
             pull_mode: PullModeSetting::default(),
             ref_filters: Default::default(),
+            update: Default::default(),
         }
     }
 }

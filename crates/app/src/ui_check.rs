@@ -90,4 +90,20 @@ mod tests {
         click(&mut app, "Dismiss");
         assert!(app.crash_notice.is_none());
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_update_notice_and_setting() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(checked(Shortcut::Settings, false));
+        snapshot(&app, "update-0-setting-off");
+        let _ = app.update(Message::UpdateChecked(Ok(vec![crate::update::Release {
+            version: crate::update::Version::parse("99.0.0").unwrap(),
+            url: "https://example.com".into(),
+        }])));
+        let _ = app.update(Message::SettingsClosed);
+        snapshot(&app, "update-1-notice");
+        click(&mut app, "Dismiss");
+        assert!(app.update_available.is_none());
+    }
 }
