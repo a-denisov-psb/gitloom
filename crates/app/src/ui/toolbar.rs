@@ -215,8 +215,14 @@ fn action<'a>(view: &RepoView, compact: bool, action: ToolbarAction) -> Element<
                 action.label().to_owned(),
             )
         }
-        // Nothing to stash or pop: plain disabled button.
-        (ToolbarAction::Stash | ToolbarAction::Pop, _) if view.write_block.is_none() => disabled(),
+        // Nothing to stash or pop: disabled, the tooltip says why (and
+        // names the button when compact).
+        (ToolbarAction::Stash, _) if view.write_block.is_none() => {
+            with_tooltip_text(disabled(), "Stash: no changes to stash".to_owned())
+        }
+        (ToolbarAction::Pop, _) if view.write_block.is_none() => {
+            with_tooltip_text(disabled(), "Pop: no stash to pop".to_owned())
+        }
         (ToolbarAction::Terminal, _) => with_tooltip_text(
             toolbar_button(action, Some(Message::OpenTerminal), compact).into(),
             match crate::actions::ActionId::OpenTerminal.shortcut_text() {

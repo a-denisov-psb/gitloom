@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::editor::{editor_command, EditorInput, EditorKind, PreparedEditor};
-use crate::editor::{EDITOR_DIR_ENV, EDITOR_ENV};
+use crate::identity::{ASKPASS_ENV, DISPLAY_NAME, EDITOR_DIR_ENV, EDITOR_ENV};
 use crate::{CancelToken, Error, Operation, Progress, Result};
 
 /// Oldest supported Git (Ubuntu 22.04 LTS ships 2.34).
@@ -72,9 +72,9 @@ impl GitAvailability {
     pub fn reason(&self) -> Option<String> {
         match self {
             Self::Available(_) => None,
-            Self::Missing => Some("Git was not found on PATH; Gitloom is read-only".into()),
+            Self::Missing => Some(format!("Git was not found on PATH; {DISPLAY_NAME} is read-only")),
             Self::TooOld(version) => Some(format!(
-                "Git {version} is too old (needs {MIN_GIT_VERSION} or newer); Gitloom is read-only"
+                "Git {version} is too old (needs {MIN_GIT_VERSION} or newer); {DISPLAY_NAME} is read-only"
             )),
         }
     }
@@ -636,10 +636,6 @@ pub fn checkout_blocked(stderr: &str) -> bool {
 pub fn branch_not_merged(stderr: &str) -> bool {
     stderr.contains("is not fully merged")
 }
-
-/// Environment variable that tells a program started as `GIT_ASKPASS` /
-/// `SSH_ASKPASS` that it runs in askpass mode (Git passes only the prompt).
-pub const ASKPASS_ENV: &str = "GITLOOM_ASKPASS";
 
 /// Runs the `git` executable in one repository.
 #[derive(Debug, Clone)]

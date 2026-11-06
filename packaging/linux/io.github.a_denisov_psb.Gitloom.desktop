@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Gitloom
+GenericName=Git Client
+Comment=Native, open-source Git client with a GitKraken-style interface
+Exec=gitloom %F
+Icon=io.github.a_denisov_psb.Gitloom
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;version control;repository;commit;branch;
+StartupNotify=true
+StartupWMClass=io.github.a_denisov_psb.Gitloom

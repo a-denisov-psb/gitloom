@@ -1,8 +1,11 @@
+mod about;
 mod actions;
 mod app;
+mod app_icon;
 mod askpass;
 mod avatars;
 mod conflict;
+mod crash;
 mod fetch;
 mod file_history;
 mod format;
@@ -25,7 +28,10 @@ mod shortcuts;
 mod snapshot;
 mod theme;
 mod ui;
+#[cfg(test)]
+mod ui_check;
 mod undo;
+mod update;
 
 use std::path::PathBuf;
 
@@ -45,6 +51,13 @@ fn main() -> iced::Result {
     let marker = std::env::var_os(git_core::ASKPASS_ENV).is_some();
     if let Some(prompt) = askpass::prompt_from_args(&args, marker) {
         return askpass::main(prompt);
+    }
+
+    // Crash reports for the main process only (ADR-029).
+    #[cfg(debug_assertions)]
+    crash::debug_panic_trigger();
+    if let Some(dir) = crash::default_dir() {
+        crash::install(dir);
     }
 
     // `gitloom [PATH]...` opens each path in its own tab.
@@ -71,7 +84,7 @@ fn main() -> iced::Result {
         default_text_size: 13.into(),
         ..iced::Settings::default()
     })
-    .window_size((1400.0, 860.0))
+    .window(app_icon::window_settings(iced::Size::new(1400.0, 860.0)))
     // The session is saved before the window closes.
     .exit_on_close_request(false)
     .run()

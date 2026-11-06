@@ -26,7 +26,16 @@
       "Bash(git merge --no-ff feature/:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
-      "Bash(gh run watch:*)"
+      "Bash(gh run watch:*)",
+      "Bash(git push origin master)",
+      "Bash(git push origin v:*)",
+      "Bash(git push origin --delete release/:*)",
+      "Bash(git merge --no-ff release/:*)",
+      "Bash(git merge --no-ff develop)",
+      "Bash(git tag:*)",
+      "Bash(git switch master)",
+      "Bash(git switch -c release/:*)",
+      "Bash(git push -u origin release/:*)"
     ],
     "deny": [
       "Bash(git reset --hard:*)",

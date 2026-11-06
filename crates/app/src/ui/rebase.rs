@@ -146,7 +146,8 @@ fn entry_row(panel: &RebasePanel, index: usize) -> Element<'_, Message> {
                     action,
                 })
                 .size(12)
-                .height(80),
+                .height(80)
+                .style(theme::editor),
         );
     }
     container(cell)

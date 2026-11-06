@@ -50,6 +50,15 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: GPL-3.0-or-later. Dependencies must have GPL-3.0 compatible licenses,
   checked by `cargo-deny`; third-party notices ship with every package.
 - Why: maintainer decision; forks and redistributed builds stay open source.
+- Implementation (M6-03): `LICENSE` holds the GPL-3.0 text, the workspace declares
+  `GPL-3.0-or-later`, our crates are `publish = false`. `deny.toml` allows only
+  GPL-3.0 compatible licenses (checked against the tree); `cargo deny` runs in
+  `check.sh` (skipped with a hint when missing) and in the CI job "Licenses and
+  advisories". `scripts/third-party-licenses.sh` (cargo-about, `about.toml`) writes
+  `THIRD-PARTY-LICENSES.md` (all crates of the release targets with license texts,
+  plus Lucide icons) and `crates/app/assets/third-party.tsv` (the list in the About
+  dialog); `--check` fails in CI when either is stale or misses a crate of `cargo tree`.
+  Where a crate offers a choice, the most permissive license is listed.
 
 ## ADR-009 Privacy
 
@@ -128,7 +137,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-017 Autonomous task merges
 
-- Status: accepted (M2)
+- Status: accepted (M2), extended by ADR-034 (no questions within a milestone, autonomous releases)
 - Decision: Claude Code merges finished feature branches into `develop` itself when
   all acceptance criteria are met and `./scripts/check.sh` is green, then pushes
   `develop`. The maintainer is asked only for plan deviations, scope questions,
@@ -279,11 +288,14 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 - Status: accepted (M6 plan)
 - Decision: display name, binary name, application id, config/cache/data dir name,
-  repository and issue URLs live in one module; code uses only that module. The rename
-  from the working title "Gitloom" copies `settings.json` and `session.json` once from
-  the old config dir.
-- Why: "Gitloom" collides with an existing product; the final name must be a one-place
-  change.
+  repository and issue URLs live in one module; code uses only that module. A rename
+  would be one task (the name was kept, ADR-033, so no config migration exists).
+- Why: "Gitloom" collides with an existing product; the name must be a one-place
+  change whichever way the decision falls (kept in ADR-033).
+- Implementation (M6-01): `git_core::identity` (`crates/git-core/src/identity.rs`), because
+  `git-core` needs env names, temp prefixes and reflog messages and must not depend on
+  `app`. `crates/git-core/tests/identity_guard.rs` fails when the name appears in code
+  outside that module and test code.
 
 ## ADR-029 Crash reports
 
@@ -292,6 +304,18 @@ Architecture decision records in short form. New entries at the bottom. Change a
   message, backtrace) to the data dir, keeps the newest 20 and offers them on the next
   start. Nothing is uploaded.
 - Why: users can attach a report to an issue; privacy by default (ADR-009).
+- Implementation (M6-05): `crates/app/src/crash.rs`. Reports are
+  `<data dir>/crashes/<UTC>Z.txt` (Linux `~/.local/share/gitloom/crashes`, macOS
+  `~/Library/Application Support/Gitloom/crashes`, Windows `%APPDATA%\Gitloom\data\crashes`).
+  The hook is installed after the askpass/editor checks, so helper processes never
+  write reports. Panics on other threads are reported too ("had an internal error"
+  instead of "closed unexpectedly"). `shown.txt` lists the reports already offered; the
+  next start offers the newest unseen one in the status bar ("Open report folder",
+  "Copy report", "Dismiss"). The panic message is written as is (a path inside it is
+  not filtered). Release builds keep the symbol table (`strip = "debuginfo"`) so
+  backtraces name functions; Windows MSVC builds have no PDB in the packages, so their
+  frames may stay unnamed. Debug builds panic at start when `GITLOOM_DEBUG_PANIC`
+  names a directory (integration test).
 
 ## ADR-030 Update check
 
@@ -301,3 +325,125 @@ Architecture decision records in short form. New entries at the bottom. Change a
   download or installation; pre-releases only for pre-release builds.
 - Why: ADR-009 (network features are opt-in); installers differ per platform, so
   automatic updates are a backlog item.
+- Implementation (M6-06): `crates/app/src/update.rs`. Preferences → General → "Check
+  for updates" (off). The check requests
+  `api.github.com/repos/<owner>/<repo>/releases?per_page=30` (derived from
+  `identity::REPOSITORY_URL`; the list instead of `/releases/latest`, which hides
+  pre-releases), takes the version from the tag and skips drafts. The time of the last
+  attempt and the dismissed version are stored in the session file (`update`); a failed
+  request also waits a day and stays silent. The `ureq` agent is created only when a
+  check runs; with the setting off nothing is scheduled.
+
+## ADR-031 Packaging
+
+- Status: accepted (M6-08)
+- Decision: `cargo-packager 0.11` (installed as a tool, not a dependency) builds AppImage,
+  macOS `.app`/`.dmg` and Windows `.msi` from `[package.metadata.packager]` in
+  `crates/app/Cargo.toml`, so name, version and description come from Cargo.
+  `scripts/package.sh` (Linux, macOS) and `scripts/package.ps1` (Windows x64/x86) build the
+  local platform's packages into `dist/`; the plain archives (`.tar.gz` with binary,
+  licenses, desktop entry, metainfo and icon; `.zip` with exe, licenses, README) are made
+  by the scripts. macOS: arm64 and x86_64 builds joined with `lipo`, packaged as
+  `universal-apple-darwin`, ad-hoc signed (`codesign -s -`) before the dmg is made.
+  Every package carries `LICENSE` and `THIRD-PARTY-LICENSES.md` (AppImage
+  `usr/lib/gitloom/`, msi and zip next to the exe, app bundle `Resources/`), where the
+  About dialog finds them.
+- Install scope: the MSI uses cargo-packager's WiX template, which installs per machine
+  (elevation). A per-user MSI needs a custom WiX template with registry key paths for
+  every component (ICE38/ICE64), which cannot be validated without Windows; the portable
+  zip is the per-user option. AppImage, tar.gz and dmg need no installation rights.
+- Linux: AppImage and tar.gz are built on the oldest Ubuntu LTS runner (22.04, glibc 2.35)
+  in the release workflow; builds on newer systems need a newer glibc. linuxdeploy runs
+  with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE needed); appimagetool needs `file`.
+- MSI version (1.0.0-rc.1): WiX accepts only numeric versions, so `package.ps1` passes
+  cargo-packager a generated configuration (with `name` and `binariesDir`, which
+  `--config` needs) whose version `1.0.0-rc.N` becomes `1.0.0-N`; cargo-packager turns that
+  into the MSI version `1.0.0.N`. Windows Installer ignores the fourth field for upgrades,
+  so the final 1.0.0 replaces a release candidate. File names keep `1.0.0-rc.N`.
+- Why: one configuration for three installer formats; fallbacks were not needed.
+
+## ADR-032 CI budget until the repository is public
+
+- Status: accepted
+- Decision: Linux check and MSRV run on every push and pull request. Windows and macOS
+  run only on pushes to `master` and `release/**`, on tags and via `workflow_dispatch`.
+  Runs are grouped per ref with `cancel-in-progress`. Before every merge the maintainer
+  workflow runs `./scripts/check.sh` and clippy for the Windows target locally.
+- Why: private repositories bill Windows and macOS minutes at a multiple of Linux; the
+  budget is limited until the repository is public (M6-11). Revisit after that.
+
+## ADR-033 Keep the name Gitloom
+
+- Status: accepted (maintainer, 2026-11-05; supersedes the rename decision of 2026-11-03)
+- Context: the M6 plan intended a rename because "GitLoom" exists as a product (an
+  LLM-memory SaaS, GitHub org `gitloom`, crate `gitloom` on crates.io) and several small
+  Git tools use similar names (e.g. `AidinD/git-loom`, `pedrohperalta/gitloom`). A check on
+  2026-11-05 confirmed all of this. Alternatives were brainstormed; none was clearly
+  better. Trademark and domain checks were not done.
+- Decision: keep the name "Gitloom" for 1.0. The repository is
+  `github.com/a-denisov-psb/gitloom`; the application id is derived from the GitHub
+  account (`io.github.a_denisov_psb.Gitloom`) because no own domain exists. The collision
+  is a known and accepted risk (discoverability, possible trademark objection).
+- Consequences: no rename migration (config dir `Gitloom` stays); the values in
+  `git_core::identity` are final; the crate is not published on crates.io under this
+  name (taken). A later rename stays possible as one task because of ADR-028. ADR-031 is
+  reserved for M6-08 (packaging), so the numbering has a gap until then (filled by M6-08).
+
+## ADR-034 Autonomous milestone execution
+
+- Status: accepted (maintainer, 2026-11-06; changes the workflow of ADR-017)
+- Decision: Claude Code works through a whole milestone without asking back, one Claude
+  Code chat per milestone.
+  - Plan gaps, contradictions and design questions are decided by Claude Code itself: the
+    most conservative variant that is closest to GitKraken. The decision is recorded as an
+    ADR (architecture or dependencies) or as a deviation note in the milestone file or
+    `docs/UX-PARITY.md`, and mentioned in one sentence in the report.
+  - Claude Code stops only for:
+    (a) CI is red and still not fixed after two fix attempts;
+    (b) maintainer-only actions (certificates, secrets, accounts, domains, money): skip
+    these tasks, record them under "Maintainer to-dos" in `docs/HANDOVER.md`, continue;
+    (c) irreversible actions outside the repository;
+    (d) scope extension by new features. Reducing scope or moving items to the ideas
+    backlog is allowed, with a note in the milestone file.
+  - The release at the end of the milestone is fully autonomous (`/release`):
+    `release/X.Y.Z`, merge into `master`, tag `vX.Y.Z`, push `master` and the tag, merge
+    back into `develop`. Preconditions: `./scripts/check.sh` green, clippy for the
+    Windows target green, CI on `develop` green.
+- Why: the maintainer's role moves from approving every step to planning milestones and
+  reviewing results; stops are reserved for things only the maintainer can do or undo.
+- Consequences: `CLAUDE.md`, `.claude/commands/` and `.claude/settings.json` allow
+  pushing `master` and tags as part of `/release`. Force-push, `reset --hard`, `rebase`
+  and `clean` stay denied. Reports are one line per task and one report per milestone.
+
+## ADR-035 Headless UI checks with iced_test
+
+- Status: accepted (M6-03)
+- Context: UI tasks must be checked by hand, but keyboard input never reached the
+  window in the WSLg setup, and screenshots of the Windows desktop fail while it is
+  locked.
+- Decision: `iced_test 0.14` (iced's own simulator, MIT) is a dev-dependency of the app.
+  `crates/app/src/ui_check.rs` renders the real `App::view` headless, clicks widgets by
+  their text, types keys and writes PNG snapshots to `target/ui-snapshots/`. The checks
+  are `#[ignore]`d (they need a renderer) and run with
+  `ICED_TEST_BACKEND=tiny-skia cargo test -p gitloom ui_check -- --ignored`.
+- Consequences: snapshots use iced's Fira Sans test font instead of the system font;
+  the release binary is unaffected (dev-dependency only). A real window check stays
+  part of the release checklist (M6-13).
+
+## ADR-036 App icon and platform metadata
+
+- Status: accepted (M6-04)
+- Decision: the icon master is `crates/app/assets/app-icon/icon.svg` (own design: two Git
+  lanes woven like loom threads). `scripts/app-icon.sh` renders the PNG sizes 16–1024,
+  `icon.ico` (PNG entries) and `icon.icns` (PNG entries) with `resvg 0.48`
+  (dev-dependency, newest release at least 14 days old). The window icon is the
+  embedded 256 px PNG; on Linux the window's application id is `identity::APP_ID`, the
+  name of the `.desktop` file. Windows executables get a version resource and the icon
+  from `build.rs` via `winresource 0.1` (build-dependency, MIT; runs only for Windows
+  targets, uses `rc.exe` or MinGW's `windres`). Desktop file, AppStream metainfo and the
+  macOS `Info.plist` keys live in `packaging/`; a test checks them against
+  `git_core::identity`. Minimum macOS version: 11.0 (first release with universal
+  binaries).
+- Why: one reproducible source for every icon format without image tools on the
+  build machine.
+

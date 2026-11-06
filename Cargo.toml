@@ -3,10 +3,13 @@ resolver = "3"
 members = ["crates/git-core", "crates/git-graph", "crates/app"]
 
 [workspace.package]
-version = "0.6.1"
+version = "1.0.0-rc.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 rust-version = "1.88"
+description = "Native, open-source Git client with a GitKraken-style interface"
+repository = "https://github.com/a-denisov-psb/gitloom"
+homepage = "https://github.com/a-denisov-psb/gitloom"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -21,4 +24,5 @@ print_stdout = "warn"
 
 [profile.release]
 lto = "thin"
-strip = true
+# Keep the symbol table so crash report backtraces name functions (ADR-029).
+strip = "debuginfo"

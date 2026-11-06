@@ -357,6 +357,25 @@ pub enum Message {
     /// Filter of the keyboard shortcut list changed.
     ShortcutFilterChanged(String),
     ShortcutListClosed,
+    AboutOpened,
+    AboutClosed,
+    /// Result of the crash report check at start (M6-05).
+    CrashReportFound(Option<crate::crash::Pending>),
+    CrashReportOpenFolder,
+    CrashReportCopy,
+    CrashReportDismissed,
+    /// Preferences → General → Check for updates (M6-06).
+    UpdatesToggled(bool),
+    /// The timer of the update check with this sequence number ran out.
+    UpdateDue(u64),
+    UpdateChecked(Result<Vec<crate::update::Release>, String>),
+    UpdateDismissed,
+    /// Opens a URL in the browser or a file in its default application.
+    OpenLink(String),
+    /// Tab / Shift+Tab: next or previous text field.
+    FocusMoved {
+        back: bool,
+    },
     /// Esc taken by a focused text field.
     EscapeCaptured,
     /// Backspace, also when a text field took it (palette sub-lists).
@@ -730,6 +749,18 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
+    /// About dialog open (M6-03).
+    pub about: bool,
+    /// Crash report of the previous run, offered once in the status bar.
+    pub crash_notice: Option<crate::crash::Pending>,
+    /// Last check and dismissed version, stored in the session (M6-06).
+    update_state: crate::update::UpdateState,
+    /// Newer release found by the update check.
+    pub update_available: Option<crate::update::Release>,
+    /// Creates the release source only when a check runs (ADR-030).
+    update_source_factory: fn() -> Option<Arc<dyn crate::update::ReleaseSource>>,
+    /// Invalidates pending update timers.
+    update_seq: u64,
     /// Open command palette (Ctrl+P).
     pub palette: Option<Palette>,
     /// Palette actions used recently, most recent first.
@@ -795,6 +826,12 @@ impl App {
             form: None,
             context_menu: None,
             shortcut_list: None,
+            about: false,
+            crash_notice: None,
+            update_state: Default::default(),
+            update_available: None,
+            update_source_factory: crate::update::github_source,
+            update_seq: 0,
             palette: None,
             recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
@@ -849,7 +886,15 @@ impl App {
             Message::GitDetected(result.unwrap_or(git_core::GitAvailability::Missing))
         });
         let system_theme = iced::system::theme().map(Message::SystemTheme);
-        (app, Task::batch([task, detect, system_theme]))
+        // Only the real app (with a session) looks for crash reports.
+        let crashes = match app.session_path.as_ref().and(crate::crash::default_dir()) {
+            Some(dir) => Task::perform(
+                blocking(move || Ok(crate::crash::take_pending(&dir))),
+                |found| Message::CrashReportFound(found.ok().flatten()),
+            ),
+            None => Task::none(),
+        };
+        (app, Task::batch([task, detect, system_theme, crashes]))
     }
 
     /// Why write actions are blocked, if they are (unknown counts as blocked).
@@ -1230,7 +1275,11 @@ impl App {
                 Some(id.clone()),
             ),
         };
-        let stash_message = format!("Gitloom: before {}", label.to_lowercase());
+        let stash_message = format!(
+            "{}: before {}",
+            git_core::identity::DISPLAY_NAME,
+            label.to_lowercase()
+        );
         let task = self.run_undoable(tab, label, move |git| {
             if stash_first {
                 git.stash_push(Some(&stash_message))?;
@@ -1676,6 +1725,7 @@ impl App {
         }
         self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
+        self.update_state = session.update.clone();
         let (paths, active) = (session.tabs.clone(), session.active);
         // Before opening: the loaders read stored per-repository state
         // (hidden branches).
@@ -1694,7 +1744,34 @@ impl App {
         for path in std::mem::take(&mut self.pending_paths) {
             tasks.push(self.open_path(path));
         }
+        // Settings are loaded before the session.
+        tasks.push(self.schedule_update_check(crate::update::now()));
         Task::batch(tasks)
+    }
+
+    /// Runs the update check now if it is due, else arms a timer for it.
+    /// Nothing happens (no client, no request) while the setting is off.
+    fn schedule_update_check(&mut self, now: u64) -> Task<Message> {
+        self.update_seq += 1;
+        if !self.settings.general.check_updates || !self.session_loaded {
+            return Task::none();
+        }
+        let seq = self.update_seq;
+        let wait = crate::update::due_in(self.update_state.last_check, now);
+        if wait > 0 {
+            // Created lazily: the timer needs the runtime that runs the task.
+            return Task::perform(
+                async move { tokio::time::sleep(std::time::Duration::from_secs(wait)).await },
+                move |()| Message::UpdateDue(seq),
+            );
+        }
+        let Some(source) = (self.update_source_factory)() else {
+            return Task::none();
+        };
+        // Also a failed check waits a day: at most one request per day.
+        self.update_state.last_check = Some(now);
+        let check = Task::perform(blocking(move || source.releases()), Message::UpdateChecked);
+        Task::batch([check, self.persist()])
     }
 
     /// Session as it should be on disk for the current state.
@@ -1717,6 +1794,7 @@ impl App {
             panes: self.panes.ratios,
             ref_filters: self.ref_filters(),
             pull_mode: self.pull_mode.into(),
+            update: self.update_state.clone(),
         }
     }
 
@@ -1819,10 +1897,8 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        match self.active_tab().and_then(Tab::view) {
-            Some(view) => format!("{} – Gitloom", view.name()),
-            None => "Gitloom".into(),
-        }
+        let view = self.active_tab().and_then(Tab::view);
+        git_core::identity::window_title(view.map(|view| view.name()))
     }
 
     pub fn active_tab(&self) -> Option<&Tab> {
@@ -1899,11 +1975,32 @@ impl App {
             }
             return Task::none();
         }
+        // An open context menu: ↑/↓ move the highlight, Enter runs it.
+        if let Some(menu) = &mut self.context_menu {
+            match shortcut {
+                Shortcut::Navigate(crate::nav::Move::Next) => {
+                    menu.move_highlight(true);
+                    return Task::none();
+                }
+                Shortcut::Navigate(crate::nav::Move::Previous) => {
+                    menu.move_highlight(false);
+                    return Task::none();
+                }
+                Shortcut::Confirm => {
+                    if let Some(index) = menu.highlighted {
+                        return self.update(Message::MenuSelected(index));
+                    }
+                    return Task::none();
+                }
+                _ => {}
+            }
+        }
         // An open dialog or menu only reacts to Esc and Enter.
         let overlay_open = self.modal.is_some()
             || self.context_menu.is_some()
             || self.message_dialog.is_some()
             || self.shortcut_list.is_some()
+            || self.about
             || self.settings_page.is_some();
         // Zoom and fullscreen change nothing in the overlay's content.
         if overlay_open
@@ -2064,20 +2161,48 @@ impl App {
                 });
             }
             Shortcut::Settings => return self.open_settings(),
+            Shortcut::About => return self.update(Message::AboutOpened),
+            Shortcut::Pull => return self.update(Message::Pull(None)),
+            Shortcut::Push => return self.update(Message::Push { force: false }),
+            Shortcut::Stash => return self.update(Message::StashPush),
+            Shortcut::PopStash => {
+                let first = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.stashes.first().map(|s| s.id.clone()));
+                return match first {
+                    Some(id) => self.update(Message::StashPop(id)),
+                    None => {
+                        self.status = "No stash to pop".into();
+                        Task::none()
+                    }
+                };
+            }
+            Shortcut::ContextMenu => {
+                let selected =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .and_then(|v| match &v.selection {
+                            Some(Selection::Commit(id)) if !v.snapshot.is_stash(id) => {
+                                Some(id.clone())
+                            }
+                            _ => None,
+                        });
+                if let Some(id) = selected {
+                    // No pointer position: open it near the graph's top left.
+                    let position = iced::Point::new(
+                        self.window_size.width * 0.3,
+                        self.window_size.height * 0.25,
+                    );
+                    let task = self.update(Message::CommitContextMenu { id, position });
+                    if let Some(menu) = &mut self.context_menu {
+                        menu.move_highlight(true);
+                    }
+                    return task;
+                }
+            }
             Shortcut::Close => {
-                if self.modal.take().is_some()
-                    || self.context_menu.take().is_some()
-                    || self.shortcut_list.take().is_some()
-                    || self.settings_page.take().is_some()
-                    || self.form.take().is_some()
-                    || self.message_dialog.take().is_some()
-                    || self
-                        .active_view_mut()
-                        .is_some_and(|v| v.drag.take().is_some())
-                    || self
-                        .active_view_mut()
-                        .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
-                {
+                if self.close_topmost_overlay() {
                     return Task::none();
                 }
                 if let Some(view) = self.active_view_mut() {
@@ -2100,6 +2225,25 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    /// Closes the topmost dialog, menu, overlay or inline input; false if
+    /// none was open (M6-07: Esc closes every overlay, also when a text
+    /// field inside it had focus).
+    fn close_topmost_overlay(&mut self) -> bool {
+        std::mem::take(&mut self.about)
+            || self.modal.take().is_some()
+            || self.context_menu.take().is_some()
+            || self.shortcut_list.take().is_some()
+            || self.form.take().is_some()
+            || self.message_dialog.take().is_some()
+            || self.settings_page.take().is_some()
+            || self
+                .active_view_mut()
+                .is_some_and(|v| v.drag.take().is_some())
+            || self
+                .active_view_mut()
+                .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
     }
 
     /// Opens the repository containing `path` in tab `id`.
@@ -2612,9 +2756,19 @@ impl App {
                     after,
                 } => {
                     if undo {
-                        git_core::move_head(git, Some(&after), before.as_deref(), "gitloom: undo")?;
+                        git_core::move_head(
+                            git,
+                            Some(&after),
+                            before.as_deref(),
+                            &git_core::identity::reflog_message("undo"),
+                        )?;
                     } else {
-                        git_core::move_head(git, before.as_deref(), Some(&after), "gitloom: redo")?;
+                        git_core::move_head(
+                            git,
+                            before.as_deref(),
+                            Some(&after),
+                            &git_core::identity::reflog_message("redo"),
+                        )?;
                     }
                     UndoAction::Commit {
                         amend,
@@ -3530,6 +3684,78 @@ impl App {
                 }
             }
             Message::ShortcutListClosed => self.shortcut_list = None,
+            Message::AboutOpened => {
+                self.context_menu = None;
+                self.shortcut_list = None;
+                self.palette = None;
+                self.about = true;
+            }
+            Message::AboutClosed => self.about = false,
+            Message::CrashReportFound(pending) => self.crash_notice = pending,
+            Message::CrashReportOpenFolder => {
+                let Some(file) = self.crash_notice.as_ref().map(|c| c.path.clone()) else {
+                    return Task::none();
+                };
+                return Task::perform(
+                    blocking(move || {
+                        crate::launch::spawn(&crate::launch::reveal_file(
+                            crate::launch::Platform::current(),
+                            &file,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
+            Message::CrashReportCopy => {
+                if let Some(crash) = &self.crash_notice {
+                    self.status = "Crash report copied".into();
+                    return iced::clipboard::write(crash.text.clone());
+                }
+            }
+            Message::CrashReportDismissed => self.crash_notice = None,
+            Message::UpdatesToggled(on) => {
+                self.settings.general.check_updates = on;
+                if !on {
+                    self.update_available = None;
+                }
+                let check = self.schedule_update_check(crate::update::now());
+                return Task::batch([self.save_settings(), check]);
+            }
+            Message::UpdateDue(seq) => {
+                if seq == self.update_seq {
+                    return self.schedule_update_check(crate::update::now());
+                }
+            }
+            Message::UpdateChecked(result) => {
+                // Failures stay silent: the check is a background convenience.
+                if let (Ok(releases), Some(running)) = (
+                    result,
+                    crate::update::Version::parse(crate::about::version()),
+                ) {
+                    self.update_available = crate::update::newer_release(&running, &releases)
+                        .filter(|r| crate::update::should_notify(r, &self.update_state));
+                }
+                if self.settings.general.check_updates {
+                    return self.schedule_update_check(crate::update::now());
+                }
+            }
+            Message::UpdateDismissed => {
+                if let Some(release) = self.update_available.take() {
+                    self.update_state.dismissed = Some(release.version.to_string());
+                    return self.persist();
+                }
+            }
+            Message::OpenLink(target) => {
+                return Task::perform(
+                    blocking(move || {
+                        crate::launch::spawn(&crate::launch::open_target(
+                            crate::launch::Platform::current(),
+                            &target,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
             Message::SettingsLoaded(loaded) => {
                 let settings::Loaded {
                     settings,
@@ -3754,15 +3980,19 @@ impl App {
                 }
             }
             Message::EscapeCaptured => {
-                if self.palette.take().is_none()
-                    && self.shortcut_list.take().is_none()
-                    && self.settings_page.take().is_none()
-                {
+                if self.palette.take().is_none() && !self.close_topmost_overlay() {
                     // Esc in the search field closes the search.
                     if let Some(view) = self.active_view_mut() {
                         view.search = None;
                     }
                 }
+            }
+            Message::FocusMoved { back } => {
+                return if back {
+                    iced::widget::operation::focus_previous()
+                } else {
+                    iced::widget::operation::focus_next()
+                };
             }
             Message::BackspacePressed => {
                 if self
@@ -4975,8 +5205,9 @@ impl App {
                     DiscardTarget::File(file) => (
                         "Discard changes".to_string(),
                         format!(
-                            "Discard all changes to {}? This cannot be undone outside Gitloom.",
-                            file.path
+                            "Discard all changes to {}? This cannot be undone outside {}.",
+                            file.path,
+                            git_core::identity::DISPLAY_NAME
                         ),
                     ),
                     DiscardTarget::All => (
@@ -6575,18 +6806,19 @@ fn auto_fetch_state(view: &RepoView) -> crate::fetch::TabState {
 }
 
 /// Hint for authentication failures in Git's output (ADR-019).
-fn auth_hint(error: &str) -> Option<&'static str> {
+fn auth_hint(error: &str) -> Option<String> {
+    let name = git_core::identity::DISPLAY_NAME;
     let lower = error.to_lowercase();
     if lower.contains("host key verification failed") {
-        Some("The server's SSH host key was not accepted. Check the host and confirm its key, then try again.")
+        Some("The server's SSH host key was not accepted. Check the host and confirm its key, then try again.".into())
     } else if lower.contains("permission denied (publickey") {
-        Some("The server rejected your SSH key. Check that the key is added to your account and loaded in ssh-agent (or protected by a passphrase Gitloom can ask for).")
+        Some(format!("The server rejected your SSH key. Check that the key is added to your account and loaded in ssh-agent (or protected by a passphrase {name} can ask for)."))
     } else if lower.contains("authentication failed")
         || lower.contains("could not read username")
         || lower.contains("could not read password")
         || lower.contains("invalid username or password")
     {
-        Some("Authentication failed. Check your credentials or your Git credential helper (e.g. Git Credential Manager); Gitloom does not store passwords.")
+        Some(format!("Authentication failed. Check your credentials or your Git credential helper (e.g. Git Credential Manager); {name} does not store passwords."))
     } else {
         None
     }
@@ -6737,6 +6969,22 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
         Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
+        }
+        // Tab / Shift+Tab move the focus between text fields (M6-07);
+        // Ctrl+Tab switches repository tabs; a multi-line editor that takes
+        // Tab keeps it.
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Tab),
+            modifiers,
+            ..
+        }) if status == event::Status::Ignored
+            && !modifiers.control()
+            && !modifiers.logo()
+            && !modifiers.alt() =>
+        {
+            Some(Message::FocusMoved {
+                back: modifiers.shift(),
+            })
         }
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
@@ -6982,7 +7230,7 @@ async fn blocking<T: Send + 'static>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn app_with_tabs(count: usize) -> App {
@@ -7217,7 +7465,7 @@ mod tests {
     }
 
     /// App with one ready tab showing commits `ids` (linear, newest first).
-    fn ready_app(ids: &[&str]) -> App {
+    pub(crate) fn ready_app(ids: &[&str]) -> App {
         use git_core::{Commit, Head, Log, WorkingTree};
 
         let (mut app, _) = App::new(Vec::new(), None);
@@ -7260,7 +7508,7 @@ mod tests {
             .and_then(|v| v.selection.clone())
     }
 
-    fn checked(shortcut: Shortcut, text_input_focused: bool) -> Message {
+    pub(crate) fn checked(shortcut: Shortcut, text_input_focused: bool) -> Message {
         Message::ShortcutChecked {
             shortcut,
             text_input_focused,
@@ -7405,8 +7653,11 @@ mod tests {
         assert_eq!(app.window_size(), iced::Size::new(600.0, 400.0));
     }
 
-    /// Counts created HTTP clients (avatars, M5-11).
-    static FETCHERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    thread_local! {
+        /// Counts created HTTP clients (avatars, M5-11). Per test thread, so
+        /// tests running in parallel do not see each other's clients.
+        static FETCHERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
 
     struct NoNetwork;
 
@@ -7417,7 +7668,7 @@ mod tests {
     }
 
     fn counting_factory() -> Arc<dyn crate::avatars::Fetcher> {
-        FETCHERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        FETCHERS.with(|n| n.set(n.get() + 1));
         Arc::new(NoNetwork)
     }
 
@@ -7441,7 +7692,7 @@ mod tests {
     #[test]
     fn avatars_off_means_no_client_and_no_request() {
         let mut app = avatar_app(6);
-        let created = FETCHERS.load(std::sync::atomic::Ordering::SeqCst);
+        let created = FETCHERS.with(std::cell::Cell::get);
         let _ = app.update(Message::GraphScrolled {
             offset: 0.0,
             height: 600.0,
@@ -7449,7 +7700,7 @@ mod tests {
         let _ = app.update(Message::CommitSelected("c1".into()));
         assert!(app.avatar_fetcher.is_none());
         assert_eq!(app.avatars.in_flight(), 0);
-        assert_eq!(FETCHERS.load(std::sync::atomic::Ordering::SeqCst), created);
+        assert_eq!(FETCHERS.with(std::cell::Cell::get), created);
     }
 
     #[test]
@@ -10536,6 +10787,242 @@ mod tests {
         assert_eq!(palette_labels(&app)[0], "Toggle left panel");
         let _ = app.update(Message::Shortcut(Shortcut::Close));
         assert!(app.palette.is_none());
+    }
+
+    thread_local! {
+        /// Release sources created by the update check (M6-06), per test thread.
+        static UPDATE_SOURCES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    struct NoReleases;
+
+    impl crate::update::ReleaseSource for NoReleases {
+        fn releases(&self) -> Result<Vec<crate::update::Release>, String> {
+            Err("tests have no network".into())
+        }
+    }
+
+    fn counting_update_source() -> Option<Arc<dyn crate::update::ReleaseSource>> {
+        UPDATE_SOURCES.with(|n| n.set(n.get() + 1));
+        Some(Arc::new(NoReleases))
+    }
+
+    fn update_sources() -> usize {
+        UPDATE_SOURCES.with(std::cell::Cell::get)
+    }
+
+    fn release(tag: &str) -> crate::update::Release {
+        crate::update::Release {
+            version: crate::update::Version::parse(tag).unwrap(),
+            url: format!("https://example.com/{tag}"),
+        }
+    }
+
+    fn update_app() -> App {
+        let (mut app, _) = App::new(Vec::new(), None);
+        app.update_source_factory = counting_update_source;
+        app
+    }
+
+    #[test]
+    fn update_check_off_means_no_source_and_no_request() {
+        let mut app = update_app();
+        let before = update_sources();
+        let _ = app.update(loaded(Session::default()));
+        let seq = app.update_seq;
+        let _ = app.update(Message::UpdateDue(seq));
+        assert_eq!(update_sources(), before);
+        assert!(app.update_state.last_check.is_none());
+        // On, then off again: the pending timer is void.
+        let _ = app.update(Message::UpdatesToggled(true));
+        assert_eq!(update_sources(), before + 1);
+        let _ = app.update(Message::UpdatesToggled(false));
+        let stale = app.update_seq;
+        let _ = app.update(Message::UpdateDue(stale));
+        assert_eq!(update_sources(), before + 1);
+        assert!(!app.settings.general.check_updates);
+    }
+
+    #[test]
+    fn update_check_runs_once_a_day_and_offers_newer_releases() {
+        let mut app = update_app();
+        app.settings.general.check_updates = true;
+        let before = update_sources();
+        let _ = app.update(loaded(Session::default()));
+        // Due at start: one request, time stored in the session.
+        assert_eq!(update_sources(), before + 1);
+        let last = app.update_state.last_check.unwrap();
+        assert_eq!(app.current_session().update.last_check, Some(last));
+        // A timer that fires early does not request again.
+        let seq = app.update_seq;
+        let _ = app.update(Message::UpdateDue(seq));
+        assert_eq!(update_sources(), before + 1);
+
+        let running = crate::update::Version::parse(crate::about::version()).unwrap();
+        let newer = format!("{}.{}.{}", running.major + 1, 0, 0);
+        let _ = app.update(Message::UpdateChecked(Ok(vec![
+            release("0.0.1"),
+            release(&newer),
+        ])));
+        assert_eq!(
+            app.update_available.as_ref().unwrap().version.to_string(),
+            newer
+        );
+        // Dismissed per version.
+        let _ = app.update(Message::UpdateDismissed);
+        assert!(app.update_available.is_none());
+        assert_eq!(app.update_state.dismissed.as_deref(), Some(newer.as_str()));
+        let _ = app.update(Message::UpdateChecked(Ok(vec![release(&newer)])));
+        assert!(app.update_available.is_none());
+        let newest = format!("{}.{}.{}", running.major + 2, 0, 0);
+        let _ = app.update(Message::UpdateChecked(Ok(vec![release(&newest)])));
+        assert!(app.update_available.is_some());
+        // Failures are silent.
+        let _ = app.update(Message::UpdateChecked(Err("offline".into())));
+        assert!(app.status.is_empty());
+    }
+
+    #[test]
+    fn esc_in_a_focused_field_closes_the_overlay() {
+        let mut app = ready_app(&["c"]);
+        // The form focuses its first input, so Esc arrives as captured.
+        let _ = app.update(Message::AddRemoteStart);
+        assert!(app.form.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.form.is_none());
+        // Preferences (auto-fetch input) and the About dialog on top.
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let _ = app.update(Message::AboutOpened);
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(!app.about && app.settings_page.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.settings_page.is_none());
+        // Nothing open: Esc in the search field closes the search.
+        let _ = app.update(checked(Shortcut::SearchCommits, false));
+        assert!(app.tabs[0].view().unwrap().search.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.tabs[0].view().unwrap().search.is_none());
+    }
+
+    #[test]
+    fn tab_moves_the_focus_but_ctrl_tab_switches_tabs() {
+        use iced::keyboard::{key::Named, Key, Location, Modifiers};
+        let press = |modifiers: Modifiers| {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Tab),
+                modified_key: Key::Named(Named::Tab),
+                physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Tab),
+                location: Location::Standard,
+                modifiers,
+                text: None,
+                repeat: false,
+            })
+        };
+        let id = window::Id::unique();
+        assert!(matches!(
+            global_event(press(Modifiers::empty()), event::Status::Ignored, id),
+            Some(Message::FocusMoved { back: false })
+        ));
+        assert!(matches!(
+            global_event(press(Modifiers::SHIFT), event::Status::Ignored, id),
+            Some(Message::FocusMoved { back: true })
+        ));
+        assert!(matches!(
+            global_event(press(Modifiers::CTRL), event::Status::Ignored, id),
+            Some(Message::Shortcut(Shortcut::NextTab))
+        ));
+        // A multi-line editor that took Tab keeps it.
+        assert!(global_event(press(Modifiers::empty()), event::Status::Captured, id).is_none());
+    }
+
+    #[test]
+    fn context_menu_by_keyboard() {
+        use crate::nav::Move;
+        let mut app = ready_app(&["c", "b"]);
+        let _ = app.update(Message::CommitSelected("b".into()));
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        let menu = app.context_menu.as_ref().expect("commit menu");
+        let first = menu.highlighted.expect("first item highlighted");
+        // Graph navigation pauses while the menu is open.
+        let _ = app.update(checked(Shortcut::Navigate(Move::Next), false));
+        let second = app.context_menu.as_ref().unwrap().highlighted.unwrap();
+        assert_ne!(first, second);
+        assert_eq!(selected(&app), Some(Selection::Commit("b".into())));
+        let _ = app.update(checked(Shortcut::Navigate(Move::Previous), false));
+        assert_eq!(app.context_menu.as_ref().unwrap().highlighted, Some(first));
+        let _ = app.update(checked(Shortcut::Close, false));
+        assert!(app.context_menu.is_none());
+        // Enter runs the highlighted item (and closes the menu).
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        let _ = app.update(checked(Shortcut::Confirm, false));
+        assert!(app.context_menu.is_none());
+        // The WIP row has no commit menu.
+        let _ = app.update(Message::WipSelected);
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        assert!(app.context_menu.is_none());
+    }
+
+    #[test]
+    fn toolbar_actions_are_in_the_palette() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        for label in ["Pull", "Push", "Stash", "Pop stash"] {
+            let _ = app.update(Message::PaletteQuery(label.to_lowercase()));
+            assert!(palette_labels(&app).iter().any(|l| l == label), "{label}");
+        }
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        // Nothing to pop: a reason instead of an error.
+        let _ = app.update(checked(Shortcut::PopStash, false));
+        assert_eq!(app.status, "No stash to pop");
+    }
+
+    #[test]
+    fn crash_report_notice_offers_copy_and_dismiss() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::CrashReportFound(None));
+        assert!(app.crash_notice.is_none());
+        let pending = crate::crash::Pending {
+            path: "/data/crashes/x.txt".into(),
+            text: "report text".into(),
+            fatal: true,
+        };
+        let _ = app.update(Message::CrashReportFound(Some(pending.clone())));
+        assert_eq!(app.crash_notice.as_ref(), Some(&pending));
+        let _ = app.update(Message::CrashReportCopy);
+        assert_eq!(app.status, "Crash report copied");
+        let _ = app.update(Message::CrashReportDismissed);
+        assert!(app.crash_notice.is_none());
+    }
+
+    #[test]
+    fn about_opens_from_palette_and_preferences_and_closes() {
+        let mut app = ready_app(&["c"]);
+        // Palette: "About <name>".
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("about".into()));
+        assert_eq!(
+            palette_labels(&app)[0],
+            format!("About {}", git_core::identity::DISPLAY_NAME)
+        );
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        assert!(app.about);
+        // Other shortcuts wait while it is open; Esc closes it.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        assert_eq!(app.tabs.len(), 1);
+        let _ = app.update(checked(Shortcut::Close, false));
+        assert!(!app.about);
+
+        // From the Preferences: Esc closes the dialog first, then the view.
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let _ = app.update(Message::AboutOpened);
+        assert!(app.about && app.settings_page.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(!app.about);
+        assert!(app.settings_page.is_some());
+        let _ = app.update(Message::AboutOpened);
+        let _ = app.update(Message::AboutClosed);
+        assert!(!app.about);
     }
 
     #[test]

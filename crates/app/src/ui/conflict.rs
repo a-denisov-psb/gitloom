@@ -139,7 +139,8 @@ fn text_view<'a>(
         .on_action(Message::ConflictOutputEdited)
         .font(Font::MONOSPACE)
         .size(TEXT_SIZE)
-        .height(Fill);
+        .height(Fill)
+        .style(theme::editor);
 
     column![
         toolbar,

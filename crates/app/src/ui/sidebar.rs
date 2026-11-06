@@ -99,7 +99,8 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let filter = text_input("Filter", &repo.filter)
         .id(crate::app::FILTER_INPUT)
         .on_input(Message::FilterChanged)
-        .padding([4, 8]);
+        .padding([4, 8])
+        .style(theme::input);
 
     let content = column![
         container(filter).padding(8),

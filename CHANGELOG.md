@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-11-06
+
+First release candidate of Gitloom 1.0: installers for Linux, macOS and Windows, a new license (GPL-3.0-or-later), crash reports, an opt-in update check, an accessibility pass and a user guide.
+
+### Added
+
+- Keyboard access: Shift+F10 or the Menu key opens the context menu of the selected commit (↑/↓ and Enter choose an entry); Tab / Shift+Tab move between input fields; Pull, Push, Stash and Pop stash are in the command palette.
+- Update check, opt-in (Preferences → General, off by default): once a day Gitloom asks GitHub for the latest release and shows "Gitloom X is available" in the status bar with a link to the release notes. Nothing is downloaded or installed.
+- Crash reports: if Gitloom crashes, a local report (version, OS, message, backtrace) is written to the data folder; the next start offers "Open report folder" and "Copy report" in the status bar. Nothing is uploaded.
+- App icon for the window, taskbar/dock and packages; Windows executables carry version information; Linux desktop entry and AppStream metadata.
+- User guide in `docs/user/` (getting started, coming from GitKraken, daily workflow, branches and remotes, merge/rebase/conflicts, undo, settings, privacy, troubleshooting, known limitations), linked from the README and the About dialog.
+- About dialog (command palette "About Gitloom", or the button at the bottom of the Preferences): version, commit, license, links to the repository and the issue tracker, and all third-party components with their licenses.
+
+### Changed
+
+- Gitloom is now licensed under the GNU General Public License v3.0 or later (previously MIT OR Apache-2.0). Third-party licenses are listed in `THIRD-PARTY-LICENSES.md`.
+
+### Fixed
+
+- Esc closes a dialog, form or menu with one press also while one of its input fields has focus.
+- Focused input fields show a clearly visible focus ring in both themes; icon-only buttons (zoom, disabled Stash/Pop in the compact toolbar) have tooltips.
+
 ## [0.6.1] - 2026-11-06
 
 ### Fixed

@@ -16,18 +16,18 @@ Setup in Cowork:
 
 | Who | Does | Does not |
 |---|---|---|
-| Maintainer | Decides, approves merges and releases | – |
+| Maintainer | Decides scope, reviews milestone reports, does maintainer-only actions | Approve single tasks, merges or releases (ADR-034) |
 | Planning chat (you) | Product decisions with the maintainer, roadmap, detailed milestone plans, reviews of Claude Code's results | Write or change code |
-| Claude Code | Implements milestone tasks on feature branches, tests, keeps docs in sync | Change scope on its own |
+| Claude Code | Works through a whole milestone autonomously (one chat per milestone): tasks, plan-gap decisions, merges, release | Extend scope with new features |
 
 ### How planning works
 
 1. Maintainer and planning chat decide scope and write the milestone file (`docs/milestones/Mx-*.md`): tasks, dependencies, acceptance criteria, UX parity references.
 2. The planning chat hands the maintainer prompts for Claude Code (with full file contents, see section 3). The maintainer pastes them into Claude Code.
-3. Claude Code implements task by task (`/next-task`, `/finish-task`), merges green features into `develop` and reports back in German.
-4. The planning chat reviews the result (checkboxes, notes under each task, `git log`), adjusts the plan and prepares the next prompts.
+3. The maintainer starts one Claude Code chat per milestone. Claude Code implements task by task (`/next-task`, `/finish-task`) without asking back, merges green features into `develop`, reports one line per task and releases the milestone itself (`/release`, ADR-034) with a final report.
+4. The planning chat reviews the milestone report (checkboxes, deviation notes, new ADRs, `git log`), adjusts the plan and prepares the next milestone.
 
-The milestone files are the contract: Claude Code does not change scope on its own and records open points in `docs/HANDOVER.md` → "Open questions"; the planning chat answers them and updates the plan.
+The milestone files are the contract: Claude Code does not extend scope. It decides plan gaps itself (most conservative, GitKraken-closest variant) and documents them as ADR, milestone note or `docs/UX-PARITY.md` deviation; it stops only for the reasons in ADR-034. Skipped maintainer-only tasks land in `docs/HANDOVER.md` → "Maintainer to-dos". The planning chat reviews these decisions after the milestone.
 
 ### Rules for editing files
 
@@ -55,7 +55,7 @@ The milestone files are the contract: Claude Code does not change scope on its o
 - Open-source, cross-platform Git client in Rust that looks and behaves like (older) GitKraken, without subscription and without bloat.
 - **Hard requirement:** layout and interaction must match GitKraken so long-time users feel at home immediately. Colors and icons are free; no GitKraken name, logo or assets.
 - Native UI, no webview (performance and footprint).
-- Working title "Gitloom".
+- Name "Gitloom" (kept for 1.0, ADR-033).
 
 ### Key decisions (details in `docs/DECISIONS.md`)
 
@@ -68,7 +68,7 @@ The milestone files are the contract: Claude Code does not change scope on its o
 | Graph | Pure crate `git-graph`, Kahn ordering, stable lanes, per-row segments | Testable, virtualizable |
 | Demo data | Only in tests; unfinished actions disabled with tooltip | App must not look like a demo |
 | Branching | Git flow: `master` releases, `develop` integration, `feature/<task-id>-<slug>` | Maintainer's choice |
-| License | MIT OR Apache-2.0 | Provisional, needs confirmation |
+| License | GPL-3.0-or-later | Switched in M6-03 (ADR-008) |
 | Privacy | No telemetry, no accounts, offline by default | Scope |
 
 ### Verified technical facts
@@ -98,7 +98,8 @@ One line per milestone: version, date, scope, notable deviations.
 | M3 Branches and remotes | 0.4.0 | 2026-10-25 | Checkout, branch/tag create/rename/delete, fetch (manual + auto), pull modes, push incl. force-with-lease, upstream and remote management, context menus, undo/redo for ref operations, progress + cancel, Gitloom as askpass helper | Askpass mode detected via `GITLOOM_ASKPASS` env (ADR-019); credentials never stored |
 | M4 Merge, rebase, conflicts, undo | 0.5.0 | 2026-10-26 | Merge/ff, rebase and interactive rebase, cherry-pick, revert, reset, conflict resolution view, continue/skip/abort, drag and drop, multi-selection, undo/redo; Gitloom as Git's editor | Shift+↑/↓ select ranges instead of parent/child navigation; reset uses a mode dialog instead of a submenu; hard reset is undoable via a snapshot; editor input is a message queue; released with keyboard parts and the Windows walkthrough still open (maintainer to-dos); three known limitations moved to the backlog |
 | M5 Productivity parity | 0.6.0 | 2026-11-04 | Action registry and shortcut list, settings, light/dark theme, zoom and fullscreen, Lucide icons, command palette, commit search, hide/solo branches, file history and blame, opt-in avatars, external diff/merge tools, terminal and file manager, end-to-end check | Released with the Windows and keyboard to-dos still open (bundled in M6-13); GitHub Actions did not run from 2026-10-26 until the billing was fixed, CI of `develop` verified before the release |
-| M6 Release readiness | 1.0.0 | – | Planned in detail (`docs/milestones/M6-release-readiness.md`): rename, GPL-3.0-or-later, icon, crash reports, update check, accessibility, packaging, release workflow, SignPath, public repository, user docs, walkthrough | – |
+| Hotfix | 0.6.1 | 2026-11-06 | Network cancel could hang (v0.6.0 Windows CI timed out) | – |
+| M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
 
@@ -117,7 +118,7 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-03: rename before 1.0 because "GitLoom" exists as a product; the name itself is still open and blocks M6-02 |
+| 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-05: keep "Gitloom" despite the collision with the GitLoom product (ADR-033, supersedes the rename decision of 2026-11-03); repository `github.com/a-denisov-psb/gitloom` |
 | 2 | Confirm license (MIT OR Apache-2.0) | decided 2026-11-03: GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
 | 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0 |
@@ -128,7 +129,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Implement M6 (`docs/milestones/M6-release-readiness.md`): review Claude Code's result after every task (checkbox, note under the task, `git log` on `develop`) and adjust the plan where needed. The maintainer's name decision is pending and blocks M6-02.
+1. M6 (`docs/milestones/M6-release-readiness.md`) runs autonomously in one Claude Code chat (ADR-034). Review the milestone report after the release (deviations, new ADRs, maintainer to-dos) instead of each task.
 2. Answer the M6 maintainer verification items (milestone file) as the related tasks come up.
 3. Collect the maintainer's own ideas; place them in the roadmap.
 

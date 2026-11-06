@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
 
 [dependencies]
 git-core = { path = "../git-core" }
@@ -19,9 +23,50 @@ sha2 = "0.11"
 tokio = { version = "1.53", features = ["rt", "time"] }
 ureq = "3.4"
 
+[build-dependencies]
+# Windows version resource and exe icon (M6-04); only used for Windows targets.
+winresource = "0.1"
+
 [dev-dependencies]
 git-core = { path = "../git-core", features = ["mock"] }
 tempfile = "3.27"
+iced_test = "0.14"
+resvg = "0.48"
 
 [lints]
 workspace = true
+
+# Packaging with cargo-packager (M6-08, ADR-031): `scripts/package.sh` /
+# `scripts/package.ps1`. Name-dependent values match `git_core::identity`
+# (checked by a test in `app_icon.rs`).
+[package.metadata.packager]
+productName = "Gitloom"
+identifier = "io.github.a_denisov_psb.Gitloom"
+publisher = "Gitloom contributors"
+copyright = "Copyright © 2026 the Gitloom contributors. GPL-3.0-or-later."
+category = "DeveloperTool"
+licenseFile = "../../LICENSE"
+icons = [
+    "assets/app-icon/icon-32.png",
+    "assets/app-icon/icon-64.png",
+    "assets/app-icon/icon-128.png",
+    "assets/app-icon/icon-256.png",
+    "assets/app-icon/icon-512.png",
+    "assets/app-icon/icon.icns",
+    "assets/app-icon/icon.ico",
+]
+resources = [
+    { src = "../../LICENSE", target = "LICENSE" },
+    { src = "../../THIRD-PARTY-LICENSES.md", target = "THIRD-PARTY-LICENSES.md" },
+]
+
+[package.metadata.packager.macos]
+minimumSystemVersion = "11.0"
+infoPlistPath = "../../packaging/macos/Info.plist"
+
+[package.metadata.packager.deb]
+# Also used for the AppImage's desktop entry.
+desktopTemplate = "../../packaging/linux/appimage.desktop"
+
+[package.metadata.packager.wix]
+languages = ["en-US"]

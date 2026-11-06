@@ -23,11 +23,20 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
             .into()
     }))
     .spacing(2)
+    .push(space::vertical())
+    .push(
+        button(text(format!("About {}", git_core::identity::DISPLAY_NAME)))
+            .on_press(Message::AboutOpened)
+            .padding([6, 12])
+            .width(Fill)
+            .style(theme::list_item(false)),
+    )
     .padding(8)
-    .width(220);
+    .width(220)
+    .height(Fill);
 
     let form = match page.category {
-        Category::General => general(page),
+        Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
         Category::ExternalTools => external_tools(&app.settings, page),
     };
@@ -76,12 +85,13 @@ fn field<'a>(
     content.into()
 }
 
-fn general(page: &Page) -> Element<'_, Message> {
+fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
     let mut input = column![row![
         text_input("5", &page.auto_fetch_input)
             .id(AUTO_FETCH_INPUT)
             .on_input(Message::AutoFetchInput)
             .padding(6)
+            .style(theme::input)
             .width(90),
         muted("minutes"),
     ]
@@ -91,11 +101,25 @@ fn general(page: &Page) -> Element<'_, Message> {
     if let Some(error) = &page.error {
         input = input.push(text(error).size(12).style(theme::text_danger));
     }
-    field(
-        "Auto-fetch interval",
-        input.into(),
-        "Fetches all remotes of open repositories in the background. 0 turns auto-fetch off.",
-    )
+    let updates = settings.general.check_updates;
+    column![
+        field(
+            "Auto-fetch interval",
+            input.into(),
+            "Fetches all remotes of open repositories in the background. 0 turns auto-fetch off.",
+        ),
+        field(
+            "Check for updates",
+            iced::widget::toggler(updates)
+                .on_toggle(Message::UpdatesToggled)
+                .label(if updates { "On" } else { "Off" })
+                .into(),
+            "Asks api.github.com for the latest release once a day and shows a notice in the \
+             status bar. Nothing is downloaded or installed.",
+        ),
+    ]
+    .spacing(18)
+    .into()
 }
 
 /// Segmented control: one button per option, the chosen one highlighted.
@@ -160,10 +184,19 @@ fn appearance(app: &App) -> Element<'_, Message> {
 fn zoom<'a>(percent: u32) -> Element<'a, Message> {
     use crate::settings::{zoom_step, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN};
     let step = |label: Element<'a, Message>, target: u32, enabled: bool| {
-        button(label)
-            .on_press_maybe(enabled.then_some(Message::ZoomTo(target)))
-            .padding([5, 12])
-            .style(button::secondary)
+        let tip = if target > percent {
+            zoom_tip("Zoom in", crate::actions::ActionId::ZoomIn)
+        } else {
+            zoom_tip("Zoom out", crate::actions::ActionId::ZoomOut)
+        };
+        crate::ui::panel::with_tooltip_text(
+            button(label)
+                .on_press_maybe(enabled.then_some(Message::ZoomTo(target)))
+                .padding([5, 12])
+                .style(button::secondary)
+                .into(),
+            tip,
+        )
     };
     row![
         step(
@@ -282,11 +315,20 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
             text_input("Detect automatically", &tools.terminal_command)
                 .on_input(Message::TerminalCommandInput)
                 .padding(6)
+                .style(theme::input)
                 .width(Length::Fixed(420.0))
                 .into(),
             "Command for Alt+T and the toolbar's Terminal button; {path} is the repository folder. Empty: the first terminal found.",
         ))
         .into()
+}
+
+/// Tooltip of an icon-only zoom button, with its shortcut.
+fn zoom_tip(label: &str, action: crate::actions::ActionId) -> String {
+    match action.shortcut_text() {
+        Some(keys) => format!("{label} ({keys})"),
+        None => label.to_owned(),
+    }
 }
 
 #[cfg(test)]

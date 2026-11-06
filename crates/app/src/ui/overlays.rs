@@ -83,7 +83,8 @@ pub fn form(form: &Form) -> Element<'_, Message> {
                         value,
                     })
                     .on_submit(Message::FormSubmit)
-                    .padding(6);
+                    .padding(6)
+                    .style(theme::input);
                 if first_text {
                     input = input.id(FORM_FIRST_INPUT);
                     first_text = false;
@@ -169,7 +170,8 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
         text_input("Filter shortcuts", filter)
             .id(crate::app::SHORTCUT_FILTER_INPUT)
             .on_input(Message::ShortcutFilterChanged)
-            .padding(6),
+            .padding(6)
+            .style(theme::input),
         scrollable(rows.padding(Padding::default().right(12))).height(Fill),
     ]
     .spacing(12);
@@ -186,6 +188,91 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
                 .style(theme::backdrop),
         )
         .on_press(Message::ShortcutListClosed)
+        .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
+/// About dialog (M6-03): name, version, commit, license, links and the
+/// third-party components.
+pub fn about() -> Element<'static, Message> {
+    use crate::about;
+    use git_core::identity;
+
+    let link = |label: &'static str, target: String| {
+        button(text(label).size(13))
+            .on_press(Message::OpenLink(target))
+            .padding([4, 10])
+            .style(button::secondary)
+    };
+    let components = about::components();
+    let mut list = Column::new().spacing(1);
+    for component in components {
+        list = list.push(
+            row![
+                text(component.name).size(12).width(Fill),
+                text(component.version).size(12).width(90),
+                muted(component.license).size(12).width(170),
+            ]
+            .spacing(8),
+        );
+    }
+    let content = column![
+        row![
+            column![
+                text(identity::DISPLAY_NAME).size(22),
+                muted(env!("CARGO_PKG_DESCRIPTION")),
+            ]
+            .spacing(4),
+            space::horizontal(),
+            button(text("Close"))
+                .on_press(Message::AboutClosed)
+                .padding([4, 12])
+                .style(button::secondary),
+        ]
+        .align_y(iced::alignment::Vertical::Top),
+        column![
+            text(format!("Version {}", about::version())),
+            muted(format!("Commit {}", about::commit())).size(12),
+        ]
+        .spacing(2),
+        text(format!(
+            "Copyright © 2026 the {} contributors. Licensed under {} – free software \
+             without warranty.",
+            identity::DISPLAY_NAME,
+            about::LICENSE_ID
+        ))
+        .size(12),
+        row![
+            link("User guide", about::user_guide_url(about::version())),
+            link("License", about::LICENSE_URL.to_owned()),
+            link(
+                "Third-party licenses",
+                about::notices_target(std::env::current_exe().ok().as_deref())
+            ),
+            link("Repository", identity::REPOSITORY_URL.to_owned()),
+            link("Report an issue", identity::ISSUES_URL.to_owned()),
+        ]
+        .spacing(8)
+        .wrap(),
+        text(format!("Third-party components ({})", components.len())).size(13),
+        container(scrollable(list.padding(Padding::default().right(12))).height(220))
+            .padding(8)
+            .width(Fill)
+            .style(theme::dialog_details),
+    ]
+    .spacing(12);
+    let dialog = container(content)
+        .width(DIALOG_WIDTH + 80.0)
+        .padding(20)
+        .style(theme::dialog);
+    // Clicks inside the dialog must not reach the backdrop, which closes it.
+    opaque(
+        mouse_area(
+            container(opaque(dialog))
+                .center(Fill)
+                .style(theme::backdrop),
+        )
+        .on_press(Message::AboutClosed)
         .interaction(iced::mouse::Interaction::Idle),
     )
 }
@@ -241,6 +328,7 @@ pub fn palette(palette: &crate::palette::Palette) -> Element<'_, Message> {
             .on_input(Message::PaletteQuery)
             .on_submit(Message::PaletteSubmit)
             .padding(8)
+            .style(theme::input)
             .size(14),
         container(list).max_height(420),
     ]
@@ -267,6 +355,7 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
         iced::widget::text_editor(&dialog.editor)
             .on_action(Message::CommitMessageEdited)
             .padding(6)
+            .style(theme::editor)
             .height(180),
     ]
     .spacing(12);
@@ -322,12 +411,21 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
                 if let Some(shortcut) = shortcut {
                     line = line.push(muted(shortcut).size(11));
                 }
+                let highlighted = menu.highlighted == Some(index);
                 let item = button(line.align_y(iced::Center))
                     .on_press_maybe(enabled.then_some(Message::MenuSelected(index)))
                     .height(MENU_ITEM_HEIGHT)
                     .padding([4, 10])
                     .width(Fill)
-                    .style(theme::menu_item);
+                    .style(move |theme, status| {
+                        // The keyboard highlight looks like hover.
+                        let status = if highlighted && status == button::Status::Active {
+                            button::Status::Hovered
+                        } else {
+                            status
+                        };
+                        theme::menu_item(theme, status)
+                    });
                 match hint {
                     Some(hint) => crate::ui::panel::with_tooltip_text(item.into(), hint.clone()),
                     None => item.into(),

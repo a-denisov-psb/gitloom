@@ -4,3 +4,5 @@
 
 # Windows download artefacts
 *:Zone.Identifier
+/dist
+/crates/app/packager-msi.json

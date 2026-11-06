@@ -1,5 +1,7 @@
 # Contributing
 
+Bug reports and ideas are welcome as [issues](https://github.com/a-denisov-psb/gitloom/issues); security problems go through a private report (see [SECURITY.md](SECURITY.md)). Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Gitloom follows GitKraken's layout and shortcuts, so a feature request should say how GitKraken does it; accounts, cloud features, integrations and AI features are out of scope.
+
 ## Setup
 
 - Rust via [rustup](https://rustup.rs). `rust-toolchain.toml` selects stable with rustfmt and clippy. MSRV: 1.88.
@@ -74,3 +76,13 @@ Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`.
 - No `unwrap`/`expect`/`panic!` outside tests.
 - UI follows GitKraken (`docs/UX-PARITY.md`); deviations are documented there.
 - See `CLAUDE.md` for the full rule set.
+
+## License of contributions
+
+Gitloom is licensed under `GPL-3.0-or-later` (see [LICENSE](LICENSE)). By submitting a contribution you agree that it is licensed under the same terms. No CLA and no DCO sign-off are required. New source files need no license header; if you add one, use the SPDX form:
+
+```rust
+// SPDX-License-Identifier: GPL-3.0-or-later
+```
+
+New dependencies must have a license compatible with GPL-3.0; `cargo deny check` (part of `./scripts/check.sh` when installed, and of CI) enforces the allow list in `deny.toml`. After adding or updating a dependency, regenerate the third-party notices with `./scripts/third-party-licenses.sh`.
