@@ -136,6 +136,7 @@ fn search_bar(search: &crate::search::SearchState) -> Element<'_, Message> {
         .on_input(Message::SearchInput)
         .on_submit(Message::SearchSubmit)
         .padding([4, 8])
+        .style(theme::input)
         .size(13),
         muted(search.counter()).size(12).width(70),
         button(

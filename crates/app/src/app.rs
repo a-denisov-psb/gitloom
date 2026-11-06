@@ -372,6 +372,10 @@ pub enum Message {
     UpdateDismissed,
     /// Opens a URL in the browser or a file in its default application.
     OpenLink(String),
+    /// Tab / Shift+Tab: next or previous text field.
+    FocusMoved {
+        back: bool,
+    },
     /// Esc taken by a focused text field.
     EscapeCaptured,
     /// Backspace, also when a text field took it (palette sub-lists).
@@ -1971,6 +1975,26 @@ impl App {
             }
             return Task::none();
         }
+        // An open context menu: ↑/↓ move the highlight, Enter runs it.
+        if let Some(menu) = &mut self.context_menu {
+            match shortcut {
+                Shortcut::Navigate(crate::nav::Move::Next) => {
+                    menu.move_highlight(true);
+                    return Task::none();
+                }
+                Shortcut::Navigate(crate::nav::Move::Previous) => {
+                    menu.move_highlight(false);
+                    return Task::none();
+                }
+                Shortcut::Confirm => {
+                    if let Some(index) = menu.highlighted {
+                        return self.update(Message::MenuSelected(index));
+                    }
+                    return Task::none();
+                }
+                _ => {}
+            }
+        }
         // An open dialog or menu only reacts to Esc and Enter.
         let overlay_open = self.modal.is_some()
             || self.context_menu.is_some()
@@ -2138,21 +2162,47 @@ impl App {
             }
             Shortcut::Settings => return self.open_settings(),
             Shortcut::About => return self.update(Message::AboutOpened),
+            Shortcut::Pull => return self.update(Message::Pull(None)),
+            Shortcut::Push => return self.update(Message::Push { force: false }),
+            Shortcut::Stash => return self.update(Message::StashPush),
+            Shortcut::PopStash => {
+                let first = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.stashes.first().map(|s| s.id.clone()));
+                return match first {
+                    Some(id) => self.update(Message::StashPop(id)),
+                    None => {
+                        self.status = "No stash to pop".into();
+                        Task::none()
+                    }
+                };
+            }
+            Shortcut::ContextMenu => {
+                let selected =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .and_then(|v| match &v.selection {
+                            Some(Selection::Commit(id)) if !v.snapshot.is_stash(id) => {
+                                Some(id.clone())
+                            }
+                            _ => None,
+                        });
+                if let Some(id) = selected {
+                    // No pointer position: open it near the graph's top left.
+                    let position = iced::Point::new(
+                        self.window_size.width * 0.3,
+                        self.window_size.height * 0.25,
+                    );
+                    let task = self.update(Message::CommitContextMenu { id, position });
+                    if let Some(menu) = &mut self.context_menu {
+                        menu.move_highlight(true);
+                    }
+                    return task;
+                }
+            }
             Shortcut::Close => {
-                if std::mem::take(&mut self.about)
-                    || self.modal.take().is_some()
-                    || self.context_menu.take().is_some()
-                    || self.shortcut_list.take().is_some()
-                    || self.settings_page.take().is_some()
-                    || self.form.take().is_some()
-                    || self.message_dialog.take().is_some()
-                    || self
-                        .active_view_mut()
-                        .is_some_and(|v| v.drag.take().is_some())
-                    || self
-                        .active_view_mut()
-                        .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
-                {
+                if self.close_topmost_overlay() {
                     return Task::none();
                 }
                 if let Some(view) = self.active_view_mut() {
@@ -2175,6 +2225,25 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    /// Closes the topmost dialog, menu, overlay or inline input; false if
+    /// none was open (M6-07: Esc closes every overlay, also when a text
+    /// field inside it had focus).
+    fn close_topmost_overlay(&mut self) -> bool {
+        std::mem::take(&mut self.about)
+            || self.modal.take().is_some()
+            || self.context_menu.take().is_some()
+            || self.shortcut_list.take().is_some()
+            || self.form.take().is_some()
+            || self.message_dialog.take().is_some()
+            || self.settings_page.take().is_some()
+            || self
+                .active_view_mut()
+                .is_some_and(|v| v.drag.take().is_some())
+            || self
+                .active_view_mut()
+                .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
     }
 
     /// Opens the repository containing `path` in tab `id`.
@@ -3911,16 +3980,19 @@ impl App {
                 }
             }
             Message::EscapeCaptured => {
-                if self.palette.take().is_none()
-                    && !std::mem::take(&mut self.about)
-                    && self.shortcut_list.take().is_none()
-                    && self.settings_page.take().is_none()
-                {
+                if self.palette.take().is_none() && !self.close_topmost_overlay() {
                     // Esc in the search field closes the search.
                     if let Some(view) = self.active_view_mut() {
                         view.search = None;
                     }
                 }
+            }
+            Message::FocusMoved { back } => {
+                return if back {
+                    iced::widget::operation::focus_previous()
+                } else {
+                    iced::widget::operation::focus_next()
+                };
             }
             Message::BackspacePressed => {
                 if self
@@ -6897,6 +6969,22 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
         Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
+        }
+        // Tab / Shift+Tab move the focus between text fields (M6-07);
+        // Ctrl+Tab switches repository tabs; a multi-line editor that takes
+        // Tab keeps it.
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Tab),
+            modifiers,
+            ..
+        }) if status == event::Status::Ignored
+            && !modifiers.control()
+            && !modifiers.logo()
+            && !modifiers.alt() =>
+        {
+            Some(Message::FocusMoved {
+                back: modifiers.shift(),
+            })
         }
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
@@ -10792,6 +10880,100 @@ pub(crate) mod tests {
         // Failures are silent.
         let _ = app.update(Message::UpdateChecked(Err("offline".into())));
         assert!(app.status.is_empty());
+    }
+
+    #[test]
+    fn esc_in_a_focused_field_closes_the_overlay() {
+        let mut app = ready_app(&["c"]);
+        // The form focuses its first input, so Esc arrives as captured.
+        let _ = app.update(Message::AddRemoteStart);
+        assert!(app.form.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.form.is_none());
+        // Preferences (auto-fetch input) and the About dialog on top.
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let _ = app.update(Message::AboutOpened);
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(!app.about && app.settings_page.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.settings_page.is_none());
+        // Nothing open: Esc in the search field closes the search.
+        let _ = app.update(checked(Shortcut::SearchCommits, false));
+        assert!(app.tabs[0].view().unwrap().search.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.tabs[0].view().unwrap().search.is_none());
+    }
+
+    #[test]
+    fn tab_moves_the_focus_but_ctrl_tab_switches_tabs() {
+        use iced::keyboard::{key::Named, Key, Location, Modifiers};
+        let press = |modifiers: Modifiers| {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Tab),
+                modified_key: Key::Named(Named::Tab),
+                physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Tab),
+                location: Location::Standard,
+                modifiers,
+                text: None,
+                repeat: false,
+            })
+        };
+        let id = window::Id::unique();
+        assert!(matches!(
+            global_event(press(Modifiers::empty()), event::Status::Ignored, id),
+            Some(Message::FocusMoved { back: false })
+        ));
+        assert!(matches!(
+            global_event(press(Modifiers::SHIFT), event::Status::Ignored, id),
+            Some(Message::FocusMoved { back: true })
+        ));
+        assert!(matches!(
+            global_event(press(Modifiers::CTRL), event::Status::Ignored, id),
+            Some(Message::Shortcut(Shortcut::NextTab))
+        ));
+        // A multi-line editor that took Tab keeps it.
+        assert!(global_event(press(Modifiers::empty()), event::Status::Captured, id).is_none());
+    }
+
+    #[test]
+    fn context_menu_by_keyboard() {
+        use crate::nav::Move;
+        let mut app = ready_app(&["c", "b"]);
+        let _ = app.update(Message::CommitSelected("b".into()));
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        let menu = app.context_menu.as_ref().expect("commit menu");
+        let first = menu.highlighted.expect("first item highlighted");
+        // Graph navigation pauses while the menu is open.
+        let _ = app.update(checked(Shortcut::Navigate(Move::Next), false));
+        let second = app.context_menu.as_ref().unwrap().highlighted.unwrap();
+        assert_ne!(first, second);
+        assert_eq!(selected(&app), Some(Selection::Commit("b".into())));
+        let _ = app.update(checked(Shortcut::Navigate(Move::Previous), false));
+        assert_eq!(app.context_menu.as_ref().unwrap().highlighted, Some(first));
+        let _ = app.update(checked(Shortcut::Close, false));
+        assert!(app.context_menu.is_none());
+        // Enter runs the highlighted item (and closes the menu).
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        let _ = app.update(checked(Shortcut::Confirm, false));
+        assert!(app.context_menu.is_none());
+        // The WIP row has no commit menu.
+        let _ = app.update(Message::WipSelected);
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        assert!(app.context_menu.is_none());
+    }
+
+    #[test]
+    fn toolbar_actions_are_in_the_palette() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        for label in ["Pull", "Push", "Stash", "Pop stash"] {
+            let _ = app.update(Message::PaletteQuery(label.to_lowercase()));
+            assert!(palette_labels(&app).iter().any(|l| l == label), "{label}");
+        }
+        let _ = app.update(Message::Shortcut(Shortcut::Close));
+        // Nothing to pop: a reason instead of an error.
+        let _ = app.update(checked(Shortcut::PopStash, false));
+        assert_eq!(app.status, "No stash to pop");
     }
 
     #[test]

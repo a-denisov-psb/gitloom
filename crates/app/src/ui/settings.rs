@@ -91,6 +91,7 @@ fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
             .id(AUTO_FETCH_INPUT)
             .on_input(Message::AutoFetchInput)
             .padding(6)
+            .style(theme::input)
             .width(90),
         muted("minutes"),
     ]
@@ -183,10 +184,19 @@ fn appearance(app: &App) -> Element<'_, Message> {
 fn zoom<'a>(percent: u32) -> Element<'a, Message> {
     use crate::settings::{zoom_step, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN};
     let step = |label: Element<'a, Message>, target: u32, enabled: bool| {
-        button(label)
-            .on_press_maybe(enabled.then_some(Message::ZoomTo(target)))
-            .padding([5, 12])
-            .style(button::secondary)
+        let tip = if target > percent {
+            zoom_tip("Zoom in", crate::actions::ActionId::ZoomIn)
+        } else {
+            zoom_tip("Zoom out", crate::actions::ActionId::ZoomOut)
+        };
+        crate::ui::panel::with_tooltip_text(
+            button(label)
+                .on_press_maybe(enabled.then_some(Message::ZoomTo(target)))
+                .padding([5, 12])
+                .style(button::secondary)
+                .into(),
+            tip,
+        )
     };
     row![
         step(
@@ -305,11 +315,20 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
             text_input("Detect automatically", &tools.terminal_command)
                 .on_input(Message::TerminalCommandInput)
                 .padding(6)
+                .style(theme::input)
                 .width(Length::Fixed(420.0))
                 .into(),
             "Command for Alt+T and the toolbar's Terminal button; {path} is the repository folder. Empty: the first terminal found.",
         ))
         .into()
+}
+
+/// Tooltip of an icon-only zoom button, with its shortcut.
+fn zoom_tip(label: &str, action: crate::actions::ActionId) -> String {
+    match action.shortcut_text() {
+        Some(keys) => format!("{label} ({keys})"),
+        None => label.to_owned(),
+    }
 }
 
 #[cfg(test)]

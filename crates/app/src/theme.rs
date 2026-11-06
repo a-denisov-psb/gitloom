@@ -466,11 +466,35 @@ pub fn state_banner(theme: &Theme) -> container::Style {
 }
 
 /// Inline text input (e.g. new branch name); red border on an error.
+/// Text input with a clearly visible focus ring (M6-07): 2 px accent border.
+pub fn input(
+    theme: &Theme,
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    let mut style = iced::widget::text_input::default(theme, status);
+    if matches!(status, iced::widget::text_input::Status::Focused { .. }) {
+        style.border = style.border.color(palette(theme).accent).width(2);
+    }
+    style
+}
+
+/// Multi-line editor with the same focus ring as [`input`].
+pub fn editor(
+    theme: &Theme,
+    status: iced::widget::text_editor::Status,
+) -> iced::widget::text_editor::Style {
+    let mut style = iced::widget::text_editor::default(theme, status);
+    if matches!(status, iced::widget::text_editor::Status::Focused { .. }) {
+        style.border = style.border.color(palette(theme).accent).width(2);
+    }
+    style
+}
+
 pub fn inline_input(
     error: bool,
 ) -> impl Fn(&Theme, iced::widget::text_input::Status) -> iced::widget::text_input::Style {
     move |theme, status| {
-        let mut style = iced::widget::text_input::default(theme, status);
+        let mut style = input(theme, status);
         if error {
             style.border = style.border.color(palette(theme).danger).width(1);
         }

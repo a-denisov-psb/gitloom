@@ -332,6 +332,8 @@ impl MenuEntry {
 pub struct ContextMenu {
     pub position: Point,
     pub entries: Vec<MenuEntry>,
+    /// Entry chosen with ↑/↓ (M6-07); Enter runs it.
+    pub highlighted: Option<usize>,
 }
 
 /// Approximate menu size used to keep it inside the window.
@@ -341,7 +343,44 @@ pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
 
 impl ContextMenu {
     pub fn new(position: Point, entries: Vec<MenuEntry>) -> Self {
-        Self { position, entries }
+        Self {
+            position,
+            entries,
+            highlighted: None,
+        }
+    }
+
+    fn enabled(&self, index: usize) -> bool {
+        matches!(
+            self.entries.get(index),
+            Some(MenuEntry::Item { enabled: true, .. })
+        )
+    }
+
+    /// Moves the keyboard highlight to the next (or previous) enabled item,
+    /// wrapping around; the first press starts at the top (or bottom).
+    pub fn move_highlight(&mut self, down: bool) {
+        let count = self.entries.len();
+        if count == 0 {
+            return;
+        }
+        let mut index = match (self.highlighted, down) {
+            (Some(i), true) => (i + 1) % count,
+            (Some(i), false) => (i + count - 1) % count,
+            (None, true) => 0,
+            (None, false) => count - 1,
+        };
+        for _ in 0..count {
+            if self.enabled(index) {
+                self.highlighted = Some(index);
+                return;
+            }
+            index = if down {
+                (index + 1) % count
+            } else {
+                (index + count - 1) % count
+            };
+        }
     }
 
     /// Message of entry `index` if it is an enabled item.
@@ -407,6 +446,39 @@ mod tests {
                 },
             ],
         )
+    }
+
+    #[test]
+    fn arrows_skip_separators_and_disabled_items() {
+        let mut menu = ContextMenu::new(
+            Point::ORIGIN,
+            vec![
+                MenuEntry::item("A", Message::DismissNotice),
+                MenuEntry::Separator,
+                MenuEntry::Item {
+                    label: "Off".into(),
+                    shortcut: None,
+                    enabled: false,
+                    message: Box::new(Message::Refresh),
+                    hint: None,
+                },
+                MenuEntry::item("B", Message::Refresh),
+            ],
+        );
+        menu.move_highlight(true);
+        assert_eq!(menu.highlighted, Some(0));
+        menu.move_highlight(true);
+        assert_eq!(menu.highlighted, Some(3));
+        menu.move_highlight(true);
+        assert_eq!(menu.highlighted, Some(0), "wraps");
+        menu.move_highlight(false);
+        assert_eq!(menu.highlighted, Some(3));
+        let mut up = ContextMenu::new(Point::ORIGIN, menu.entries.clone());
+        up.move_highlight(false);
+        assert_eq!(up.highlighted, Some(3), "starts at the bottom");
+        let mut none = ContextMenu::new(Point::ORIGIN, vec![MenuEntry::Separator]);
+        none.move_highlight(true);
+        assert_eq!(none.highlighted, None);
     }
 
     #[test]

@@ -35,6 +35,10 @@ Linux needs X11/Wayland libraries and `libxkbcommon`. Without a GPU, use the sof
 ICED_BACKEND=tiny-skia cargo run -p gitloom
 ```
 
+## Accessibility
+
+Every action is reachable from the keyboard (command palette Ctrl+P, context menus with Shift+F10), focus is visible in both themes, and the interface zooms up to 200 %. Screen readers are not supported yet: the UI toolkit (iced 0.14) does not expose an accessibility tree.
+
 ## Documentation
 
 | Document | Content |

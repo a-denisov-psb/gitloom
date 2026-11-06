@@ -157,7 +157,7 @@ Acceptance: unit tests (semver comparison incl. rc, pre-release rule, 24 h sched
 
 Note: the release list endpoint is used (not `/releases/latest`, which hides pre-releases); the last attempt counts, so a failed request also waits a day and stays silent. The HTTP part was checked against a public repository (ignored test `live_github_release_list`), the setting and the notice headless (ADR-035); the check against our own release follows in M6-14.
 
-### [ ] M6-07 Accessibility pass
+### [x] M6-07 Accessibility pass
 
 - Keyboard: every action reachable (palette), Tab order in dialogs, settings and forms; Esc closes every overlay; focus ring visible in both themes.
 - Information not by color alone: check conflict view, search dimming, hidden branches, file status (icons exist).
@@ -165,6 +165,26 @@ Note: the release list endpoint is used (not `/releases/latest`, which hides pre
 - Document the screen reader limitation in the user docs and README.
 
 Acceptance: checklist in the task note with every view; fixes for every gap found; app tests for new keyboard paths.
+
+Note (checklist; "fixed" = gap found and fixed here, checked with tests and headless snapshots, ADR-035):
+
+| View | Keyboard | Esc | Focus visible | Not by color alone | Icon tooltips |
+|---|---|---|---|---|---|
+| Toolbar | palette: Pull, Push, Stash, Pop stash added (fixed); Undo/Redo, Branch, Fetch, Terminal had shortcuts | – | – | disabled buttons are dimmed and say why | fixed: disabled Stash/Pop in compact mode had none |
+| Graph | ↑/↓/J/K, Shift+J/K, Ctrl+Home/End, Shift+↑/↓; commit menu by Shift+F10 / Menu key with ↑/↓/Enter (fixed) | closes search / diff | selection bar | refs labelled, search counter "n of m", dimming is a luminance change | search, prev/next, close: ok |
+| Sidebar | Ctrl+Alt+F filter, Ctrl+J toggle; branch actions via palette (checkout) and graph menu | – | filter ring (fixed, 2 px) | hidden branches: eye-off icon; HEAD: check icon | eye, "+" remote: ok |
+| Staging / commit panel | S/U, Ctrl+Shift+S/U, Ctrl+Enter, Ctrl+Shift+M, Tab between summary and description (fixed) | – | summary and description ring (fixed) | file status icons, conflict section title | – |
+| Diff | Esc closes; S/U for the shown file | ok | – | +/− markers | close: ok |
+| Conflict view | Take all/Take file buttons; editor | ok (second Esc after the editor) | output editor ring (fixed) | checkboxes and "ours"/"theirs" labels | – |
+| Interactive rebase | P/R/S/F/D, ↑/↓, Alt+↑/↓ | ok | message editors ring (fixed) | action names as text | grip is part of a labelled row |
+| File history / blame | ↑/↓, Esc | ok | – | text labels | close: ok |
+| Palette, shortcut list | Ctrl+P, Ctrl+/, arrows, Enter | ok | query ring (fixed) | – | – |
+| Dialogs, forms, message dialogs | Enter submits, Tab between fields (fixed) | fixed: Esc in a focused field only unfocused it | ring (fixed) | errors as text | – |
+| Preferences, About | Ctrl+, ; palette "About" | ok (fixed for the focused input) | ring (fixed) | toggles say On/Off | zoom −/+ (fixed) |
+| Start screen, askpass | Ctrl+O, path input; askpass Enter/Esc | ok | ring (fixed) | – | – |
+| Status bar notices | buttons (mouse); actions also in palette where they exist | – | – | icon plus text | – |
+
+Zoom up to 200 % exists since M5-04. Screen readers: limitation documented in README and UX-PARITY (user docs in M6-12). iced offers no keyboard focus for buttons, so buttons stay mouse-only where no shortcut or palette entry exists (status bar notice buttons, About links); their actions are not needed for Git work.
 
 ### [ ] M6-08 Packaging configuration
 
