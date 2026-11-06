@@ -48,7 +48,7 @@ Details: `docs/ARCHITECTURE.md`.
 - Do not guess library APIs. iced 0.14 and gix 0.88 changed a lot compared to older versions: read the source in `~/.cargo/registry/src/` or docs.rs for the exact pinned version.
 - New dependencies: latest stable version that is at least 14 days old, pinned to minor (`"0.88"`). Significant ones get an entry in `docs/DECISIONS.md`.
 - Platform-specific code (`#[cfg(unix)]`, `#[cfg(windows)]`) keeps its imports and helpers inside the same cfg scope. Before pushing, run clippy for the Windows target if available.
-- Do not change milestone scope on your own. If something in the plan is wrong or unclear, stop and ask; record open points in `docs/HANDOVER.md` → "Open questions".
+- Do not extend milestone scope with new features. Decide plan gaps, contradictions and design questions yourself and document them (ADR-034: most conservative, GitKraken-closest variant; ADR, milestone note or `docs/UX-PARITY.md` deviation). Stop only for the stop reasons listed in ADR-034.
 
 ## Git workflow (git flow)
 
@@ -57,16 +57,16 @@ Details: `docs/ARCHITECTURE.md`.
 | `master` | Released versions only, each tagged `vX.Y.Z` |
 | `develop` | Integration branch, always green |
 | `feature/<task-id>-<slug>` | One per task, e.g. `feature/M1-03-lane-layout`, branched from `develop` |
-| `release/X.Y.Z` | Milestone release preparation, only when the maintainer asks |
-| `hotfix/X.Y.Z` | Fixes on `master`, only when the maintainer asks |
+| `release/X.Y.Z` | Milestone release, created automatically at milestone end (`/release`, ADR-034) |
+| `hotfix/X.Y.Z` | Fixes on `master`, only when the maintainer asks or a release CI run is red |
 
 - Commits: Conventional Commits with the crate as scope, e.g. `feat(git-graph): assign lanes to merge parents`, `fix(app): keep selection after refresh`. Small, focused commits.
-- Merging a feature: when all acceptance criteria are met and `./scripts/check.sh` is green, merge it yourself (`git switch develop && git merge --no-ff feature/...`), push `develop`, delete the feature branch. Ask first only for plan deviations, scope changes or open decisions (ADR-017).
+- Merging a feature: when all acceptance criteria are met and `./scripts/check.sh` is green, merge it yourself (`git switch develop && git merge --no-ff feature/...`), push `develop`, delete the feature branch. Do not ask; decide open points yourself and document them (ADR-017, ADR-034).
 - Tasks blocked by the maintainer: do everything else, record the open items under "Maintainer to-dos" in `docs/HANDOVER.md`, continue with the next unblocked task.
 - Never commit directly to `master` or `develop`. Never rewrite published history.
 - CI budget (ADR-032): pushes to `develop` and `feature/**` run only the Linux check and MSRV. Windows and macOS run on `master`, `release/**`, tags and `workflow_dispatch`. So before every merge run `./scripts/check.sh` and clippy for the Windows target (`cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`, see `docs/HANDOVER.md`); the Windows/macOS CI is not a safety net for `develop`.
 - After pushing `develop`, check the CI run with `gh run watch`; a red run takes priority over the next task. Superseded runs of the same branch are cancelled automatically.
-- Push feature branches (`git push -u origin feature/...`) and `develop`. Never push `master` or tags; the maintainer does that. Never force-push.
+- Push feature branches (`git push -u origin feature/...`) and `develop`. Push `master` and tags only as part of `/release`. Never force-push.
 
 ## Definition of done (per task)
 
@@ -87,6 +87,7 @@ Details: `docs/ARCHITECTURE.md`.
 
 ## Communication
 
-- Report in short German summaries to the maintainer (bullets, tables where useful). Code and repo content stay English.
-- When a task is done: what changed, what was checked, anything deviating.
-- Per task: short German summary after merging. At milestone end: summary report with maintainer to-dos.
+- Report to the maintainer in German, as short as possible. Code and repo content stay English.
+- Per task: exactly one line after merging: `M6-03 ✔ – <result>; Abweichung: <deviation>` (omit the deviation part if there is none).
+- At milestone end (end of `/release`): one detailed report as a table: tasks, deviations with reasons, maintainer to-dos, open risks.
+- On problems: the problem plus what you decided.

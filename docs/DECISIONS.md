@@ -128,7 +128,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-017 Autonomous task merges
 
-- Status: accepted (M2)
+- Status: accepted (M2), extended by ADR-034 (no questions within a milestone, autonomous releases)
 - Decision: Claude Code merges finished feature branches into `develop` itself when
   all acceptance criteria are met and `./scripts/check.sh` is green, then pushes
   `develop`. The maintainer is asked only for plan deviations, scope questions,
@@ -331,3 +331,29 @@ Architecture decision records in short form. New entries at the bottom. Change a
   `git_core::identity` are final; the crate is not published on crates.io under this
   name (taken). A later rename stays possible as one task because of ADR-028. ADR-031 is
   reserved for M6-08 (packaging), so the numbering has a gap until then.
+
+## ADR-034 Autonomous milestone execution
+
+- Status: accepted (maintainer, 2026-11-06; changes the workflow of ADR-017)
+- Decision: Claude Code works through a whole milestone without asking back, one Claude
+  Code chat per milestone.
+  - Plan gaps, contradictions and design questions are decided by Claude Code itself: the
+    most conservative variant that is closest to GitKraken. The decision is recorded as an
+    ADR (architecture or dependencies) or as a deviation note in the milestone file or
+    `docs/UX-PARITY.md`, and mentioned in one sentence in the report.
+  - Claude Code stops only for:
+    (a) CI is red and still not fixed after two fix attempts;
+    (b) maintainer-only actions (certificates, secrets, accounts, domains, money): skip
+    these tasks, record them under "Maintainer to-dos" in `docs/HANDOVER.md`, continue;
+    (c) irreversible actions outside the repository;
+    (d) scope extension by new features. Reducing scope or moving items to the ideas
+    backlog is allowed, with a note in the milestone file.
+  - The release at the end of the milestone is fully autonomous (`/release`):
+    `release/X.Y.Z`, merge into `master`, tag `vX.Y.Z`, push `master` and the tag, merge
+    back into `develop`. Preconditions: `./scripts/check.sh` green, clippy for the
+    Windows target green, CI on `develop` green.
+- Why: the maintainer's role moves from approving every step to planning milestones and
+  reviewing results; stops are reserved for things only the maintainer can do or undo.
+- Consequences: `CLAUDE.md`, `.claude/commands/` and `.claude/settings.json` allow
+  pushing `master` and tags as part of `/release`. Force-push, `reset --hard`, `rebase`
+  and `clean` stay denied. Reports are one line per task and one report per milestone.
