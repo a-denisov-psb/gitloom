@@ -20,28 +20,29 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (end of M5, version 0.6.0)
+## Current state (M6 in progress, version 0.6.1 released, 2026-11-06)
 
-Done (M4-01 … M4-15, see the notes in `docs/milestones/M4-merge-rebase.md`; M1–M3 in their milestone files):
+M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
-- `git-core`: reads via `GixBackend`; writes via `CliBackend` / `GitWriter`, now also merge and fast-forward, rebase and interactive rebase, cherry-pick, revert, reset, continue/skip/abort, conflict model and resolution (ADR-022); Gitloom as Git's editor (ADR-021); undo/redo entries for all history operations.
-- `git-graph`: topological order, lane layout as vertical runs (ADR-011), `LaneHints` lane groups.
-- `app`: everything from M3 plus multi-selection in the graph, merge/rebase/cherry-pick/revert/reset from the menus, interactive rebase panel, reword and squash shortcuts, conflict resolution view, operation banner with Continue/Skip/Abort, drag and drop of branches.
-- M5 (see `docs/milestones/M5-productivity.md`): action registry and shortcut list, settings, light/dark theme, zoom, icons, command palette, commit search, hide/solo, file history, blame, avatars, external tools, terminal and file manager.
-- Planning: M6 is planned in task-level detail (`docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030). The name "Gitloom" is kept (ADR-033); M6-01 is done, M6-02 finalizes the identity values.
-- Measurements: `docs/PERFORMANCE.md` (M1 … M4 sections).
-- Branches: `master` with `v0.1.0` … `v0.5.0` (`v0.6.0` after the maintainer pushes it); `develop` (default branch on GitHub).
+- Done: M6-01 identity, M6-02 identity values, M6-03 GPL-3.0-or-later + cargo-deny + third-party notices + About dialog, M6-04 app icon and metadata, M6-05 crash reports, M6-06 opt-in update check, M6-07 accessibility pass, M6-08 packaging (cargo-packager, ADR-031), M6-09 release workflow (dry run green on all targets), M6-12 user guide (`docs/user/`).
+- Claude Code part done, waiting for the maintainer: M6-11 (approve the public repository content, author email decision), M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
+- Blocked by maintainer actions: M6-10 (SignPath after the repository is public), M6-14 (rc.1: depends on M6-11; the plan has the maintainer tag `master` and make the repository public), M6-15 (1.0.0 only when the maintainer asks).
+- Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
+- Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).
+- Branches: `master` with `v0.1.0` … `v0.6.1`; `develop` (default branch on GitHub).
+
+Earlier milestones (M1–M5) are described in their milestone files; the summary of M5 is in `docs/PLANNING-HANDOVER.md`.
 
 Verified:
 
-- `./scripts/check.sh` green on Linux, clippy for the Windows target; CI green on all platforms for the last code commit (e461b48). The CI run of the planning merge e048618 did not start (GitHub account billing), see Maintainer to-dos.
-- M4 walkthrough on Linux by mouse on a clone of this repo (see the M4-14 note).
-- UI checked by hand through WSLg (synthetic mouse; keyboard input and modifiers did not reach the window, gaps are maintainer to-dos).
+- `./scripts/check.sh` green on Linux (incl. cargo-deny and the notices check), clippy for the Windows target; CI green on `develop`; `master` v0.6.1 green on Linux, Windows and macOS.
+- Release workflow: dry run green on Linux (Ubuntu 22.04, AppImage started under Xvfb), macOS universal (signature, lipo, dmg, start) and Windows x64/x86 (msi, zip, start). Linux artifacts downloaded and started locally.
+- M6 UI changes checked headless with `iced_test` snapshots (ADR-035): the Windows desktop was locked, and keyboard input never reached WSLg windows.
 
 Not done / known limitations:
 
 - M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict notice): ROADMAP ideas backlog (open question 9).
-- Real credential prompts (GCM on Windows, SSH passphrase on Linux), keyboard parts of the M3/M4 walkthroughs and the Windows runs of M2–M4 are open maintainer checks.
+- Real credential prompts, keyboard walkthroughs and the Windows runs of M2–M5 are collected in `docs/RELEASE-CHECKLIST.md` (M6-13).
 - Partial clones: commit file lists show renames as deletion plus addition when blobs are missing (UX-PARITY).
 - Follow-up proposals from M1-15 (pack mappings, allocator retention) stay open (`docs/PERFORMANCE.md`).
 
@@ -49,6 +50,7 @@ Not done / known limitations:
 
 Tasks only the maintainer can do. Claude Code adds new items here and ticks them off when done.
 
+- [ ] M6-09: download the Windows artifacts of the release dry run (Actions → "Release" → latest `workflow_dispatch` run on `develop` → `packages-windows-x64`/`-x86`) and start the `.msi` and the `.zip` once; report SmartScreen behavior.
 - [ ] M6-13: run `docs/RELEASE-CHECKLIST.md` against the packaged release candidate (Windows required, macOS if available) and answer its GitKraken verification items. The open Windows and keyboard checks of M2–M5 were moved there (M6-13).
 
 - [x] GitHub → Settings → General → Default branch: set to `develop`.
