@@ -5,6 +5,7 @@ mod app_icon;
 mod askpass;
 mod avatars;
 mod conflict;
+mod crash;
 mod fetch;
 mod file_history;
 mod format;
@@ -49,6 +50,13 @@ fn main() -> iced::Result {
     let marker = std::env::var_os(git_core::ASKPASS_ENV).is_some();
     if let Some(prompt) = askpass::prompt_from_args(&args, marker) {
         return askpass::main(prompt);
+    }
+
+    // Crash reports for the main process only (ADR-029).
+    #[cfg(debug_assertions)]
+    crash::debug_panic_trigger();
+    if let Some(dir) = crash::default_dir() {
+        crash::install(dir);
     }
 
     // `gitloom [PATH]...` opens each path in its own tab.
