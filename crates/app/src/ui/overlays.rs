@@ -243,6 +243,7 @@ pub fn about() -> Element<'static, Message> {
         ))
         .size(12),
         row![
+            link("User guide", about::user_guide_url(about::version())),
             link("License", about::LICENSE_URL.to_owned()),
             link(
                 "Third-party licenses",

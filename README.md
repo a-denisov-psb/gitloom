@@ -6,6 +6,8 @@ A fast, open-source Git client with the workflow GitKraken users already know. N
 
 ![Gitloom showing a repository with its lane graph](docs/screenshots/m5-main-dark-100.png)
 
+**[User guide](docs/user/README.md)** · [Releases](https://github.com/a-denisov-psb/gitloom/releases) · [Keyboard shortcuts](docs/UX-PARITY.md#keyboard-shortcuts)
+
 Status: version 1.0 is in preparation (release candidates first). See the [roadmap](docs/ROADMAP.md).
 
 ## Features
@@ -67,6 +69,7 @@ Gitloom is developed milestone by milestone; the plans and decisions are part of
 
 | Document | Content |
 |---|---|
+| [User guide](docs/user/README.md) | Using Gitloom |
 | [ROADMAP](docs/ROADMAP.md) | Milestones, non-goals, ideas |
 | [M1 plan](docs/milestones/M1-real-repository.md) | M1 tasks and notes (done) |
 | [M2 plan](docs/milestones/M2-working-copy.md) | M2 tasks and notes (done) |
