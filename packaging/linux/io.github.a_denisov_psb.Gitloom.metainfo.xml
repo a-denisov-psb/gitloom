@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.a_denisov_psb.Gitloom</id>
+  <name>Gitloom</name>
+  <summary>Native, open-source Git client with a GitKraken-style interface</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      A fast Git client with the layout, interactions and keyboard shortcuts long-time
+      GitKraken users know: lane graph, staging by file, hunk and line, branches and remotes,
+      merge, rebase and conflict resolution, undo and redo. Native Rust, no webview, no
+      accounts, no telemetry.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.a_denisov_psb.Gitloom.desktop</launchable>
+  <url type="homepage">https://github.com/a-denisov-psb/gitloom</url>
+  <url type="bugtracker">https://github.com/a-denisov-psb/gitloom/issues</url>
+  <categories>
+    <category>Development</category>
+    <category>RevisionControl</category>
+  </categories>
+  <provides>
+    <binary>gitloom</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>

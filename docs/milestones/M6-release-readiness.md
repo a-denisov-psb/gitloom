@@ -126,13 +126,15 @@ Acceptance: `cargo deny check` green; notices file contains every crate of `carg
 
 Note: there is no gear menu (the gear opens the Preferences), so "About" sits in the palette and at the bottom of the Preferences categories (UX-PARITY deviation). Notices: `THIRD-PARTY-LICENSES.md` only (no HTML); "Third-party licenses" in the dialog opens the shipped file, or the repository copy of the version. `cargo deny` required tokio 1.53.3 (RUSTSEC-2026-0386) and replacing yanked `clipboard-win`/`async-executor` versions. Checked headless with `iced_test` (ADR-035; the Windows desktop was locked): Preferences → "About" → dialog → Close.
 
-### [ ] M6-04 App icon and desktop metadata
+### [x] M6-04 App icon and desktop metadata
 
 - Own app icon (SVG master, no GitKraken resemblance) and generated sizes: PNG set, `.ico`, `.icns`; window icon at runtime.
 - Linux `.desktop` file (name, comment, categories `Development;RevisionControl;`, MimeType none), AppStream metainfo optional.
 - macOS `Info.plist` values (bundle id from identity, minimum macOS version, high-DPI), Windows version resource (product name, version, copyright).
 
 Acceptance: icon visible in the window, taskbar/dock and package; generation reproducible by a script.
+
+Note: ADR-036. Checked: Windows exe (cross-built) shows the icon and version info (extracted with PowerShell), the Linux app starts with the window icon set; taskbar/dock and package icons are verified with the packages (M6-08/M6-09) and in the release checklist (M6-13), because the Windows desktop was locked. Minimum macOS version 11.0.
 
 ### [ ] M6-05 Crash reports
 

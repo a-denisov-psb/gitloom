@@ -382,3 +382,20 @@ Architecture decision records in short form. New entries at the bottom. Change a
   the release binary is unaffected (dev-dependency only). A real window check stays
   part of the release checklist (M6-13).
 
+## ADR-036 App icon and platform metadata
+
+- Status: accepted (M6-04)
+- Decision: the icon master is `crates/app/assets/app-icon/icon.svg` (own design: two Git
+  lanes woven like loom threads). `scripts/app-icon.sh` renders the PNG sizes 16–1024,
+  `icon.ico` (PNG entries) and `icon.icns` (PNG entries) with `resvg 0.48`
+  (dev-dependency, newest release at least 14 days old). The window icon is the
+  embedded 256 px PNG; on Linux the window's application id is `identity::APP_ID`, the
+  name of the `.desktop` file. Windows executables get a version resource and the icon
+  from `build.rs` via `winresource 0.1` (build-dependency, MIT; runs only for Windows
+  targets, uses `rc.exe` or MinGW's `windres`). Desktop file, AppStream metainfo and the
+  macOS `Info.plist` keys live in `packaging/`; a test checks them against
+  `git_core::identity`. Minimum macOS version: 11.0 (first release with universal
+  binaries).
+- Why: one reproducible source for every icon format without image tools on the
+  build machine.
+
