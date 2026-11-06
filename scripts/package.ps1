@@ -41,7 +41,9 @@ $packagerArgs = @("packager", "-p", $bin, "--release", "--target", $Target, "-f"
     "--binaries-dir", $bins, "--out-dir", $work)
 $configFile = $null
 if ($version -match '^(\d+\.\d+\.\d+)-rc\.(\d+)$') {
-    $msiVersion = "$($Matches[1]).$($Matches[2])"
+    # cargo-packager needs semver here and turns a numeric pre-release
+    # (1.0.0-N) into the MSI version 1.0.0.N itself.
+    $msiVersion = "$($Matches[1])-$($Matches[2])"
     # Read Cargo's UTF-8 output as such (the copyright contains a non-ASCII sign).
     [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
     $metadata = (cargo metadata --no-deps --format-version 1 --locked) -join "`n" | ConvertFrom-Json
