@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-06
+
+### Fixed
+
+- Cancelling a network operation can no longer hang when a Git helper process outlives the cancel (seen on Windows); an operation cancelled before it started no longer starts Git.
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

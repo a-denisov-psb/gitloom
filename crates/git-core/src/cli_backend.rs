@@ -828,6 +828,10 @@ impl CliBackend {
         use std::sync::mpsc;
 
         let display = format!("git {}", args.join(" "));
+        // Cancelled before the start: no process at all.
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         let mut child = self.spawn_network(args)?;
         let mut stdout = child.stdout.take();
         let stdout_reader = std::thread::spawn(move || {
@@ -867,8 +871,10 @@ impl CliBackend {
             if cancel.is_cancelled() {
                 kill_tree(&mut child);
                 let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
+                // The readers are not joined: a process that escaped the kill
+                // (e.g. a helper started while `taskkill` walked the tree) may
+                // keep the pipes open. They end on their own when it exits.
+                drop((stdout_reader, stderr_reader));
                 return Err(Error::Cancelled);
             }
             let closed = match received.recv_timeout(std::time::Duration::from_millis(50)) {
@@ -971,6 +977,18 @@ fn command(git: &Path) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression (v0.6.0 Windows CI hang): a cancelled token must not start
+    /// Git at all. The root does not exist, so spawning would fail with a
+    /// backend error instead of `Cancelled`.
+    #[test]
+    fn network_cancelled_before_start_spawns_nothing() {
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let backend = CliBackend::new("/nonexistent/gitloom-test-root");
+        let result = backend.network(&["fetch", "origin"], &cancel, &mut |_| {});
+        assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+    }
 
     fn version(major: u32, minor: u32, patch: u32) -> GitVersion {
         GitVersion {
