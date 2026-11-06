@@ -29,11 +29,31 @@ pub fn snapshot_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots")
 }
 
+/// Snapshot path for `name`; older files of it are removed first (the
+/// simulator compares against an existing file and appends the renderer
+/// name, e.g. `<name>-tiny-skia.png`).
+fn fresh_path(name: &str) -> PathBuf {
+    for renderer in ["tiny-skia", "wgpu"] {
+        let _ = std::fs::remove_file(snapshot_dir().join(format!("{name}-{renderer}.png")));
+    }
+    snapshot_dir().join(format!("{name}.png"))
+}
+
 /// Renders `app` to `target/ui-snapshots/<name>.png` (replacing an older one).
 pub fn snapshot(app: &App, name: &str) -> PathBuf {
-    let path = snapshot_dir().join(format!("{name}.png"));
-    let _ = std::fs::remove_file(&path);
+    let path = fresh_path(name);
     let mut sim = simulator(app);
+    let snap = sim.snapshot(&app.theme()).unwrap();
+    assert!(snap.matches_image(&path).unwrap());
+    path
+}
+
+/// Clicks the widget with `id` (focusing an input) and renders the result.
+pub fn snapshot_focused(app: &App, id: &'static str, name: &str) -> PathBuf {
+    let path = fresh_path(name);
+    let mut sim = simulator(app);
+    sim.click(iced::widget::Id::new(id))
+        .unwrap_or_else(|e| panic!("no widget {id}: {e}"));
     let snap = sim.snapshot(&app.theme()).unwrap();
     assert!(snap.matches_image(&path).unwrap());
     path
@@ -105,5 +125,41 @@ mod tests {
         snapshot(&app, "update-1-notice");
         click(&mut app, "Dismiss");
         assert!(app.update_available.is_none());
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_focus_ring_both_themes() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(checked(Shortcut::Settings, false));
+        for (light, name) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot_focused(
+                &app,
+                crate::ui::settings::AUTO_FETCH_INPUT,
+                &format!("focus-settings-{name}"),
+            );
+        }
+        let _ = app.update(Message::SettingsClosed);
+        let _ = app.update(Message::AddRemoteStart);
+        snapshot_focused(
+            &app,
+            crate::ui::overlays::FORM_FIRST_INPUT,
+            "focus-form-light",
+        );
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_context_menu_keyboard() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::CommitSelected("b".into()));
+        let _ = app.update(checked(Shortcut::ContextMenu, false));
+        let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
+        snapshot(&app, "context-menu-keyboard");
     }
 }

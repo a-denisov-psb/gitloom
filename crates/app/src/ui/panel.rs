@@ -171,7 +171,8 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     let remaining = SUMMARY_LIMIT as i64 - view.summary.chars().count() as i64;
     let mut summary = text_input("Summary", &view.summary)
         .id(crate::app::COMMIT_SUMMARY_INPUT)
-        .padding(6);
+        .padding(6)
+        .style(theme::input);
     if writable {
         summary = summary.on_input(Message::SummaryChanged);
     }
@@ -188,6 +189,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     let mut description = text_editor(&view.description)
         .placeholder("Description")
         .padding(6)
+        .style(theme::editor)
         .height(90)
         // Ctrl+Enter commits instead of inserting a line break.
         .key_binding(|press| {

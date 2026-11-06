@@ -188,7 +188,8 @@ impl Askpass {
                     .secure(self.kind == PromptKind::Secret)
                     .on_input(Message::Input)
                     .on_submit(Message::Submit)
-                    .padding(6),
+                    .padding(6)
+                    .style(theme::input),
             );
         }
         container(content.push(buttons))

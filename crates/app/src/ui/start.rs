@@ -20,6 +20,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .on_input(Message::StartPathChanged)
             .on_submit(Message::StartPathSubmitted)
             .padding(6)
+            .style(theme::input)
             .width(320),
         button(text("Open"))
             .on_press_maybe(

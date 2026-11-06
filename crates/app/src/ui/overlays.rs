@@ -83,7 +83,8 @@ pub fn form(form: &Form) -> Element<'_, Message> {
                         value,
                     })
                     .on_submit(Message::FormSubmit)
-                    .padding(6);
+                    .padding(6)
+                    .style(theme::input);
                 if first_text {
                     input = input.id(FORM_FIRST_INPUT);
                     first_text = false;
@@ -169,7 +170,8 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
         text_input("Filter shortcuts", filter)
             .id(crate::app::SHORTCUT_FILTER_INPUT)
             .on_input(Message::ShortcutFilterChanged)
-            .padding(6),
+            .padding(6)
+            .style(theme::input),
         scrollable(rows.padding(Padding::default().right(12))).height(Fill),
     ]
     .spacing(12);
@@ -325,6 +327,7 @@ pub fn palette(palette: &crate::palette::Palette) -> Element<'_, Message> {
             .on_input(Message::PaletteQuery)
             .on_submit(Message::PaletteSubmit)
             .padding(8)
+            .style(theme::input)
             .size(14),
         container(list).max_height(420),
     ]
@@ -351,6 +354,7 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
         iced::widget::text_editor(&dialog.editor)
             .on_action(Message::CommitMessageEdited)
             .padding(6)
+            .style(theme::editor)
             .height(180),
     ]
     .spacing(12);
@@ -406,12 +410,21 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
                 if let Some(shortcut) = shortcut {
                     line = line.push(muted(shortcut).size(11));
                 }
+                let highlighted = menu.highlighted == Some(index);
                 let item = button(line.align_y(iced::Center))
                     .on_press_maybe(enabled.then_some(Message::MenuSelected(index)))
                     .height(MENU_ITEM_HEIGHT)
                     .padding([4, 10])
                     .width(Fill)
-                    .style(theme::menu_item);
+                    .style(move |theme, status| {
+                        // The keyboard highlight looks like hover.
+                        let status = if highlighted && status == button::Status::Active {
+                            button::Status::Hovered
+                        } else {
+                            status
+                        };
+                        theme::menu_item(theme, status)
+                    });
                 match hint {
                     Some(hint) => crate::ui::panel::with_tooltip_text(item.into(), hint.clone()),
                     None => item.into(),

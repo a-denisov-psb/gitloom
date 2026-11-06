@@ -86,20 +86,17 @@ fn git_dir(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Re-run when HEAD moves: HEAD itself, the branch it points to and
-/// packed refs.
+/// packed refs. Only existing files are watched; a missing one would make
+/// Cargo re-run the script on every build.
 fn watch_head(git_dir: &Path) {
     let head = git_dir.join("HEAD");
-    println!("cargo:rerun-if-changed={}", head.display());
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("packed-refs").display()
-    );
+    let mut watched = vec![head.clone(), git_dir.join("packed-refs")];
     if let Ok(content) = std::fs::read_to_string(&head) {
         if let Some(reference) = content.trim().strip_prefix("ref: ") {
-            println!(
-                "cargo:rerun-if-changed={}",
-                git_dir.join(reference).display()
-            );
+            watched.push(git_dir.join(reference));
         }
+    }
+    for path in watched.iter().filter(|p| p.exists()) {
+        println!("cargo:rerun-if-changed={}", path.display());
     }
 }

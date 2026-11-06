@@ -78,6 +78,13 @@ pub enum ActionId {
     Settings,
     /// About dialog (palette and Preferences).
     About,
+    /// Toolbar actions in the palette (M6-07: every action by keyboard).
+    Pull,
+    Push,
+    Stash,
+    PopStash,
+    /// Shift+F10 / Menu key: context menu of the selected commit.
+    ContextMenu,
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -292,7 +299,9 @@ fn named_label(key: Named, mac: bool) -> &'static str {
         Named::End => "End",
         Named::Tab => "Tab",
         Named::F5 => "F5",
+        Named::F10 => "F10",
         Named::F11 => "F11",
+        Named::ContextMenu => "Menu",
         _ => "?",
     }
 }
@@ -485,6 +494,10 @@ fn table() -> Vec<Action> {
         Global,
         &[],
     );
+    add(A::Pull, "Pull", RepoActions, Global, &[]);
+    add(A::Push, "Push", RepoActions, Global, &[]);
+    add(A::Stash, "Stash", RepoActions, Global, &[]);
+    add(A::PopStash, "Pop stash", RepoActions, Global, &[]);
     add(
         A::Refresh,
         "Reload repository",
@@ -587,6 +600,14 @@ fn table() -> Vec<Action> {
         Navigation,
         Global,
         &[ch('y').cmd(), ch('z').cmd().shift()],
+    );
+
+    add(
+        A::ContextMenu,
+        "Open context menu of the selected commit",
+        Navigation,
+        Global,
+        &[named(Named::F10).shift(), named(Named::ContextMenu)],
     );
 
     // Command palette and search
@@ -760,6 +781,11 @@ fn table() -> Vec<Action> {
                 | A::Redo
                 | A::FocusFilter
                 | A::CheckoutBranch
+                | A::Pull
+                | A::Push
+                | A::Stash
+                | A::PopStash
+                | A::ContextMenu
                 | A::SearchCommits
                 | A::FileHistory
                 | A::OpenTerminal

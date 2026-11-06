@@ -83,6 +83,8 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Action | Shortcut | Status |
 |---|---|---|
 | Next / previous item | ↓ / J next (older), ↑ / K previous (newer) | done (M1) |
+| Context menu of the selected commit | Shift+F10 / Menu key; ↑/↓ choose, Enter runs, Esc closes | done (M6-07) |
+| Next / previous input field | Tab / Shift+Tab | done (M6-07) |
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+J (first parent), Shift+K (child on the same branch) | done (M1; Shift+↑/↓ extend the selection since M4-01) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
@@ -97,6 +99,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Open repo via palette | Ctrl+Shift+O | done (M5-06; recent repositories and Browse…) |
 | File history and blame | Ctrl+Shift+H | done (M5-09 history: palette list of tracked files, also the file context menu and the History button of the diff; M5-10 blame: History / Blame toggle, "Blame at this commit"; verify layout in GitKraken) |
 | Focus left panel filter | Ctrl+Alt+F | done (M1) |
+| Pull, Push, Stash, Pop stash | Command palette | done (M6-07; the toolbar actions are palette entries) |
 | Open repo in terminal | Alt+T | done (M5-13; the system terminal, see deviations) |
 | Open repo in file manager | Alt+O | done (M5-13) |
 | Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts) |
@@ -144,4 +147,6 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
 | The toolbar's Terminal button and Alt+T open the system terminal in the repository instead of a terminal inside the app | M5 plan: an integrated terminal is a backlog item; the command can be set in Preferences → External tools |
 | "About Gitloom" is in the command palette and at the bottom of the Preferences categories instead of a Help menu | Gitloom has no menu bar and its gear button opens the Preferences directly (M6-03) |
+| Focused text fields get a 2 px accent border; Esc closes a dialog or menu even while one of its fields has focus | Accessibility pass (M6-07): visible focus and one Esc per overlay |
+| Screen readers are not supported | iced 0.14 exposes no accessibility tree (M6 plan); documented as a known limitation |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
