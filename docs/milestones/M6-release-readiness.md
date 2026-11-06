@@ -60,6 +60,7 @@ Out of scope (later):
 
 - [ ] A tag on `master` produces a draft release with AppImage, Linux `.tar.gz`, macOS universal dmg, Windows x64 `.zip` + `.msi` (signed), Windows x86 (best effort) and `SHA256SUMS`.
 - [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
+- [ ] No console window on Windows (M6-16).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
 - [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
@@ -85,6 +86,7 @@ Out of scope (later):
 | M6-12 | User documentation | M6-02 |
 | M6-13 | Consolidated walkthrough and GitKraken verification | M6-02 … M6-09 |
 | M6-14 | Release candidate v1.0.0-rc.1 | M6-02 … M6-09, M6-11, M6-12 |
+| M6-16 | No console window on Windows | M6-08 |
 | M6-15 | Release v1.0.0 | all |
 
 ---
@@ -260,6 +262,19 @@ Note (Claude Code part done, 2026-11-06; the checkbox waits for the maintainer's
 Acceptance: pre-release published with all artifacts; update check (M6-06) of a `rc.1` build sees a later `rc.2`.
 
 Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG section merged into `master`, tagged `v1.0.0-rc.1` by Claude Code (maintainer request "mach weiter mit rc.1", ADR-034); the release workflow builds the draft pre-release. Repository made public with private vulnerability reporting on the maintainer's request (2026-11-06). Open (maintainer): publish the draft, SignPath (M6-10); the update check against `rc.2` follows with the next candidate. The checkbox waits for these steps.
+
+### [ ] M6-16 No console window on Windows
+
+Finding of the maintainer (2026-11-06): the Windows build opens a console window next to Gitloom, because the binary uses the console subsystem (`crates/app/src/main.rs` has no `windows_subsystem` attribute).
+
+- `#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]` at the top of `crates/app/src/main.rs`. Debug builds (`cargo run`) keep the console for panics and logs.
+- Helper modes keep working with the GUI subsystem: askpass (Git reads the answer from the inherited stdout pipe) and Git editor mode (exit code, file written). Child processes: `git` already uses `CREATE_NO_WINDOW`, the terminal `CREATE_NEW_CONSOLE`; check all other spawns (file manager, external tools via `git difftool`/`mergetool`). Console-only diff/merge tools (e.g. vimdiff) get no window → known limitation in the user guide.
+- Starting `gitloom.exe <path>` from a terminal returns to the prompt immediately (like GitKraken); release builds print nothing to the terminal, crash reports cover panics (ADR-029).
+- Windows CI: run the editor-mode integration tests (`crates/app/tests/git_editor.rs`, `interactive_rebase.rs`, `sequencer.rs`) also with `--release`, so they exercise the GUI-subsystem binary.
+- `docs/RELEASE-CHECKLIST.md`: add "No console window when starting from the Start menu, the zip and a terminal" and "HTTPS credential prompt and interactive rebase still work" to the Windows section.
+- CHANGELOG `[Unreleased]` → Fixed: "Windows: no console window opens next to Gitloom."
+
+Acceptance: Windows CI green including the `--release` editor tests; the maintainer confirms on the next release candidate that no console window appears.
 
 ### [ ] M6-15 Release v1.0.0
 
