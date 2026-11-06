@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+      description: The task you are trying to get done, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: gitkraken
+    attributes:
+      label: How does GitKraken do it?
+      description: Gitloom follows GitKraken's layout and interactions. If GitKraken has this, describe or link how it works there.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Note that accounts, cloud features, integrations (pull requests, issue trackers) and AI features are out of scope.

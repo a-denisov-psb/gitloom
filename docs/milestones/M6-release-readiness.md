@@ -222,6 +222,13 @@ Acceptance: an rc tag produces signed Windows artifacts; verification step green
 
 Acceptance: scan report in the task note; maintainer approves the repository content before it goes public.
 
+Note (Claude Code part done, 2026-11-06; the checkbox waits for the maintainer's approval):
+
+- Secret scan: `gitleaks` could not be installed in this environment (downloading its binary was blocked), so the full history (335 commits, all branches, `git log --all -p`, without `Cargo.lock`, notices and images) was searched for the gitleaks core patterns: AWS keys, GitHub/GitLab tokens (`ghp_`, `github_pat_`, `gho_`, `glpat-`), Slack tokens, private key blocks, OpenAI/Google API keys, JWTs and `password/secret/token/api_key = "…"` assignments. Result: no findings; the only hits are the askpass test prompts (`"Password:"`). Recommended before going public: one `gitleaks git` run by the maintainer.
+- Personal data: every commit has the author and committer email `the old personal address` (maintainer decision: keep or rewrite to the GitHub noreply address); it also appears once in this milestone file. Test emails are `@example.com`; test paths are `/home/me`.
+- Internal content reviewed: `CLAUDE.md`, `.claude/` (commands, permission settings), `docs/PLANNING-HANDOVER.md`, `docs/HANDOVER.md` (environment notes mention WSL, no hosts or paths) and `scripts/` contain no local paths, host names or SSH aliases. Recommendation: keep them public (they document how the project is developed); the maintainer decides.
+- Added: `SECURITY.md` (GitHub private vulnerability reporting), issue forms (bug with version/OS/Git/crash report, feature request with "how does GitKraken do it"), PR template, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1, reports via the private reporting channel), CONTRIBUTING (contact, no CLA/DCO), README for the public (features, install per platform with the Gatekeeper and SmartScreen notes, coming from GitKraken, privacy, accessibility, build).
+
 ### [ ] M6-12 User documentation
 
 - `docs/user/` (Markdown, rendered on GitHub): getting started, coming from GitKraken (shortcuts and deviations from UX-PARITY in user language), daily workflow, branches and remotes, merge/rebase/conflicts, undo, settings, privacy (what contacts the network and when), troubleshooting (credentials, askpass, external tools, crash reports), known limitations.
