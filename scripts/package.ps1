@@ -30,12 +30,42 @@ New-Item -ItemType Directory -Force $dist | Out-Null
 Run cargo @("build", "--release", "--locked", "-p", $bin, "--target", $Target)
 $bins = Join-Path $root "target\$Target\release"
 
-# MSI
+# MSI. WiX needs a numeric version: a pre-release 1.0.0-rc.N becomes
+# 1.0.0.N (Windows Installer ignores the fourth field for upgrades, so the
+# final 1.0.0 replaces it). cargo-packager takes the version from Cargo, so
+# for a pre-release its configuration is passed in full with that version.
 $work = Join-Path $root "target\packager\windows-$arch"
 if (Test-Path $work) { Remove-Item -Recurse -Force $work }
 New-Item -ItemType Directory -Force $work | Out-Null
-Run cargo @("packager", "-p", $bin, "--release", "--target", $Target, "-f", "wix",
+$packagerArgs = @("packager", "-p", $bin, "--release", "--target", $Target, "-f", "wix",
     "--binaries-dir", $bins, "--out-dir", $work)
+$configFile = $null
+if ($version -match '^(\d+\.\d+\.\d+)-rc\.(\d+)$') {
+    $msiVersion = "$($Matches[1]).$($Matches[2])"
+    # Read Cargo's UTF-8 output as such (the copyright contains a non-ASCII sign).
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $metadata = (cargo metadata --no-deps --format-version 1 --locked) -join "`n" | ConvertFrom-Json
+    $package = $metadata.packages | Where-Object { $_.name -eq $bin }
+    $config = $package.metadata.packager
+    $config | Add-Member -NotePropertyName version -NotePropertyValue $msiVersion -Force
+    $config | Add-Member -NotePropertyName description -NotePropertyValue $package.description -Force
+    $config | Add-Member -NotePropertyName homepage -NotePropertyValue $package.homepage -Force
+    $config | Add-Member -NotePropertyName binaries -NotePropertyValue @(@{ path = $bin; main = $true }) -Force
+    # Relative paths in the configuration are relative to the crate.
+    $configFile = Join-Path (Split-Path $package.manifest_path) "packager-msi.json"
+    # UTF-8 without BOM: cargo-packager's JSON parser rejects a BOM.
+    [System.IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 10),
+        [System.Text.UTF8Encoding]::new($false))
+    $packagerArgs = @("packager", "--config", $configFile, "--target", $Target, "-f", "wix",
+        "--binaries-dir", $bins, "--out-dir", $work)
+} elseif ($version -match '-') {
+    throw "Pre-release version $version: only -rc.N can be mapped to an MSI version"
+}
+try {
+    Run cargo $packagerArgs
+} finally {
+    if ($configFile) { Remove-Item -Force $configFile }
+}
 $msi = Get-ChildItem -Path $work -Filter *.msi -Recurse | Select-Object -First 1
 if (-not $msi) { throw "no .msi produced" }
 Copy-Item $msi.FullName (Join-Path $dist "$name-$version-$arch.msi") -Force

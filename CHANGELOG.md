@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-11-06
+
+First release candidate of Gitloom 1.0: installers for Linux, macOS and Windows, a new license (GPL-3.0-or-later), crash reports, an opt-in update check, an accessibility pass and a user guide.
+
 ### Added
 
 - Keyboard access: Shift+F10 or the Menu key opens the context menu of the selected commit (↑/↓ and Enter choose an entry); Tab / Shift+Tab move between input fields; Pull, Push, Stash and Pop stash are in the command palette.
