@@ -4,3 +4,4 @@
 
 # Windows download artefacts
 *:Zone.Identifier
+/dist

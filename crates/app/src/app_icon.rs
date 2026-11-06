@@ -192,6 +192,13 @@ mod tests {
         ] {
             assert!(metainfo.contains(&part), "missing {part}");
         }
+        let manifest =
+            std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+                .unwrap();
+        assert!(manifest.contains(&format!("productName = \"{DISPLAY_NAME}\"")));
+        assert!(manifest.contains(&format!("identifier = \"{APP_ID}\"")));
+        let appimage = std::fs::read_to_string(root.join("linux/appimage.desktop")).unwrap();
+        assert!(appimage.contains(&format!("StartupWMClass={APP_ID}")));
         let plist = std::fs::read_to_string(root.join("macos/Info.plist")).unwrap();
         assert!(plist.contains(&format!("<string>{APP_ID}</string>")));
         assert!(plist.contains(&format!("<string>{DISPLAY_NAME}</string>")));

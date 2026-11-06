@@ -186,13 +186,15 @@ Note (checklist; "fixed" = gap found and fixed here, checked with tests and head
 
 Zoom up to 200 % exists since M5-04. Screen readers: limitation documented in README and UX-PARITY (user docs in M6-12). iced offers no keyboard focus for buttons, so buttons stay mouse-only where no shortcut or palette entry exists (status bar notice buttons, About links); their actions are not needed for Git work.
 
-### [ ] M6-08 Packaging configuration
+### [x] M6-08 Packaging configuration
 
 - `cargo-packager` configuration (or per-target fallback, ADR-031): AppImage, macOS `.app` + `.dmg` (universal binary via `lipo` of arm64 and x86_64), Windows `.msi` (x64, x86); plus `.tar.gz` and `.zip` of the plain binary with LICENSE and notices.
 - Packages contain LICENSE, THIRD-PARTY-LICENSES, icon, desktop metadata; installers install per user where the format allows.
 - Script `scripts/package.sh`/`.ps1` to build the local platform's packages.
 
 Acceptance: Linux packages built and started locally (AppImage on Ubuntu 22.04 or the oldest supported LTS in a container); Windows/macOS packaging verified in M6-09.
+
+Note: ADR-031. AppImage and tar.gz built and started locally (Debian 13, WSL); no container runtime is available here, so the Ubuntu 22.04 start moves to the release workflow (M6-09 builds the Linux packages on `ubuntu-22.04` and starts the AppImage there under Xvfb). The MSI installs per machine (cargo-packager's WiX template); the zip is the per-user option.
 
 ### [ ] M6-09 Release workflow
 

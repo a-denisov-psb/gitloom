@@ -71,13 +71,17 @@ pub fn notices_target(exe: Option<&Path>) -> String {
         .unwrap_or_else(|| notices_url(version()))
 }
 
-/// Package layouts (M6-08): next to the binary (zip, tar.gz), the macOS
-/// bundle's `Resources` and the Unix `share/doc/<binary>` directory
-/// (AppImage).
+/// Package layouts (M6-08): next to the binary (zip, tar.gz, msi), the
+/// macOS bundle's `Resources`, `lib/<binary>` (AppImage resources) and
+/// `share/doc/<binary>`.
 fn notices_candidates(dir: &Path) -> Vec<PathBuf> {
     vec![
         dir.join(NOTICES_FILE),
         dir.join("..").join("Resources").join(NOTICES_FILE),
+        dir.join("..")
+            .join("lib")
+            .join(identity::BINARY_NAME)
+            .join(NOTICES_FILE),
         dir.join("..")
             .join("share")
             .join("doc")

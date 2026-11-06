@@ -84,6 +84,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - First full debug build takes a few minutes (iced + wgpu).
 - License tooling (M6-03): `cargo install --locked cargo-deny` and `cargo install --locked cargo-about --features cli`; `check.sh` runs both when installed. After dependency changes run `./scripts/third-party-licenses.sh`.
 - App icon (ADR-036): edit `crates/app/assets/app-icon/icon.svg`, then `./scripts/app-icon.sh`.
+- Packages (ADR-031): `cargo install --locked cargo-packager`, then `./scripts/package.sh` (Linux/macOS) or `scripts\package.ps1` (Windows) → `dist/`. Linux needs `file` (here a local copy from `apt-get download file libmagic1t64 libmagic-mgc`, since there is no sudo).
 - Headless UI checks (ADR-035): `ICED_TEST_BACKEND=tiny-skia cargo test -p gitloom ui_check -- --ignored` writes PNGs to `target/ui-snapshots/`.
 - Windows check from WSL: `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`; `cargo test --workspace --no-run --target x86_64-pc-windows-gnu` builds `.exe` test binaries (needs `mingw-w64`) that run on Windows through WSL interop when Git for Windows is installed. Copy them to a Windows folder first.
 
