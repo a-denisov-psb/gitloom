@@ -1,0 +1,249 @@
+name: Release
+
+# Tag vX.Y.Z or vX.Y.Z-rc.N on master: build all targets, attach them with
+# SHA256SUMS to a draft GitHub release (pre-release for -rc), notes from the
+# CHANGELOG section (ADR-016, ADR-031). workflow_dispatch: dry run that only
+# uploads the packages as workflow artifacts.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"]
+    branches: ["feature/M6-09-release-workflow"] # TEMP: validation, removed before merge
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+
+      - name: Tag matches the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match version ${version}" >&2
+            exit 1
+          fi
+          ./scripts/release-notes.sh "${version}" > /dev/null
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  linux:
+    name: Linux x64
+    needs: check
+    # Oldest LTS runner: the binaries need glibc 2.35 or newer (ADR-031).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev file xvfb libxkbcommon-x11-0
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Package
+        run: ./scripts/package.sh
+
+      - name: Start the AppImage
+        run: |
+          set +e
+          export ICED_BACKEND=tiny-skia XDG_CONFIG_HOME="$RUNNER_TEMP/config" XDG_DATA_HOME="$RUNNER_TEMP/data"
+          xvfb-run -a timeout 15 ./dist/*.AppImage "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/start.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/start.log"
+          # 124: still running after 15 s, i.e. it started and did not crash.
+          [[ $status -eq 124 ]] || { echo "AppImage exited with $status" >&2; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-linux-x64
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Package
+        run: ./scripts/package.sh
+
+      - name: Check the bundle
+        run: |
+          app="target/packager/macos/$(sed -n 's/^pub const DISPLAY_NAME: &str = "\(.*\)";/\1/p' crates/git-core/src/identity.rs).app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$app"/Contents/MacOS/*
+          lipo -archs "$app"/Contents/MacOS/* | grep -q arm64
+          lipo -archs "$app"/Contents/MacOS/* | grep -q x86_64
+          plutil -p "$app/Contents/Info.plist"
+
+      - name: Start the app
+        run: |
+          app="target/packager/macos/$(sed -n 's/^pub const DISPLAY_NAME: &str = "\(.*\)";/\1/p' crates/git-core/src/identity.rs).app"
+          exe=$(ls "$app"/Contents/MacOS/* | head -n 1)
+          "$exe" "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/start.log" 2>&1 &
+          pid=$!
+          sleep 15
+          cat "$RUNNER_TEMP/start.log"
+          kill -0 "$pid" || { echo "the app exited early" >&2; exit 1; }
+          kill "$pid"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-macos-universal
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: check
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            optional: false
+          - arch: x86
+            target: i686-pc-windows-msvc
+            optional: true
+    # Windows x86 is best effort (ADR-016).
+    continue-on-error: ${{ matrix.optional }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Package
+        shell: pwsh
+        run: scripts/package.ps1 -Target ${{ matrix.target }}
+
+      # M6-10: SignPath signs the exe (inside zip and msi) here once the
+      # repository is public and the SignPath project exists. Skipped while
+      # the organization id is not configured.
+      - name: Sign with SignPath (M6-10)
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        shell: pwsh
+        run: |
+          Write-Error "SignPath signing is not set up yet (M6-10)."
+          exit 1
+
+      - name: Start the app
+        shell: pwsh
+        run: |
+          $exe = "target\${{ matrix.target }}\release\gitloom.exe"
+          $process = Start-Process -FilePath $exe -ArgumentList $env:GITHUB_WORKSPACE -PassThru
+          Start-Sleep -Seconds 15
+          if ($process.HasExited) { throw "the app exited early with $($process.ExitCode)" }
+          Stop-Process -Id $process.Id
+          (Get-Item $exe).VersionInfo | Format-List ProductName, ProductVersion, FileDescription
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload checksums (dry run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+
+      - name: Create the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ./scripts/release-notes.sh "$version" > "$RUNNER_TEMP/notes.md"
+          prerelease=()
+          [[ "$version" == *-rc.* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft "${prerelease[@]}" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag
