@@ -20,16 +20,16 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (M6 in progress, version 0.6.1 released, 2026-11-06)
+## Current state (M6 in progress, 1.0.0-rc.1 tagged, 2026-11-06)
 
 M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
 - Done: M6-01 identity, M6-02 identity values, M6-03 GPL-3.0-or-later + cargo-deny + third-party notices + About dialog, M6-04 app icon and metadata, M6-05 crash reports, M6-06 opt-in update check, M6-07 accessibility pass, M6-08 packaging (cargo-packager, ADR-031), M6-09 release workflow (dry run green on all targets), M6-12 user guide (`docs/user/`).
-- Claude Code part done, waiting for the maintainer: M6-11 (approve the public repository content, author email decision), M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
-- Blocked by maintainer actions: M6-10 (SignPath after the repository is public), M6-14 (rc.1: depends on M6-11; the plan has the maintainer tag `master` and make the repository public), M6-15 (1.0.0 only when the maintainer asks).
+- Done with the maintainer: M6-11 (content approved, history rewritten to the GitHub noreply address). Claude Code part done, waiting for the maintainer: M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
+- M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Open for the maintainer: publish the draft, make the repository public, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
 - Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
 - Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).
-- Branches: `master` with `v0.1.0` … `v0.6.1`; `develop` (default branch on GitHub).
+- Branches: `master` with `v0.1.0` … `v0.6.1` and `v1.0.0-rc.1`; `develop` (default branch on GitHub).
 
 Earlier milestones (M1–M5) are described in their milestone files; the summary of M5 is in `docs/PLANNING-HANDOVER.md`.
 

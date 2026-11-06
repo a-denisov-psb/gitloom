@@ -355,6 +355,11 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Linux: AppImage and tar.gz are built on the oldest Ubuntu LTS runner (22.04, glibc 2.35)
   in the release workflow; builds on newer systems need a newer glibc. linuxdeploy runs
   with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE needed); appimagetool needs `file`.
+- MSI version (1.0.0-rc.1): WiX accepts only numeric versions, so `package.ps1` passes
+  cargo-packager a generated configuration (with `name` and `binariesDir`, which
+  `--config` needs) whose version `1.0.0-rc.N` becomes `1.0.0-N`; cargo-packager turns that
+  into the MSI version `1.0.0.N`. Windows Installer ignores the fourth field for upgrades,
+  so the final 1.0.0 replaces a release candidate. File names keep `1.0.0-rc.N`.
 - Why: one configuration for three installer formats; fallbacks were not needed.
 
 ## ADR-032 CI budget until the repository is public
