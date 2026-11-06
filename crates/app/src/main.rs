@@ -1,3 +1,4 @@
+mod about;
 mod actions;
 mod app;
 mod askpass;
@@ -25,6 +26,8 @@ mod shortcuts;
 mod snapshot;
 mod theme;
 mod ui;
+#[cfg(test)]
+mod ui_check;
 mod undo;
 
 use std::path::PathBuf;

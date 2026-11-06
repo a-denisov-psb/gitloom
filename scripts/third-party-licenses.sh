@@ -21,7 +21,9 @@ check=false
 out_dir=$(mktemp -d)
 trap 'rm -rf "$out_dir"' EXIT
 
-cargo about generate --locked scripts/third-party/notices.md.hbs -o "$out_dir/notices.md"
+cargo about generate --locked scripts/third-party/notices.md.hbs -o "$out_dir/notices.raw.md"
+# Some license files use CRLF; the repository stores LF.
+tr -d '\r' < "$out_dir/notices.raw.md" > "$out_dir/notices.md"
 cargo about generate --locked scripts/third-party/list.tsv.hbs -o "$out_dir/list.tsv"
 
 # Bundled assets that are not crates.

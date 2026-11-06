@@ -143,4 +143,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | The commit message of a rebase step is editable before Continue (prefilled with the original message) | Git asks for the message on `rebase --continue` after a conflict; the commit panel answers instead of a terminal editor |
 | Shift+↑/↓ extend the commit selection; branch navigation stays on Shift+J/K | M4 plan: multi-selection needs a keyboard way to extend; until M4 Shift+↑/↓ also navigated parent/child |
 | The toolbar's Terminal button and Alt+T open the system terminal in the repository instead of a terminal inside the app | M5 plan: an integrated terminal is a backlog item; the command can be set in Preferences → External tools |
+| "About Gitloom" is in the command palette and at the bottom of the Preferences categories instead of a Help menu | Gitloom has no menu bar and its gear button opens the Preferences directly (M6-03) |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

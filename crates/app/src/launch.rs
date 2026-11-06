@@ -167,6 +167,17 @@ pub fn file_manager(platform: Platform, dir: &Path) -> Launch {
     Launch::new(program, vec![dir.to_string_lossy().into_owned()], dir)
 }
 
+/// Default handler for `target`: a URL opens in the browser, a file in its
+/// default application.
+pub fn open_target(platform: Platform, target: &str) -> Launch {
+    let program = match platform {
+        Platform::Windows => "explorer",
+        Platform::MacOs => "open",
+        Platform::Linux => "xdg-open",
+    };
+    Launch::new(program, vec![target.to_owned()], &std::env::temp_dir())
+}
+
 /// File manager with `file` selected (where the platform can select).
 pub fn reveal_file(platform: Platform, file: &Path) -> Launch {
     let dir = file.parent().unwrap_or(file);
@@ -253,6 +264,16 @@ pub fn spawn(launch: &Launch) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn targets_open_with_the_platform_handler() {
+        let url = "https://example.com/x";
+        assert_eq!(open_target(Platform::Windows, url).program, "explorer");
+        assert_eq!(open_target(Platform::MacOs, url).program, "open");
+        let linux = open_target(Platform::Linux, url);
+        assert_eq!(linux.program, "xdg-open");
+        assert_eq!(linux.args, vec![url.to_owned()]);
+    }
 
     struct Fake {
         programs: Vec<&'static str>,

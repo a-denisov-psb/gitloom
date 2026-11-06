@@ -50,6 +50,15 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: GPL-3.0-or-later. Dependencies must have GPL-3.0 compatible licenses,
   checked by `cargo-deny`; third-party notices ship with every package.
 - Why: maintainer decision; forks and redistributed builds stay open source.
+- Implementation (M6-03): `LICENSE` holds the GPL-3.0 text, the workspace declares
+  `GPL-3.0-or-later`, our crates are `publish = false`. `deny.toml` allows only
+  GPL-3.0 compatible licenses (checked against the tree); `cargo deny` runs in
+  `check.sh` (skipped with a hint when missing) and in the CI job "Licenses and
+  advisories". `scripts/third-party-licenses.sh` (cargo-about, `about.toml`) writes
+  `THIRD-PARTY-LICENSES.md` (all crates of the release targets with license texts,
+  plus Lucide icons) and `crates/app/assets/third-party.tsv` (the list in the About
+  dialog); `--check` fails in CI when either is stale or misses a crate of `cargo tree`.
+  Where a crate offers a choice, the most permissive license is listed.
 
 ## ADR-009 Privacy
 
@@ -357,3 +366,19 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Consequences: `CLAUDE.md`, `.claude/commands/` and `.claude/settings.json` allow
   pushing `master` and tags as part of `/release`. Force-push, `reset --hard`, `rebase`
   and `clean` stay denied. Reports are one line per task and one report per milestone.
+
+## ADR-035 Headless UI checks with iced_test
+
+- Status: accepted (M6-03)
+- Context: UI tasks must be checked by hand, but keyboard input never reached the
+  window in the WSLg setup, and screenshots of the Windows desktop fail while it is
+  locked.
+- Decision: `iced_test 0.14` (iced's own simulator, MIT) is a dev-dependency of the app.
+  `crates/app/src/ui_check.rs` renders the real `App::view` headless, clicks widgets by
+  their text, types keys and writes PNG snapshots to `target/ui-snapshots/`. The checks
+  are `#[ignore]`d (they need a renderer) and run with
+  `ICED_TEST_BACKEND=tiny-skia cargo test -p gitloom ui_check -- --ignored`.
+- Consequences: snapshots use iced's Fira Sans test font instead of the system font;
+  the release binary is unaffected (dev-dependency only). A real window check stays
+  part of the release checklist (M6-13).
+
