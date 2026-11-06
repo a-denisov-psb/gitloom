@@ -90,6 +90,14 @@ fn notices_candidates(dir: &Path) -> Vec<PathBuf> {
     ]
 }
 
+/// The user guide (`docs/user/`) in the repository at the tag of `version`.
+pub fn user_guide_url(version: &str) -> String {
+    format!(
+        "{}/blob/v{version}/docs/user/README.md",
+        identity::REPOSITORY_URL
+    )
+}
+
 /// The notices in the repository at the tag of `version`.
 pub fn notices_url(version: &str) -> String {
     format!(
@@ -138,6 +146,7 @@ mod tests {
         // Nothing shipped: the repository copy of this version.
         assert_eq!(notices_target(Some(&exe)), notices_url(version()));
         assert!(notices_url("1.0.0").ends_with("/blob/v1.0.0/THIRD-PARTY-LICENSES.md"));
+        assert!(user_guide_url("1.0.0").ends_with("/blob/v1.0.0/docs/user/README.md"));
         assert_eq!(notices_target(None), notices_url(version()));
 
         // AppImage layout: usr/bin/<binary> and usr/share/doc/<binary>/.

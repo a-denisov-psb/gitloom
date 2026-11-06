@@ -229,12 +229,14 @@ Note (Claude Code part done, 2026-11-06; the checkbox waits for the maintainer's
 - Internal content reviewed: `CLAUDE.md`, `.claude/` (commands, permission settings), `docs/PLANNING-HANDOVER.md`, `docs/HANDOVER.md` (environment notes mention WSL, no hosts or paths) and `scripts/` contain no local paths, host names or SSH aliases. Recommendation: keep them public (they document how the project is developed); the maintainer decides.
 - Added: `SECURITY.md` (GitHub private vulnerability reporting), issue forms (bug with version/OS/Git/crash report, feature request with "how does GitKraken do it"), PR template, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1, reports via the private reporting channel), CONTRIBUTING (contact, no CLA/DCO), README for the public (features, install per platform with the Gatekeeper and SmartScreen notes, coming from GitKraken, privacy, accessibility, build).
 
-### [ ] M6-12 User documentation
+### [x] M6-12 User documentation
 
 - `docs/user/` (Markdown, rendered on GitHub): getting started, coming from GitKraken (shortcuts and deviations from UX-PARITY in user language), daily workflow, branches and remotes, merge/rebase/conflicts, undo, settings, privacy (what contacts the network and when), troubleshooting (credentials, askpass, external tools, crash reports), known limitations.
 - Linked from README and the About dialog.
 
 Acceptance: every feature in the CHANGELOG since 0.1.0 is covered; screenshots current.
+
+Note: ten chapters in `docs/user/` plus an index, linked from README and the About dialog ("User guide" opens the guide at the tag of the running version). Coverage was checked against every CHANGELOG entry from 0.2.0 to [Unreleased] (0.1.0 was the layout shell only); every UI label named in the guide was checked against the code. Screenshots: the M5 set (graph, diff, history, rebase, conflict; the UI of these views is unchanged since) plus new Preferences and About screenshots rendered headless (ADR-035).
 
 ### [ ] M6-13 Consolidated walkthrough and GitKraken verification
 
