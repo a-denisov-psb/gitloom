@@ -364,13 +364,15 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-032 CI budget until the repository is public
 
-- Status: accepted
+- Status: superseded (repository public since 2026-11-06)
 - Decision: Linux check and MSRV run on every push and pull request. Windows and macOS
   run only on pushes to `master` and `release/**`, on tags and via `workflow_dispatch`.
   Runs are grouped per ref with `cancel-in-progress`. Before every merge the maintainer
   workflow runs `./scripts/check.sh` and clippy for the Windows target locally.
 - Why: private repositories bill Windows and macOS minutes at a multiple of Linux; the
   budget is limited until the repository is public (M6-11). Revisit after that.
+- Superseded (2026-11-06): the repository is public, standard runners are free, so CI runs
+  Linux, Windows and macOS on every push and pull request again.
 
 ## ADR-033 Keep the name Gitloom
 
