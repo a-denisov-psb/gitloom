@@ -68,7 +68,7 @@ The milestone files are the contract: Claude Code does not extend scope. It deci
 | Graph | Pure crate `git-graph`, Kahn ordering, stable lanes, per-row segments | Testable, virtualizable |
 | Demo data | Only in tests; unfinished actions disabled with tooltip | App must not look like a demo |
 | Branching | Git flow: `master` releases, `develop` integration, `feature/<task-id>-<slug>` | Maintainer's choice |
-| License | MIT OR Apache-2.0 | Provisional, needs confirmation |
+| License | GPL-3.0-or-later | Switched in M6-03 (ADR-008) |
 | Privacy | No telemetry, no accounts, offline by default | Scope |
 
 ### Verified technical facts
