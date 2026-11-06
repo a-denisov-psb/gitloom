@@ -82,6 +82,7 @@ Gitloom is developed milestone by milestone; the plans and decisions are part of
 | [DECISIONS](docs/DECISIONS.md) | Architecture decision records |
 | [UX-PARITY](docs/UX-PARITY.md) | GitKraken layout, interactions, shortcuts |
 | [HANDOVER](docs/HANDOVER.md) | Current state, open questions |
+| [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) | Manual checks before a release |
 | [CONTRIBUTING](CONTRIBUTING.md) | Setup, git flow, commit style |
 | [CLAUDE.md](CLAUDE.md) | Instructions for Claude Code |
 

@@ -246,6 +246,8 @@ Note: ten chapters in `docs/user/` plus an index, linked from README and the Abo
 
 Acceptance: checklist complete; HANDOVER "Maintainer to-dos" contains no M2–M5 items.
 
+Note (Claude Code part done, 2026-11-06; the checkbox waits for the maintainer's run): `docs/RELEASE-CHECKLIST.md` groups all open checks by area (install and start, keyboard, M2–M5 Windows walkthroughs, credentials, new 1.0 features, GitKraken verification with Gitloom's current behavior for comparison). The 12 open M2–M5 items left HANDOVER; it now points to the checklist. The run needs the packaged release candidate (M6-14).
+
 ### [ ] M6-14 Release candidate v1.0.0-rc.1
 
 - Release branch `release/1.0.0`, version `1.0.0-rc.1`, CHANGELOG section, tag on `master` by the maintainer, draft pre-release by the workflow.
