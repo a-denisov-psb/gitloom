@@ -47,10 +47,15 @@ if ($version -match '^(\d+\.\d+\.\d+)-rc\.(\d+)$') {
     $metadata = (cargo metadata --no-deps --format-version 1 --locked) -join "`n" | ConvertFrom-Json
     $package = $metadata.packages | Where-Object { $_.name -eq $bin }
     $config = $package.metadata.packager
+    # With `name` set, cargo-packager does not look for Cargo.toml next to the
+    # configuration file (which fails for a file path).
+    $config | Add-Member -NotePropertyName name -NotePropertyValue $bin -Force
     $config | Add-Member -NotePropertyName version -NotePropertyValue $msiVersion -Force
     $config | Add-Member -NotePropertyName description -NotePropertyValue $package.description -Force
     $config | Add-Member -NotePropertyName homepage -NotePropertyValue $package.homepage -Force
     $config | Add-Member -NotePropertyName binaries -NotePropertyValue @(@{ path = $bin; main = $true }) -Force
+    # `--binaries-dir` is ignored together with `--config`.
+    $config | Add-Member -NotePropertyName binariesDir -NotePropertyValue $bins -Force
     # Relative paths in the configuration are relative to the crate.
     $configFile = Join-Path (Split-Path $package.manifest_path) "packager-msi.json"
     # UTF-8 without BOM: cargo-packager's JSON parser rejects a BOM.
