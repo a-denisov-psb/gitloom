@@ -26,7 +26,7 @@ M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md
 
 - Done: M6-01 identity, M6-02 identity values, M6-03 GPL-3.0-or-later + cargo-deny + third-party notices + About dialog, M6-04 app icon and metadata, M6-05 crash reports, M6-06 opt-in update check, M6-07 accessibility pass, M6-08 packaging (cargo-packager, ADR-031), M6-09 release workflow (dry run green on all targets), M6-12 user guide (`docs/user/`).
 - Done with the maintainer: M6-11 (content approved, history rewritten to the GitHub noreply address). Claude Code part done, waiting for the maintainer: M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
-- M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Open for the maintainer: publish the draft, make the repository public, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
+- M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Repository public since 2026-11-06. Open for the maintainer: publish the draft, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
 - Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
 - Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).
 - Branches: `master` with `v0.1.0` … `v0.6.1` and `v1.0.0-rc.1`; `develop` (default branch on GitHub).
@@ -66,7 +66,8 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] Check the CI runs of `master` v0.4.0 (d4f9f4a) and `develop` (2d31663): both green (checked with `gh run list`, 2026-10-25). From now on Claude Code checks CI itself after each push to `develop`.
 - [x] GitHub Actions: CI of `develop` checked on 2026-11-04 (billing fixed), green on Linux, Windows, macOS and MSRV.
 - [x] M6-11: repository content approved; history rewritten to the GitHub noreply address (2026-11-06).
-- [ ] M6-14: make the repository public, then enable Settings → Code security → "Private vulnerability reporting" (SECURITY.md and the Code of Conduct point to it).
+- [x] M6-14: repository public and private vulnerability reporting enabled (2026-11-06, by Claude Code on request).
+- [ ] M6-14: check and publish the draft pre-release `v1.0.0-rc.1` (Releases page).
 - [ ] M6-10: apply at SignPath Foundation once the repository is public; create the project and signing policy, connect GitHub, and set the repository variable `SIGNPATH_ORGANIZATION_ID` (the release workflow has the step prepared).
 - [ ] ADR-033 (name kept): optional trademark/domain check for "Gitloom"; decide before the repository goes public (M6-11) whether it stays under `a-denisov-psb` or moves to an own organization (then update `git_core::identity` and the remote).
 - [x] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0. Resolved: CI runs again since 2026-11-04.

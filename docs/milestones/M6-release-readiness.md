@@ -259,7 +259,7 @@ Note (Claude Code part done, 2026-11-06; the checkbox waits for the maintainer's
 
 Acceptance: pre-release published with all artifacts; update check (M6-06) of a `rc.1` build sees a later `rc.2`.
 
-Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG section merged into `master`, tagged `v1.0.0-rc.1` by Claude Code (maintainer request "mach weiter mit rc.1", ADR-034); the release workflow builds the draft pre-release. Open (maintainer): publish the draft, make the repository public, SignPath (M6-10); the update check against `rc.2` follows with the next candidate. The checkbox waits for these steps.
+Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG section merged into `master`, tagged `v1.0.0-rc.1` by Claude Code (maintainer request "mach weiter mit rc.1", ADR-034); the release workflow builds the draft pre-release. Repository made public with private vulnerability reporting on the maintainer's request (2026-11-06). Open (maintainer): publish the draft, SignPath (M6-10); the update check against `rc.2` follows with the next candidate. The checkbox waits for these steps.
 
 ### [ ] M6-15 Release v1.0.0
 
