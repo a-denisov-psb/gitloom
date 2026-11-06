@@ -126,6 +126,11 @@ jobs:
           lipo -archs "$app"/Contents/MacOS/* | grep -q arm64
           lipo -archs "$app"/Contents/MacOS/* | grep -q x86_64
           plutil -p "$app/Contents/Info.plist"
+          # The app inside the dmg carries the signature too.
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" dist/*.dmg
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP"/dmg/*.app
+          ls -l "$RUNNER_TEMP/dmg"
+          hdiutil detach "$RUNNER_TEMP/dmg"
 
       - name: Start the app
         run: |

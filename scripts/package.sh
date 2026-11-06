@@ -66,10 +66,14 @@ package_macos() {
     # Ad-hoc signature (ADR-016): no Developer ID, not notarized.
     codesign --force --deep --sign - "$work/$name.app"
     codesign --verify --deep --strict "$work/$name.app"
-    cargo packager -p "$bin" --release --target universal-apple-darwin -f dmg \
-        --binaries-dir "$universal" --out-dir "$work"
-    local dmg
-    dmg=$(find "$work" -maxdepth 1 -name '*.dmg' | head -n 1)
+    # The dmg is made here, not by cargo-packager, which would bundle the
+    # app again without the signature.
+    local volume="$work/dmg"
+    rm -rf "$volume" && mkdir -p "$volume"
+    cp -R "$work/$name.app" "$volume/"
+    ln -s /Applications "$volume/Applications"
+    local dmg="$work/$name-$version-universal.dmg"
+    hdiutil create -volname "$name" -srcfolder "$volume" -ov -format UDZO "$dmg"
     cp "$dmg" "$dist/$name-$version-universal.dmg"
 }
 
