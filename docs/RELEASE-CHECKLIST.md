@@ -45,6 +45,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Walkthrough against the GitHub remote: Fetch all, create branch (Ctrl+B), push with upstream, pull (fast-forward), rejected push → Force push (once without and once after a fetch), create/push/delete a tag, rename a branch including the remote, delete remote and local branch, checkout of a remote branch. Afterwards GitHub has no leftovers.
 - [ ] Credentials: HTTPS with Git Credential Manager (no Gitloom prompt when GCM has the credential); with the credential removed, Gitloom's prompt window appears and Esc cancels it.
 - [ ] L: SSH with a passphrase-protected key without ssh-agent: Gitloom's prompt asks for the passphrase; an unknown host key asks Yes/No.
+- [ ] Remove, rename and add a remote in a terminal while Gitloom is open: the left panel follows (M6-18).
 
 ## 5. History editing on Windows (formerly M4)
 

@@ -8,6 +8,9 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - Windows: no console window opens next to Gitloom.
 - The repository and branch pickers in the toolbar open the recent repositories and the branch list.
+- The left panel no longer shows remotes that were removed or renamed outside Gitloom: changes to any Git config file (also several quick writes, rewrites by tools and the global config) are picked up without a restart.
+- Remotes defined in the global Git configuration are marked in the left panel; Remove, Rename and Edit URL are disabled for them, since Git cannot change them from the repository.
+- Removing, renaming or editing a remote that no longer exists reloads the repository and says so in the status bar instead of showing Git's error.
 
 ## [1.0.0-rc.1] - 2026-11-06
 
