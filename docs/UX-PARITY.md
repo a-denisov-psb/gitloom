@@ -12,10 +12,10 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 |---|---|---|
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it); M6-17 pickers open the palette lists (see deviations); M8 external editor button next to Terminal |
-| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Gitflow (when initialized), Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; folders, icons, highlight and counter M7-14 (folders before branches, tags flat, no folder menu: GitKraken check open); Gitflow M7 |
+| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Gitflow (when initialized), Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; folders, icons, highlight and counter M7-14 (folders before branches, tags flat, no folder menu: GitKraken check open); GITFLOW section M7-08 (groups only when they have branches) |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top; resizable columns and a column menu | done (M1); resizable columns and column menu M9 |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
-| Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); M7 inline and split (ADR-038) |
+| Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); inline and split M7 (ADR-038) |
 | Status bar | Bottom line | done |
 | Resizable panes | All splits draggable | done |
 
@@ -40,8 +40,8 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path); M8 "Open in external editor" |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
-| Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | M7 (global setting; staging by line and block in all modes); toggle and setting done in M7-01, Inline view with block bars and change arrows M7-03, Split view M7-04 |
-| Gitflow | Preferences → Gitflow initializes; GITFLOW section in the left panel with a green start button; branch menu "Finish …" | M7 (native, git-flow compatible config; ADR-037) |
+| Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | done (M7: one global setting; staging by line in all modes and by block in Inline/Split; read-only diffs have no bars; GitKraken checks on remembering, block buttons and Split alignment open) |
+| Gitflow | Preferences → Gitflow initializes; GITFLOW section in the left panel with a green start button; branch menu "Finish …" | done (M7: native, git-flow compatible config, ADR-037; also palette entries; finish across conflicts and one undo step; GitKraken checks on dialogs and section position open) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |

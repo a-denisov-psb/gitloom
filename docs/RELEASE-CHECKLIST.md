@@ -65,6 +65,16 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Crash report: not triggerable in release builds; if a crash happens during the checks, the next start shows the notice, Copy report and Open report folder work.
 - [ ] Privacy: with avatars and update check off, Gitloom opens no network connection besides Git's (auto-fetch).
 
+## 7a. New in 1.1 (M7; Windows required, Linux checked in CI)
+
+- [ ] Left panel: folders collapse and stay collapsed after a restart; "Viewing x/y · Show All" appears when hiding a branch; drag and drop, double click and the branch menu work on branches inside folders.
+- [ ] Diff views: switch Hunk / Inline / Split on an unstaged, a staged and a commit diff; stage, unstage and discard a block and selected lines in Inline and Split (also a CRLF file); the arrows jump between changes; the mode survives a restart.
+- [ ] A 2 MB text file scrolls smoothly in Inline and Split.
+- [ ] Git flow: initialize in Preferences on a repository without `develop`; start a feature from the green "+", finish it with "Delete branch"; start and finish a release (tag created, merged into main and develop); Ctrl+Z undoes the finish, Ctrl+Y redoes it.
+- [ ] Release finish with a conflict in the merge into develop: resolve in the conflict view, Continue, the finish completes by itself; close Gitloom while the conflict is open, reopen, "Continue finishing" completes it.
+- [ ] A repository initialized with the `git-flow` CLI (Git for Windows ships it) shows the GITFLOW section; one initialized by Gitloom works with `git flow feature start` in a terminal.
+- [ ] Context menus with long branch names (drag one long-named branch onto another) are as wide as their longest entry.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

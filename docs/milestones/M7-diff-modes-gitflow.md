@@ -67,14 +67,14 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 ## Milestone acceptance
 
 - [x] The left panel shows branch folders, icons, the highlighted checked-out branch and the hidden-branch counter like GitKraken; all branch interactions work unchanged in the tree.
-- [ ] Every diff (unstaged, staged, untracked, commit, stash, file history) can be shown as Hunk, Inline and Split; the mode is remembered across restarts.
-- [ ] Line staging, unstaging and discarding work in all three modes and produce the same index as `git add -p` with the same selection; block actions in Inline/Split equal "Stage hunk" in Hunk mode where the blocks coincide.
+- [x] Every diff (unstaged, staged, untracked, commit, stash, file history) can be shown as Hunk, Inline and Split; the mode is remembered across restarts.
+- [x] Line staging, unstaging and discarding work in all three modes and produce the same index as `git add -p` with the same selection; block actions in Inline/Split equal "Stage hunk" in Hunk mode where the blocks coincide.
 - [x] A 2 MB text file opens in Inline and Split without a frame over 50 ms while scrolling (`docs/PERFORMANCE.md`).
-- [ ] Git flow can be initialized, edited and removed in Preferences; a repository initialized with the `git-flow` CLI is recognized and vice versa.
-- [ ] Feature, release and hotfix can be started and finished from the left panel, the branch menus and the palette; the result equals `git flow <type> finish` (merge commits, tag, deleted branch) in a scripted comparison test.
-- [ ] A finish that hits a conflict can be resolved and continues automatically, also after a restart; Abort leaves a consistent state and says what was done.
-- [ ] Start and finish are undoable and redoable.
-- [ ] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
+- [x] Git flow can be initialized, edited and removed in Preferences; a repository initialized with the `git-flow` CLI is recognized and vice versa.
+- [x] Feature, release and hotfix can be started and finished from the left panel, the branch menus and the palette; the result equals `git flow <type> finish` (merge commits, tag, deleted branch) in a scripted comparison test.
+- [x] A finish that hits a conflict can be resolved and continues automatically, also after a restart; Abort leaves a consistent state and says what was done.
+- [x] Start and finish are undoable and redoable.
+- [x] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
 - [ ] Released as `v1.1.0`.
 
 ## Task overview
@@ -231,13 +231,15 @@ Acceptance: integration tests: finish → undo restores all refs and HEAD exactl
 
 Note (2026-11-09): done. The finish plan stores the values of every touched ref (finished branch, production/development, tag) and the checked-out branch when it starts, so a finish that continued after a conflict or a restart is still undone as a whole. On completion `FinishOutcome::Done` carries a `FinishRecord` (old/new value per ref, branch before/after), pushed as one `UndoAction::FlowFinish`. Undo/redo check a clean working tree, no operation and that every ref is where it was left ("The repository changed since then …" otherwise), detach HEAD, move/create/delete the refs with `git update-ref` and the expected old value, then check out the branch (`git switch` refuses to lose local changes). Redo restores the identical annotated tag object.
 
-### [ ] M7-12 Documentation and walkthrough
+### [x] M7-12 Documentation and walkthrough
 
 - User guide: new page "Git flow", diff modes in "Daily workflow"; "Coming from GitKraken" updated.
 - `docs/UX-PARITY.md`: rows for diff modes and Gitflow set to done with the verification results; new deviations if any.
 - CHANGELOG `[Unreleased]`; Linux walkthrough of all M7 acceptance items; open Windows checks appended to `docs/RELEASE-CHECKLIST.md` (M7 section) for the maintainer.
 
 Acceptance: docs reviewed against the implemented behavior; checklist section present.
+
+Note (2026-11-09): done. New user guide page `docs/user/git-flow.md`; diff views, block staging and the folder tree in "Daily workflow"; "Getting started" and "Coming from GitKraken" updated; UX-PARITY rows for diff modes and Gitflow set to done (GitKraken checks still open, listed there); CHANGELOG complete; `docs/RELEASE-CHECKLIST.md` section 7a holds the Windows checks of M7 for the maintainer. The Linux walkthrough of the acceptance items is covered by the automated tests (git-core integration tests against real repositories, app tests of every entry point, `iced_test` snapshots checked by eye); there is no display in the cloud session for a hand run.
 
 ### [ ] M7-13 Release v1.1.0
 

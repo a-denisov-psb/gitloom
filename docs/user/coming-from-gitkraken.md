@@ -45,3 +45,5 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - A Git lock file (`index.lock`) is never deleted; the operation offers **Retry** instead.
 - The author, date and SHA columns hide automatically when the commit message would get too narrow; columns cannot be resized yet.
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
+- The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
+- Git flow needs no `git-flow` tool; a hotfix finished while a release branch exists is merged into the development branch (see [Git flow](git-flow.md)).
