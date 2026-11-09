@@ -49,7 +49,8 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let remote: Vec<_> = by_remote
         .into_iter()
         .flat_map(|(name, refs)| {
-            std::iter::once(remote_label(name)).chain(
+            let external = repo.snapshot.external_remote(name);
+            std::iter::once(remote_label(name, external)).chain(
                 refs.into_iter()
                     .map(|r| ref_item(repo, r, r.local_name(), 2)),
             )
@@ -336,15 +337,25 @@ pub fn ahead_behind_badge(ahead_behind: Option<(usize, usize)>) -> Option<String
 }
 
 /// Remote name above its branches; right click opens the remote menu.
-fn remote_label<'a>(name: &'a str) -> Element<'a, Message> {
+/// Remote node; `external`: defined outside the repository config (the
+/// tooltip says where, M6-18).
+fn remote_label<'a>(
+    name: &'a str,
+    external: Option<git_core::ConfigScope>,
+) -> Element<'a, Message> {
     let label = container(muted(name))
         .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT))
         .width(Fill);
-    let name = name.to_owned();
-    crate::ui::context_area::context_area(label, move |position| Message::RemoteContextMenu {
-        name: name.clone(),
-        position,
-    })
+    let owned = name.to_owned();
+    let area =
+        crate::ui::context_area::context_area(label, move |position| Message::RemoteContextMenu {
+            name: owned.clone(),
+            position,
+        });
+    match external {
+        Some(scope) => crate::ui::panel::with_tooltip_text(area, scope.hint().to_owned()),
+        None => area,
+    }
 }
 
 fn list_button<'a>(
