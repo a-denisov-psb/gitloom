@@ -55,12 +55,15 @@ Out of scope (later):
 | GitHub Actions billing fixed (until the repository is public the release workflow runs on the private plan) | M6-09 |
 | GitKraken checks from M4/M5: drag and drop onto a branch that is not checked out; interactive rebase list order; commit search dims or filters; hide the checked-out branch; file history/blame layout; palette sub-lists | M6-13 |
 | macOS machine available for a smoke test of the dmg? (otherwise CI only) | M6-13 |
+| Empty remote node `github-fc` in the left panel (not in any Git config level per `git config --show-origin`): does it disappear after restarting Gitloom? | M6-18 |
 
 ## Milestone acceptance
 
 - [ ] A tag on `master` produces a draft release with AppImage, Linux `.tar.gz`, macOS universal dmg, Windows x64 `.zip` + `.msi` (signed), Windows x86 (best effort) and `SHA256SUMS`.
 - [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
 - [ ] No console window on Windows (M6-16).
+- [ ] No toolbar control shows "Not available yet" (M6-17).
+- [ ] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
 - [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
@@ -87,6 +90,8 @@ Out of scope (later):
 | M6-13 | Consolidated walkthrough and GitKraken verification | M6-02 … M6-09 |
 | M6-14 | Release candidate v1.0.0-rc.1 | M6-02 … M6-09, M6-11, M6-12 |
 | M6-16 | No console window on Windows | M6-08 |
+| M6-17 | Repository and branch pickers | M6-08 |
+| M6-18 | Remotes in sync with the Git configuration | – |
 | M6-15 | Release v1.0.0 | all |
 
 ---
@@ -277,6 +282,33 @@ Finding of the maintainer (2026-11-06): the Windows build opens a console window
 Acceptance: Windows CI green including the `--release` editor tests; the maintainer confirms on the next release candidate that no console window appears.
 
 Note (2026-11-09): implemented; Windows CI green including the `--release` editor tests and a PE header test (`crates/app/tests/windows_subsystem.rs`); editor mode of the GUI-subsystem binary checked by hand against Git for Windows. Console-only diff/merge tools are listed as a known limitation. The checkbox waits for the maintainer's confirmation on the next release candidate.
+
+### [ ] M6-17 Repository and branch pickers
+
+Finding of the maintainer (2026-11-09): the "repository" and "branch" pickers on the left of the toolbar still show "Not available yet" (disabled since M1). They stay (GitKraken layout) and open the existing palette lists.
+
+- Click on the repository picker opens the palette in the mode of "Open recent repository…" (same list, same behavior as the palette action); click on the branch picker opens "Checkout branch…". No new list code.
+- The pickers look as today (caption, value, chevron) plus the normal hover/pressed styles of toolbar buttons; tooltips "Open recent repository" / "Checkout branch" with the shortcut if the action has one.
+- Enabled state and reason come from the action registry (e.g. the branch picker is disabled with the registry's reason while an operation blocks checkout); without an open repository the pickers behave as today on the start screen.
+- Intentional deviation in `docs/UX-PARITY.md`: GitKraken opens a dropdown below the picker, Gitloom the centered palette list (a real dropdown is a backlog item).
+- Audit: no other control in the running app shows the "Not available yet" tooltip (the Submodules section is out of scope); list any remaining place in the report, do not implement it.
+- CHANGELOG `[Unreleased]` → Fixed: "The repository and branch pickers in the toolbar open the recent repositories and the branch list."
+
+Acceptance: app tests: clicking each picker opens the palette in the right mode; disabled state with reason; `iced_test` toolbar snapshot unchanged apart from hover; the audit result is in the task note.
+
+### [ ] M6-18 Remotes in sync with the Git configuration
+
+Finding of the maintainer (2026-11-09): the left panel shows an empty remote `github-fc`; "Remove" fails with `error: No such remote: 'github-fc'`. Facts: `git config --show-origin --get-regexp "^remote\.github-fc\."` prints nothing in that repository; the only remote is `origin` with URL `git@github-fc:a-denisov-psb/gitloom.git` (`github-fc` is an SSH host alias); the history was rewritten (M6-11) while Gitloom may have been open. `GixBackend::remotes` lists `remote.<name>` sections of gix's resolved config only, so the likely cause is a stale configuration in the backend (a `.git/config` change that the reopen logic of M3 missed).
+
+- Reproduce and fix in this order:
+  1. Stale configuration: with the repository open, change remotes outside Gitloom (`git remote add/rename/remove`, a full rewrite of `.git/config` via a temporary file and rename, as `git filter-repo` and editors do). The left panel must follow without restart. Find out why the reopen was missed (watcher filter, debounce, rename events, Windows behavior) and fix it.
+  2. Remote defined outside the repository: a `[remote "x"]` in the global config (test with `GIT_CONFIG_GLOBAL`). Show it with the tooltip "Defined in the global Git configuration"; Remove, Rename and Edit URL are disabled with that hint; Fetch stays available if it has a URL.
+  3. Safety net: if `git remote remove/rename/set-url` reports "No such remote", reload the repository state and show the status message "Remote <name> no longer exists" instead of the error dialog.
+- Check that no other code path creates remote nodes (URL parsing, leftover directories under `.git/refs/remotes/`, session data).
+- `docs/RELEASE-CHECKLIST.md`, Windows section: "Remove, rename and add a remote in a terminal while Gitloom is open: the left panel follows".
+- CHANGELOG `[Unreleased]` → Fixed: "The left panel no longer shows remotes that were removed or renamed outside Gitloom." (wording per the actual cause).
+
+Acceptance: integration tests for cases 1–3; the task note names the root cause found; Windows CI green.
 
 ### [ ] M6-15 Release v1.0.0
 

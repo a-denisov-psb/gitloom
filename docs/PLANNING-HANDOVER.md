@@ -110,6 +110,8 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - M5 detailed plan (2026-10-26): `docs/milestones/M5-productivity.md`, ADR-023 … ADR-027, ROADMAP backlog entries.
 - M6 detailed plan (2026-11-03): `docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030, ADR-008/016 updated, ROADMAP backlog entries.
 
+- rc.2 scope, M7 left panel tree, M8/M9 outlines (2026-11-09): M6-17, M6-18, M7-14 in the milestone files, ROADMAP M8/M9, backlog updated.
+
 Add new agreed-but-not-yet-applied changes here.
 
 ## 7. Open decisions and verification items
@@ -121,17 +123,19 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 | 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-05: keep "Gitloom" despite the collision with the GitLoom product (ADR-033, supersedes the rename decision of 2026-11-03); repository `github.com/a-denisov-psb/gitloom` |
 | 2 | Confirm license (MIT OR Apache-2.0) | decided 2026-11-03: GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
-| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0 |
+| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0; 2026-11-06: Git flow start/finish planned in M7 (ADR-037), the graph layout stays in the backlog |
 | 5 | M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict without notice): keep or plan follow-ups? | decided 2026-10-26: backlog (ROADMAP) |
 | 6 | Verify in GitKraken whether the interactive rebase list shows the newest commit on top (Gitloom does) | Open, maintainer to-do M4-07 |
+| 7 | Profiles like GitKraken's (workspace with own tabs and settings) or identities only? | decided 2026-11-09: identities only (name and email per repository), M8 |
+| 8 | Order after M7 | decided 2026-11-09: M8 repository settings and tools, then M9 graph columns, themes and syntax highlighting |
 
 Questions raised by Claude Code during implementation are tracked in `docs/HANDOVER.md` → "Open questions"; check it at the start of every planning session.
 
 ## 8. Suggested next planning steps
 
-1. M6 (`docs/milestones/M6-release-readiness.md`) runs autonomously in one Claude Code chat (ADR-034). Review the milestone report after the release (deviations, new ADRs, maintainer to-dos) instead of each task.
-2. Answer the M6 maintainer verification items (milestone file) as the related tasks come up.
-3. Collect the maintainer's own ideas; place them in the roadmap.
+1. rc.2 after the maintainer's go: M6-16, M6-17, M6-18 plus findings of M6-10/M6-13; then M6-15 (1.0.0) on request.
+2. M7 runs autonomously after `v1.0.0` (ADR-034); the maintainer answers the GitKraken verification items in the M7 file beforehand.
+3. Detail plan for M8 when M7 is released (outline in ROADMAP); M9 after that.
 
 ## 9. Document map
 

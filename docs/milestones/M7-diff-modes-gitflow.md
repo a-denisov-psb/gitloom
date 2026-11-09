@@ -6,12 +6,13 @@ Starts after `v1.0.0` (M6-15).
 
 ## Goal
 
-The diff view offers GitKraken's three modes (Hunk, Inline, Split) with staging in every mode, and Gitloom supports GitKraken's Git flow: initialize it per repository, start and finish features, releases and hotfixes from the left panel, the context menus and the command palette, including conflicts and undo.
+The diff view offers GitKraken's three modes (Hunk, Inline, Split) with staging in every mode, and Gitloom supports GitKraken's Git flow: initialize it per repository, start and finish features, releases and hotfixes from the left panel, the context menus and the command palette, including conflicts and undo. The left panel groups branches into folders like GitKraken.
 
 ## Scope
 
 In scope:
 
+- Left panel like GitKraken: branch folders, icons, highlighted checked-out branch, hidden-branch counter (M7-14, first task)
 - Diff view modes Hunk / Inline / Split, remembered globally; line and block staging in all modes; change navigation
 - Full-context diffs in `git-core`
 - Git flow configuration (compatible with the `git-flow` CLI), initialization in the Preferences
@@ -31,6 +32,7 @@ Out of scope (later):
 
 | Topic | Decision |
 |---|---|
+| Left panel tree | Local and remote branches (per remote) are split at `/` into folders, any depth; folders before branches, both sorted case-insensitively, unless the GitKraken check says otherwise. Folder rows: chevron, folder icon, segment name; click toggles; collapse state per repository in the session (default expanded); no folder context menu unless GitKraken has one. Branch rows: branch icon, last segment only, full name in the tooltip, ahead/behind and all branch interactions unchanged. The checked-out branch is a highlighted row with a checkbox-style check. With hidden or solo branches a line "Viewing x/y · Show All" sits above the filter and section counts read "visible/total"; "Show All" clears hide and solo. Tags stay flat unless the GitKraken check says they are grouped. The GITFLOW section (M7-08) reuses the same row components. |
 | Diff mode | Toggle Hunk / Inline / Split in the diff header (the existing disabled buttons). One global mode stored in `settings.json`, used by every diff view (standalone and embedded in file history). The conflict view is unchanged. |
 | Diff data | `git-core` gains a context option (`DiffContext::Hunks` = today's 3 lines, `DiffContext::Full` = the whole file as one hunk). Hunk mode keeps its exact data and code path; Inline and Split load the full context. Size limits, binary detection and the filter pipeline (ADR-018) are the same for both. ADR-038. |
 | Staging in Inline/Split | Line selection works like in Hunk mode (click, Shift+click, Ctrl+click). Instead of a hunk header, each **change block** (changes whose 3-line contexts touch, the same rule as `text_diff`) gets a slim bar with "Stage block" / "Unstage block" / "Discard block". The app turns a block into a line selection and applies it through the existing line path (`build_patch`), so there is no new patch code. |
@@ -51,6 +53,8 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 
 | Item | Used in |
 |---|---|
+| Left panel: are folders sorted before branches? Are tags grouped into folders as well? | M7-14 |
+| Left panel: does a folder have a context menu (e.g. hide/solo all branches in it)? | M7-14 |
 | Diff: is the mode remembered globally, per file or not at all? | M7-01 |
 | Diff: staging controls in Inline/Split (hunk buttons, line selection, which buttons per block)? | M7-03, M7-04 |
 | Diff: how Split aligns a changed block (padding, pairing) and where the change arrows sit | M7-04 |
@@ -62,6 +66,7 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 
 ## Milestone acceptance
 
+- [ ] The left panel shows branch folders, icons, the highlighted checked-out branch and the hidden-branch counter like GitKraken; all branch interactions work unchanged in the tree.
 - [ ] Every diff (unstaged, staged, untracked, commit, stash, file history) can be shown as Hunk, Inline and Split; the mode is remembered across restarts.
 - [ ] Line staging, unstaging and discarding work in all three modes and produce the same index as `git add -p` with the same selection; block actions in Inline/Split equal "Stage hunk" in Hunk mode where the blocks coincide.
 - [ ] A 2 MB text file opens in Inline and Split without a frame over 50 ms while scrolling (`docs/PERFORMANCE.md`).
@@ -76,6 +81,7 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 
 | ID | Task | Depends on |
 |---|---|---|
+| M7-14 | Left panel tree like GitKraken (first task) | – |
 | M7-01 | Diff mode setting and toggle | – |
 | M7-02 | Full-context diffs in git-core | – |
 | M7-03 | Inline view | M7-01, M7-02 |
@@ -83,16 +89,30 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 | M7-05 | Diff modes in embedded views, snapshots, performance | M7-03, M7-04 |
 | M7-06 | Git flow configuration model | – |
 | M7-07 | Gitflow preferences (initialize, edit, remove) | M7-06 |
-| M7-08 | GITFLOW section and start | M7-06 |
+| M7-08 | GITFLOW section and start | M7-06, M7-14 |
 | M7-09 | Finish engine (git-core) | M7-06 |
 | M7-10 | Finish UI, conflicts and resume | M7-08, M7-09 |
 | M7-11 | Undo/redo for finish | M7-09, M7-10 |
-| M7-12 | Documentation and walkthrough | M7-01 … M7-11 |
+| M7-12 | Documentation and walkthrough | M7-01 … M7-11, M7-14 |
 | M7-13 | Release v1.1.0 | all |
 
 ---
 
 ## Tasks
+
+### [ ] M7-14 Left panel tree like GitKraken
+
+First task of M7 (the ID is new; it runs before M7-01). Behavior per the decisions table ("Left panel tree").
+
+- Tree model in the app (pure function, unit-tested): from the branch list to folders and leaves per section/remote; cached per snapshot and filter, not rebuilt per frame (target: 2 000 branches build in < 5 ms).
+- Rows: Lucide `folder`/`folder-open` and `git-branch` icons (vendored like the M5 icons, license kept); indentation per level; chevron on folders; truncation with tooltip at narrow widths.
+- Collapse state per repository in `session.json` (key: section, remote, folder path); the filter matches full branch names and shows matches with their folders expanded without changing the stored state.
+- Checked-out branch: highlighted row (palette color with AA contrast in both themes) and a checkbox-style check icon instead of the plain check.
+- Hidden branches (M5-08): "Viewing x/y · Show All" above the filter while anything is hidden or solo; counts "visible/total" in LOCAL and REMOTE; "Show All" clears hide and solo.
+- Click, double click, context menu, drag and drop, hide/solo and keyboard focus on branch rows behave as before; folder rows only toggle.
+- `docs/UX-PARITY.md`: left panel row set to done with the verification results.
+
+Acceptance: unit tests for the tree (nesting, sorting, a remote with and without folders, filter with expanded ancestors, counts with hidden branches); app tests for toggling, persistence and Show All; existing sidebar tests green; `iced_test` snapshots of the left panel in both themes at 100 % and 200 % zoom.
 
 ### [ ] M7-01 Diff mode setting and toggle
 
