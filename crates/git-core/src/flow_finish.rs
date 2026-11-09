@@ -100,6 +100,12 @@ pub struct FinishPlan {
     pub branch: String,
     pub steps: Vec<FinishStep>,
     pub next: usize,
+    /// Refs the finish touches and their values when it started (M7-11).
+    #[serde(default)]
+    pub before: Vec<(String, Option<String>)>,
+    /// Branch checked out when it started (`None`: detached).
+    #[serde(default)]
+    pub head_before: Option<String>,
 }
 
 impl FinishPlan {
@@ -173,6 +179,62 @@ pub fn plan(config: &FlowConfig, branch: &FlowBranch, options: &FinishOptions) -
         branch: full,
         steps,
         next: 0,
+        before: Vec::new(),
+        head_before: None,
+    }
+}
+
+/// One ref moved by a finish: values before and after (`None`: missing).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefState {
+    /// Full ref name (`refs/heads/main`, `refs/tags/v1.0`).
+    pub name: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+/// A completed finish as one undo entry (M7-11): every touched ref and the
+/// checked-out branch before and after. Undo/redo only move refs and check
+/// out; commits and the annotated tag object stay, so redo restores the
+/// identical tag.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FinishRecord {
+    /// "Finish release 1.2.0".
+    pub label: String,
+    pub refs: Vec<RefState>,
+    pub head_before: Option<String>,
+    pub head_after: Option<String>,
+}
+
+/// Full names of the refs `plan` touches.
+fn touched_refs(plan: &FinishPlan) -> Vec<String> {
+    let mut refs = vec![format!("refs/heads/{}", plan.branch)];
+    for step in &plan.steps {
+        let name = match step {
+            FinishStep::Merge { into, .. } => format!("refs/heads/{into}"),
+            FinishStep::Tag { name, .. } => format!("refs/tags/{name}"),
+            _ => continue,
+        };
+        if !refs.contains(&name) {
+            refs.push(name);
+        }
+    }
+    refs
+}
+
+fn ref_value(git: &dyn GitWriter, name: &str) -> Result<Option<String>> {
+    match git.run(&["rev-parse", "--verify", "--quiet", name], read_only()) {
+        Ok(output) => Ok(Some(output.stdout_text().trim().to_owned())),
+        Err(Error::Command { code: Some(1), .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn head_branch(git: &dyn GitWriter) -> Result<Option<String>> {
+    match git.run(&["symbolic-ref", "--quiet", "--short", "HEAD"], read_only()) {
+        Ok(output) => Ok(Some(output.stdout_text().trim().to_owned())),
+        Err(Error::Command { code: Some(1), .. }) => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -207,9 +269,10 @@ impl std::fmt::Display for FinishProblem {
 }
 
 /// How a run of the plan ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FinishOutcome {
-    Done,
+    /// All steps ran; the record undoes the whole finish.
+    Done(Box<FinishRecord>),
     /// A merge or rebase stopped with conflicts; after it is concluded,
     /// [`resume`] runs the remaining steps.
     Conflicts,
@@ -322,7 +385,13 @@ pub fn start(git: &dyn GitWriter, plan: &FinishPlan) -> Result<FinishOutcome> {
     if let Some(problem) = problem(git, plan)? {
         return Err(Error::Backend(problem.to_string()));
     }
-    run(git, plan.clone())
+    let mut plan = plan.clone();
+    plan.before = touched_refs(&plan)
+        .into_iter()
+        .map(|name| ref_value(git, &name).map(|value| (name, value)))
+        .collect::<Result<_>>()?;
+    plan.head_before = head_branch(git)?;
+    run(git, plan)
 }
 
 /// Runs the remaining steps of the saved finish once the stopped merge or
@@ -350,7 +419,96 @@ fn run(git: &dyn GitWriter, mut plan: FinishPlan) -> Result<FinishOutcome> {
         }
     }
     clear(git)?;
-    Ok(FinishOutcome::Done)
+    let refs = plan
+        .before
+        .iter()
+        .map(|(name, before)| {
+            Ok(RefState {
+                name: name.clone(),
+                before: before.clone(),
+                after: ref_value(git, name)?,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(FinishOutcome::Done(Box::new(FinishRecord {
+        label: format!("Finish {} {}", plan.kind.noun(), plan.name),
+        refs,
+        head_before: plan.head_before.clone(),
+        head_after: head_branch(git)?,
+    })))
+}
+
+/// Undoes a finish: every ref back to its value before, the branch that
+/// was checked out before checked out again.
+pub fn undo(git: &dyn GitWriter, record: &FinishRecord) -> Result<()> {
+    apply(git, record, true)
+}
+
+/// Redoes an undone finish.
+pub fn redo(git: &dyn GitWriter, record: &FinishRecord) -> Result<()> {
+    apply(git, record, false)
+}
+
+fn apply(git: &dyn GitWriter, record: &FinishRecord, undo: bool) -> Result<()> {
+    let status = git.run(
+        &["status", "--porcelain", "--untracked-files=no"],
+        read_only(),
+    )?;
+    if !status.stdout.is_empty() {
+        return Err(Error::Backend(FinishProblem::LocalChanges.to_string()));
+    }
+    if operation_in_progress(git)? {
+        return Err(Error::Backend(
+            FinishProblem::OperationInProgress.to_string(),
+        ));
+    }
+    // Every ref must still be where the finish (or the undo) left it.
+    for state in &record.refs {
+        let expected = if undo { &state.after } else { &state.before };
+        if ref_value(git, &state.name)? != *expected {
+            return Err(Error::Backend(
+                "The repository changed since then; undo and redo only work while the \
+                 branches are where they were left"
+                    .into(),
+            ));
+        }
+    }
+    let message = crate::identity::reflog_message(if undo { "undo" } else { "redo" });
+    // Detached first: moving the checked-out branch must not touch the
+    // working tree; the final checkout updates it.
+    git.run(&["switch", "--quiet", "--detach"], RunOptions::default())?;
+    for state in &record.refs {
+        let (from, to) = if undo {
+            (&state.after, &state.before)
+        } else {
+            (&state.before, &state.after)
+        };
+        match (from, to) {
+            (_, Some(to)) => {
+                let old = from.clone().unwrap_or_else(|| "0".repeat(to.len()));
+                git.run(
+                    &["update-ref", "-m", &message, &state.name, to, &old],
+                    RunOptions::default(),
+                )?;
+            }
+            (Some(from), None) => {
+                git.run(
+                    &["update-ref", "-m", &message, "-d", &state.name, from],
+                    RunOptions::default(),
+                )?;
+            }
+            (None, None) => {}
+        }
+    }
+    let head = if undo {
+        &record.head_before
+    } else {
+        &record.head_after
+    };
+    if let Some(branch) = head {
+        git.switch_branch(branch)?;
+    }
+    Ok(())
 }
 
 fn execute(git: &dyn GitWriter, step: &FinishStep) -> Result<MergeOutcome> {

@@ -69,10 +69,10 @@ fn feature_finish_merges_without_fast_forward_and_deletes() {
     let repo = repo();
     let develop = rev(&repo, "develop");
     let tip = start(&repo, "feature/login", "develop", "f.txt", "f\n");
-    assert_eq!(
+    assert!(matches!(
         finish(&repo, FlowKind::Feature, "login", |_| {}),
-        FinishOutcome::Done
-    );
+        FinishOutcome::Done(_)
+    ));
 
     // Like `git flow feature finish`: a merge commit on develop, branch gone.
     assert_eq!(head_branch(&repo), "develop");
@@ -93,13 +93,13 @@ fn feature_finish_keeps_the_branch_and_can_rebase() {
     let tip = start(&repo, "feature/a", "develop", "f.txt", "f\n");
     repo.checkout("develop");
     let develop = repo.commit("d2.txt", "more\n", "more develop work");
-    assert_eq!(
+    assert!(matches!(
         finish(&repo, FlowKind::Feature, "a", |o| {
             o.rebase = true;
             o.delete = false;
         }),
-        FinishOutcome::Done
-    );
+        FinishOutcome::Done(_)
+    ));
     // Rebased: the feature commit now sits on top of develop's work.
     let rebased = rev(&repo, "feature/a");
     assert_ne!(rebased, tip);
@@ -114,10 +114,10 @@ fn release_finish_merges_tags_and_back_merges() {
     let main = rev(&repo, "main");
     let develop = rev(&repo, "develop");
     let tip = start(&repo, "release/1.0", "develop", "version.txt", "1.0\n");
-    assert_eq!(
+    assert!(matches!(
         finish(&repo, FlowKind::Release, "1.0", |_| {}),
-        FinishOutcome::Done
-    );
+        FinishOutcome::Done(_)
+    ));
 
     // Like `git flow release finish 1.0`: merge into main, annotated tag
     // there, merge of the release branch into develop, branch deleted,
@@ -139,10 +139,10 @@ fn release_finish_merges_tags_and_back_merges() {
 fn hotfix_finish_goes_to_main_and_develop() {
     let repo = repo();
     let tip = start(&repo, "hotfix/1.0.1", "main", "fix.txt", "fix\n");
-    assert_eq!(
+    assert!(matches!(
         finish(&repo, FlowKind::Hotfix, "1.0.1", |o| o.tag = "1.0.1".into()),
-        FinishOutcome::Done
-    );
+        FinishOutcome::Done(_)
+    ));
     assert!(repo.parents("main").contains(&tip));
     assert!(repo.parents("develop").contains(&tip));
     assert!(exists(&repo, "refs/tags/1.0.1"));
@@ -188,7 +188,10 @@ fn conflict_in_the_first_merge_resumes_after_a_restart() {
     assert_eq!(flow_finish::resume(&cli).unwrap(), FinishOutcome::Conflicts);
 
     resolve(&repo);
-    assert_eq!(flow_finish::resume(&cli).unwrap(), FinishOutcome::Done);
+    assert!(matches!(
+        flow_finish::resume(&cli).unwrap(),
+        FinishOutcome::Done(_)
+    ));
     assert!(exists(&repo, "refs/tags/v2.0"));
     assert_eq!(rev(&repo, "v2.0^{commit}"), rev(&repo, "main"));
     assert!(!exists(&repo, "refs/heads/release/2.0"));
@@ -207,7 +210,10 @@ fn conflict_in_the_second_merge_resumes() {
     assert_eq!(head_branch(&repo), "develop");
     assert!(exists(&repo, "refs/tags/v2.0"), "tag done before");
     resolve(&repo);
-    assert_eq!(flow_finish::resume(&cli).unwrap(), FinishOutcome::Done);
+    assert!(matches!(
+        flow_finish::resume(&cli).unwrap(),
+        FinishOutcome::Done(_)
+    ));
     assert!(!exists(&repo, "refs/heads/release/2.0"));
 }
 
@@ -297,4 +303,74 @@ fn preconditions_are_typed_problems() {
         error.to_string().contains("The tag v3.0 exists already"),
         "{error}"
     );
+}
+
+/// Full ref names and their values, sorted.
+fn refs(repo: &TestRepo) -> String {
+    repo.git(&["for-each-ref", "--format=%(refname) %(objectname)"])
+}
+
+fn finished_record(outcome: FinishOutcome) -> flow_finish::FinishRecord {
+    match outcome {
+        FinishOutcome::Done(record) => *record,
+        FinishOutcome::Conflicts => panic!("stopped with conflicts"),
+    }
+}
+
+#[test]
+fn undo_restores_every_ref_and_head_and_redo_the_identical_tag() {
+    let repo = repo();
+    start(&repo, "release/1.0", "develop", "version.txt", "1.0\n");
+    let before = refs(&repo);
+    let record = finished_record(finish(&repo, FlowKind::Release, "1.0", |_| {}));
+    assert_eq!(record.label, "Finish release 1.0");
+    assert_eq!(record.head_before.as_deref(), Some("release/1.0"));
+    assert_eq!(record.head_after.as_deref(), Some("develop"));
+    let after = refs(&repo);
+    let tag_object = rev(&repo, "refs/tags/v1.0");
+    let cli = CliBackend::new(repo.path());
+
+    flow_finish::undo(&cli, &record).unwrap();
+    assert_eq!(
+        refs(&repo),
+        before,
+        "branches back, tag and nothing else gone"
+    );
+    assert_eq!(head_branch(&repo), "release/1.0");
+    assert!(repo.git(&["status", "--porcelain"]).is_empty());
+
+    flow_finish::redo(&cli, &record).unwrap();
+    assert_eq!(refs(&repo), after);
+    assert_eq!(rev(&repo, "refs/tags/v1.0"), tag_object, "same tag object");
+    assert_eq!(head_branch(&repo), "develop");
+}
+
+#[test]
+fn undo_is_refused_after_a_commit_on_develop() {
+    let repo = repo();
+    start(&repo, "feature/x", "develop", "f.txt", "f\n");
+    let record = finished_record(finish(&repo, FlowKind::Feature, "x", |_| {}));
+    repo.commit("more.txt", "more\n", "after the finish");
+    let error = flow_finish::undo(&CliBackend::new(repo.path()), &record).unwrap_err();
+    assert!(
+        error.to_string().contains("The repository changed"),
+        "{error}"
+    );
+    assert!(!exists(&repo, "refs/heads/feature/x"), "nothing changed");
+}
+
+#[test]
+fn a_finish_resumed_after_conflicts_is_undone_as_a_whole() {
+    let repo = conflicting_release(false);
+    let before = refs(&repo);
+    assert_eq!(
+        finish(&repo, FlowKind::Release, "2.0", |_| {}),
+        FinishOutcome::Conflicts
+    );
+    resolve(&repo);
+    let cli = CliBackend::new(repo.path());
+    let record = finished_record(flow_finish::resume(&cli).unwrap());
+    flow_finish::undo(&cli, &record).unwrap();
+    assert_eq!(refs(&repo), before);
+    assert_eq!(head_branch(&repo), "release/2.0");
 }

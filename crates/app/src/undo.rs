@@ -19,6 +19,8 @@ pub enum UndoAction {
     /// Merge, fast-forward, rebase, cherry-pick, revert, reset, reword or
     /// squash (M4-12).
     History(git_core::HistoryChange),
+    /// A whole Git flow finish (M7-11): refs and checked-out branch.
+    FlowFinish(Box<git_core::flow_finish::FinishRecord>),
 }
 
 impl UndoAction {
@@ -29,6 +31,7 @@ impl UndoAction {
             Self::Commit { .. }
                 | Self::Ref(git_core::RefChange::Checkout { .. })
                 | Self::Ref(git_core::RefChange::CreateBranch { .. })
+                | Self::FlowFinish(_)
         ) || matches!(self, Self::History(change)
             if !matches!(change.kind, git_core::HistoryUndo::MoveBranch { .. }))
     }
@@ -44,6 +47,7 @@ impl UndoAction {
             ),
             Self::Ref(change) => change.label(),
             Self::History(change) => change.label.clone(),
+            Self::FlowFinish(record) => record.label.clone(),
         }
     }
 }
