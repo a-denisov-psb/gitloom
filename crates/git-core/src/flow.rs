@@ -14,7 +14,8 @@ const VERSION_TAG: &str = "gitflow.prefix.versiontag";
 
 /// Branch types Gitloom starts and finishes (AVH's `bugfix/` and `support/`
 /// are read, kept and not shown).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum FlowKind {
     Feature,
     Release,
