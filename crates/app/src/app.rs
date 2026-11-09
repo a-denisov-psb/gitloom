@@ -149,6 +149,8 @@ pub struct Opened {
     snapshot: Arc<RepoSnapshot>,
     /// Stored hidden/soloed branches of the repository (pruned).
     filter: crate::ref_filter::RefFilter,
+    /// Stored collapsed branch folders of the left panel.
+    folders: std::collections::BTreeSet<String>,
 }
 
 impl std::fmt::Debug for Opened {
@@ -167,6 +169,11 @@ pub enum Message {
     PaneResized(pane_grid::ResizeEvent),
     FilterChanged(String),
     SectionToggled(Section),
+    /// Click on a branch folder or remote in the left panel (M7-14); the
+    /// key is [`crate::branch_tree::folder_key`].
+    FolderToggled(String),
+    /// "Show All" in the left panel: clears hide and solo.
+    ShowAllBranches,
     RefClicked(String),
     WipSelected,
     CommitSelected(String),
@@ -1795,6 +1802,7 @@ impl App {
             active,
             panes: self.panes.ratios,
             ref_filters: self.ref_filters(),
+            collapsed_folders: self.collapsed_folders(),
             pull_mode: self.pull_mode.into(),
             update: self.update_state.clone(),
         }
@@ -1813,6 +1821,23 @@ impl App {
             }
         }
         filters
+    }
+
+    /// Stored collapsed folders: those of open repositories replace the
+    /// stored ones.
+    fn collapsed_folders(
+        &self,
+    ) -> std::collections::BTreeMap<PathBuf, std::collections::BTreeSet<String>> {
+        let mut folders = self.session.collapsed_folders.clone();
+        for view in self.tabs.iter().filter_map(Tab::view) {
+            let root = view.backend.path().to_path_buf();
+            if view.folders_collapsed.is_empty() {
+                folders.remove(&root);
+            } else {
+                folders.insert(root, view.folders_collapsed.clone());
+            }
+        }
+        folders
     }
 
     /// Changes the hidden/soloed branches of the active tab and filters the
@@ -2257,6 +2282,7 @@ impl App {
         let generation = tab.generation;
         tab.state = TabState::Loading { path: path.clone() };
         let filters = self.session.ref_filters.clone();
+        let folders = self.session.collapsed_folders.clone();
         Task::perform(
             blocking(move || {
                 let backend: Arc<dyn GitBackend> =
@@ -2267,10 +2293,12 @@ impl App {
                 if filter.is_active() {
                     snapshot = snapshot.with_filter(&filter)?;
                 }
+                let folders = folders.get(backend.path()).cloned().unwrap_or_default();
                 Ok(Opened {
                     backend,
                     snapshot: Arc::new(snapshot),
                     filter,
+                    folders,
                 })
             }),
             move |result| Message::RepoOpened {
@@ -5414,6 +5442,20 @@ impl App {
                     view.filter = filter;
                 }
             }
+            Message::FolderToggled(key) => {
+                if let Some(view) = self.active_view_mut() {
+                    if !view.folders_collapsed.remove(&key) {
+                        view.folders_collapsed.insert(key);
+                    }
+                }
+                return self.persist();
+            }
+            Message::ShowAllBranches => {
+                return self.change_filter(|filter, _| {
+                    filter.hidden.clear();
+                    filter.soloed.clear();
+                });
+            }
             Message::SectionToggled(section) => {
                 if let Some(view) = self.active_view_mut() {
                     if !view.collapsed.remove(&section) {
@@ -6066,6 +6108,7 @@ impl App {
                     Ok(opened) => {
                         let mut view = RepoView::new(opened.backend, opened.snapshot);
                         view.ref_filter = opened.filter;
+                        view.folders_collapsed = opened.folders;
                         TabState::Ready(Box::new(view))
                     }
                     Err(error) => TabState::Failed { path, error },
@@ -7548,6 +7591,44 @@ pub(crate) mod tests {
         .unwrap();
         let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("mock"));
         app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
+        app
+    }
+
+    /// Ready app whose left panel has folders, two remotes, a checked-out
+    /// branch with ahead/behind and a hidden branch (UI checks of M7-14).
+    pub(crate) fn sidebar_app() -> App {
+        use git_core::RefKind::{LocalBranch, RemoteBranch, Tag};
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let reference = |name: &str, kind, is_head| git_core::Reference {
+            name: name.into(),
+            kind,
+            target: "c".into(),
+            is_head,
+            upstream: None,
+            ahead_behind: is_head.then_some((2, 1)),
+        };
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs = vec![
+            reference("main", LocalBranch, true),
+            reference("develop", LocalBranch, false),
+            reference("feature/sidebar-tree", LocalBranch, false),
+            reference("feature/ui/toolbar-pickers", LocalBranch, false),
+            reference("feature/ui/diff-modes", LocalBranch, false),
+            reference("hotfix/remote-sync", LocalBranch, false),
+            reference("origin/main", RemoteBranch, false),
+            reference("origin/develop", RemoteBranch, false),
+            reference("origin/feature/sidebar-tree", RemoteBranch, false),
+            reference("v1.0.0-rc.2", Tag, false),
+        ];
+        snapshot.remotes = vec!["backup".into(), "origin".into()];
+        view.snapshot = Arc::new(snapshot);
+        view.folders_collapsed.insert("local:hotfix".into());
+        view.ref_filter
+            .toggle_hidden("develop", git_core::RefKind::LocalBranch);
         app
     }
 
@@ -10754,6 +10835,68 @@ pub(crate) mod tests {
             name: "topic".into(),
             kind: git_core::RefKind::LocalBranch,
         });
+        apply_filter(&mut app);
+        assert_eq!(graph_ids(&app), ["t1", "m1", "base"]);
+        assert!(app.current_session().ref_filters.is_empty());
+    }
+
+    #[test]
+    fn folders_toggle_and_are_stored_per_repository() {
+        let mut app = filter_app();
+        let root = app.tabs[0].view().unwrap().backend.path().to_path_buf();
+        assert!(app.current_session().collapsed_folders.is_empty());
+
+        let _ = app.update(Message::FolderToggled("local:feature".into()));
+        let _ = app.update(Message::FolderToggled("remote:origin".into()));
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.folders_collapsed.contains("local:feature"));
+        assert_eq!(
+            app.current_session().collapsed_folders[&root]
+                .iter()
+                .collect::<Vec<_>>(),
+            ["local:feature", "remote:origin"]
+        );
+
+        // Expanding both again removes the repository from the session.
+        let _ = app.update(Message::FolderToggled("local:feature".into()));
+        let _ = app.update(Message::FolderToggled("remote:origin".into()));
+        assert!(app.current_session().collapsed_folders.is_empty());
+    }
+
+    #[test]
+    fn a_text_filter_does_not_change_the_stored_folders() {
+        let mut app = filter_app();
+        let _ = app.update(Message::FolderToggled("local:feature".into()));
+        let _ = app.update(Message::FilterChanged("top".into()));
+        let _ = app.update(Message::FilterChanged(String::new()));
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.folders_collapsed.contains("local:feature"));
+    }
+
+    #[test]
+    fn show_all_clears_hide_and_solo() {
+        let mut app = filter_app();
+        let _ = app.update(Message::ToggleHidden {
+            name: "topic".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        let _ = app.update(Message::ToggleSolo {
+            name: "main".into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        let groups = app.tabs[0].view().unwrap().sidebar_groups();
+        assert_eq!(
+            groups.all,
+            crate::branch_tree::Counts {
+                visible: 1,
+                total: 2
+            }
+        );
+
+        let _ = app.update(Message::ShowAllBranches);
+        let view = app.tabs[0].view().unwrap();
+        assert!(!view.ref_filter.is_active());
+        assert_eq!(view.sidebar_groups().all.visible, 2, "cache follows");
         apply_filter(&mut app);
         assert_eq!(graph_ids(&app), ["t1", "m1", "base"]);
         assert!(app.current_session().ref_filters.is_empty());

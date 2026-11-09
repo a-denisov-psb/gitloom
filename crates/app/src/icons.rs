@@ -50,10 +50,15 @@ pub enum Icon {
     Minus,
     Search,
     History,
+    /// Collapsed branch folder in the left panel.
+    Folder,
+    FolderOpen,
+    /// Checked-out branch in the left panel.
+    CheckSquare,
 }
 
 impl Icon {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 40] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -91,6 +96,9 @@ impl Icon {
         Self::Minus,
         Self::Search,
         Self::History,
+        Self::Folder,
+        Self::FolderOpen,
+        Self::CheckSquare,
     ];
 
     /// SVG source of the icon.
@@ -138,6 +146,9 @@ impl Icon {
             Self::Minus => lucide!("minus"),
             Self::Search => lucide!("search"),
             Self::History => lucide!("history"),
+            Self::Folder => lucide!("folder"),
+            Self::FolderOpen => lucide!("folder-open"),
+            Self::CheckSquare => lucide!("square-check"),
         }
     }
 
