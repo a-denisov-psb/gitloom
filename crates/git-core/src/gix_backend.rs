@@ -550,6 +550,14 @@ impl GitBackend for GixBackend {
             .collect())
     }
 
+    fn flow_config(&self) -> Result<Option<crate::FlowConfig>> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        Ok(crate::FlowConfig::from_values(|key| {
+            config.string(key).map(|value| value.to_string())
+        }))
+    }
+
     fn reload(&self) {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).stale = true;
     }
