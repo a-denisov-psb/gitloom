@@ -507,6 +507,13 @@ pub struct RepoView {
     pub center: CenterView,
     pub filter: String,
     pub collapsed: HashSet<Section>,
+    /// A Git flow finish was started or continued in this session: once
+    /// its stopped merge is concluded, the remaining steps run on their
+    /// own (M7-10). After a restart the banner asks instead.
+    pub flow_finishing: bool,
+    /// `next` step of the finish that was last continued automatically
+    /// (no second attempt if continuing failed).
+    pub flow_resumed_at: Option<usize>,
     /// Collapsed branch folders and remotes of the left panel
     /// ([`crate::branch_tree::folder_key`]); stored per repository.
     pub folders_collapsed: std::collections::BTreeSet<String>,
@@ -746,6 +753,8 @@ impl RepoView {
             filter: String::new(),
             collapsed: HashSet::from([Section::Submodules]),
             folders_collapsed: Default::default(),
+            flow_finishing: false,
+            flow_resumed_at: None,
             sidebar_cache: Default::default(),
             refreshing: false,
             error: None,

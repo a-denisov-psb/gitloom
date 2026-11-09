@@ -364,4 +364,18 @@ mod tests {
             snapshot(&app, &format!("gitflow-section-{theme}"));
         }
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_gitflow_finish() {
+        let mut app = crate::app::tests::flow_app();
+        let _ = app.update(Message::FlowFinishRequested("feature/login".into()));
+        snapshot(&app, "gitflow-finish-0-feature");
+        let _ = app.update(Message::FormClosed);
+        let _ = app.update(Message::FlowFinishRequested("release/1.2.0".into()));
+        snapshot(&app, "gitflow-finish-1-release");
+        // A finish waiting after a restart.
+        let app = crate::app::tests::finishing_app(5, false);
+        snapshot(&app, "gitflow-finish-2-banner");
+    }
 }

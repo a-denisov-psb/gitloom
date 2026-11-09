@@ -91,6 +91,8 @@ pub enum ActionId {
     InitializeGitflow,
     /// Start feature / release / hotfix (M7-08).
     FlowStart(git_core::FlowKind),
+    /// Finish the checked-out Git flow branch (M7-10).
+    FlowFinish,
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -674,6 +676,13 @@ fn table() -> Vec<Action> {
         Global,
         &[],
     );
+    add(
+        A::FlowFinish,
+        "Finish current Gitflow branch",
+        RepoActions,
+        Global,
+        &[],
+    );
     for kind in git_core::FlowKind::ALL {
         add(
             A::FlowStart(kind),
@@ -825,6 +834,7 @@ fn table() -> Vec<Action> {
                 | A::ExternalDiff
                 | A::InitializeGitflow
                 | A::FlowStart(_)
+                | A::FlowFinish
         ) {
             action.requires = Requires::Repository;
         }

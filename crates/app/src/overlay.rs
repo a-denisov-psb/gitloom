@@ -182,6 +182,8 @@ pub enum FieldKind {
     Text,
     /// One of the given values (pick list).
     Choice(Vec<String>),
+    /// Checkbox; the value is "true" or "false" (M7-10).
+    Check,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,6 +213,15 @@ impl FormField {
             kind: FieldKind::Choice(options),
         }
     }
+
+    /// Checkbox field, checked if `checked`.
+    pub fn check(label: impl Into<String>, checked: bool) -> Self {
+        Self {
+            label: label.into(),
+            value: checked.to_string(),
+            kind: FieldKind::Check,
+        }
+    }
 }
 
 /// What submitting a [`Form`] does.
@@ -228,6 +239,11 @@ pub enum FormAction {
     },
     /// Add a remote (name, URL).
     AddRemote { tab: crate::app::TabId },
+    /// Finish Git flow branch `branch` (options; M7-10).
+    FinishFlow {
+        tab: crate::app::TabId,
+        branch: String,
+    },
     /// Start a Git flow branch of `kind` (name field; M7-08).
     StartFlow {
         tab: crate::app::TabId,
@@ -269,6 +285,11 @@ impl Form {
     /// Trimmed value of field `index` (empty if out of range).
     pub fn value(&self, index: usize) -> &str {
         self.fields.get(index).map_or("", |f| f.value.trim())
+    }
+
+    /// Checkbox field `index` is checked.
+    pub fn checked(&self, index: usize) -> bool {
+        self.value(index) == "true"
     }
 }
 
