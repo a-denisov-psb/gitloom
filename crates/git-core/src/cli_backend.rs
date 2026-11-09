@@ -632,6 +632,15 @@ pub fn checkout_blocked(stderr: &str) -> bool {
         || stderr.contains("Please commit your changes or stash them")
 }
 
+/// The remote that `git remote remove/rename/set-url` did not find
+/// ("No such remote: 'x'", "No such remote 'x'"), if that is the error.
+pub fn missing_remote(stderr: &str) -> Option<String> {
+    let rest = &stderr[stderr.find("No such remote")? + "No such remote".len()..];
+    let rest = rest.trim_start_matches([':', ' ']);
+    let name = rest.strip_prefix('\'')?;
+    Some(name[..name.find('\'')?].to_owned())
+}
+
 /// True if `git branch -d` refused because the branch is not merged.
 pub fn branch_not_merged(stderr: &str) -> bool {
     stderr.contains("is not fully merged")
@@ -977,6 +986,24 @@ fn command(git: &Path) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_remote_reads_all_git_messages() {
+        // remove / rename
+        assert_eq!(
+            missing_remote("error: No such remote: 'github-fc'\n").as_deref(),
+            Some("github-fc")
+        );
+        // set-url
+        assert_eq!(
+            missing_remote("error: No such remote 'a/b'").as_deref(),
+            Some("a/b")
+        );
+        assert_eq!(
+            missing_remote("fatal: 'x' does not appear to be a git repository"),
+            None
+        );
+    }
 
     /// Regression (v0.6.0 Windows CI hang): a cancelled token must not start
     /// Git at all. The root does not exist, so spawning would fail with a

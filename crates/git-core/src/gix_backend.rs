@@ -20,11 +20,10 @@ const OBJECT_CACHE_BYTES: usize = 16 * 1024 * 1024;
 /// Repository opened with gitoxide. Cheap to share between threads; every
 /// call works on its own thread-local [`gix::Repository`].
 pub struct GixBackend {
-    /// Reopened when the repository config changes (gix reads it only on open).
+    /// Reopened when a config file changes (gix reads them only on open).
     repo: std::sync::RwLock<gix::ThreadSafeRepository>,
-    /// Config files of the repository and their last seen modification time.
-    config_files: Vec<PathBuf>,
-    config_stamp: std::sync::Mutex<Option<std::time::SystemTime>>,
+    /// Config files the open repository depends on and their content.
+    config: std::sync::Mutex<ConfigFiles>,
     root: PathBuf,
     name: String,
     /// Objects may be missing locally and fetched on demand (blobless clone).
@@ -49,17 +48,22 @@ impl GixBackend {
             || root.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
+        // Read the config files before the final open: a change in between
+        // is then seen as a change (and not lost).
+        let files = config_paths(&repo.to_thread_local());
+        let fingerprint = fingerprint(&files);
+        let repo = gix::ThreadSafeRepository::open(repo.git_dir())
+            .map_err(|_| Error::NotARepository(path.display().to_string()))?;
+        let mut config = ConfigFiles {
+            files,
+            fingerprint,
+            stale: false,
+        };
+        config.extend(&repo.to_thread_local());
         let partial_clone = is_partial_clone(&repo.to_thread_local());
-        let mut config_files = vec![repo.git_dir().join("config")];
-        let common = repo.to_thread_local().common_dir().join("config");
-        if common != config_files[0] {
-            config_files.push(common);
-        }
-        let config_stamp = std::sync::Mutex::new(config_stamp(&config_files));
         Ok(Self {
             repo: std::sync::RwLock::new(repo),
-            config_files,
-            config_stamp,
+            config: std::sync::Mutex::new(config),
             root,
             name,
             partial_clone,
@@ -195,12 +199,16 @@ impl GixBackend {
         repo
     }
 
-    /// gix reads the config only when opening: reopen after `git` changed it
-    /// (new remote, upstream set by `push -u`, commit template, ...).
+    /// gix reads the config only when opening: reopen after `git` or any
+    /// other program changed a config file (new remote, upstream set by
+    /// `push -u`, a rewrite by `git filter-repo`, the global config, ...).
+    /// Compares contents, not modification times: several writes within one
+    /// timestamp tick (about 16 ms on Windows) would otherwise go unnoticed
+    /// and leave a stale state until a restart (M6-18).
     fn reload_if_config_changed(&self) {
-        let now = config_stamp(&self.config_files);
-        let mut stamp = self.config_stamp.lock().unwrap_or_else(|e| e.into_inner());
-        if *stamp == now {
+        let mut config = self.config.lock().unwrap_or_else(|e| e.into_inner());
+        let now = fingerprint(&config.files);
+        if now == config.fingerprint && !config.stale {
             return;
         }
         let git_dir = self
@@ -211,18 +219,84 @@ impl GixBackend {
             .to_path_buf();
         // On failure (e.g. a half-written config) keep the old state and retry later.
         if let Ok(fresh) = gix::ThreadSafeRepository::open(git_dir) {
+            config.fingerprint = now;
+            config.stale = false;
+            config.extend(&fresh.to_thread_local());
             *self.repo.write().unwrap_or_else(|e| e.into_inner()) = fresh;
-            *stamp = now;
         }
     }
 }
 
-/// Latest modification time of the config files (`None` if none exists).
-fn config_stamp(files: &[PathBuf]) -> Option<std::time::SystemTime> {
-    files
-        .iter()
-        .filter_map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
-        .max()
+/// The config files an open repository was built from.
+struct ConfigFiles {
+    files: Vec<PathBuf>,
+    /// Content hash per file (`None`: missing or unreadable).
+    fingerprint: Vec<Option<u64>>,
+    /// Reopen on the next access regardless of the fingerprint.
+    stale: bool,
+}
+
+impl ConfigFiles {
+    /// Adds files that `repo` loaded and that are not tracked yet
+    /// (includes), with their current content.
+    fn extend(&mut self, repo: &gix::Repository) {
+        for path in config_paths(repo) {
+            if !self.files.contains(&path) {
+                self.fingerprint.push(file_hash(&path));
+                self.files.push(path);
+            }
+        }
+    }
+}
+
+/// Config files `repo` depends on: repository, worktree, global and system
+/// config (also when they do not exist yet) and every included file.
+fn config_paths(repo: &gix::Repository) -> Vec<PathBuf> {
+    use gix::config::Source;
+
+    let mut paths = vec![
+        repo.git_dir().join("config"),
+        repo.common_dir().join("config"),
+        repo.git_dir().join("config.worktree"),
+    ];
+    let mut env = |name: &str| std::env::var_os(name);
+    for source in [
+        Source::GitInstallation,
+        Source::System,
+        Source::Git,
+        Source::User,
+    ] {
+        if let Some(path) = source.storage_location(&mut env) {
+            paths.push(path);
+        }
+    }
+    let config = repo.config_snapshot();
+    paths.extend(
+        config
+            .plumbing()
+            .sections()
+            .filter_map(|section| section.meta().path.clone()),
+    );
+    let mut unique = Vec::with_capacity(paths.len());
+    for path in paths {
+        if !unique.contains(&path) {
+            unique.push(path);
+        }
+    }
+    unique
+}
+
+fn fingerprint(files: &[PathBuf]) -> Vec<Option<u64>> {
+    files.iter().map(|path| file_hash(path)).collect()
+}
+
+/// Hash of the file content (`None` if it does not exist or cannot be read).
+fn file_hash(path: &Path) -> Option<u64> {
+    use std::hash::{Hash as _, Hasher as _};
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
 }
 
 impl GitBackend for GixBackend {
@@ -431,6 +505,53 @@ impl GitBackend for GixBackend {
             .into_iter()
             .map(|name| name.to_string())
             .collect())
+    }
+
+    fn external_remotes(&self) -> Result<Vec<(String, crate::ConfigScope)>> {
+        use gix::config::Source;
+
+        let repo = self.local();
+        let names = repo.remote_names();
+        let config = repo.config_snapshot();
+        let Some(sections) = config.plumbing().sections_by_name("remote") else {
+            return Ok(Vec::new());
+        };
+        // Sources per remote name (only remotes gix lists, i.e. trusted ones).
+        let mut sources: Vec<(String, Vec<Source>)> = Vec::new();
+        for section in sections {
+            let Some(name) = section.header().subsection_name() else {
+                continue;
+            };
+            if !names.contains(name) {
+                continue;
+            }
+            let name = name.to_string();
+            let source = section.meta().source;
+            match sources.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, list)) => list.push(source),
+                None => sources.push((name, vec![source])),
+            }
+        }
+        Ok(sources
+            .into_iter()
+            .filter(|(_, list)| {
+                !list
+                    .iter()
+                    .any(|s| matches!(s, Source::Local | Source::Worktree))
+            })
+            .map(|(name, list)| {
+                let scope = match list.first() {
+                    Some(Source::User | Source::Git) => crate::ConfigScope::Global,
+                    Some(Source::System | Source::GitInstallation) => crate::ConfigScope::System,
+                    _ => crate::ConfigScope::Other,
+                };
+                (name, scope)
+            })
+            .collect())
+    }
+
+    fn reload(&self) {
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).stale = true;
     }
 
     fn remote_url(&self, name: &str) -> Result<Option<String>> {
