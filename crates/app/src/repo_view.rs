@@ -13,6 +13,8 @@ pub enum Section {
     Remote,
     Tags,
     Stashes,
+    /// Shown when Git flow is initialized (M7-08).
+    Gitflow,
     Submodules,
 }
 

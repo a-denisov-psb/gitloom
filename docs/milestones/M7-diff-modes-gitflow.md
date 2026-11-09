@@ -189,7 +189,7 @@ Acceptance: tests for validation; initialize, edit and remove in a test repo upd
 
 Note (2026-11-09): done. Preferences → "Gitflow" (title "Gitflow · <repository>"); the form starts from the repository's values or the defaults (`main` if it exists). Not initialized: "Initialize Gitflow" (`flow::init`, creates missing branches); initialized: "Save" (`flow::write`) and "Remove Gitflow" (confirmation, `flow::remove`, branches untouched). Validation from `FlowConfig::problem` is shown live and disables the button; writes run like other writes (busy/Git missing disable the buttons with the reason). The snapshot carries the Gitflow config and the refs check compares it, so a change (also from a terminal) refreshes the tab. Palette: "Initialize Gitflow" opens the category. Snapshot `ui_check_gitflow_preferences`.
 
-### [ ] M7-08 GITFLOW section and start
+### [x] M7-08 GITFLOW section and start
 
 - Left panel section "GITFLOW" (decisions table): groups, counts, filter, collapse state remembered like other sections, green "+" menu.
 - Start dialog per type (name field, validation, Enter starts, Esc cancels); creates the branch from the local development/production tip and checks it out (existing branch creation + checkout, undoable as today).
@@ -197,6 +197,8 @@ Note (2026-11-09): done. Preferences → "Gitflow" (title "Gitflow · <repositor
 - Blocked states (operation in progress, branch exists) show the reason like other write actions.
 
 Acceptance: `iced_test` snapshot of the section; tests for start from all entry points; undo removes the started branch and returns to the previous branch.
+
+Note (2026-11-09): done. GITFLOW section between STASHES and SUBMODULES with the groups Features/Releases/Hotfixes (a group is listed only when it has branches, like GitKraken; collapse keys `gitflow:<type>` stored with the folders), names without prefix, the same branch rows as LOCAL, total count, text filter on full names. Green "+" opens Start feature/release/hotfix at the pointer; the development branch menu offers Start feature/release, the production branch menu Start hotfix; the palette has "Start feature/release/hotfix" (disabled with "Initialize Gitflow first" without Git flow). The start dialog validates like Ctrl+B (plus: empty name, base branch missing, operation in progress) and creates and checks out the branch with the existing undoable path (undo deletes it and returns to the previous branch). Snapshot `ui_check_gitflow_section`.
 
 ### [x] M7-09 Finish engine (git-core)
 

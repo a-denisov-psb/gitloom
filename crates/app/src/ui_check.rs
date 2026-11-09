@@ -350,4 +350,18 @@ mod tests {
         ));
         snapshot(&app, "gitflow-preferences");
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_gitflow_section() {
+        let mut app = crate::app::tests::flow_app();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("gitflow-section-{theme}"));
+        }
+    }
 }
