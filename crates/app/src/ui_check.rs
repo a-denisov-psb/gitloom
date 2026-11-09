@@ -292,4 +292,49 @@ mod tests {
             right: true,
         });
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_file_history_split() {
+        let mut app = crate::app::tests::file_history_app(crate::settings::DiffMode::Split);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("file-history-split-{theme}"));
+        }
+    }
+
+    /// M7-05: opening and scrolling a 2 MB / 50 000 line diff in every
+    /// mode. Run with `--release`; prints the timings for PERFORMANCE.md.
+    #[test]
+    #[ignore = "manual timing; run with --release --ignored --nocapture"]
+    fn perf_large_diff_modes() {
+        use crate::settings::DiffMode;
+        for mode in DiffMode::ALL {
+            let (mut app, open) = crate::app::tests::large_diff_app(mode, 50_000);
+            let rows = crate::app::tests::diff_rows(&app);
+            // A frame: build the view and lay it out (what iced does per
+            // redraw before drawing), at 60 positions over the whole file.
+            let mut frames = Vec::new();
+            for step in 0..60 {
+                let offset = step as f32 / 59.0 * rows as f32 * crate::ui::diff::ROW_HEIGHT;
+                crate::app::tests::scroll_diff(&mut app, offset);
+                let start = std::time::Instant::now();
+                let sim = simulator(&app);
+                drop(sim);
+                frames.push(start.elapsed());
+            }
+            frames.sort();
+            eprintln!(
+                "{:6}: open {:>7.1?} ({rows} rows), frame median {:>6.1?}, max {:>6.1?}",
+                mode.label(),
+                open,
+                frames[frames.len() / 2],
+                frames[frames.len() - 1]
+            );
+        }
+    }
 }
