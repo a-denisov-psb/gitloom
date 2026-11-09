@@ -13,6 +13,7 @@ mod discard;
 mod editor;
 mod external_tools;
 mod file_history;
+pub mod flow;
 mod gix_backend;
 mod history;
 mod history_ops;
@@ -50,6 +51,7 @@ pub use external_tools::{
     tool_info, DiffTarget, ToolInfo, ToolKind,
 };
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
+pub use flow::{FlowBranch, FlowConfig, FlowKind};
 pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
@@ -484,6 +486,11 @@ pub trait GitBackend: Send + Sync {
     /// are defined. `git remote remove/rename/set-url` cannot change them.
     fn external_remotes(&self) -> Result<Vec<(String, ConfigScope)>> {
         Ok(Vec::new())
+    }
+
+    /// Git flow configuration of the repository, if initialized (M7-06).
+    fn flow_config(&self) -> Result<Option<FlowConfig>> {
+        Ok(None)
     }
 
     /// Forgets cached repository state (e.g. the config) so the next call

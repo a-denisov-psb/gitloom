@@ -167,7 +167,7 @@ Acceptance: target from the milestone acceptance met and documented; snapshots f
 
 Note (2026-11-09): done. The file history diff already followed the global mode since M7-01; read-only diffs (commit, stash, history) now have no block bars at all, and the change navigation jumps to a block's first changed row there. Performance in `docs/PERFORMANCE.md` (M7 section): frames 6–8 ms median, at most 19 ms, opening 43–51 ms for a 2 MB / 50 000 line file; no fix needed. Snapshot `ui_check_file_history_split` (dark/light).
 
-### [ ] M7-06 Git flow configuration model
+### [x] M7-06 Git flow configuration model
 
 - `git-core`: `FlowConfig { production, development, prefixes: feature/release/hotfix, version_tag }` with `read(repo) -> Option<FlowConfig>`, `write`, `remove` (only the `gitflow` section; other `gitflow.*` keys kept on write). Reads come from the repository config (gix), writes go through `git config` (CliBackend).
 - `FlowBranch` classification of a local branch name (type + name without prefix) for the left panel and menus.
@@ -175,6 +175,8 @@ Note (2026-11-09): done. The file history diff already followed the global mode 
 - ADR-037 (native Git flow, config compatibility).
 
 Acceptance: unit tests for parsing, classification and defaults; integration tests: a repo initialized with `git flow init -d` (if the CLI is available in CI, otherwise a config written like the CLI does) is recognized; a repo initialized by Gitloom passes `git flow config` / is usable by the CLI (same keys).
+
+Note (2026-11-09): done. `git_core::flow` (`FlowConfig`, `FlowKind`, `FlowBranch`, `write`, `remove`, `init`) and `GitBackend::flow_config` (resolved config via gix, `None` unless both branch keys are set; missing prefixes take git-flow's defaults). `remove` drops every `gitflow` section (incl. AVH's `bugfix`/`support`/`path` keys), never branches. Classification picks the longest matching prefix. Validation: branch names like Ctrl+B, production ≠ development, a prefix must be able to start a branch name (git-flow accepts prefixes without "/", so does Gitloom), the tag prefix a tag name. The `git-flow` CLI is not installed in CI, so the CLI case uses the keys `git flow init -d` (AVH) writes.
 
 ### [ ] M7-07 Gitflow preferences (initialize, edit, remove)
 
