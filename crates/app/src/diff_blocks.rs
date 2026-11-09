@@ -59,9 +59,103 @@ pub fn blocks(file: &FileDiff) -> Vec<Block> {
     out
 }
 
+/// Rows of the Split view for the lines of one hunk: `(left, right)` line
+/// indices. Context lines fill both sides; inside a run of changes the
+/// removed lines (left) and added lines (right) are paired row by row and
+/// the shorter side is padded with `None` (M7-04).
+pub fn split_rows(lines: &[git_core::DiffLine]) -> Vec<(Option<u32>, Option<u32>)> {
+    let mut rows = Vec::with_capacity(lines.len());
+    let (mut removed, mut added) = (Vec::new(), Vec::new());
+    let flush = |rows: &mut Vec<_>, removed: &mut Vec<u32>, added: &mut Vec<u32>| {
+        for i in 0..removed.len().max(added.len()) {
+            rows.push((removed.get(i).copied(), added.get(i).copied()));
+        }
+        removed.clear();
+        added.clear();
+    };
+    for (l, line) in lines.iter().enumerate() {
+        let l = l as u32;
+        match line.kind {
+            DiffLineKind::Context => {
+                flush(&mut rows, &mut removed, &mut added);
+                rows.push((Some(l), Some(l)));
+            }
+            DiffLineKind::Removed => {
+                // A removal after additions starts a new run.
+                if !added.is_empty() {
+                    flush(&mut rows, &mut removed, &mut added);
+                }
+                removed.push(l);
+            }
+            DiffLineKind::Added => added.push(l),
+        }
+    }
+    flush(&mut rows, &mut removed, &mut added);
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Split rows of a line pattern: ` ` context, `-` removed, `+` added.
+    fn pairs(pattern: &str) -> Vec<(Option<u32>, Option<u32>)> {
+        let lines: Vec<_> = pattern
+            .chars()
+            .map(|c| git_core::DiffLine {
+                kind: match c {
+                    '-' => DiffLineKind::Removed,
+                    '+' => DiffLineKind::Added,
+                    _ => DiffLineKind::Context,
+                },
+                old_line: None,
+                new_line: None,
+                content: String::new(),
+                missing_newline: false,
+                crlf: false,
+            })
+            .collect();
+        split_rows(&lines)
+    }
+
+    #[test]
+    fn split_pairs_removed_and_added_lines() {
+        // Only removals: right side padded.
+        assert_eq!(
+            pairs(" --"),
+            [(Some(0), Some(0)), (Some(1), None), (Some(2), None)]
+        );
+        // Only additions: left side padded.
+        assert_eq!(
+            pairs("++ "),
+            [(None, Some(0)), (None, Some(1)), (Some(2), Some(2))]
+        );
+        // More removals than additions.
+        assert_eq!(
+            pairs("---+"),
+            [(Some(0), Some(3)), (Some(1), None), (Some(2), None)]
+        );
+        // More additions than removals.
+        assert_eq!(
+            pairs("-+++"),
+            [(Some(0), Some(1)), (None, Some(2)), (None, Some(3))]
+        );
+    }
+
+    #[test]
+    fn split_keeps_adjacent_runs_apart() {
+        // Two runs separated by context, and a removal right after additions.
+        assert_eq!(
+            pairs("-+ -++-"),
+            [
+                (Some(0), Some(1)),
+                (Some(2), Some(2)),
+                (Some(3), Some(4)),
+                (None, Some(5)),
+                (Some(6), None),
+            ]
+        );
+    }
 
     fn full(old: &str, new: &str) -> FileDiff {
         let text =

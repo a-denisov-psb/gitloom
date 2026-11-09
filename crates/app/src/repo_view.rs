@@ -135,14 +135,23 @@ pub enum DiffLayout {
     Hunks,
     /// The whole file with a bar above every change block (M7-03).
     Inline,
+    /// Old and new side by side, with block bars like Inline (M7-04).
+    Split,
+}
+
+impl DiffLayout {
+    /// Full file with change blocks (Inline and Split).
+    pub fn has_blocks(self) -> bool {
+        matches!(self, Self::Inline | Self::Split)
+    }
 }
 
 impl DiffLayout {
     pub fn of(mode: crate::settings::DiffMode) -> Self {
         match mode {
             crate::settings::DiffMode::Hunk => Self::Hunks,
-            // Split gets its own layout in M7-04.
-            crate::settings::DiffMode::Inline | crate::settings::DiffMode::Split => Self::Inline,
+            crate::settings::DiffMode::Inline => Self::Inline,
+            crate::settings::DiffMode::Split => Self::Split,
         }
     }
 }
@@ -154,8 +163,11 @@ pub enum DiffRow {
     Header(u32),
     /// Line `l` of hunk `h`.
     Line(u32, u32),
-    /// Bar of change block `b` (Inline layout).
+    /// Bar of change block `b` (Inline and Split layouts).
     Block(u32),
+    /// Split layout: lines of hunk `h` on the old (left) and new (right)
+    /// side; `None` is an empty cell.
+    Split(u32, Option<u32>, Option<u32>),
 }
 
 /// Rows kept above a change when jumping to it.
@@ -189,36 +201,62 @@ impl DiffView {
         }
     }
 
-    /// True if display row `row` is a changed (selectable) line.
-    fn is_changed(&self, row: usize) -> bool {
+    /// Line `l` of hunk `h` is a changed (selectable) line.
+    fn is_changed_line(&self, h: u32, l: u32) -> bool {
         let Loadable::Ready(file) = &self.diff else {
             return false;
         };
-        matches!(self.rows.get(row), Some(&DiffRow::Line(h, l)) if file
-            .hunks
+        file.hunks
             .get(h as usize)
             .and_then(|hunk| hunk.lines.get(l as usize))
-            .is_some_and(|line| line.kind != git_core::DiffLineKind::Context))
+            .is_some_and(|line| line.kind != git_core::DiffLineKind::Context)
+    }
+
+    /// Changed lines of display row `row` (both sides of a Split row).
+    fn changed_lines(&self, row: usize) -> Vec<(u32, u32)> {
+        let keys = match self.rows.get(row) {
+            Some(&DiffRow::Line(h, l)) => vec![(h, l)],
+            Some(&DiffRow::Split(h, left, right)) => {
+                left.into_iter().chain(right).map(|l| (h, l)).collect()
+            }
+            _ => Vec::new(),
+        };
+        keys.into_iter()
+            .filter(|&(h, l)| self.is_changed_line(h, l))
+            .collect()
     }
 
     /// Applies a click on display row `row` to the line selection.
     pub fn click(&mut self, row: usize, mode: ClickMode) {
+        self.click_side(row, None, mode);
+    }
+
+    /// Click on one side of a Split row (`right`: new side) or on an
+    /// Inline/Hunk row (`None`).
+    pub fn click_side(&mut self, row: usize, right: Option<bool>, mode: ClickMode) {
         // Commit diffs are read-only.
-        if self.staged().is_none() || !self.is_changed(row) {
+        if self.staged().is_none() {
             return;
         }
-        let Some(&DiffRow::Line(h, l)) = self.rows.get(row) else {
-            return;
+        let key = match (self.rows.get(row), right) {
+            (Some(&DiffRow::Line(h, l)), None) => (h, l),
+            (Some(&DiffRow::Split(h, left, new)), Some(right)) => {
+                match if right { new } else { left } {
+                    Some(l) => (h, l),
+                    None => return,
+                }
+            }
+            _ => return,
         };
-        let key = (h, l);
+        if !self.is_changed_line(key.0, key.1) {
+            return;
+        }
         match (mode, self.anchor) {
             (ClickMode::Range, Some(anchor)) => {
                 let (from, to) = (anchor.min(row), anchor.max(row));
                 for r in from..=to {
-                    if let (true, Some(&DiffRow::Line(h, l))) =
-                        (self.is_changed(r), self.rows.get(r))
-                    {
-                        self.selection.insert((h, l));
+                    for key in self.changed_lines(r) {
+                        self.selection.insert(key);
                     }
                 }
             }
@@ -269,7 +307,7 @@ impl DiffView {
         self.anchor = None;
         match diff {
             Ok(diff) => {
-                if self.layout == DiffLayout::Inline {
+                if self.layout.has_blocks() {
                     self.blocks = crate::diff_blocks::blocks(&diff);
                 }
                 let mut next_block = 0;
@@ -277,6 +315,20 @@ impl DiffView {
                     let h = h as u32;
                     if self.layout == DiffLayout::Hunks {
                         self.rows.push(DiffRow::Header(h));
+                    }
+                    if self.layout == DiffLayout::Split {
+                        for (left, right) in crate::diff_blocks::split_rows(&hunk.lines) {
+                            if let Some(block) = self.blocks.get(next_block) {
+                                let starts = |side: Option<u32>| side == Some(block.first);
+                                if block.hunk == h && (starts(left) || starts(right)) {
+                                    self.block_rows.push(self.rows.len());
+                                    self.rows.push(DiffRow::Block(next_block as u32));
+                                    next_block += 1;
+                                }
+                            }
+                            self.rows.push(DiffRow::Split(h, left, right));
+                        }
+                        continue;
                     }
                     for l in 0..hunk.lines.len() as u32 {
                         // The bar sits right above the block's first change.
@@ -1100,6 +1152,47 @@ mod tests {
         assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 4)]);
         view.click(4, ClickMode::Replace);
         assert_eq!(view.selection.len(), 1, "bars are not selectable");
+    }
+
+    #[test]
+    fn split_rows_pair_sides_and_keep_the_blocks() {
+        let inline = inline_diff();
+        let mut view = inline_diff();
+        view.layout = DiffLayout::Split;
+        let file = match &view.diff {
+            Loadable::Ready(file) => Ok(file.clone()),
+            _ => unreachable!(),
+        };
+        view.set_diff(file);
+        assert_eq!(view.blocks, inline.blocks, "same blocks as Inline");
+        // Line 5 changed: one paired row; line 30 removed: right side empty.
+        // 40 old lines + bars - 1 (the changed pair shares a row).
+        assert_eq!(view.rows.len(), 42);
+        assert_eq!(view.rows[4], DiffRow::Block(0));
+        assert_eq!(view.rows[5], DiffRow::Split(0, Some(4), Some(5)));
+        assert_eq!(view.rows[30], DiffRow::Block(1));
+        assert_eq!(view.rows[31], DiffRow::Split(0, Some(30), None));
+        assert_eq!(view.block_rows, [4, 30]);
+
+        // Removed lines are clicked on the left, added ones on the right.
+        view.click_side(5, Some(false), ClickMode::Replace);
+        assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 4)]);
+        view.click_side(5, Some(true), ClickMode::Toggle);
+        assert_eq!(
+            view.selection.iter().copied().collect::<Vec<_>>(),
+            [(0, 4), (0, 5)]
+        );
+        // Empty and context cells select nothing.
+        view.click_side(31, Some(true), ClickMode::Replace);
+        view.click_side(6, Some(false), ClickMode::Replace);
+        assert_eq!(view.selection.len(), 2);
+        // A range covers both sides of the rows in between.
+        view.click_side(5, Some(false), ClickMode::Replace);
+        view.click_side(31, Some(false), ClickMode::Range);
+        assert_eq!(
+            view.selection.iter().copied().collect::<Vec<_>>(),
+            [(0, 4), (0, 5), (0, 30)]
+        );
     }
 
     #[test]

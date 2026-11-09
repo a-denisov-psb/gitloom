@@ -5,7 +5,7 @@ use iced::widget::{button, column, container, mouse_area, row, scrollable, space
 use iced::{alignment, Element, Fill, Font};
 
 use crate::app::{DiscardTarget, Message};
-use crate::repo_view::{DiffLayout, DiffRow, DiffView, Loadable, RepoView};
+use crate::repo_view::{DiffRow, DiffView, Loadable, RepoView};
 use crate::settings::DiffMode;
 use crate::theme;
 use crate::ui::muted;
@@ -55,7 +55,7 @@ fn view_with<'a>(
     // Until the Inline and Split renderers land (M7-03/M7-04), both show
     // the full-context diff with the hunk renderer.
     let mut modes = row![].spacing(2).align_y(iced::Center);
-    if diff.layout == DiffLayout::Inline && matches!(diff.diff, Loadable::Ready(_)) {
+    if diff.layout.has_blocks() && matches!(diff.diff, Loadable::Ready(_)) {
         modes = modes
             .push(change_navigation(diff))
             .push(space::horizontal().width(8));
@@ -228,6 +228,40 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
                 continue;
             }
             DiffRow::Line(h, l) => (h, l),
+            DiffRow::Split(h, left, right) => {
+                let Some(hunk) = file.hunks.get(h as usize) else {
+                    continue;
+                };
+                // The empty side of an added/deleted file says so once.
+                let first_row = diff.block_rows.first().map_or(0, |b| b + 1);
+                let note = match (&file.old_path, &file.new_path) {
+                    _ if row_index != first_row => None,
+                    (None, Some(_)) => Some((false, "File added")),
+                    (Some(_), None) => Some((true, "File deleted")),
+                    _ => None,
+                };
+                let cell = |side: Option<u32>, right: bool| {
+                    let note = note.filter(|(r, _)| *r == right).map(|(_, t)| t);
+                    split_cell(
+                        diff,
+                        hunk,
+                        h,
+                        side,
+                        right,
+                        row_index,
+                        staged.is_some(),
+                        note,
+                    )
+                };
+                rows = rows.push(row![
+                    cell(left, false),
+                    container(space::vertical().height(LINE_HEIGHT))
+                        .width(1)
+                        .style(theme::divider),
+                    cell(right, true),
+                ]);
+                continue;
+            }
         };
         let Some(hunk) = file.hunks.get(h as usize) else {
             continue;
@@ -365,6 +399,84 @@ fn change_navigation<'a>(diff: &DiffView) -> Element<'a, Message> {
 
 /// Height of one diff row (for scrolling to rows).
 pub const ROW_HEIGHT: f32 = LINE_HEIGHT;
+
+/// One half of a Split row: number, marker and content of the old (left)
+/// or new (right) side; an empty cell where the other side has more lines
+/// (`note` names an added or deleted file there).
+#[allow(clippy::too_many_arguments)]
+fn split_cell<'a>(
+    diff: &DiffView,
+    hunk: &'a DiffHunk,
+    h: u32,
+    line: Option<u32>,
+    right: bool,
+    row: usize,
+    selectable: bool,
+    note: Option<&'static str>,
+) -> Element<'a, Message> {
+    let Some((l, line)) = line.and_then(|l| hunk.lines.get(l as usize).map(|line| (l, line)))
+    else {
+        let content: Element<'a, Message> = match note {
+            Some(note) => container(muted(note).size(TEXT_SIZE))
+                .padding([0, 12])
+                .into(),
+            None => space::horizontal().into(),
+        };
+        return container(content)
+            .height(LINE_HEIGHT)
+            .width(Fill)
+            .align_y(alignment::Vertical::Center)
+            .style(theme::diff_empty_side)
+            .into();
+    };
+    let selected = diff.selection.contains(&(h, l));
+    let number = if right { line.new_line } else { line.old_line };
+    let marker = match line.kind {
+        DiffLineKind::Context => " ",
+        DiffLineKind::Added => "+",
+        DiffLineKind::Removed => "-",
+    };
+    let mut content = line.content.clone();
+    if line.missing_newline {
+        content.push_str("  (no newline at end of file)");
+    }
+    let cell: Element<'a, Message> = container(
+        row![
+            container(
+                text(number.map_or_else(String::new, |n| n.to_string()))
+                    .font(Font::MONOSPACE)
+                    .size(TEXT_SIZE)
+                    .style(theme::text_muted),
+            )
+            .width(NUMBER_WIDTH)
+            .padding([0, 6])
+            .align_x(alignment::Horizontal::Right),
+            text(marker)
+                .font(Font::MONOSPACE)
+                .size(TEXT_SIZE)
+                .width(MARKER_WIDTH),
+            text(content)
+                .font(Font::MONOSPACE)
+                .size(TEXT_SIZE)
+                .wrapping(text::Wrapping::None),
+        ]
+        .align_y(iced::Center),
+    )
+    .height(LINE_HEIGHT)
+    .width(Fill)
+    .clip(true)
+    .align_y(alignment::Vertical::Center)
+    .style(theme::diff_line(line.kind, selected))
+    .into();
+    if selectable && line.kind != DiffLineKind::Context {
+        mouse_area(cell)
+            .on_press(Message::DiffSideClicked { row, right })
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into()
+    } else {
+        cell
+    }
+}
 
 fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
     let number = |n: Option<u32>| {

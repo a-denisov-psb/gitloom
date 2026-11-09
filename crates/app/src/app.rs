@@ -206,6 +206,11 @@ pub enum Message {
     ApplyHunk(usize),
     /// Stage or unstage the selected lines of the shown diff.
     ApplySelectedLines,
+    /// Click on the old (left) or new (right) side of a Split diff row.
+    DiffSideClicked {
+        row: usize,
+        right: bool,
+    },
     /// Stage or unstage change block `index` of the Inline view (M7-03).
     ApplyBlock(usize),
     /// "Previous change" / "Next change" in the diff header.
@@ -3004,6 +3009,17 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// How a click on a diff line changes the selection (modifier keys).
+    fn click_mode(&self) -> crate::repo_view::ClickMode {
+        if self.modifiers.shift() {
+            crate::repo_view::ClickMode::Range
+        } else if self.modifiers.command() {
+            crate::repo_view::ClickMode::Toggle
+        } else {
+            crate::repo_view::ClickMode::Replace
+        }
+    }
+
     /// Context of the diff mode (M7-01).
     fn diff_context(&self) -> git_core::DiffContext {
         self.settings.diff.view_mode.context()
@@ -4490,15 +4506,15 @@ impl App {
             }
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
             Message::DiffLineClicked(row) => {
-                let mode = if self.modifiers.shift() {
-                    crate::repo_view::ClickMode::Range
-                } else if self.modifiers.command() {
-                    crate::repo_view::ClickMode::Toggle
-                } else {
-                    crate::repo_view::ClickMode::Replace
-                };
+                let mode = self.click_mode();
                 if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
                     diff.click(row, mode);
+                }
+            }
+            Message::DiffSideClicked { row, right } => {
+                let mode = self.click_mode();
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    diff.click_side(row, Some(right), mode);
                 }
             }
             Message::ApplyHunk(index) => return self.apply_diff_lines(move |_, h, _| h == index),
@@ -5629,7 +5645,7 @@ impl App {
                             let offset = diff
                                 .change_target(0, visible, true)
                                 .map_or(0.0, |row| row as f32 * height);
-                            if diff.layout == DiffLayout::Inline && offset > 0.0 {
+                            if diff.layout.has_blocks() && offset > 0.0 {
                                 diff.scroll.offset = offset;
                                 return scroll_by_id(diff.scroll_id.clone(), offset);
                             }
@@ -8247,19 +8263,36 @@ pub(crate) mod tests {
         inline_app(120, 60, 100)
     }
 
+    fn inline_app(lines: u32, changed: u32, removed: u32) -> App {
+        mode_app(settings::DiffMode::Inline, lines, changed, removed)
+    }
+
     /// Inline view of a file of `lines` lines: line `changed` changed,
     /// line `removed` removed.
-    fn inline_app(lines: u32, changed: u32, removed: u32) -> App {
+    /// Diff of "a" in `mode` (full context): line `changed` changed, line
+    /// `removed` removed; `removed` 0 with `changed` 0 makes "a" a new file.
+    pub(crate) fn mode_app(
+        mode: settings::DiffMode,
+        lines: u32,
+        changed: u32,
+        removed: u32,
+    ) -> App {
         let mut app = staging_app(&["a"], &[]);
-        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
+        let _ = app.update(Message::DiffModeChanged(mode));
         let request = DiffRequest {
             kind: git_core::DiffKind::Unstaged,
             path: "a".into(),
             old_path: None,
         };
         let _ = app.update(Message::DiffOpened(request.clone()));
-        let old: String = (1..=lines).map(|i| format!("line {i}\n")).collect();
-        let new = old
+        let all: String = (1..=lines).map(|i| format!("line {i}\n")).collect();
+        let added_file = changed == 0 && removed == 0;
+        let old = if added_file {
+            String::new()
+        } else {
+            all.clone()
+        };
+        let new = all
             .replace(
                 &format!("line {changed}\n"),
                 &format!("changed {changed}\n"),
@@ -8273,7 +8306,7 @@ pub(crate) mod tests {
             request,
             context: git_core::DiffContext::Full,
             result: Ok(git_core::FileDiff {
-                old_path: Some("a".into()),
+                old_path: (!added_file).then(|| "a".into()),
                 new_path: Some("a".into()),
                 binary: false,
                 too_large: false,
@@ -8281,6 +8314,38 @@ pub(crate) mod tests {
             }),
         });
         app
+    }
+
+    /// `mode_app` shown from the top with git available (UI checks).
+    pub(crate) fn diff_at_top(mode: settings::DiffMode, changed: u32, removed: u32) -> App {
+        let mut app = mode_app(mode, 30, changed, removed);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        app
+    }
+
+    #[test]
+    fn split_side_clicks_select_lines_and_blocks_stage() {
+        let mut app = mode_app(settings::DiffMode::Split, 120, 60, 100);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let diff = open_diff(&app);
+        assert_eq!(diff.layout, DiffLayout::Split);
+        let row = diff.block_rows[0] + 1;
+        assert!(matches!(
+            diff.rows[row],
+            crate::repo_view::DiffRow::Split(0, Some(_), Some(_))
+        ));
+        let _ = app.update(Message::DiffSideClicked { row, right: true });
+        assert_eq!(open_diff(&app).selection.len(), 1);
+        let _ = app.update(Message::ApplySelectedLines);
+        assert_eq!(running_args(&app), ["Stage lines of a"]);
     }
 
     /// Inline diff shown from the top (the simulator does not run the
