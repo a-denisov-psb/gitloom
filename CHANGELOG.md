@@ -10,6 +10,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Diff header: Hunk / Inline / Split toggle, also in the command palette; the choice is remembered.
 - Inline diff view: the whole file with each change block marked by a bar with "Stage block" / "Unstage block" / "Discard block"; line selection works as in the Hunk view; "Previous change" / "Next change" arrows in the header, and opening a file shows its first change.
 - Split diff view: old and new side by side with paired changed lines, the same block bars, line selection (removed lines on the left, added on the right) and change arrows; added and deleted files show the empty side as "File added" / "File deleted".
+- Git flow (git-flow compatible): Preferences → Gitflow initializes, edits or removes it for the active repository; a GITFLOW section in the left panel lists features, releases and hotfixes; start them with the green "+", the menu of the development or production branch, or the command palette.
 - While branches are hidden or soloed, "Viewing x/y · Show All" above the filter tells how many are shown and shows all again; LOCAL and REMOTE count "shown/total".
 
 ## [1.0.0-rc.2] - 2026-11-09
