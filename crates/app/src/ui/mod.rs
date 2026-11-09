@@ -146,7 +146,12 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
         TabState::Ready(view) => {
             // Labelled toolbar buttons need about 1 100 logical pixels.
             let compact = app.window_size().width < 1100.0;
-            let mut content = column![toolbar::view(view, app.pull_mode, compact)].spacing(1);
+            let pickers = toolbar::Pickers {
+                repository: app.action_block(crate::shortcuts::Shortcut::OpenRepoPalette),
+                branch: app.action_block(crate::shortcuts::Shortcut::CheckoutBranch),
+            };
+            let mut content =
+                column![toolbar::view(view, app.pull_mode, compact, pickers)].spacing(1);
             if let Some(state) = view.snapshot.state_banner() {
                 content = content.push(state_banner(view, state));
             }

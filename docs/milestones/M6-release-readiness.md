@@ -55,11 +55,15 @@ Out of scope (later):
 | GitHub Actions billing fixed (until the repository is public the release workflow runs on the private plan) | M6-09 |
 | GitKraken checks from M4/M5: drag and drop onto a branch that is not checked out; interactive rebase list order; commit search dims or filters; hide the checked-out branch; file history/blame layout; palette sub-lists | M6-13 |
 | macOS machine available for a smoke test of the dmg? (otherwise CI only) | M6-13 |
+| Empty remote node `github-fc` in the left panel (not in any Git config level per `git config --show-origin`): does it disappear after restarting Gitloom? | M6-18 |
 
 ## Milestone acceptance
 
 - [ ] A tag on `master` produces a draft release with AppImage, Linux `.tar.gz`, macOS universal dmg, Windows x64 `.zip` + `.msi` (signed), Windows x86 (best effort) and `SHA256SUMS`.
 - [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
+- [ ] No console window on Windows (M6-16).
+- [x] No toolbar control shows "Not available yet" (M6-17).
+- [x] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
 - [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
@@ -85,6 +89,9 @@ Out of scope (later):
 | M6-12 | User documentation | M6-02 |
 | M6-13 | Consolidated walkthrough and GitKraken verification | M6-02 … M6-09 |
 | M6-14 | Release candidate v1.0.0-rc.1 | M6-02 … M6-09, M6-11, M6-12 |
+| M6-16 | No console window on Windows | M6-08 |
+| M6-17 | Repository and branch pickers | M6-08 |
+| M6-18 | Remotes in sync with the Git configuration | – |
 | M6-15 | Release v1.0.0 | all |
 
 ---
@@ -259,7 +266,55 @@ Note (Claude Code part done, 2026-11-06; the checkbox waits for the maintainer's
 
 Acceptance: pre-release published with all artifacts; update check (M6-06) of a `rc.1` build sees a later `rc.2`.
 
-Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG section merged into `master`, tagged `v1.0.0-rc.1` by Claude Code (maintainer request "mach weiter mit rc.1", ADR-034); the release workflow builds the draft pre-release. Open (maintainer): publish the draft, make the repository public, SignPath (M6-10); the update check against `rc.2` follows with the next candidate. The checkbox waits for these steps.
+Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG section merged into `master`, tagged `v1.0.0-rc.1` by Claude Code (maintainer request "mach weiter mit rc.1", ADR-034); the release workflow builds the draft pre-release. Repository made public with private vulnerability reporting on the maintainer's request (2026-11-06). Open (maintainer): publish the draft, SignPath (M6-10); the update check against `rc.2` follows with the next candidate. The checkbox waits for these steps.
+
+Note (2026-11-09): `v1.0.0-rc.2` tagged on `master` by Claude Code (maintainer request "mach weiter mit rc.2") with M6-16, M6-17 and M6-18; same branch `release/1.0.0`, version `1.0.0-rc.2` (MSI 1.0.0.2). Open (maintainer): publish the draft pre-release; the update check of an rc.1 build should now see rc.2.
+
+### [ ] M6-16 No console window on Windows
+
+Finding of the maintainer (2026-11-06): the Windows build opens a console window next to Gitloom, because the binary uses the console subsystem (`crates/app/src/main.rs` has no `windows_subsystem` attribute).
+
+- `#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]` at the top of `crates/app/src/main.rs`. Debug builds (`cargo run`) keep the console for panics and logs.
+- Helper modes keep working with the GUI subsystem: askpass (Git reads the answer from the inherited stdout pipe) and Git editor mode (exit code, file written). Child processes: `git` already uses `CREATE_NO_WINDOW`, the terminal `CREATE_NEW_CONSOLE`; check all other spawns (file manager, external tools via `git difftool`/`mergetool`). Console-only diff/merge tools (e.g. vimdiff) get no window → known limitation in the user guide.
+- Starting `gitloom.exe <path>` from a terminal returns to the prompt immediately (like GitKraken); release builds print nothing to the terminal, crash reports cover panics (ADR-029).
+- Windows CI: run the editor-mode integration tests (`crates/app/tests/git_editor.rs`, `interactive_rebase.rs`, `sequencer.rs`) also with `--release`, so they exercise the GUI-subsystem binary.
+- `docs/RELEASE-CHECKLIST.md`: add "No console window when starting from the Start menu, the zip and a terminal" and "HTTPS credential prompt and interactive rebase still work" to the Windows section.
+- CHANGELOG `[Unreleased]` → Fixed: "Windows: no console window opens next to Gitloom."
+
+Acceptance: Windows CI green including the `--release` editor tests; the maintainer confirms on the next release candidate that no console window appears.
+
+Note (2026-11-09): implemented; Windows CI green including the `--release` editor tests and a PE header test (`crates/app/tests/windows_subsystem.rs`); editor mode of the GUI-subsystem binary checked by hand against Git for Windows. Console-only diff/merge tools are listed as a known limitation. The checkbox waits for the maintainer's confirmation on the next release candidate.
+
+### [x] M6-17 Repository and branch pickers
+
+Finding of the maintainer (2026-11-09): the "repository" and "branch" pickers on the left of the toolbar still show "Not available yet" (disabled since M1). They stay (GitKraken layout) and open the existing palette lists.
+
+- Click on the repository picker opens the palette in the mode of "Open recent repository…" (same list, same behavior as the palette action); click on the branch picker opens "Checkout branch…". No new list code.
+- The pickers look as today (caption, value, chevron) plus the normal hover/pressed styles of toolbar buttons; tooltips "Open recent repository" / "Checkout branch" with the shortcut if the action has one.
+- Enabled state and reason come from the action registry (e.g. the branch picker is disabled with the registry's reason while an operation blocks checkout); without an open repository the pickers behave as today on the start screen.
+- Intentional deviation in `docs/UX-PARITY.md`: GitKraken opens a dropdown below the picker, Gitloom the centered palette list (a real dropdown is a backlog item).
+- Audit: no other control in the running app shows the "Not available yet" tooltip (the Submodules section is out of scope); list any remaining place in the report, do not implement it.
+- CHANGELOG `[Unreleased]` → Fixed: "The repository and branch pickers in the toolbar open the recent repositories and the branch list."
+
+Acceptance: app tests: clicking each picker opens the palette in the right mode; disabled state with reason; `iced_test` toolbar snapshot unchanged apart from hover; the audit result is in the task note.
+
+Note (2026-11-09): done. The registry reason for "Checkout branch…" now also covers a missing Git and an operation in progress (`Guarded::Checkout`, "Cannot check out a branch while a rebase is in progress"; `git switch` refuses then), so the palette entry and the picker share it; a disabled picker shows its value muted like other disabled toolbar buttons. The `iced_test` toolbar render (`ui_check_toolbar_pickers`) is pixel-identical to `develop` in the enabled state; clicks were checked in the simulator (no renderer under Xvfb in the cloud session). Audit: the only other control in the running app with "Not available yet" is the Inline/Split toggle in the diff header (planned in M7-01 … M7-04); the Submodules header is out of scope.
+
+### [x] M6-18 Remotes in sync with the Git configuration
+
+Finding of the maintainer (2026-11-09): the left panel shows an empty remote `github-fc`; "Remove" fails with `error: No such remote: 'github-fc'`. Facts: `git config --show-origin --get-regexp "^remote\.github-fc\."` prints nothing in that repository; the only remote is `origin` with URL `git@github-fc:a-denisov-psb/gitloom.git` (`github-fc` is an SSH host alias); the history was rewritten (M6-11) while Gitloom may have been open. `GixBackend::remotes` lists `remote.<name>` sections of gix's resolved config only, so the likely cause is a stale configuration in the backend (a `.git/config` change that the reopen logic of M3 missed).
+
+- Reproduce and fix in this order:
+  1. Stale configuration: with the repository open, change remotes outside Gitloom (`git remote add/rename/remove`, a full rewrite of `.git/config` via a temporary file and rename, as `git filter-repo` and editors do). The left panel must follow without restart. Find out why the reopen was missed (watcher filter, debounce, rename events, Windows behavior) and fix it.
+  2. Remote defined outside the repository: a `[remote "x"]` in the global config (test with `GIT_CONFIG_GLOBAL`). Show it with the tooltip "Defined in the global Git configuration"; Remove, Rename and Edit URL are disabled with that hint; Fetch stays available if it has a URL.
+  3. Safety net: if `git remote remove/rename/set-url` reports "No such remote", reload the repository state and show the status message "Remote <name> no longer exists" instead of the error dialog.
+- Check that no other code path creates remote nodes (URL parsing, leftover directories under `.git/refs/remotes/`, session data).
+- `docs/RELEASE-CHECKLIST.md`, Windows section: "Remove, rename and add a remote in a terminal while Gitloom is open: the left panel follows".
+- CHANGELOG `[Unreleased]` → Fixed: "The left panel no longer shows remotes that were removed or renamed outside Gitloom." (wording per the actual cause).
+
+Acceptance: integration tests for cases 1–3; the task note names the root cause found; Windows CI green.
+
+Note (2026-11-09): done. Root cause: `GixBackend` reopened gix only when the modification time of `.git/config` changed. Several config writes within one timestamp tick (Windows advances file times in steps of about 16 ms; `git remote rename/remove` and `git filter-repo` write the config several times in a row) were lost if gix had re-read the config in between, and files outside `.git` (global and system config, includes) were never checked; the stale gix state stayed until a restart (reproduced in `tests/config_reload.rs` with a temp-file rewrite that keeps the time). Fix: a content fingerprint of every config file gix depends on (repository, worktree, global, system, includes, also when missing), taken before opening; the focus refresh now also checks refs and remotes (the global config is outside the watcher) and the refs check compares URLs and config scopes as well. The watcher itself was fine (`config` events, rename targets, `.lock` ignored). Notable: Git itself answers `No such remote: 'x'` for a remote that exists only in the global config, which is exactly the maintainer's error message; so `github-fc` was either stale (fixed) or defined outside the repository config at a level the shell check did not see (e.g. a different HOME or Git installation) – now shown with "Defined in the global Git configuration" (or system/other) and not removable. The restart check in the maintainer to-dos tells which. Other sources of remote nodes: only remote-tracking refs (`refs/remotes/<x>/…`, a node with branches); empty directories under `.git/refs/remotes/` and session data create none.
 
 ### [ ] M6-15 Release v1.0.0
 

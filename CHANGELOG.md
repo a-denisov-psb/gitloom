@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-11-09
+
+Second release candidate of Gitloom 1.0: no console window on Windows, working repository and branch pickers, and remotes that stay in sync with the Git configuration.
+
+### Fixed
+
+- Windows: no console window opens next to Gitloom.
+- The repository and branch pickers in the toolbar open the recent repositories and the branch list.
+- The left panel no longer shows remotes that were removed or renamed outside Gitloom: changes to any Git config file (also several quick writes, rewrites by tools and the global config) are picked up without a restart.
+- Remotes defined in the global Git configuration are marked in the left panel; Remove, Rename and Edit URL are disabled for them, since Git cannot change them from the repository.
+- Removing, renaming or editing a remote that no longer exists reloads the repository and says so in the status bar instead of showing Git's error.
+
 ## [1.0.0-rc.1] - 2026-11-06
 
 First release candidate of Gitloom 1.0: installers for Linux, macOS and Windows, a new license (GPL-3.0-or-later), crash reports, an opt-in update check, an accessibility pass and a user guide.

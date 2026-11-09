@@ -20,16 +20,17 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (M6 in progress, 1.0.0-rc.1 tagged, 2026-11-06)
+## Current state (M6 in progress, 1.0.0-rc.2 tagged, 2026-11-09)
 
 M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
 - Done: M6-01 identity, M6-02 identity values, M6-03 GPL-3.0-or-later + cargo-deny + third-party notices + About dialog, M6-04 app icon and metadata, M6-05 crash reports, M6-06 opt-in update check, M6-07 accessibility pass, M6-08 packaging (cargo-packager, ADR-031), M6-09 release workflow (dry run green on all targets), M6-12 user guide (`docs/user/`).
 - Done with the maintainer: M6-11 (content approved, history rewritten to the GitHub noreply address). Claude Code part done, waiting for the maintainer: M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
-- M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Open for the maintainer: publish the draft, make the repository public, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
+- M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Repository public since 2026-11-06. Open for the maintainer: publish the draft, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
+- rc.2 (2026-11-09, `v1.0.0-rc.2` on `master`): M6-16 no console window on Windows, M6-17 toolbar pickers open the palette lists, M6-18 remotes in sync with the Git configuration (root cause: config reload keyed on the mtime of `.git/config` only). Open for the maintainer: publish the draft, confirm M6-16 and M6-18 on rc.2, check that the update check of an rc.1 build sees rc.2 (M6-14).
 - Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
 - Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).
-- Branches: `master` with `v0.1.0` … `v0.6.1` and `v1.0.0-rc.1`; `develop` (default branch on GitHub).
+- Branches: `master` with `v0.1.0` … `v0.6.1`, `v1.0.0-rc.1` and `v1.0.0-rc.2`; `develop` (default branch on GitHub).
 
 Earlier milestones (M1–M5) are described in their milestone files; the summary of M5 is in `docs/PLANNING-HANDOVER.md`.
 
@@ -52,6 +53,9 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 
 - [ ] M6-09: download the Windows artifacts of the release dry run (Actions → "Release" → latest `workflow_dispatch` run on `develop` → `packages-windows-x64`/`-x86`) and start the `.msi` and the `.zip` once; report SmartScreen behavior.
 - [ ] M6-13: run `docs/RELEASE-CHECKLIST.md` against the packaged release candidate (Windows required, macOS if available) and answer its GitKraken verification items. The open Windows and keyboard checks of M2–M5 were moved there (M6-13).
+- [ ] M6-16: on the next release candidate, confirm that no console window appears (Start menu, zip, terminal) and that the HTTPS prompt and interactive rebase still work (also in `docs/RELEASE-CHECKLIST.md`).
+- [ ] M7: answer the GitKraken verification items in docs/milestones/M7-diff-modes-gitflow.md (diff modes, Gitflow) if possible before M7 starts.
+- [ ] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown.
 
 - [x] GitHub → Settings → General → Default branch: set to `develop`.
 - [x] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`
@@ -66,7 +70,8 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] Check the CI runs of `master` v0.4.0 (d4f9f4a) and `develop` (2d31663): both green (checked with `gh run list`, 2026-10-25). From now on Claude Code checks CI itself after each push to `develop`.
 - [x] GitHub Actions: CI of `develop` checked on 2026-11-04 (billing fixed), green on Linux, Windows, macOS and MSRV.
 - [x] M6-11: repository content approved; history rewritten to the GitHub noreply address (2026-11-06).
-- [ ] M6-14: make the repository public, then enable Settings → Code security → "Private vulnerability reporting" (SECURITY.md and the Code of Conduct point to it).
+- [x] M6-14: repository public and private vulnerability reporting enabled (2026-11-06, by Claude Code on request).
+- [ ] M6-14: check and publish the draft pre-release `v1.0.0-rc.1` (Releases page).
 - [ ] M6-10: apply at SignPath Foundation once the repository is public; create the project and signing policy, connect GitHub, and set the repository variable `SIGNPATH_ORGANIZATION_ID` (the release workflow has the step prepared).
 - [ ] ADR-033 (name kept): optional trademark/domain check for "Gitloom"; decide before the repository goes public (M6-11) whether it stays under `a-denisov-psb` or moves to an own organization (then update `git_core::identity` and the remote).
 - [x] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0. Resolved: CI runs again since 2026-11-04.

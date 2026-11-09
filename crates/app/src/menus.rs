@@ -454,13 +454,46 @@ pub fn tag(name: &str, writable: bool) -> Vec<MenuEntry> {
 
 /// `any_shown` / `any_hidden`: some of the remote's branches are shown /
 /// hidden in the graph.
-pub fn remote(name: &str, writable: bool, any_shown: bool, any_hidden: bool) -> Vec<MenuEntry> {
+/// Facts for the remote menu.
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteFacts {
+    pub writable: bool,
+    pub any_shown: bool,
+    pub any_hidden: bool,
+    /// Defined outside the repository config: `git remote` cannot change it.
+    pub external: Option<git_core::ConfigScope>,
+    pub has_url: bool,
+}
+
+pub fn remote(name: &str, facts: &RemoteFacts) -> Vec<MenuEntry> {
+    let RemoteFacts {
+        writable,
+        any_shown,
+        any_hidden,
+        external,
+        has_url,
+    } = *facts;
+    // Outside the repository config: only Fetch (if it has a URL).
+    let config_entry = |label: &str, message: Message| match external {
+        Some(scope) => MenuEntry::Item {
+            label: label.into(),
+            shortcut: None,
+            enabled: false,
+            message: Box::new(message),
+            hint: Some(scope.hint().into()),
+        },
+        None => action(label, writable, message),
+    };
     vec![
-        action("Fetch", writable, Message::FetchRemote(name.into())),
+        action(
+            "Fetch",
+            writable && (external.is_none() || has_url),
+            Message::FetchRemote(name.into()),
+        ),
         MenuEntry::Separator,
-        action("Edit URL…", writable, Message::EditRemoteUrl(name.into())),
-        action("Rename…", writable, Message::RenameRemoteStart(name.into())),
-        action("Remove", writable, Message::RemoveRemote(name.into())),
+        config_entry("Edit URL…", Message::EditRemoteUrl(name.into())),
+        config_entry("Rename…", Message::RenameRemoteStart(name.into())),
+        config_entry("Remove", Message::RemoveRemote(name.into())),
         MenuEntry::Separator,
         action(
             "Hide all",
@@ -800,7 +833,11 @@ mod tests {
             ["Copy SHA", "Copy message"]
         );
         assert_eq!(summary(&tag("v1", false)).0, ["Copy name"]);
-        assert!(summary(&remote("origin", false, false, false)).0.is_empty());
+        let read_only = RemoteFacts {
+            any_shown: false,
+            ..facts(false, None)
+        };
+        assert!(summary(&remote("origin", &read_only)).0.is_empty());
     }
 
     #[test]
@@ -826,10 +863,44 @@ mod tests {
         assert!(message_of(&hidden, "Unsolo").is_some());
         assert!(message_of(&remote_menu(None, false), "Hide").is_some());
 
-        let menu = remote("origin", true, true, false);
+        let menu = remote("origin", &facts(true, None));
         let (enabled, disabled) = summary(&menu);
         assert!(enabled.contains(&"Hide all"));
         assert!(disabled.iter().any(|(l, _)| *l == "Show all"));
+    }
+
+    fn facts(writable: bool, external: Option<git_core::ConfigScope>) -> RemoteFacts {
+        RemoteFacts {
+            writable,
+            any_shown: true,
+            any_hidden: false,
+            external,
+            has_url: true,
+        }
+    }
+
+    #[test]
+    fn remote_outside_the_repository_config_can_only_be_fetched() {
+        let hint = "Defined in the global Git configuration";
+        let menu = remote("glob", &facts(true, Some(git_core::ConfigScope::Global)));
+        let (enabled, _) = summary(&menu);
+        assert!(enabled.contains(&"Fetch"));
+        for label in ["Edit URL…", "Rename…", "Remove"] {
+            assert!(!enabled.contains(&label), "{label}");
+            assert_eq!(hint_of(&menu, label), Some(hint));
+        }
+        // Without a URL there is nothing to fetch from.
+        let no_url = RemoteFacts {
+            has_url: false,
+            ..facts(true, Some(git_core::ConfigScope::Global))
+        };
+        assert!(!summary(&remote("glob", &no_url)).0.contains(&"Fetch"));
+        // Repository remotes keep every entry.
+        let menu = remote("origin", &facts(true, None));
+        let (enabled, _) = summary(&menu);
+        for label in ["Fetch", "Edit URL…", "Rename…", "Remove"] {
+            assert!(enabled.contains(&label), "{label}");
+        }
     }
 
     #[test]

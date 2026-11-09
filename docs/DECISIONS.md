@@ -364,13 +364,15 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-032 CI budget until the repository is public
 
-- Status: accepted
+- Status: superseded (repository public since 2026-11-06)
 - Decision: Linux check and MSRV run on every push and pull request. Windows and macOS
   run only on pushes to `master` and `release/**`, on tags and via `workflow_dispatch`.
   Runs are grouped per ref with `cancel-in-progress`. Before every merge the maintainer
   workflow runs `./scripts/check.sh` and clippy for the Windows target locally.
 - Why: private repositories bill Windows and macOS minutes at a multiple of Linux; the
   budget is limited until the repository is public (M6-11). Revisit after that.
+- Superseded (2026-11-06): the repository is public, standard runners are free, so CI runs
+  Linux, Windows and macOS on every push and pull request again.
 
 ## ADR-033 Keep the name Gitloom
 
@@ -447,3 +449,16 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Why: one reproducible source for every icon format without image tools on the
   build machine.
 
+## ADR-037 Native Git flow
+
+- Status: accepted (M7 plan, 2026-11-06)
+- Decision: Git flow (initialize, start, finish for feature, release and hotfix) is implemented in Gitloom on top of the existing `GitWriter` operations; the `git-flow` CLI is neither required nor called. The configuration uses git-flow's keys (`gitflow.branch.master`, `gitflow.branch.develop`, `gitflow.prefix.feature|release|hotfix|versiontag`) in the repository config, so repositories initialized by the CLI, GitKraken or Gitloom are interchangeable; unknown `gitflow.*` keys are kept. A running finish is persisted in `.git/gitloom/gitflow-finish.json` and resumed after conflicts or a restart. Finish never pushes.
+- Why: GitKraken works without the CLI; the CLI is not installed everywhere (and differs between nvie and AVH editions); native steps get Gitloom's conflict handling, progress and undo.
+- Consequences: Gitloom's finish follows GitKraken's documented behavior, which may differ from a CLI edition in details (e.g. hotfix while a release branch exists); differences are listed in `docs/UX-PARITY.md`.
+
+## ADR-038 Diff view modes
+
+- Status: accepted (M7 plan, 2026-11-06)
+- Decision: the diff view has three modes (Hunk, Inline, Split), one global setting. Hunk mode keeps today's 3-line-context data. Inline and Split load a full-context diff (`DiffContext::Full`, one hunk for the whole file) from the same diff pipeline. In Inline and Split, staging works by lines and by change blocks; a block action is turned into a line selection and applied through the existing line staging path (`build_patch`).
+- Why: no regression risk for Hunk mode, no second patch builder; full context is needed anyway to render whole files.
+- Consequences: switching modes reloads the diff in the background; the 2 MB diff limit applies to all modes.

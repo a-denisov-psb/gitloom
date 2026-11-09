@@ -19,8 +19,11 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Done |
 | M5 | 0.6.0 | Productivity parity | Done |
 | M6 | 1.0.0 | Release readiness | In progress (maintainer steps open) |
+| M7 | 1.1.0 | Left panel tree, diff view modes and Git flow | Planned |
+| M8 | 1.2.0 | Repository settings and tools | Outline |
+| M9 | 1.3.0 | Graph columns, themes and syntax highlighting | Outline |
 
-Only the current and the next milestone are planned in task-level detail.
+Only the current and the next milestone are planned in task-level detail; later milestones are outlines until they are next.
 
 ### M0 – Layout shell (done)
 
@@ -48,7 +51,24 @@ Action registry with shortcut list (Ctrl+/), settings view, light and dark theme
 
 ### M6 – Release readiness (1.0)
 
-Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with the first release candidate, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
+Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with the first release candidate, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Fixes for rc.2: no console window on Windows, working repository/branch pickers, remotes in sync with the Git configuration. Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
+
+### M7 – Left panel tree, diff view modes and Git flow (1.1)
+
+Branch folders, icons, highlighted checked-out branch and hidden-branch counter in the left panel like GitKraken; Hunk, Inline and Split diff views with staging in every mode; GitKraken's Git flow: initialize per repository (git-flow compatible config), GITFLOW section in the left panel, start and finish of features, releases and hotfixes with conflict resume and undo. Details: [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md).
+
+### M8 – Repository settings and tools (1.2, outline)
+
+- Preferences category "Repository" for settings of the active tab's repository; the Gitflow settings of M7 move there.
+- Git identities: profiles with name and email (identity only, no workspace profiles like GitKraken's); one is the global default (`user.name`/`user.email` global); per repository chosen in the commit panel ("Committing as …") and the palette; the choice writes `user.name`/`user.email` to the repository config, "Use global" removes them; an unknown identity in a repository can be saved as a profile.
+- SSH key per repository: `core.sshCommand = ssh -i "<key>" -o IdentitiesOnly=yes` in the repository config; no choice = system default (ssh-agent, `~/.ssh/config`); keys from `~/.ssh` or a file dialog; an existing `core.sshCommand` is only replaced after confirmation; passphrases via the askpass dialog, nothing stored.
+- External editor: Preferences → External tools, command template with `{path}`; "Open repository in editor" (palette, Alt+E, toolbar button next to Terminal shown only when an editor is set); file context menu in the unstaged/staged lists "Open in external editor" (disabled with a hint when no editor is set or the file is deleted).
+
+### M9 – Graph columns, themes and syntax highlighting (1.3, outline)
+
+- Graph columns: drag column borders, double click for optimal width, column menu (gear in the header) to show/hide branch/tag, graph, message, author, date, SHA; replaces the automatic hiding of columns.
+- Theme "Classic Dark": the palette gains style tokens (row tint in the lane color, filled ref pills with a line to the node, header bands, column separators, panel depth); Dark and Light keep their current look through token values.
+- Syntax highlighting in diffs, blame, file history and the conflict view: syntect with the `two-face` syntax set (languages like VS Code's built-ins); whole old/new files are highlighted in the background and mapped to diff lines (needs M7-02), cached per blob, size limit, colors per theme, switch in Preferences → Appearance.
 
 ## Non-goals
 
@@ -61,7 +81,7 @@ Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or
 
 Own ideas and deferred items. To be assigned to milestones with the maintainer.
 
-- **Git flow graph layout** (after 1.0): if git flow is initialized (`gitflow.*` config),
+- **Git flow graph layout** (after M7; builds on the Git flow configuration model of M7-06): if git flow is initialized (`gitflow.*` config),
   render the graph like the classic git flow diagram: fixed lane groups from left to right
   (master, hotfix/*, release/*, develop, feature/*), one color per branch type.
   Branch membership is inferred from git flow config, first-parent chains of branch tips
@@ -75,9 +95,10 @@ Own ideas and deferred items. To be assigned to milestones with the maintainer.
   offer "Commit empty" like the empty cherry-pick dialog instead of showing Git's error.
 - **Autostash conflict notice** (M4 known limitation): when re-applying an autostash after
   merge/rebase conflicts, show a dedicated notice that the stash was kept.
-- **Diff view modes**: inline and split view in addition to the hunk view.
-- **Graph columns**: resizable columns and a column menu like GitKraken's.
-- **Git identity in settings**: edit `user.name` / `user.email` (global and per repository).
+- **Toolbar picker dropdowns**: open the repository and branch lists as a dropdown below the pickers like GitKraken instead of the palette (M6-17).
+- **Automatic identity**: choose the identity (M8) automatically by remote URL or path, like `includeIf`.
+- **Signing key per identity** (GPG/SSH commit signing).
+- **SSH key generator** in the Preferences.
 - **Integrated terminal** instead of opening the system terminal.
 - **macOS notarization** with an Apple Developer ID (removes the Gatekeeper prompt).
 - **More packages**: Flatpak, `.deb`/`.rpm`, Homebrew cask, winget.

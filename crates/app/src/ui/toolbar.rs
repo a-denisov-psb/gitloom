@@ -6,9 +6,10 @@ use iced::{Element, Fill};
 use crate::app::Message;
 use crate::icons::{self, Icon};
 use crate::repo_view::{Guarded, RepoView};
+use crate::shortcuts::Shortcut;
 use crate::theme;
 use crate::ui::muted;
-use crate::ui::panel::{with_tooltip, with_tooltip_text, write_tooltip};
+use crate::ui::panel::{with_tooltip_text, write_tooltip};
 
 /// Toolbar actions; all write operations arrive in later milestones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,11 +89,34 @@ fn toolbar_button<'a>(
     tool_button(action.icon(), action.label(), on_press, compact)
 }
 
+/// Why the repository and branch pickers are disabled, if they are (from
+/// the action registry, see `App::action_block`).
+#[derive(Debug, Clone, Default)]
+pub struct Pickers {
+    pub repository: Option<String>,
+    pub branch: Option<String>,
+}
+
 /// `compact`: the window is too narrow for labelled buttons (icons only).
-pub fn view(view: &RepoView, pull_mode: git_core::PullMode, compact: bool) -> Element<'_, Message> {
+pub fn view(
+    view: &RepoView,
+    pull_mode: git_core::PullMode,
+    compact: bool,
+    blocks: Pickers,
+) -> Element<'_, Message> {
     let pickers = row![
-        picker("repository", view.name().to_owned()),
-        picker("branch", view.snapshot.branch_label()),
+        picker(
+            "repository",
+            view.name().to_owned(),
+            Shortcut::OpenRepoPalette,
+            blocks.repository,
+        ),
+        picker(
+            "branch",
+            view.snapshot.branch_label(),
+            Shortcut::CheckoutBranch,
+            blocks.branch,
+        ),
     ]
     .spacing(20);
 
@@ -142,9 +166,17 @@ fn settings_button<'a>(compact: bool) -> Element<'a, Message> {
     )
 }
 
-/// Repository / branch picker; the dropdowns follow with checkout (M3).
-fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
-    with_tooltip(
+/// Repository / branch picker: opens the palette list of `action`
+/// (M6-17; GitKraken opens a dropdown, see UX-PARITY). `block` is why the
+/// action cannot run, shown as the tooltip of the disabled picker.
+fn picker<'a>(
+    caption: &'a str,
+    value: String,
+    action: Shortcut,
+    block: Option<String>,
+) -> Element<'a, Message> {
+    let tip = block.clone().unwrap_or_else(|| picker_tooltip(action));
+    with_tooltip_text(
         button(
             column![
                 muted(caption).size(10),
@@ -157,10 +189,24 @@ fn picker<'a>(caption: &'a str, value: String) -> Element<'a, Message> {
             ]
             .spacing(1),
         )
+        .on_press_maybe(block.is_none().then_some(Message::PickerClicked(action)))
         .padding([3, 8])
         .style(theme::picker)
         .into(),
+        tip,
     )
+}
+
+/// Tooltip of an enabled picker: what it opens, with the shortcut if any.
+fn picker_tooltip(action: Shortcut) -> String {
+    let label = match action {
+        Shortcut::CheckoutBranch => "Checkout branch",
+        _ => "Open recent repository",
+    };
+    match action.shortcut_text() {
+        Some(keys) => format!("{label} ({keys})"),
+        None => label.to_owned(),
+    }
 }
 
 fn action<'a>(view: &RepoView, compact: bool, action: ToolbarAction) -> Element<'a, Message> {

@@ -20,8 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows and macOS only on master, release/**, tags and manual runs (ADR-032).
-        os: ${{ fromJSON((github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -46,6 +45,12 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      # Release builds use the GUI subsystem on Windows (M6-16); the Git
+      # editor tests run the real binary, so check that it still works there.
+      - name: Test Git editor mode (release binary)
+        if: runner.os == 'Windows'
+        run: cargo test -p gitloom --release --locked --test git_editor --test interactive_rebase --test sequencer --test windows_subsystem
 
   licenses:
     name: Licenses and advisories

@@ -309,6 +309,8 @@ pub enum Message {
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
+    /// Click on a toolbar picker: runs its palette action (M6-17).
+    PickerClicked(Shortcut),
     SettingsLoaded(settings::Loaded),
     /// The status bar message number `seq` may disappear now.
     StatusExpired(u64),
@@ -2996,10 +2998,12 @@ impl App {
                 let refs = backend.references().map_err(|e| e.to_string())?;
                 let stashes = backend.stashes().map_err(|e| e.to_string())?;
                 let state = backend.state().map_err(|e| e.to_string())?;
-                let remotes = backend.remotes().map_err(|e| e.to_string())?;
+                // Remotes, URLs and where they are defined (`git remote` in a
+                // terminal changes only the config).
+                let remotes = crate::snapshot::Remotes::load(backend.as_ref())?;
                 Ok(refs_changed(&snapshot, &head, &refs, &stashes)
                     || state != snapshot.state
-                    || remotes != snapshot.remotes)
+                    || remotes != crate::snapshot::Remotes::of(&snapshot))
             }),
             move |changed| Message::RefsChecked { tab: id, changed },
         )
@@ -3175,6 +3179,15 @@ impl App {
                 return Some("Open a repository first".to_owned());
             }
             _ => {}
+        }
+        if id == Shortcut::CheckoutBranch {
+            let view = self.active_tab().and_then(Tab::view)?;
+            if let Some(reason) = &view.write_block {
+                return Some(reason.clone());
+            }
+            if let Some(reason) = view.state_block(Guarded::Checkout) {
+                return Some(reason);
+            }
         }
         let in_rebase_panel = self
             .active_tab()
@@ -4550,6 +4563,16 @@ impl App {
                             self.modal = merge_blocked_dialog(error, request);
                         }
                     }
+                    // `git remote remove/rename/set-url` on a remote that is
+                    // gone (changed outside Gitloom): reload instead of an
+                    // error dialog (M6-18).
+                    Err(error) if git_core::missing_remote(&error).is_some() => {
+                        let name = git_core::missing_remote(&error).unwrap_or_default();
+                        self.status = format!("Remote {name} no longer exists");
+                        if let Some(view) = self.tab_mut(tab).and_then(|t| t.view()) {
+                            view.backend.reload();
+                        }
+                    }
                     Err(error) if push && git_core::push_rejection(&error).is_some() => {
                         self.modal = Some(push_rejected_dialog(error));
                     }
@@ -4894,6 +4917,15 @@ impl App {
             }
             Message::RemoteContextMenu { name, position } => {
                 let writable = self.write_block().is_none();
+                let (external, has_url) =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .map_or((None, false), |view| {
+                            (
+                                view.snapshot.external_remote(&name),
+                                view.snapshot.remote_urls.iter().any(|(n, _)| *n == name),
+                            )
+                        });
                 let (any_shown, any_hidden) =
                     self.active_tab()
                         .and_then(Tab::view)
@@ -4917,7 +4949,16 @@ impl App {
                         });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::remote(&name, writable, any_shown, any_hidden),
+                    crate::menus::remote(
+                        &name,
+                        &crate::menus::RemoteFacts {
+                            writable,
+                            any_shown,
+                            any_hidden,
+                            external,
+                            has_url,
+                        },
+                    ),
                 ));
             }
             Message::FetchRemote(name) => {
@@ -5877,6 +5918,12 @@ impl App {
                     None => self.refresh(id),
                 };
             }
+            Message::PickerClicked(id) => {
+                if self.action_block(id).is_none() {
+                    self.palette = None;
+                    return self.shortcut(id);
+                }
+            }
             Message::Shortcut(shortcut) if shortcut.works_in_text_input() => {
                 return self.shortcut(shortcut)
             }
@@ -5932,12 +5979,14 @@ impl App {
             }
             Message::FocusRefreshDue(seq) => {
                 if seq == self.focus_seq {
-                    // With a healthy watcher only the status can be stale.
+                    // With a healthy watcher the status and files outside the
+                    // repository (global Git config) can be stale; the refs
+                    // check reloads everything only if something moved.
                     let target = self
                         .active_tab()
                         .and_then(|t| t.view().map(|v| (t.id, v.watcher)));
                     return match target {
-                        Some((id, WatchState::Running)) => self.refresh_status(id),
+                        Some((id, WatchState::Running)) => self.check_refs(id),
                         _ => self.update(Message::Refresh),
                     };
                 }
@@ -9998,6 +10047,14 @@ pub(crate) mod tests {
         let tab = app.tabs[0].id;
         let _ = app.update(Message::WatcherStarted(tab));
         let _ = app.update(Message::FocusRefreshDue(app.focus_seq));
+        // A refs check first (the global Git config is outside the watcher);
+        // unchanged refs and remotes then refresh only the status.
+        let view = app.tabs[0].view().unwrap();
+        assert!(!view.status_refreshing && !view.refreshing);
+        let _ = app.update(Message::RefsChecked {
+            tab,
+            changed: Ok(false),
+        });
         let view = app.tabs[0].view().unwrap();
         assert!(view.status_refreshing && !view.refreshing);
 
@@ -11071,6 +11128,64 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn toolbar_pickers_open_their_palette_lists() {
+        let mut app = checkout_app();
+        app.session
+            .touch_recent(std::path::Path::new("/repos/other"), 1);
+        assert_eq!(app.action_block(Shortcut::OpenRepoPalette), None);
+        assert_eq!(app.action_block(Shortcut::CheckoutBranch), None);
+
+        let _ = app.update(Message::PickerClicked(Shortcut::OpenRepoPalette));
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::OpenRepository)
+        );
+        assert_eq!(palette_labels(&app), ["Browse…", "other"]);
+
+        // A click on the other picker replaces the open list.
+        let _ = app.update(Message::PickerClicked(Shortcut::CheckoutBranch));
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::CheckoutBranch)
+        );
+        assert!(palette_labels(&app).contains(&"origin/feature".to_owned()));
+    }
+
+    #[test]
+    fn branch_picker_is_disabled_while_an_operation_blocks_checkout() {
+        let mut app = app_in_state(rebasing());
+        let reason = app.action_block(Shortcut::CheckoutBranch);
+        assert_eq!(
+            reason.as_deref(),
+            Some("Cannot check out a branch while a rebase is in progress")
+        );
+        let _ = app.update(Message::PickerClicked(Shortcut::CheckoutBranch));
+        assert!(app.palette.is_none());
+        // The palette lists the action disabled with the same reason.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("checkout branch".into()));
+        let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
+        assert_eq!(entry.disabled, reason);
+        // The repository picker stays available.
+        let _ = app.update(Message::PaletteClosed);
+        assert_eq!(app.action_block(Shortcut::OpenRepoPalette), None);
+        let _ = app.update(Message::PickerClicked(Shortcut::OpenRepoPalette));
+        assert!(app.palette.is_some());
+    }
+
+    #[test]
+    fn branch_picker_is_disabled_without_git() {
+        let mut app = checkout_app();
+        app.tabs[0].view_mut().unwrap().write_block = Some("Git was not found".into());
+        assert_eq!(
+            app.action_block(Shortcut::CheckoutBranch).as_deref(),
+            Some("Git was not found")
+        );
+        let _ = app.update(Message::PickerClicked(Shortcut::CheckoutBranch));
+        assert!(app.palette.is_none());
+    }
+
+    #[test]
     fn commit_checkout_asks_first() {
         let mut app = checkout_app();
         let _ = app.update(Message::CommitContextMenu {
@@ -11520,6 +11635,49 @@ pub(crate) mod tests {
         let mut app = tag_app(&["origin"]);
         let _ = app.update(Message::FetchRemote("origin".into()));
         assert_eq!(running_args(&app), ["Fetch origin"]);
+    }
+
+    #[test]
+    fn remote_outside_the_repository_config_cannot_be_removed() {
+        let mut app = tag_app(&["glob", "origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.remote_urls = vec![("glob".into(), "https://x/g.git".into())];
+        snapshot.external_remotes = vec![("glob".into(), git_core::ConfigScope::Global)];
+        view.snapshot = Arc::new(snapshot);
+
+        let _ = app.update(Message::RemoteContextMenu {
+            name: "glob".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::FetchRemote(r)) if r == "glob"));
+        assert!(menu.select(4).is_none(), "Remove is disabled");
+    }
+
+    #[test]
+    fn a_vanished_remote_reloads_instead_of_an_error_dialog() {
+        let mut app = tag_app(&["github-fc"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RemoveRemote("github-fc".into()));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Remove remote github-fc"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Remove remote github-fc".into(),
+            result: Err("Git failed (exit code 2): error: No such remote: 'github-fc'".into()),
+        });
+        assert!(app.modal.is_none(), "no error dialog");
+        assert_eq!(app.status, "Remote github-fc no longer exists");
+        assert!(app.tabs[0].view().unwrap().refreshing, "repository reloads");
+
+        // Other errors still show the dialog.
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Remove remote github-fc".into(),
+            result: Err("error: could not remove config section".into()),
+        });
+        assert!(app.modal.is_some());
     }
 
     #[test]

@@ -99,6 +99,7 @@ One line per milestone: version, date, scope, notable deviations.
 | M4 Merge, rebase, conflicts, undo | 0.5.0 | 2026-10-26 | Merge/ff, rebase and interactive rebase, cherry-pick, revert, reset, conflict resolution view, continue/skip/abort, drag and drop, multi-selection, undo/redo; Gitloom as Git's editor | Shift+↑/↓ select ranges instead of parent/child navigation; reset uses a mode dialog instead of a submenu; hard reset is undoable via a snapshot; editor input is a message queue; released with keyboard parts and the Windows walkthrough still open (maintainer to-dos); three known limitations moved to the backlog |
 | M5 Productivity parity | 0.6.0 | 2026-11-04 | Action registry and shortcut list, settings, light/dark theme, zoom and fullscreen, Lucide icons, command palette, commit search, hide/solo branches, file history and blame, opt-in avatars, external diff/merge tools, terminal and file manager, end-to-end check | Released with the Windows and keyboard to-dos still open (bundled in M6-13); GitHub Actions did not run from 2026-10-26 until the billing was fixed, CI of `develop` verified before the release |
 | Hotfix | 0.6.1 | 2026-11-06 | Network cancel could hang (v0.6.0 Windows CI timed out) | – |
+| M6 release candidate 2 | 1.0.0-rc.2 | 2026-11-09 | M6-16 no console window on Windows, M6-17 toolbar pickers, M6-18 remotes in sync with the Git configuration | M6-17 pickers open the palette lists instead of a dropdown (UX-PARITY deviation, dropdown in the backlog) |
 | M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
@@ -109,6 +110,8 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - Backlog entry "Git flow graph layout": in `docs/ROADMAP.md` → "Ideas backlog".
 - M5 detailed plan (2026-10-26): `docs/milestones/M5-productivity.md`, ADR-023 … ADR-027, ROADMAP backlog entries.
 - M6 detailed plan (2026-11-03): `docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030, ADR-008/016 updated, ROADMAP backlog entries.
+
+- rc.2 scope, M7 left panel tree, M8/M9 outlines (2026-11-09): M6-17, M6-18, M7-14 in the milestone files, ROADMAP M8/M9, backlog updated.
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -121,17 +124,19 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 | 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-05: keep "Gitloom" despite the collision with the GitLoom product (ADR-033, supersedes the rename decision of 2026-11-03); repository `github.com/a-denisov-psb/gitloom` |
 | 2 | Confirm license (MIT OR Apache-2.0) | decided 2026-11-03: GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
-| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0 |
+| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0; 2026-11-06: Git flow start/finish planned in M7 (ADR-037), the graph layout stays in the backlog |
 | 5 | M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict without notice): keep or plan follow-ups? | decided 2026-10-26: backlog (ROADMAP) |
 | 6 | Verify in GitKraken whether the interactive rebase list shows the newest commit on top (Gitloom does) | Open, maintainer to-do M4-07 |
+| 7 | Profiles like GitKraken's (workspace with own tabs and settings) or identities only? | decided 2026-11-09: identities only (name and email per repository), M8 |
+| 8 | Order after M7 | decided 2026-11-09: M8 repository settings and tools, then M9 graph columns, themes and syntax highlighting |
 
 Questions raised by Claude Code during implementation are tracked in `docs/HANDOVER.md` → "Open questions"; check it at the start of every planning session.
 
 ## 8. Suggested next planning steps
 
-1. M6 (`docs/milestones/M6-release-readiness.md`) runs autonomously in one Claude Code chat (ADR-034). Review the milestone report after the release (deviations, new ADRs, maintainer to-dos) instead of each task.
-2. Answer the M6 maintainer verification items (milestone file) as the related tasks come up.
-3. Collect the maintainer's own ideas; place them in the roadmap.
+1. rc.2 tagged 2026-11-09 (M6-16, M6-17, M6-18). Next: findings of M6-10/M6-13 on rc.2 (further rcs if needed), then M6-15 (1.0.0) on request.
+2. M7 runs autonomously after `v1.0.0` (ADR-034); the maintainer answers the GitKraken verification items in the M7 file beforehand.
+3. Detail plan for M8 when M7 is released (outline in ROADMAP); M9 after that.
 
 ## 9. Document map
 
