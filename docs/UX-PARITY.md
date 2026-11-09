@@ -11,9 +11,9 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Area | GitKraken behavior | Status |
 |---|---|---|
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
-| Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it) |
-| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Submodules, Gitflow (when initialized); collapsible; filter on top; counts | done (M0), real data M1; Gitflow M7 |
-| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top | done (M1) |
+| Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it); M6-17 pickers open the palette lists (see deviations); M8 external editor button next to Terminal |
+| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Gitflow (when initialized), Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; Gitflow M7; folders, icons, highlight and counter M7-14 |
+| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top; resizable columns and a column menu | done (M1); resizable columns and column menu M9 |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
 | Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); M7 inline and split (ADR-038) |
 | Status bar | Bottom line | done |
@@ -38,7 +38,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu) |
 | Auto-fetch | Periodic fetch in the background | done (M3, every 5 min; interval in Preferences → General since M5-02) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
-| Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path) |
+| Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path); M8 "Open in external editor" |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
 | Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | M7 (global setting; staging by line and block in all modes) |
 | Gitflow | Preferences → Gitflow initializes; GITFLOW section in the left panel with a green start button; branch menu "Finish …" | M7 (native, git-flow compatible config; ADR-037) |
@@ -46,7 +46,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
-| Right click remote | Fetch, Edit URL, Rename, Remove | done (M3) |
+| Right click remote | Fetch, Edit URL, Rename, Remove | done (M3); M6-18 remotes defined outside the repository config cannot be removed, renamed or edited |
 | "+" in the remote section | Add a remote (name, URL) | done (M3) |
 | Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
@@ -134,7 +134,8 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 |---|---|
 | Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
-| Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow later; until then the message stays readable on wide graphs |
+| Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow in M9; until then the message stays readable on wide graphs |
+| The repository and branch pickers open the centered palette lists ("Open recent repository", "Checkout branch") instead of a dropdown below the picker | M6-17: reuses the existing lists before 1.0; a real dropdown is a backlog item |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | "Discard all" with staged changes asks whether to discard them too ("Keep staged" is the default) | Maintainer decision (HANDOVER question 8); staged work is never lost by accident |
 | Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |

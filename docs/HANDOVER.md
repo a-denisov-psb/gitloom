@@ -54,6 +54,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M6-13: run `docs/RELEASE-CHECKLIST.md` against the packaged release candidate (Windows required, macOS if available) and answer its GitKraken verification items. The open Windows and keyboard checks of M2–M5 were moved there (M6-13).
 - [ ] M6-16: on the next release candidate, confirm that no console window appears (Start menu, zip, terminal) and that the HTTPS prompt and interactive rebase still work (also in `docs/RELEASE-CHECKLIST.md`).
 - [ ] M7: answer the GitKraken verification items in docs/milestones/M7-diff-modes-gitflow.md (diff modes, Gitflow) if possible before M7 starts.
+- [ ] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown.
 
 - [x] GitHub → Settings → General → Default branch: set to `develop`.
 - [x] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`
