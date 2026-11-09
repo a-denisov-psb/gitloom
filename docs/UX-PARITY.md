@@ -40,7 +40,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path); M8 "Open in external editor" |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
-| Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | M7 (global setting; staging by line and block in all modes); toggle and setting done in M7-01, Inline view with block bars and change arrows M7-03, Split M7-04 |
+| Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | M7 (global setting; staging by line and block in all modes); toggle and setting done in M7-01, Inline view with block bars and change arrows M7-03, Split view M7-04 |
 | Gitflow | Preferences → Gitflow initializes; GITFLOW section in the left panel with a green start button; branch menu "Finish …" | M7 (native, git-flow compatible config; ADR-037) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |

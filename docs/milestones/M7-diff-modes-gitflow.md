@@ -148,13 +148,15 @@ Acceptance: stage/unstage/discard by block and by line in a test repo (incl. CRL
 
 Note (2026-11-09): done. Diff rows are typed (`DiffRow::Header/Line/Block`); the layout comes from the mode when the diff loaded (Split uses the Inline layout until M7-04). Blocks (`crate::diff_blocks`) use the hunk rule of `text_diff` (at most 6 unchanged lines between changes); the bar sits right above a block's first changed line, same row height as lines so the virtualization stays exact. Block actions pass the block's lines to the existing line path (`apply_diff_lines`, `discard_diff_lines`); discard asks "Discard block". Jumps keep 3 rows above the bar and stop where scrolling ends; opening a file or switching the mode jumps to the first change, reloads after staging keep the scroll position (same scrollable id). Tests: blocks equal hunks of the Hunk view; in real repositories (LF, CRLF, no trailing newline) stage/unstage/discard by block equals the hunk action and a line selection gives the same index as in Hunk mode; `ui_check_inline_diff` in both themes.
 
-### [ ] M7-04 Split view
+### [x] M7-04 Split view
 
 - Renderer for Split: two halves of equal width with a divider; left old line numbers and content (context, removed), right new (context, added); in a block removed and added lines are paired row by row, the shorter side padded with empty rows; one vertical scroll; long lines are clipped per half (no wrap, like Hunk mode).
 - Line selection: removed lines are clicked on the left, added lines on the right; selection, block bars and change navigation as in M7-03.
 - Added/deleted files show the empty side with "File added" / "File deleted"; binary/too large/no changes show the same messages as the other modes.
 
 Acceptance: tests for the row pairing (only removals, only additions, more removals than additions and vice versa, adjacent blocks); stage/unstage/discard by block and line as in M7-03; `iced_test` snapshot in both themes at 100 % and 200 % zoom.
+
+Note (2026-11-09): done. `DiffRow::Split(hunk, left, right)` rows from `diff_blocks::split_rows` (runs of changes paired row by row, a removal after additions starts a new run); blocks, bars, navigation and staging are shared with Inline (same full-context data, same `(hunk, line)` selection keys, so block and line actions equal M7-03 by construction). Shift+click selects the changed lines of both sides in the range. The "File added" / "File deleted" note sits in the first row of the empty side. Snapshots `ui_check_split_diff` (dark/light × 100/200 %, added file) checked.
 
 ### [ ] M7-05 Diff modes in embedded views, snapshots, performance
 
