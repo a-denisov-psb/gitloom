@@ -334,19 +334,139 @@ pub struct ContextMenu {
     pub entries: Vec<MenuEntry>,
     /// Entry chosen with ↑/↓ (M6-07); Enter runs it.
     pub highlighted: Option<usize>,
+    /// Width that fits the longest item (measured, see [`menu_width`]).
+    pub width: f32,
 }
 
-/// Approximate menu size used to keep it inside the window.
-pub const MENU_WIDTH: f32 = 260.0;
+/// Narrowest menu (short menus keep a calm, even look).
+pub const MENU_MIN_WIDTH: f32 = 220.0;
+/// Widest menu; longer labels end in "…" with the full text as tooltip.
+pub const MENU_MAX_WIDTH: f32 = 520.0;
 pub const MENU_ITEM_HEIGHT: f32 = 26.0;
 pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
+/// Text sizes of the menu items (label, shortcut) as the view draws them.
+pub const MENU_LABEL_SIZE: f32 = 13.0;
+pub const MENU_SHORTCUT_SIZE: f32 = 11.0;
+/// Horizontal space of an item besides its texts: button padding (2 × 10),
+/// menu padding (2 × 4), a little slack for rounding.
+const MENU_ITEM_CHROME: f32 = 20.0 + 8.0 + 4.0;
+/// Gap between a label and its shortcut.
+const MENU_SHORTCUT_GAP: f32 = 16.0;
+
+/// Font the menu texts are drawn in: the app's default font. Under test the
+/// `iced_test` simulator draws `Font::DEFAULT` as Fira Sans.
+#[cfg(not(test))]
+const DRAWN_FONT: iced::Font = iced::Font::DEFAULT;
+#[cfg(test)]
+const DRAWN_FONT: iced::Font = iced::Font::with_name("Fira Sans");
+
+/// Width of `text` at `size` in the default font, measured with the font
+/// system the renderer uses (so it is exact on every platform).
+pub fn text_width(text: &str, size: f32) -> f32 {
+    use iced::advanced::text::Paragraph as _;
+    let paragraph = iced::advanced::graphics::text::Paragraph::with_text(iced::advanced::Text {
+        content: text,
+        bounds: Size::INFINITE,
+        size: size.into(),
+        line_height: iced::widget::text::LineHeight::default(),
+        font: DRAWN_FONT,
+        align_x: iced::advanced::text::Alignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: iced::widget::text::Shaping::default(),
+        wrapping: iced::widget::text::Wrapping::None,
+    });
+    paragraph.min_bounds().width
+}
+
+/// Room an item needs: label, and shortcut with its gap.
+fn item_width(label: &str, shortcut: Option<&str>) -> f32 {
+    let shortcut = shortcut.map_or(0.0, |s| {
+        text_width(s, MENU_SHORTCUT_SIZE) + MENU_SHORTCUT_GAP
+    });
+    text_width(label, MENU_LABEL_SIZE) + shortcut + MENU_ITEM_CHROME
+}
+
+/// Width of a menu with `entries`: the widest item, between
+/// [`MENU_MIN_WIDTH`] and [`MENU_MAX_WIDTH`].
+pub fn menu_width(entries: &[MenuEntry]) -> f32 {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            MenuEntry::Item {
+                label, shortcut, ..
+            } => Some(item_width(label, shortcut.as_deref())),
+            MenuEntry::Separator => None,
+        })
+        .fold(MENU_MIN_WIDTH, f32::max)
+        .ceil()
+        .min(MENU_MAX_WIDTH)
+}
+
+/// Shortens `label` with "…" until its item fits `width`.
+fn fit_label(label: &str, shortcut: Option<&str>, width: f32) -> String {
+    if item_width(label, shortcut) <= width {
+        return label.to_owned();
+    }
+    let chars: Vec<char> = label.chars().collect();
+    // Longest prefix that fits (binary search over the char count).
+    let (mut low, mut high) = (0, chars.len());
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        let candidate: String = chars[..mid].iter().collect::<String>() + "…";
+        if item_width(&candidate, shortcut) <= width {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    chars[..low]
+        .iter()
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+        + "…"
+}
 
 impl ContextMenu {
-    pub fn new(position: Point, entries: Vec<MenuEntry>) -> Self {
+    /// Menu at `position`, as wide as its longest item; items longer than
+    /// [`MENU_MAX_WIDTH`] are shortened with "…" and show their full text
+    /// as tooltip.
+    pub fn new(position: Point, mut entries: Vec<MenuEntry>) -> Self {
+        let width = menu_width(&entries);
+        for entry in &mut entries {
+            if let MenuEntry::Item {
+                label,
+                shortcut,
+                hint,
+                ..
+            } = entry
+            {
+                let fitted = fit_label(label, shortcut.as_deref(), width);
+                if fitted != *label {
+                    *hint = Some(match hint.take() {
+                        Some(reason) => format!("{label}\n{reason}"),
+                        None => label.clone(),
+                    });
+                    *label = fitted;
+                }
+            }
+        }
         Self {
             position,
             entries,
             highlighted: None,
+            width,
+        }
+    }
+
+    /// Label, shortcut and the menu width of item `index` fit together.
+    #[cfg(test)]
+    pub fn item_fits(&self, index: usize) -> bool {
+        match self.entries.get(index) {
+            Some(MenuEntry::Item {
+                label, shortcut, ..
+            }) => item_width(label, shortcut.as_deref()) <= self.width,
+            _ => true,
         }
     }
 
@@ -421,7 +541,7 @@ impl ContextMenu {
             }
         }
         Point::new(
-            axis(self.position.x, MENU_WIDTH, window.width),
+            axis(self.position.x, self.width, window.width),
             axis(self.position.y, self.height(), window.height),
         )
     }
@@ -498,7 +618,7 @@ mod tests {
 
         let corner = ContextMenu::new(Point::new(790.0, 590.0), menu.entries.clone());
         let origin = corner.origin(window);
-        assert_eq!(origin.x, 790.0 - MENU_WIDTH);
+        assert_eq!(origin.x, 790.0 - menu.width);
         assert!(origin.y + corner.height() <= 600.0);
         // No room above or below (high zoom): as low as the window allows.
         let height = corner.height();
