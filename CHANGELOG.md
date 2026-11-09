@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Fixed
 
 - Windows: no console window opens next to Gitloom.
+- The repository and branch pickers in the toolbar open the recent repositories and the branch list.
 
 ## [1.0.0-rc.1] - 2026-11-06
 

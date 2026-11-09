@@ -162,4 +162,33 @@ mod tests {
         let _ = app.update(checked(Shortcut::Navigate(crate::nav::Move::Next), false));
         snapshot(&app, "context-menu-keyboard");
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_toolbar_pickers() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        // Any update applies "Checking for Git…": the branch picker is disabled.
+        let _ = app.update(Message::DismissNotice);
+        assert!(app
+            .action_block(crate::shortcuts::Shortcut::CheckoutBranch)
+            .is_some());
+        snapshot(&app, "pickers-0-disabled");
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        snapshot(&app, "pickers-1-toolbar");
+        click(&mut app, "repository");
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(crate::palette::Mode::OpenRepository)
+        );
+        snapshot(&app, "pickers-2-repository");
+        let _ = app.update(Message::PaletteClosed);
+        click(&mut app, "branch");
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(crate::palette::Mode::CheckoutBranch)
+        );
+        snapshot(&app, "pickers-3-branch");
+    }
 }
