@@ -99,6 +99,7 @@ One line per milestone: version, date, scope, notable deviations.
 | M4 Merge, rebase, conflicts, undo | 0.5.0 | 2026-10-26 | Merge/ff, rebase and interactive rebase, cherry-pick, revert, reset, conflict resolution view, continue/skip/abort, drag and drop, multi-selection, undo/redo; Gitloom as Git's editor | Shift+↑/↓ select ranges instead of parent/child navigation; reset uses a mode dialog instead of a submenu; hard reset is undoable via a snapshot; editor input is a message queue; released with keyboard parts and the Windows walkthrough still open (maintainer to-dos); three known limitations moved to the backlog |
 | M5 Productivity parity | 0.6.0 | 2026-11-04 | Action registry and shortcut list, settings, light/dark theme, zoom and fullscreen, Lucide icons, command palette, commit search, hide/solo branches, file history and blame, opt-in avatars, external diff/merge tools, terminal and file manager, end-to-end check | Released with the Windows and keyboard to-dos still open (bundled in M6-13); GitHub Actions did not run from 2026-10-26 until the billing was fixed, CI of `develop` verified before the release |
 | Hotfix | 0.6.1 | 2026-11-06 | Network cancel could hang (v0.6.0 Windows CI timed out) | – |
+| M6 release candidate 2 | 1.0.0-rc.2 | 2026-11-09 | M6-16 no console window on Windows, M6-17 toolbar pickers, M6-18 remotes in sync with the Git configuration | M6-17 pickers open the palette lists instead of a dropdown (UX-PARITY deviation, dropdown in the backlog) |
 | M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
@@ -133,7 +134,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. rc.2 after the maintainer's go: M6-16, M6-17, M6-18 plus findings of M6-10/M6-13; then M6-15 (1.0.0) on request.
+1. rc.2 tagged 2026-11-09 (M6-16, M6-17, M6-18). Next: findings of M6-10/M6-13 on rc.2 (further rcs if needed), then M6-15 (1.0.0) on request.
 2. M7 runs autonomously after `v1.0.0` (ADR-034); the maintainer answers the GitKraken verification items in the M7 file beforehand.
 3. Detail plan for M8 when M7 is released (outline in ROADMAP); M9 after that.
 
