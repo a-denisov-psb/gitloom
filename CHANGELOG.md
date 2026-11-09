@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-11-09
+
+Second release candidate of Gitloom 1.0: no console window on Windows, working repository and branch pickers, and remotes that stay in sync with the Git configuration.
+
 ### Fixed
 
 - Windows: no console window opens next to Gitloom.
