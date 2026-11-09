@@ -276,6 +276,8 @@ Finding of the maintainer (2026-11-06): the Windows build opens a console window
 
 Acceptance: Windows CI green including the `--release` editor tests; the maintainer confirms on the next release candidate that no console window appears.
 
+Note (2026-11-09): implemented; Windows CI green including the `--release` editor tests and a PE header test (`crates/app/tests/windows_subsystem.rs`); editor mode of the GUI-subsystem binary checked by hand against Git for Windows. Console-only diff/merge tools are listed as a known limitation. The checkbox waits for the maintainer's confirmation on the next release candidate.
+
 ### [ ] M6-15 Release v1.0.0
 
 Same procedure as before (`/release`), only when the maintainer asks; Windows artifacts signed.
