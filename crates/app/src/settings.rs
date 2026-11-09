@@ -22,6 +22,43 @@ pub struct Settings {
     pub general: General,
     pub appearance: Appearance,
     pub tools: ExternalTools,
+    pub diff: DiffSettings,
+}
+
+/// Diff view mode (M7-01, ADR-038): one global setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffMode {
+    #[default]
+    Hunk,
+    Inline,
+    Split,
+}
+
+impl DiffMode {
+    pub const ALL: [Self; 3] = [Self::Hunk, Self::Inline, Self::Split];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hunk => "Hunk",
+            Self::Inline => "Inline",
+            Self::Split => "Split",
+        }
+    }
+
+    /// Context the diff of this mode is loaded with.
+    pub fn context(self) -> git_core::DiffContext {
+        match self {
+            Self::Hunk => git_core::DiffContext::Hunks,
+            Self::Inline | Self::Split => git_core::DiffContext::Full,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiffSettings {
+    pub view_mode: DiffMode,
 }
 
 impl Default for Settings {
@@ -31,6 +68,7 @@ impl Default for Settings {
             general: General::default(),
             appearance: Appearance::default(),
             tools: ExternalTools::default(),
+            diff: DiffSettings::default(),
         }
     }
 }
@@ -326,7 +364,23 @@ mod tests {
         settings.tools.diff_tool = ToolChoice::Tool("meld".into());
         settings.tools.merge_tool = ToolChoice::None;
         settings.tools.terminal_command = "alacritty --working-directory {path}".into();
+        settings.diff.view_mode = DiffMode::Split;
         settings
+    }
+
+    #[test]
+    fn settings_without_diff_mode_load_with_hunk_view() {
+        // A settings file of 1.0 (before M7-01).
+        let text = r#"{
+            "version": 1,
+            "general": { "auto_fetch_minutes": 10, "check_updates": false },
+            "appearance": { "theme": "dark", "zoom_percent": 100, "avatars": false },
+            "tools": { "diff_tool": "git-config", "merge_tool": "git-config", "terminal_command": "" }
+        }"#;
+        let settings = parse(text).unwrap();
+        assert_eq!(settings.diff.view_mode, DiffMode::Hunk);
+        assert_eq!(settings.version, VERSION);
+        assert!(to_json(&sample()).contains(r#""view_mode": "split""#));
     }
 
     #[test]

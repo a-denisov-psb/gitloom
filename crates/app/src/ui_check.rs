@@ -228,4 +228,17 @@ mod tests {
         assert!(!app.tabs[0].view().unwrap().ref_filter.is_active());
         snapshot(&app, "left-panel-after-clicks");
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_diff_mode_toggle() {
+        let mut app = crate::app::tests::app_with_open_diff(git_core::DiffKind::Unstaged);
+        snapshot(&app, "diff-mode-0-hunk");
+        click(&mut app, "Split");
+        assert_eq!(
+            app.settings.diff.view_mode,
+            crate::settings::DiffMode::Split
+        );
+        snapshot(&app, "diff-mode-1-split-loading");
+    }
 }
