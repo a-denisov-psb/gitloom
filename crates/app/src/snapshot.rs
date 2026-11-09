@@ -52,6 +52,8 @@ pub struct RepoSnapshot {
     /// Remotes defined outside the repository config (e.g. global), which
     /// cannot be removed, renamed or edited here (M6-18).
     pub external_remotes: Vec<(String, git_core::ConfigScope)>,
+    /// Git flow configuration, if initialized (M7-06).
+    pub flow: Option<git_core::FlowConfig>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
@@ -69,6 +71,8 @@ pub struct Remotes {
     pub names: Vec<String>,
     pub urls: Vec<(String, String)>,
     pub external: Vec<(String, git_core::ConfigScope)>,
+    /// Git flow configuration (also only in the config).
+    pub flow: Option<git_core::FlowConfig>,
 }
 
 impl Remotes {
@@ -82,10 +86,12 @@ impl Remotes {
             }
         }
         let external = backend.external_remotes().map_err(|e| e.to_string())?;
+        let flow = backend.flow_config().map_err(|e| e.to_string())?;
         Ok(Self {
             names,
             urls,
             external,
+            flow,
         })
     }
 
@@ -95,6 +101,7 @@ impl Remotes {
             names: snapshot.remotes.clone(),
             urls: snapshot.remote_urls.clone(),
             external: snapshot.external_remotes.clone(),
+            flow: snapshot.flow.clone(),
         }
     }
 }
@@ -121,6 +128,7 @@ impl RepoSnapshot {
         snapshot.remotes = remotes.names;
         snapshot.remote_urls = remotes.urls;
         snapshot.external_remotes = remotes.external;
+        snapshot.flow = remotes.flow;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
         Ok(snapshot)
@@ -236,6 +244,7 @@ impl RepoSnapshot {
             remotes: Vec::new(),
             remote_urls: Vec::new(),
             external_remotes: Vec::new(),
+            flow: None,
             merge_message: None,
             commit_template: None,
             unfiltered: None,
@@ -312,6 +321,7 @@ impl RepoSnapshot {
         filtered.remotes = base.remotes.clone();
         filtered.remote_urls = base.remote_urls.clone();
         filtered.external_remotes = base.external_remotes.clone();
+        filtered.flow = base.flow.clone();
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
         filtered.unfiltered = Some(Arc::new(base));

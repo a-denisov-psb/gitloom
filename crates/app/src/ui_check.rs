@@ -292,4 +292,17 @@ mod tests {
             right: true,
         });
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_gitflow_preferences() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Gitflow,
+        ));
+        snapshot(&app, "gitflow-preferences");
+    }
 }

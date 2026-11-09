@@ -148,16 +148,24 @@ pub enum Category {
     General,
     Appearance,
     ExternalTools,
+    /// Git flow of the active tab's repository (M7-07).
+    Gitflow,
 }
 
 impl Category {
-    pub const ALL: [Self; 3] = [Self::General, Self::Appearance, Self::ExternalTools];
+    pub const ALL: [Self; 4] = [
+        Self::General,
+        Self::Appearance,
+        Self::ExternalTools,
+        Self::Gitflow,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
             Self::General => "General",
             Self::Appearance => "Appearance",
             Self::ExternalTools => "External tools",
+            Self::Gitflow => "Gitflow",
         }
     }
 }
@@ -172,6 +180,51 @@ pub struct Page {
     pub error: Option<String>,
     /// Diff and merge tools Git offers (External tools); `None` until loaded.
     pub tools: Option<Result<(git_core::ToolInfo, git_core::ToolInfo), String>>,
+    /// Gitflow form (filled when the category opens with a repository).
+    pub flow: Option<FlowForm>,
+}
+
+/// Fields of the Gitflow category, in [`FlowForm::values`] order.
+pub const FLOW_FIELDS: [&str; 6] = [
+    "Production branch",
+    "Development branch",
+    "Feature prefix",
+    "Release prefix",
+    "Hotfix prefix",
+    "Version tag prefix",
+];
+
+/// Values typed in the Gitflow category (M7-07).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowForm {
+    pub values: [String; 6],
+}
+
+impl FlowForm {
+    pub fn new(config: &git_core::FlowConfig) -> Self {
+        Self {
+            values: [
+                config.production.clone(),
+                config.development.clone(),
+                config.feature.clone(),
+                config.release.clone(),
+                config.hotfix.clone(),
+                config.version_tag.clone(),
+            ],
+        }
+    }
+
+    pub fn config(&self) -> git_core::FlowConfig {
+        let [production, development, feature, release, hotfix, version_tag] = self.values.clone();
+        git_core::FlowConfig {
+            production: production.trim().to_owned(),
+            development: development.trim().to_owned(),
+            feature: feature.trim().to_owned(),
+            release: release.trim().to_owned(),
+            hotfix: hotfix.trim().to_owned(),
+            version_tag: version_tag.trim().to_owned(),
+        }
+    }
 }
 
 impl Page {
@@ -181,6 +234,7 @@ impl Page {
             auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
             error: None,
             tools: None,
+            flow: None,
         }
     }
 
@@ -366,6 +420,16 @@ mod tests {
         settings.tools.terminal_command = "alacritty --working-directory {path}".into();
         settings.diff.view_mode = DiffMode::Split;
         settings
+    }
+
+    #[test]
+    fn flow_form_round_trip_and_trimming() {
+        let config = git_core::FlowConfig::defaults(&["main"]);
+        let mut form = FlowForm::new(&config);
+        assert_eq!(form.config(), config);
+        form.values[1] = " dev ".into();
+        assert_eq!(form.config().development, "dev");
+        assert_eq!(FLOW_FIELDS.len(), form.values.len());
     }
 
     #[test]

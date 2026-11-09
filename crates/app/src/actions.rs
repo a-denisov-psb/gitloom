@@ -87,6 +87,8 @@ pub enum ActionId {
     ContextMenu,
     /// Diff: Hunk / Inline / Split view (M7-01).
     DiffView(crate::settings::DiffMode),
+    /// Opens Preferences → Gitflow (M7-07).
+    InitializeGitflow,
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -663,6 +665,14 @@ fn table() -> Vec<Action> {
         &[ch('o').alt()],
     );
 
+    add(
+        A::InitializeGitflow,
+        "Initialize Gitflow",
+        RepoActions,
+        Global,
+        &[],
+    );
+
     // Interface
     for mode in crate::settings::DiffMode::ALL {
         add(
@@ -802,6 +812,7 @@ fn table() -> Vec<Action> {
                 | A::OpenTerminal
                 | A::OpenFileManager
                 | A::ExternalDiff
+                | A::InitializeGitflow
         ) {
             action.requires = Requires::Repository;
         }
