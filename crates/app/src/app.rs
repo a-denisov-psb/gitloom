@@ -174,6 +174,13 @@ pub enum Message {
     SectionToggled(Section),
     /// Hunk / Inline / Split in the diff header or the palette (M7-01).
     DiffModeChanged(settings::DiffMode),
+    /// Typed into field `index` of Preferences → Gitflow (M7-07).
+    FlowFieldChanged(usize, String),
+    /// "Initialize Gitflow" / "Save" in Preferences → Gitflow.
+    FlowSave,
+    /// "Remove Gitflow" (asks first).
+    FlowRemove,
+    FlowRemoveConfirmed,
     /// Click on a branch folder or remote in the left panel (M7-14); the
     /// key is [`crate::branch_tree::folder_key`].
     FolderToggled(String),
@@ -2208,6 +2215,9 @@ impl App {
             Shortcut::Settings => return self.open_settings(),
             Shortcut::About => return self.update(Message::AboutOpened),
             Shortcut::DiffView(mode) => return self.update(Message::DiffModeChanged(mode)),
+            Shortcut::InitializeGitflow => {
+                return self.update(Message::SettingsOpenedAt(settings::Category::Gitflow))
+            }
             Shortcut::Pull => return self.update(Message::Pull(None)),
             Shortcut::Push => return self.update(Message::Push { force: false }),
             Shortcut::Stash => return self.update(Message::StashPush),
@@ -3007,6 +3017,27 @@ impl App {
             }
         }
         Task::batch(tasks)
+    }
+
+    /// Name of the active tab's repository, if one is open.
+    pub fn active_repo_name(&self) -> Option<&str> {
+        self.active_tab().and_then(Tab::view).map(RepoView::name)
+    }
+
+    /// Whether Git flow is initialized in the active tab's repository
+    /// (`None` without an open repository).
+    pub fn active_flow_initialized(&self) -> Option<bool> {
+        self.active_tab()
+            .and_then(Tab::view)
+            .map(|v| v.snapshot.flow.is_some())
+    }
+
+    /// Why the active repository cannot be written right now, if it cannot.
+    pub fn active_writable_reason(&self) -> Option<String> {
+        let view = self.active_tab().and_then(Tab::view)?;
+        view.write_block
+            .clone()
+            .or_else(|| view.busy.as_ref().map(|busy| format!("Busy: {busy}")))
     }
 
     /// How a click on a diff line changes the selection (modifier keys).
@@ -4011,8 +4042,25 @@ impl App {
             }
             Message::SettingsClosed => self.settings_page = None,
             Message::SettingsCategory(category) => {
+                // Gitflow: the form starts from the repository's values, or
+                // the defaults when it is not initialized.
+                let flow = self.active_tab().and_then(Tab::view).map(|view| {
+                    let snapshot = &view.snapshot;
+                    snapshot.flow.clone().unwrap_or_else(|| {
+                        let local: Vec<&str> = snapshot
+                            .refs
+                            .iter()
+                            .filter(|r| r.kind == git_core::RefKind::LocalBranch)
+                            .map(|r| r.name.as_str())
+                            .collect();
+                        git_core::FlowConfig::defaults(&local)
+                    })
+                });
                 if let Some(page) = &mut self.settings_page {
                     page.category = category;
+                    if category == settings::Category::Gitflow {
+                        page.flow = flow.as_ref().map(settings::FlowForm::new);
+                    }
                 }
                 // The tool lists come from Git (needs a repository).
                 if category == settings::Category::ExternalTools {
@@ -5532,6 +5580,60 @@ impl App {
                 self.settings.diff.view_mode = mode;
                 let save = self.save_settings();
                 return Task::batch([save, self.reload_open_diffs()]);
+            }
+            Message::FlowFieldChanged(index, value) => {
+                if let Some(field) = self
+                    .settings_page
+                    .as_mut()
+                    .and_then(|p| p.flow.as_mut())
+                    .and_then(|f| f.values.get_mut(index))
+                {
+                    *field = value;
+                }
+            }
+            Message::FlowSave => {
+                let Some(config) = self
+                    .settings_page
+                    .as_ref()
+                    .and_then(|p| p.flow.as_ref())
+                    .map(settings::FlowForm::config)
+                else {
+                    return Task::none();
+                };
+                if config.problem().is_some() {
+                    return Task::none();
+                }
+                let Some((tab, initialized)) = self
+                    .active_tab()
+                    .and_then(|t| t.view().map(|v| (t.id, v.snapshot.flow.is_some())))
+                else {
+                    return Task::none();
+                };
+                // Initializing also creates missing branches; saving only
+                // writes the configuration.
+                return if initialized {
+                    self.run_write(tab, "Save Gitflow settings", move |git| {
+                        git_core::flow::write(git, &config)
+                    })
+                } else {
+                    self.run_write(tab, "Initialize Gitflow", move |git| {
+                        git_core::flow::init(git, &config)
+                    })
+                };
+            }
+            Message::FlowRemove => {
+                self.modal = Some(Modal::confirm(
+                    "Remove Gitflow",
+                    "Remove the Gitflow settings of this repository? Branches stay as they are.",
+                    "Remove",
+                    true,
+                    Message::FlowRemoveConfirmed,
+                ));
+            }
+            Message::FlowRemoveConfirmed => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.run_write(tab, "Remove Gitflow", git_core::flow::remove);
+                }
             }
             Message::FolderToggled(key) => {
                 if let Some(view) = self.active_view_mut() {
@@ -8457,6 +8559,82 @@ pub(crate) mod tests {
         assert_eq!(open_diff(&app).scroll.offset, 63.0 * height, "last change");
         let _ = app.update(Message::DiffJumpChange { next: false });
         assert_eq!(open_diff(&app).scroll.offset, 56.0 * height);
+    }
+
+    fn flow_page(app: &App) -> Option<&settings::FlowForm> {
+        app.settings_page.as_ref().and_then(|p| p.flow.as_ref())
+    }
+
+    #[test]
+    fn gitflow_preferences_initialize_save_and_remove() {
+        let mut app = checkout_app();
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        // The palette entry opens the category with the defaults.
+        let _ = app.update(checked(Shortcut::InitializeGitflow, false));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, settings::Category::Gitflow);
+        let form = flow_page(&app).unwrap();
+        assert_eq!(form.values[0], "main", "main exists");
+        assert_eq!(form.values[1], "develop");
+        assert_eq!(app.active_flow_initialized(), Some(false));
+
+        // An invalid value blocks the button's message.
+        let _ = app.update(Message::FlowFieldChanged(1, "main".into()));
+        let _ = app.update(Message::FlowSave);
+        assert!(running_args(&app).is_empty());
+        let _ = app.update(Message::FlowFieldChanged(1, "dev".into()));
+        let _ = app.update(Message::FlowSave);
+        assert_eq!(running_args(&app), ["Initialize Gitflow"]);
+
+        // Initialized: Save writes the settings, Remove asks first.
+        let mut app = checkout_app();
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.flow = Some(git_core::FlowConfig {
+            feature: "feat/".into(),
+            ..git_core::FlowConfig::defaults(&["main"])
+        });
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Gitflow));
+        assert_eq!(
+            flow_page(&app).unwrap().values[2],
+            "feat/",
+            "current values"
+        );
+        let _ = app.update(Message::FlowSave);
+        assert_eq!(running_args(&app), ["Save Gitflow settings"]);
+
+        let mut app_remove = checkout_app();
+        let view = app_remove.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.flow = Some(git_core::FlowConfig::defaults(&["main"]));
+        view.snapshot = Arc::new(snapshot);
+        let _ = app_remove.update(Message::FlowRemove);
+        assert_eq!(app_remove.modal.as_ref().unwrap().title, "Remove Gitflow");
+    }
+
+    #[test]
+    fn gitflow_preferences_need_a_repository() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Gitflow));
+        assert!(flow_page(&app).is_none());
+        assert_eq!(app.active_flow_initialized(), None);
+    }
+
+    #[test]
+    fn a_changed_gitflow_config_counts_as_changed_refs() {
+        let app = checkout_app();
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        let mut remotes = crate::snapshot::Remotes::of(snapshot);
+        assert_eq!(remotes, crate::snapshot::Remotes::of(snapshot));
+        remotes.flow = Some(git_core::FlowConfig::defaults(&[]));
+        assert_ne!(remotes, crate::snapshot::Remotes::of(snapshot));
     }
 
     #[test]

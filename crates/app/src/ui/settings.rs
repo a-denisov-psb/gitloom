@@ -39,6 +39,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
         Category::ExternalTools => external_tools(&app.settings, page),
+        Category::Gitflow => gitflow(app, page),
     };
 
     let header = row![
@@ -55,7 +56,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let body = row![
         container(categories).height(Fill).style(theme::chrome),
         scrollable(
-            column![text(page.category.title()).size(16), form]
+            column![text(category_title(app, page.category)).size(16), form]
                 .spacing(16)
                 .padding(20)
                 .max_width(640)
@@ -70,6 +71,80 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// Title of the form; Gitflow names the repository it applies to.
+fn category_title(app: &App, category: Category) -> String {
+    match (category, app.active_repo_name()) {
+        (Category::Gitflow, Some(name)) => format!("Gitflow · {name}"),
+        _ => category.title().to_owned(),
+    }
+}
+
+/// Preferences → Gitflow (M7-07): initialize, edit or remove Git flow for
+/// the active tab's repository.
+fn gitflow<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
+    let (Some(form), Some(initialized)) = (&page.flow, app.active_flow_initialized()) else {
+        return muted(
+            "Open a repository first. Gitflow settings apply to the repository of the \
+                      active tab.",
+        )
+        .into();
+    };
+    let fields = Column::with_children(crate::settings::FLOW_FIELDS.iter().enumerate().map(
+        |(index, label)| {
+            let note = match index {
+                0 => Some("Releases and hotfixes are merged and tagged here."),
+                1 => Some("Features start here; releases start from it."),
+                5 => Some("Put before the version in tag names, e.g. \"v\" for v1.2.0."),
+                _ => None,
+            };
+            field(
+                label,
+                text_input("", &form.values[index])
+                    .on_input(move |value| Message::FlowFieldChanged(index, value))
+                    .on_submit(Message::FlowSave)
+                    .padding(6)
+                    .style(theme::input)
+                    .width(260)
+                    .into(),
+                note,
+            )
+        },
+    ))
+    .spacing(14);
+    let problem = form.config().problem();
+    let busy = app.active_writable_reason();
+    let save_label = if initialized {
+        "Save"
+    } else {
+        "Initialize Gitflow"
+    };
+    let enabled = problem.is_none() && busy.is_none();
+    let mut actions = row![button(text(save_label))
+        .on_press_maybe(enabled.then_some(Message::FlowSave))
+        .padding([5, 14])
+        .style(button::primary)]
+    .spacing(8);
+    if initialized {
+        actions = actions.push(
+            button(text("Remove Gitflow"))
+                .on_press_maybe(busy.is_none().then_some(Message::FlowRemove))
+                .padding([5, 14])
+                .style(button::danger),
+        );
+    }
+    let intro = if initialized {
+        "Git flow is initialized for this repository (git-flow compatible settings)."
+    } else {
+        "Initializing writes git-flow compatible settings and creates missing branches: \
+         development from the production branch, production from the current commit."
+    };
+    let mut content = column![muted(intro).size(12), fields].spacing(16);
+    if let Some(reason) = problem.or(busy) {
+        content = content.push(text(reason).size(12).style(theme::text_danger));
+    }
+    content.push(actions).into()
 }
 
 /// Labelled setting with an explanation below.
