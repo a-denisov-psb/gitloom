@@ -116,13 +116,15 @@ Acceptance: unit tests for the tree (nesting, sorting, a remote with and without
 
 Note (2026-11-09): done. Tree model `crates/app/src/branch_tree.rs` (pure, unit-tested, 2 000 branches far below 5 ms); `RepoView::sidebar_groups` caches it per snapshot, text filter and hide/solo state. GitKraken verification items not answered yet, so the planned defaults apply (folders before branches, tags flat, no folder context menu); recorded in `docs/UX-PARITY.md`. Remote nodes collapse like folders (key `remote:<name>`), with a cloud icon. "Visible" counts the branches shown in the graph (the checked-out one always); the section counts are taken among the text filter matches, "Viewing x/y" among all branches. The checked-out row uses the selection color (AA in both themes) and shows its ahead/behind badge in normal text color. Snapshots `ui_check_left_panel_tree` (dark/light × 100/200 %, clicks on a folder and "Show All") checked; 200 % is rendered as half the logical size, since `iced_test` always renders at scale 2.
 
-### [ ] M7-01 Diff mode setting and toggle
+### [x] M7-01 Diff mode setting and toggle
 
 - `Settings` gains `diff.view_mode` (`hunk` | `inline` | `split`, default `hunk`); older `settings.json` files load unchanged (missing field = default), the settings version follows the existing migration rule.
 - The Hunk / Inline / Split buttons in the diff header are enabled; the active one is highlighted; switching re-requests the diff with the matching context (M7-02) and keeps the selected file. Until M7-03/M7-04 land, Inline/Split may render with the Hunk renderer behind the toggle; the release must not ship that state.
 - The command palette gets "Diff: Hunk view", "Diff: Inline view", "Diff: Split view".
 
 Acceptance: the mode survives a restart; Hunk mode looks and behaves exactly as before (existing `iced_test` snapshots unchanged); unit test for loading old settings.
+
+Note (2026-11-09): done after M7-02. `settings.json` gains `diff.view_mode` (`hunk`/`inline`/`split`), version 1 kept (missing = `hunk`). Switching reloads every open diff (standalone and file history) with the mode's context and clears the line selection (positions differ); results loaded for another mode are dropped. Inline and Split show the full-context diff with the hunk renderer until M7-03/M7-04. Palette: "Diff: Hunk view", "Diff: Inline view", "Diff: Split view" (category Interface, no shortcut). Existing `iced_test` checks unchanged; new `ui_check_diff_mode_toggle`.
 
 ### [x] M7-02 Full-context diffs in git-core
 

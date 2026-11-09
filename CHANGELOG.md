@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Added
 
 - The left panel groups local and remote branches into folders at `/` like GitKraken: folders and remotes collapse with a click (remembered per repository), branch rows show a branch icon and the last name segment (full name in the tooltip), the checked-out branch is highlighted.
+- Diff header: Hunk / Inline / Split toggle, also in the command palette; the choice is remembered (the Inline and Split views are being completed).
 - While branches are hidden or soloed, "Viewing x/y · Show All" above the filter tells how many are shown and shows all again; LOCAL and REMOTE count "shown/total".
 
 ## [1.0.0-rc.2] - 2026-11-09
