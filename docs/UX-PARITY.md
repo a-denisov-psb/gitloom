@@ -40,7 +40,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path); M8 "Open in external editor" |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
-| Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | M7 (global setting; staging by line and block in all modes); toggle and setting done in M7-01, Inline/Split renderers M7-03/M7-04 |
+| Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | M7 (global setting; staging by line and block in all modes); toggle and setting done in M7-01, Inline view with block bars and change arrows M7-03, Split M7-04 |
 | Gitflow | Preferences → Gitflow initializes; GITFLOW section in the left panel with a green start button; branch menu "Finish …" | M7 (native, git-flow compatible config; ADR-037) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
@@ -138,7 +138,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | The repository and branch pickers open the centered palette lists ("Open recent repository", "Checkout branch") instead of a dropdown below the picker | M6-17: reuses the existing lists before 1.0; a real dropdown is a backlog item |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | "Discard all" with staged changes asks whether to discard them too ("Keep staged" is the default) | Maintainer decision (HANDOVER question 8); staged work is never lost by accident |
-| Discarding a hunk or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
+| Discarding a hunk, a change block or selected lines asks for confirmation | Maintainer decision: discarding is destructive at every granularity; GitKraken asks only for file and all |
 | While an operation is in progress, Amend, Stash/Pop/Apply and undo/redo of commits are disabled | Prevents breaking the operation; Git itself refuses some of these (amend during a merge) |
 | A Git lock file (`index.lock`, ref locks) makes the operation fail with a dialog offering "Retry"; the lock is never removed | Deleting a lock of a running Git process corrupts the repository |
 | In partial clones, commit file lists may show a rename as deletion plus addition | Similarity rename detection needs blob contents that are not local; fetching them all for a file list would download much of the history |
