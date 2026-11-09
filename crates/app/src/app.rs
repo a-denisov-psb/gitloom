@@ -9218,6 +9218,108 @@ pub(crate) mod tests {
         assert_eq!(running_args(&app), ["Finish release 1.2.0"]);
     }
 
+    /// Every context menu, opened on very long names, fits its labels:
+    /// the menu widens (up to its maximum) instead of letting text stick out.
+    #[test]
+    fn every_context_menu_fits_long_names() {
+        let long = "feature/a-really-long-branch-name-that-keeps-going-for-the-menu-check";
+        let mut app = flow_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let reference = |name: &str, kind| git_core::Reference {
+            name: name.into(),
+            kind,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        snapshot
+            .refs
+            .push(reference(long, git_core::RefKind::LocalBranch));
+        snapshot.refs.push(reference(
+            &format!("origin/{long}"),
+            git_core::RefKind::RemoteBranch,
+        ));
+        snapshot.refs.push(reference(
+            "v1.2.3-release-candidate-with-a-long-suffix",
+            git_core::RefKind::Tag,
+        ));
+        snapshot
+            .remotes
+            .push("a-remote-with-a-rather-long-name".into());
+        view.snapshot = Arc::new(snapshot);
+
+        let at = iced::Point::ORIGIN;
+        let branch = |name: &str, kind| Message::BranchContextMenu {
+            name: name.into(),
+            kind,
+            position: at,
+        };
+        let file = git_core::FileChange {
+            path: "src/some/deeply/nested/folder/with/a/really/long/file-name.rs".into(),
+            kind: git_core::ChangeKind::Modified,
+            old_path: None,
+        };
+        let menus = [
+            branch(long, git_core::RefKind::LocalBranch),
+            branch("develop", git_core::RefKind::LocalBranch),
+            branch("main", git_core::RefKind::LocalBranch),
+            branch(&format!("origin/{long}"), git_core::RefKind::RemoteBranch),
+            branch(
+                "v1.2.3-release-candidate-with-a-long-suffix",
+                git_core::RefKind::Tag,
+            ),
+            Message::RemoteContextMenu {
+                name: "a-remote-with-a-rather-long-name".into(),
+                position: at,
+            },
+            Message::CommitContextMenu {
+                id: "c".into(),
+                position: at,
+            },
+            Message::FileContextMenu {
+                file: file.clone(),
+                area: FileArea::Unstaged,
+                position: at,
+            },
+            Message::FileContextMenu {
+                file,
+                area: FileArea::Staged,
+                position: at,
+            },
+            Message::PullMenu(at),
+            Message::FlowStartMenu(at),
+        ];
+        for open in menus {
+            let label = format!("{open:?}");
+            let _ = app.update(open);
+            let menu = app
+                .context_menu
+                .take()
+                .unwrap_or_else(|| panic!("no menu for {label}"));
+            assert!(menu.width <= crate::overlay::MENU_MAX_WIDTH);
+            for index in 0..menu.entries.len() {
+                assert!(menu.item_fits(index), "{label}: item {index} does not fit");
+            }
+        }
+        // A branch dropped onto another one ("Merge … into …").
+        let _ = app.update(Message::BranchDragStart {
+            name: long.into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        let _ = app.update(Message::BranchDropped {
+            name: "develop".into(),
+            kind: git_core::RefKind::LocalBranch,
+            position: at,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(menu.width > crate::overlay::MENU_MIN_WIDTH, "widened");
+        for index in 0..menu.entries.len() {
+            assert!(menu.item_fits(index), "drop menu item {index}");
+        }
+    }
+
     #[test]
     fn a_finish_is_one_undo_entry() {
         let mut app = flow_app();

@@ -13,6 +13,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Git flow (git-flow compatible): Preferences → Gitflow initializes, edits or removes it for the active repository; a GITFLOW section in the left panel lists features, releases and hotfixes; start them with the green "+", the menu of the development or production branch, or the command palette; finish them from their branch menu or the palette (merge commits, tag for releases and hotfixes, optional rebase and branch deletion). A finish that hits a conflict continues by itself after the conflict is resolved, also after a restart ("Continue finishing"). A finish is one Undo/Redo step.
 - While branches are hidden or soloed, "Viewing x/y · Show All" above the filter tells how many are shown and shows all again; LOCAL and REMOTE count "shown/total".
 
+### Fixed
+
+- Context menus are as wide as their longest entry (up to a maximum; longer entries end in "…" with the full text as tooltip), so long branch names no longer stick out of the menu.
+
 ## [1.0.0-rc.2] - 2026-11-09
 
 Second release candidate of Gitloom 1.0: no console window on Windows, working repository and branch pickers, and remotes that stay in sync with the Git configuration.
