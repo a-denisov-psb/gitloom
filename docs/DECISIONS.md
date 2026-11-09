@@ -462,3 +462,10 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: the diff view has three modes (Hunk, Inline, Split), one global setting. Hunk mode keeps today's 3-line-context data. Inline and Split load a full-context diff (`DiffContext::Full`, one hunk for the whole file) from the same diff pipeline. In Inline and Split, staging works by lines and by change blocks; a block action is turned into a line selection and applied through the existing line staging path (`build_patch`).
 - Why: no regression risk for Hunk mode, no second patch builder; full context is needed anyway to render whole files.
 - Consequences: switching modes reloads the diff in the background; the 2 MB diff limit applies to all modes.
+
+## ADR-039 M7 on develop before 1.0.0
+
+- Status: accepted (maintainer, 2026-11-09)
+- Decision: M7 starts on `develop` while 1.0.0 is still in release candidates (rc.2 tagged, not published). `master` (`v1.0.0-rc.2`) is the 1.0 line: further release candidates and 1.0.0 itself (M6-15) are made from `master` with `hotfix/1.0.x`-style branches (`release/1.0.0` from `master` for the final version), never from `develop`; each such fix is merged back into `develop`.
+- Why: the remaining M6 steps wait for the maintainer (publishing, SignPath, checklist run); development should not stall, and 1.0 must not contain M7 work.
+- Consequences: `/release` for M6-15 branches from `master`, not `develop`; CHANGELOG `[Unreleased]` on `develop` collects 1.1 changes, fixes for 1.0 get their own section on the 1.0 line.

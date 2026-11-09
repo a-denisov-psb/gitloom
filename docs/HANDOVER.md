@@ -20,13 +20,14 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (M6 in progress, 1.0.0-rc.2 tagged, 2026-11-09)
+## Current state (M6 waiting for the maintainer, 1.0.0-rc.2 tagged; M7 in progress, 2026-11-09)
 
 M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
 - Done: M6-01 identity, M6-02 identity values, M6-03 GPL-3.0-or-later + cargo-deny + third-party notices + About dialog, M6-04 app icon and metadata, M6-05 crash reports, M6-06 opt-in update check, M6-07 accessibility pass, M6-08 packaging (cargo-packager, ADR-031), M6-09 release workflow (dry run green on all targets), M6-12 user guide (`docs/user/`).
 - Done with the maintainer: M6-11 (content approved, history rewritten to the GitHub noreply address). Claude Code part done, waiting for the maintainer: M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
 - M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Repository public since 2026-11-06. Open for the maintainer: publish the draft, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
+- M7 started on `develop` on the maintainer's request (ADR-039): 1.0 fixes and 1.0.0 come from `master`, never from `develop`. Done: M7-14 left panel tree.
 - rc.2 (2026-11-09, `v1.0.0-rc.2` on `master`): M6-16 no console window on Windows, M6-17 toolbar pickers open the palette lists, M6-18 remotes in sync with the Git configuration (root cause: config reload keyed on the mtime of `.git/config` only). Open for the maintainer: publish the draft, confirm M6-16 and M6-18 on rc.2, check that the update check of an rc.1 build sees rc.2 (M6-14).
 - Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
 - Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).

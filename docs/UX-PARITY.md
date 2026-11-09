@@ -12,7 +12,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 |---|---|---|
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it); M6-17 pickers open the palette lists (see deviations); M8 external editor button next to Terminal |
-| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Gitflow (when initialized), Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; Gitflow M7; folders, icons, highlight and counter M7-14 |
+| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Gitflow (when initialized), Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; folders, icons, highlight and counter M7-14 (folders before branches, tags flat, no folder menu: GitKraken check open); Gitflow M7 |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top; resizable columns and a column menu | done (M1); resizable columns and column menu M9 |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
 | Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); M7 inline and split (ADR-038) |

@@ -2,7 +2,7 @@
 
 Target version: **1.1.0**
 
-Starts after `v1.0.0` (M6-15).
+Starts after `v1.0.0` (M6-15). Changed by the maintainer (2026-11-09): M7 starts on `develop` right after `v1.0.0-rc.2`; 1.0 fixes come from `master` (ADR-039).
 
 ## Goal
 
@@ -66,7 +66,7 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 
 ## Milestone acceptance
 
-- [ ] The left panel shows branch folders, icons, the highlighted checked-out branch and the hidden-branch counter like GitKraken; all branch interactions work unchanged in the tree.
+- [x] The left panel shows branch folders, icons, the highlighted checked-out branch and the hidden-branch counter like GitKraken; all branch interactions work unchanged in the tree.
 - [ ] Every diff (unstaged, staged, untracked, commit, stash, file history) can be shown as Hunk, Inline and Split; the mode is remembered across restarts.
 - [ ] Line staging, unstaging and discarding work in all three modes and produce the same index as `git add -p` with the same selection; block actions in Inline/Split equal "Stage hunk" in Hunk mode where the blocks coincide.
 - [ ] A 2 MB text file opens in Inline and Split without a frame over 50 ms while scrolling (`docs/PERFORMANCE.md`).
@@ -100,7 +100,7 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 
 ## Tasks
 
-### [ ] M7-14 Left panel tree like GitKraken
+### [x] M7-14 Left panel tree like GitKraken
 
 First task of M7 (the ID is new; it runs before M7-01). Behavior per the decisions table ("Left panel tree").
 
@@ -113,6 +113,8 @@ First task of M7 (the ID is new; it runs before M7-01). Behavior per the decisio
 - `docs/UX-PARITY.md`: left panel row set to done with the verification results.
 
 Acceptance: unit tests for the tree (nesting, sorting, a remote with and without folders, filter with expanded ancestors, counts with hidden branches); app tests for toggling, persistence and Show All; existing sidebar tests green; `iced_test` snapshots of the left panel in both themes at 100 % and 200 % zoom.
+
+Note (2026-11-09): done. Tree model `crates/app/src/branch_tree.rs` (pure, unit-tested, 2 000 branches far below 5 ms); `RepoView::sidebar_groups` caches it per snapshot, text filter and hide/solo state. GitKraken verification items not answered yet, so the planned defaults apply (folders before branches, tags flat, no folder context menu); recorded in `docs/UX-PARITY.md`. Remote nodes collapse like folders (key `remote:<name>`), with a cloud icon. "Visible" counts the branches shown in the graph (the checked-out one always); the section counts are taken among the text filter matches, "Viewing x/y" among all branches. The checked-out row uses the selection color (AA in both themes) and shows its ahead/behind badge in normal text color. Snapshots `ui_check_left_panel_tree` (dark/light × 100/200 %, clicks on a folder and "Show All") checked; 200 % is rendered as half the logical size, since `iced_test` always renders at scale 2.
 
 ### [ ] M7-01 Diff mode setting and toggle
 
