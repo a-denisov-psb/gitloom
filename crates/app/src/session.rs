@@ -36,6 +36,10 @@ pub struct Session {
     /// Hidden and soloed branches per repository root (M5-08).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub ref_filters: std::collections::BTreeMap<PathBuf, crate::ref_filter::RefFilter>,
+    /// Collapsed branch folders and remotes of the left panel per
+    /// repository root (M7-14; default expanded).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub collapsed_folders: std::collections::BTreeMap<PathBuf, std::collections::BTreeSet<String>>,
     /// Last update check and the dismissed version (M6-06).
     #[serde(
         default,
@@ -84,6 +88,7 @@ impl Default for Session {
             panes: PaneRatios::default(),
             pull_mode: PullModeSetting::default(),
             ref_filters: Default::default(),
+            collapsed_folders: Default::default(),
             update: Default::default(),
         }
     }
@@ -232,6 +237,14 @@ mod tests {
         filter.toggle_hidden("topic", git_core::RefKind::LocalBranch);
         filter.toggle_soloed("origin/main", git_core::RefKind::RemoteBranch);
         session.ref_filters.insert(PathBuf::from("/a"), filter);
+        session.collapsed_folders.insert(
+            PathBuf::from("/b"),
+            [
+                "local:feature".to_owned(),
+                "remote:origin:release".to_owned(),
+            ]
+            .into(),
+        );
         session
     }
 
@@ -239,6 +252,15 @@ mod tests {
     fn round_trip() {
         let session = sample();
         assert_eq!(parse(&to_json(&session)), Ok(session));
+    }
+
+    #[test]
+    fn older_files_without_folders_still_load() {
+        let mut session = sample();
+        session.collapsed_folders.clear();
+        let text = to_json(&session);
+        assert!(!text.contains("collapsed_folders"));
+        assert_eq!(parse(&text), Ok(session));
     }
 
     #[test]

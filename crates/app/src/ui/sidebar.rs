@@ -1,12 +1,11 @@
 //! Left sidebar: local/remote branches, tags, stashes, submodules.
 
-use std::collections::BTreeMap;
-
 use git_core::{RefKind, Reference};
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill};
 
 use crate::app::Message;
+use crate::branch_tree::{folder_key, Row};
 use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Section};
 use crate::theme;
@@ -25,40 +24,34 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             .filter(|r| matches(&r.name))
     };
 
-    let local: Vec<_> = refs_of(RefKind::LocalBranch)
-        .map(|r| match &repo.rename {
-            Some(rename) if rename.old == r.name => rename_input(rename),
-            _ => ref_item(repo, r, &r.name, 1),
-        })
-        .collect();
+    // LOCAL and REMOTE as folder trees (M7-14), cached per snapshot,
+    // text filter and hide/solo state.
+    let groups = repo.sidebar_groups();
+    let filtering = !needle.is_empty();
+    let local: Vec<_> =
+        crate::branch_tree::rows(&groups.local, &is_collapsed(repo, None), filtering)
+            .into_iter()
+            .map(|row| tree_row(repo, row, None, 1))
+            .collect();
 
-    let mut by_remote: BTreeMap<&str, Vec<&Reference>> = BTreeMap::new();
-    // Remotes without fetched branches are listed too.
-    for remote in &repo.snapshot.remotes {
-        if matches(remote) || needle.is_empty() {
-            by_remote.entry(remote.as_str()).or_default();
+    let mut remote = Vec::new();
+    for (name, nodes) in &groups.remotes {
+        let key = folder_key(Some(name), "");
+        let expanded = filtering || !repo.folders_collapsed.contains(&key);
+        let external = repo.snapshot.external_remote(name);
+        remote.push(remote_label(name.clone(), key, expanded, external));
+        if expanded {
+            let remote_name = Some(name.as_str());
+            remote.extend(
+                crate::branch_tree::rows(nodes, &is_collapsed(repo, remote_name), filtering)
+                    .into_iter()
+                    .map(|row| tree_row(repo, row, remote_name, 2)),
+            );
         }
     }
-    for r in refs_of(RefKind::RemoteBranch) {
-        by_remote
-            .entry(r.remote().unwrap_or("?"))
-            .or_default()
-            .push(r);
-    }
-    let remote_count = by_remote.values().map(Vec::len).sum();
-    let remote: Vec<_> = by_remote
-        .into_iter()
-        .flat_map(|(name, refs)| {
-            let external = repo.snapshot.external_remote(name);
-            std::iter::once(remote_label(name, external)).chain(
-                refs.into_iter()
-                    .map(|r| ref_item(repo, r, r.local_name(), 2)),
-            )
-        })
-        .collect();
 
     let tags: Vec<_> = refs_of(RefKind::Tag)
-        .map(|r| ref_item(repo, r, &r.name, 1))
+        .map(|r| ref_item(repo, r, r.name.clone(), 1))
         .collect();
 
     // Click selects the stash row in the graph; right click opens its menu.
@@ -81,18 +74,31 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         })
         .collect();
 
+    let hide_active = repo.ref_filter.is_active();
     let sections = column![
-        section(repo, Section::Local, "LOCAL", local.len(), local),
+        section(
+            repo,
+            Section::Local,
+            "LOCAL",
+            groups.local_count.label(hide_active),
+            local
+        ),
         section_with_action(
             repo,
             Section::Remote,
             "REMOTE",
-            remote_count,
+            groups.remote_count.label(hide_active),
             remote,
             Some((Icon::Plus, "Add remote", Message::AddRemoteStart)),
         ),
-        section(repo, Section::Tags, "TAGS", tags.len(), tags),
-        section(repo, Section::Stashes, "STASHES", stashes.len(), stashes),
+        section(repo, Section::Tags, "TAGS", tags.len().to_string(), tags),
+        section(
+            repo,
+            Section::Stashes,
+            "STASHES",
+            stashes.len().to_string(),
+            stashes
+        ),
         submodules(),
     ]
     .spacing(6);
@@ -103,10 +109,15 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .padding([4, 8])
         .style(theme::input);
 
-    let content = column![
-        container(filter).padding(8),
-        scrollable(container(sections).padding([0, 4])).height(Fill),
-    ];
+    let mut content = column![];
+    // Like GitKraken: while branches are hidden or soloed, a line above the
+    // filter says how many are shown and offers to show all again.
+    if hide_active {
+        content = content.push(viewing_line(groups.all));
+    }
+    let content = content
+        .push(container(filter).padding(8))
+        .push(scrollable(container(sections).padding([0, 4])).height(Fill));
 
     container(content)
         .width(Fill)
@@ -119,7 +130,7 @@ fn section<'a>(
     repo: &RepoView,
     section: Section,
     title: &'a str,
-    count: usize,
+    count: String,
     items: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     section_with_action(repo, section, title, count, items, None)
@@ -130,7 +141,7 @@ fn section_with_action<'a>(
     repo: &RepoView,
     section: Section,
     title: &'a str,
-    count: usize,
+    count: String,
     items: Vec<Element<'a, Message>>,
     action: Option<(Icon, &'a str, Message)>,
 ) -> Element<'a, Message> {
@@ -167,7 +178,7 @@ fn section_with_action<'a>(
             tip.to_owned(),
         ));
     }
-    line = line.push(text(count.to_string()).size(11));
+    line = line.push(text(count).size(11));
     let header = button(line)
         .on_press(Message::SectionToggled(section))
         .padding([4, 6])
@@ -204,16 +215,114 @@ fn submodules<'a>() -> Element<'a, Message> {
     )
 }
 
+/// Whether a folder of the local group (`remote` `None`) or of a remote is
+/// collapsed.
+fn is_collapsed<'a>(repo: &'a RepoView, remote: Option<&'a str>) -> impl Fn(&str) -> bool + 'a {
+    move |path| repo.folders_collapsed.contains(&folder_key(remote, path))
+}
+
+/// "Viewing x/y · Show All" above the filter (M7-14).
+fn viewing_line<'a>(all: crate::branch_tree::Counts) -> Element<'a, Message> {
+    let show_all = button(
+        text("Show All")
+            .size(12)
+            .style(|theme: &iced::Theme| text::Style {
+                color: Some(theme::palette(theme).accent),
+            }),
+    )
+    .on_press(Message::ShowAllBranches)
+    .padding([1, 4])
+    .style(theme::flat);
+    container(
+        row![
+            muted(format!("Viewing {}/{}", all.visible, all.total)).size(12),
+            muted("·").size(12),
+            crate::ui::panel::with_tooltip_text(
+                show_all.into(),
+                "Show all hidden and soloed branches again".to_owned(),
+            ),
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
+    )
+    .padding(iced::Padding::from([4, 8]).bottom(0))
+    .into()
+}
+
+/// One row of a branch tree: a folder (toggles on click) or a branch.
+/// `base` is the depth of the tree's top level.
+fn tree_row<'a>(
+    repo: &'a RepoView,
+    row: Row<'_>,
+    remote: Option<&str>,
+    base: u16,
+) -> Element<'a, Message> {
+    let depth = |d: usize| base + u16::try_from(d).unwrap_or(u16::MAX - base);
+    match row {
+        Row::Folder {
+            depth: d,
+            name,
+            path,
+            expanded,
+        } => folder_row(
+            name.to_owned(),
+            folder_key(remote, path),
+            expanded,
+            depth(d),
+        ),
+        Row::Branch {
+            depth: d,
+            index,
+            label,
+        } => {
+            let Some(reference) = repo.snapshot.refs.get(index) else {
+                return space::horizontal().width(0).into();
+            };
+            match &repo.rename {
+                Some(rename)
+                    if reference.kind == RefKind::LocalBranch && rename.old == reference.name =>
+                {
+                    rename_input(rename)
+                }
+                _ => ref_item(repo, reference, label.to_owned(), depth(d)),
+            }
+        }
+    }
+}
+
+/// Branch folder: chevron, folder icon, name; a click toggles it.
+fn folder_row<'a>(name: String, key: String, expanded: bool, depth: u16) -> Element<'a, Message> {
+    let (chevron, folder) = if expanded {
+        (Icon::ChevronDown, Icon::FolderOpen)
+    } else {
+        (Icon::ChevronRight, Icon::Folder)
+    };
+    let tip = name.clone();
+    let content = row![
+        container(icons::tinted(chevron, 12.0, |p| p.text_muted)).width(INDENT),
+        icons::tinted(folder, 13.0, |p| p.text_muted),
+        crate::ui::panel::with_tooltip_text(text(name).wrapping(text::Wrapping::None).into(), tip,),
+        space::horizontal(),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+    list_button(content.into(), depth, Message::FolderToggled(key))
+}
+
 fn ref_item<'a>(
     repo: &RepoView,
     reference: &'a Reference,
-    label: &'a str,
+    label: String,
     depth: u16,
 ) -> Element<'a, Message> {
-    let marker: Element<'a, Message> = if reference.is_head {
-        icons::tinted(Icon::Check, 13.0, |p| p.accent).into()
-    } else {
-        space::horizontal().width(0).into()
+    // Branches carry a branch icon; the checked-out one a checkbox-style
+    // check on a highlighted row (M7-14). Tags keep their plain layout.
+    let marker: Element<'a, Message> = match reference.kind {
+        _ if reference.is_head => icons::tinted(Icon::CheckSquare, 13.0, |p| p.accent).into(),
+        RefKind::LocalBranch | RefKind::RemoteBranch => {
+            icons::tinted(Icon::Branch, 13.0, |p| p.text_muted).into()
+        }
+        RefKind::Tag => space::horizontal().width(0).into(),
     };
     // Branches not shown in the graph are dimmed (M5-08).
     let filter = &repo.ref_filter;
@@ -225,12 +334,24 @@ fn ref_item<'a>(
     } else {
         label
     };
+    // The full name, since the row shows only the last segment.
+    let label: Element<'a, Message> = if reference.kind == RefKind::Tag {
+        label.into()
+    } else {
+        crate::ui::panel::with_tooltip_text(label.into(), reference.name.clone())
+    };
     let mut content = row![container(marker).width(INDENT), label, space::horizontal(),]
         .spacing(4)
         .align_y(iced::Center);
     // Like GitKraken: commits ahead/behind the upstream as small badges.
     if let Some(badge) = ahead_behind_badge(reference.ahead_behind) {
-        content = content.push(muted(badge).size(11));
+        // Muted text is not AA on the highlight of the checked-out row.
+        let badge = if reference.is_head {
+            text(badge).size(11)
+        } else {
+            muted(badge).size(11)
+        };
+        content = content.push(badge);
     }
     if filter.is_soloed(&reference.name, reference.kind) {
         content = content.push(icons::tinted(Icon::Solo, 13.0, |p| p.accent));
@@ -241,7 +362,12 @@ fn ref_item<'a>(
     }
     let content = content.into();
 
-    let item = list_button(content, depth, Message::RefClicked(reference.name.clone()));
+    let message = Message::RefClicked(reference.name.clone());
+    let item = if reference.is_head {
+        head_button(content, depth, message)
+    } else {
+        list_button(content, depth, message)
+    };
     let item = match checkout_target(reference) {
         Some(target) => crate::ui::context_area::double_click_area(item, Message::Checkout(target)),
         None => item,
@@ -336,26 +462,53 @@ pub fn ahead_behind_badge(ahead_behind: Option<(usize, usize)>) -> Option<String
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-/// Remote name above its branches; right click opens the remote menu.
-/// Remote node; `external`: defined outside the repository config (the
-/// tooltip says where, M6-18).
+/// Remote node above its branches: a click collapses it, right click
+/// opens the remote menu; `external`: defined outside the repository config
+/// (the tooltip says where, M6-18).
 fn remote_label<'a>(
-    name: &'a str,
+    name: String,
+    key: String,
+    expanded: bool,
     external: Option<git_core::ConfigScope>,
 ) -> Element<'a, Message> {
-    let label = container(muted(name))
-        .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT))
-        .width(Fill);
-    let owned = name.to_owned();
+    let chevron = if expanded {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    let content = row![
+        container(icons::tinted(chevron, 12.0, |p| p.text_muted)).width(INDENT),
+        icons::tinted(Icon::Cloud, 13.0, |p| p.text_muted),
+        muted(name.clone()),
+        space::horizontal(),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+    let row = list_button(content.into(), 1, Message::FolderToggled(key));
     let area =
-        crate::ui::context_area::context_area(label, move |position| Message::RemoteContextMenu {
-            name: owned.clone(),
+        crate::ui::context_area::context_area(row, move |position| Message::RemoteContextMenu {
+            name: name.clone(),
             position,
         });
     match external {
         Some(scope) => crate::ui::panel::with_tooltip_text(area, scope.hint().to_owned()),
         None => area,
     }
+}
+
+/// Row of the checked-out branch: always highlighted (M7-14).
+fn head_button<'a>(
+    content: Element<'a, Message>,
+    depth: u16,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(content)
+        .on_press(on_press)
+        .padding(iced::Padding::from([3, 6]).left(6.0 + INDENT * f32::from(depth)))
+        .width(Fill)
+        .clip(true)
+        .style(theme::list_item(true))
+        .into()
 }
 
 fn list_button<'a>(

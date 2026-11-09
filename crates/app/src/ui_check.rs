@@ -48,6 +48,16 @@ pub fn snapshot(app: &App, name: &str) -> PathBuf {
     path
 }
 
+/// Renders `app` in a window of `size` logical pixels (a smaller size
+/// stands for a higher zoom: the simulator always renders at scale 2).
+pub fn snapshot_sized(app: &App, name: &str, size: (f32, f32)) -> PathBuf {
+    let path = fresh_path(name);
+    let mut sim = Simulator::with_size(settings(), size, app.view());
+    let snap = sim.snapshot(&app.theme()).unwrap();
+    assert!(snap.matches_image(&path).unwrap());
+    path
+}
+
 /// Clicks the widget with `id` (focusing an input) and renders the result.
 pub fn snapshot_focused(app: &App, id: &'static str, name: &str) -> PathBuf {
     let path = fresh_path(name);
@@ -190,5 +200,32 @@ mod tests {
             Some(crate::palette::Mode::CheckoutBranch)
         );
         snapshot(&app, "pickers-3-branch");
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_left_panel_tree() {
+        let mut app = crate::app::tests::sidebar_app();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            // 200 %: half the logical size at the same pixel size.
+            for (zoom, size) in [(100, SIZE), (200, (SIZE.0 / 2.0, SIZE.1 / 2.0))] {
+                snapshot_sized(&app, &format!("left-panel-{theme}-{zoom}"), size);
+            }
+        }
+        // A folder row toggles on click; "Show All" clears the hidden branch.
+        click(&mut app, "ui");
+        assert!(app.tabs[0]
+            .view()
+            .unwrap()
+            .folders_collapsed
+            .contains("local:feature/ui"));
+        click(&mut app, "Show All");
+        assert!(!app.tabs[0].view().unwrap().ref_filter.is_active());
+        snapshot(&app, "left-panel-after-clicks");
     }
 }

@@ -10,6 +10,7 @@ mod app;
 mod app_icon;
 mod askpass;
 mod avatars;
+mod branch_tree;
 mod conflict;
 mod crash;
 mod fetch;

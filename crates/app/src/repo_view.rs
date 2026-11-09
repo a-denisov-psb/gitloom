@@ -16,6 +16,14 @@ pub enum Section {
     Submodules,
 }
 
+/// Inputs and result of the last [`crate::branch_tree::Groups`] build.
+struct SidebarCache {
+    snapshot: Arc<RepoSnapshot>,
+    filter: String,
+    ref_filter: crate::ref_filter::RefFilter,
+    groups: Arc<crate::branch_tree::Groups>,
+}
+
 /// Selected graph row, by commit id so it survives refreshes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -352,6 +360,12 @@ pub struct RepoView {
     pub center: CenterView,
     pub filter: String,
     pub collapsed: HashSet<Section>,
+    /// Collapsed branch folders and remotes of the left panel
+    /// ([`crate::branch_tree::folder_key`]); stored per repository.
+    pub folders_collapsed: std::collections::BTreeSet<String>,
+    /// LOCAL and REMOTE trees for the current snapshot, text filter and
+    /// hide/solo state; rebuilt only when one of them changes (M7-14).
+    sidebar_cache: std::cell::RefCell<Option<SidebarCache>>,
     /// A refresh is running.
     pub refreshing: bool,
     /// Last refresh failed; the previous snapshot stays visible.
@@ -584,6 +598,8 @@ impl RepoView {
             center: CenterView::Graph,
             filter: String::new(),
             collapsed: HashSet::from([Section::Submodules]),
+            folders_collapsed: Default::default(),
+            sidebar_cache: Default::default(),
             refreshing: false,
             error: None,
             summary: String::new(),
@@ -627,6 +643,31 @@ impl RepoView {
     }
 
     /// Replaces the snapshot after a refresh and keeps the selection if possible.
+    /// LOCAL and REMOTE trees of the left panel (cached, M7-14).
+    pub fn sidebar_groups(&self) -> Arc<crate::branch_tree::Groups> {
+        let mut cache = self.sidebar_cache.borrow_mut();
+        if let Some(cached) = cache.as_ref().filter(|c| {
+            Arc::ptr_eq(&c.snapshot, &self.snapshot)
+                && c.filter == self.filter
+                && c.ref_filter == self.ref_filter
+        }) {
+            return Arc::clone(&cached.groups);
+        }
+        let groups = Arc::new(crate::branch_tree::Groups::build(
+            &self.snapshot.refs,
+            &self.snapshot.remotes,
+            &self.filter,
+            &self.ref_filter,
+        ));
+        *cache = Some(SidebarCache {
+            snapshot: Arc::clone(&self.snapshot),
+            filter: self.filter.clone(),
+            ref_filter: self.ref_filter.clone(),
+            groups: Arc::clone(&groups),
+        });
+        groups
+    }
+
     pub fn apply_snapshot(&mut self, snapshot: Arc<RepoSnapshot>) {
         self.selection = restore_selection(self.selection.as_ref(), &snapshot);
         self.multi.retain(&selectable_ids(&snapshot));
