@@ -435,6 +435,15 @@ pub fn mode_active(theme: &Theme, _: button::Status) -> button::Style {
 }
 
 /// Toolbar pickers: readable text even while they cannot be opened yet.
+/// Empty half of a Split diff row (M7-04).
+pub fn diff_empty_side(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.bg_panel.scale_alpha(0.6))),
+        ..container::Style::default()
+    }
+}
+
 /// Bar above a change block in the Inline diff view (M7-03).
 pub fn diff_block_bar(theme: &Theme) -> container::Style {
     let p = palette(theme);

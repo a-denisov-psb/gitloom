@@ -255,4 +255,41 @@ mod tests {
             snapshot(&app, &format!("inline-diff-{theme}"));
         }
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_split_diff() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        let mut app = crate::app::tests::diff_at_top(DiffMode::Split, 6, 18);
+        click_side(&mut app);
+        let mut added = crate::app::tests::diff_at_top(DiffMode::Split, 0, 0);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let choice = if light {
+                ThemeChoice::Light
+            } else {
+                ThemeChoice::Dark
+            };
+            app.settings.appearance.theme = choice;
+            added.settings.appearance.theme = choice;
+            for (zoom, size) in [(100, SIZE), (200, (SIZE.0 / 2.0, SIZE.1 / 2.0))] {
+                snapshot_sized(&app, &format!("split-diff-{theme}-{zoom}"), size);
+            }
+            snapshot(&added, &format!("split-diff-added-{theme}"));
+        }
+    }
+
+    /// Selects the added line of the first changed row (right side).
+    fn click_side(app: &mut App) {
+        let row = app.tabs[0]
+            .view()
+            .and_then(|v| match &v.center {
+                crate::repo_view::CenterView::Diff(diff) => diff.block_rows.first().copied(),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let _ = app.update(Message::DiffSideClicked {
+            row: row + 1,
+            right: true,
+        });
+    }
 }
