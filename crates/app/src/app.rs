@@ -10,8 +10,9 @@ use crate::overlay::{ContextMenu, Form, FormAction, FormField, MenuEntry, Modal}
 use crate::palette::{self, Palette};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, DetailChanges, Guarded, LastWrite, Loadable, NetworkKind, NetworkOp,
-    NetworkRequest, Queued, RepoView, Section, Selection, WatchState, WriteOp,
+    CenterView, CommitDetails, DetailChanges, DiffLayout, Guarded, LastWrite, Loadable,
+    NetworkKind, NetworkOp, NetworkRequest, Queued, RepoView, Section, Selection, WatchState,
+    WriteOp,
 };
 use crate::session::{self, Session};
 use crate::settings::{self, Settings};
@@ -64,6 +65,8 @@ pub enum DiscardTarget {
     Hunk(usize),
     /// Selected lines of the shown diff.
     Lines,
+    /// Change block `index` of the shown Inline diff (M7-03).
+    Block(usize),
 }
 
 /// What to check out.
@@ -203,6 +206,12 @@ pub enum Message {
     ApplyHunk(usize),
     /// Stage or unstage the selected lines of the shown diff.
     ApplySelectedLines,
+    /// Stage or unstage change block `index` of the Inline view (M7-03).
+    ApplyBlock(usize),
+    /// "Previous change" / "Next change" in the diff header.
+    DiffJumpChange {
+        next: bool,
+    },
     ModifiersChanged(keyboard::Modifiers),
     GraphScrolled {
         offset: f32,
@@ -2893,6 +2902,9 @@ impl App {
             DiscardTarget::Lines => self.discard_diff_lines(tab, |diff, h, l| {
                 diff.selection.contains(&(h as u32, l as u32))
             }),
+            DiscardTarget::Block(index) => {
+                self.discard_diff_lines(tab, move |diff, h, l| in_block(diff, index, h, l))
+            }
         }
     }
 
@@ -2985,6 +2997,7 @@ impl App {
             if let Some(diff) = view.center.diff_mut() {
                 diff.selection.clear();
                 diff.anchor = None;
+                diff.scroll_to_change = true;
                 tasks.push(load_diff(id, backend, diff.request.clone(), context));
             }
         }
@@ -4489,6 +4502,23 @@ impl App {
                 }
             }
             Message::ApplyHunk(index) => return self.apply_diff_lines(move |_, h, _| h == index),
+            // The block as a line selection through the line path (M7-03).
+            Message::ApplyBlock(index) => {
+                return self.apply_diff_lines(move |diff, h, l| in_block(diff, index, h, l))
+            }
+            Message::DiffJumpChange { next } => {
+                let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) else {
+                    return Task::none();
+                };
+                let height = crate::ui::diff::ROW_HEIGHT;
+                let top = (diff.scroll.offset / height).round() as usize;
+                let visible = (diff.scroll.height / height).floor() as usize;
+                if let Some(target) = diff.change_target(top, visible, next) {
+                    let offset = target as f32 * height;
+                    diff.scroll.offset = offset;
+                    return scroll_by_id(diff.scroll_id.clone(), offset);
+                }
+            }
             Message::ApplySelectedLines => {
                 return self
                     .apply_diff_lines(|diff, h, l| diff.selection.contains(&(h as u32, l as u32)))
@@ -5329,6 +5359,10 @@ impl App {
                         "Discard lines".to_string(),
                         "Discard the selected lines?".to_string(),
                     ),
+                    DiscardTarget::Block(_) => (
+                        "Discard block".to_string(),
+                        "Discard the changes of this block?".to_string(),
+                    ),
                 };
                 self.modal = Some(Modal::confirm(
                     title,
@@ -5554,6 +5588,7 @@ impl App {
                 if context != self.diff_context() {
                     return Task::none();
                 }
+                let layout = DiffLayout::of(self.settings.diff.view_mode);
                 let can_fetch = self.write_block().is_none();
                 let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
                     return Task::none();
@@ -5583,7 +5618,23 @@ impl App {
                             },
                         );
                     }
-                    result => diff.set_diff(result.map_err(|e| e.to_string())),
+                    result => {
+                        diff.layout = layout;
+                        diff.set_diff(result.map_err(|e| e.to_string()));
+                        // Opening a file (or switching the mode) shows its
+                        // first change; reloads after staging keep the place.
+                        if std::mem::take(&mut diff.scroll_to_change) {
+                            let height = crate::ui::diff::ROW_HEIGHT;
+                            let visible = (diff.scroll.height / height).floor() as usize;
+                            let offset = diff
+                                .change_target(0, visible, true)
+                                .map_or(0.0, |row| row as f32 * height);
+                            if diff.layout == DiffLayout::Inline && offset > 0.0 {
+                                diff.scroll.offset = offset;
+                                return scroll_by_id(diff.scroll_id.clone(), offset);
+                            }
+                        }
+                    }
                 }
             }
             Message::ObjectFetched {
@@ -6294,6 +6345,11 @@ impl App {
 
 fn scroll_to(view: &RepoView, offset: f32) -> Task<Message> {
     scroll_by_id(view.graph_scroll_id.clone(), offset)
+}
+
+/// Changed line `l` of hunk `h` belongs to change block `index` of `diff`.
+fn in_block(diff: &crate::repo_view::DiffView, index: usize, h: usize, l: usize) -> bool {
+    diff.blocks.get(index).is_some_and(|b| b.contains(h, l))
 }
 
 fn scroll_by_id(id: iced::widget::Id, offset: f32) -> Task<Message> {
@@ -8184,6 +8240,104 @@ pub(crate) mod tests {
             result: Ok(sample_diff(1)),
         });
         assert_eq!(open_diff(&app).diff, Loadable::Ready(sample_diff(1)));
+    }
+
+    /// Unstaged diff of "a" opened in the Inline view with two blocks.
+    fn app_with_inline_diff() -> App {
+        inline_app(120, 60, 100)
+    }
+
+    /// Inline view of a file of `lines` lines: line `changed` changed,
+    /// line `removed` removed.
+    fn inline_app(lines: u32, changed: u32, removed: u32) -> App {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "a".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old: String = (1..=lines).map(|i| format!("line {i}\n")).collect();
+        let new = old
+            .replace(
+                &format!("line {changed}\n"),
+                &format!("changed {changed}\n"),
+            )
+            .replace(&format!("line {removed}\n"), "");
+        let text =
+            git_core::text_diff_with(old.as_bytes(), new.as_bytes(), git_core::DiffContext::Full);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: git_core::DiffContext::Full,
+            result: Ok(git_core::FileDiff {
+                old_path: Some("a".into()),
+                new_path: Some("a".into()),
+                binary: false,
+                too_large: false,
+                hunks: text.hunks,
+            }),
+        });
+        app
+    }
+
+    /// Inline diff shown from the top (the simulator does not run the
+    /// scroll task of opening), for UI checks.
+    pub(crate) fn inline_diff_at_top() -> App {
+        let mut app = inline_app(30, 6, 18);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        let _ = app.update(Message::DiffLineClicked(7));
+        app
+    }
+
+    #[test]
+    fn inline_diff_opens_at_the_first_change() {
+        let app = app_with_inline_diff();
+        let diff = open_diff(&app);
+        assert_eq!(diff.layout, DiffLayout::Inline);
+        assert_eq!(diff.blocks.len(), 2);
+        // Bar of block 0 at row 59, 3 rows of margin above.
+        assert_eq!(diff.block_rows[0], 59);
+        assert_eq!(diff.scroll.offset, 56.0 * crate::ui::diff::ROW_HEIGHT);
+        assert!(!diff.scroll_to_change, "only once");
+    }
+
+    #[test]
+    fn block_actions_use_the_line_path() {
+        let mut app = app_with_inline_diff();
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::ApplyBlock(1));
+        assert_eq!(running_args(&app), ["Stage lines of a"]);
+
+        let mut app = app_with_inline_diff();
+        let _ = app.update(Message::Discard(DiscardTarget::Block(0)));
+        let modal = app.modal.as_ref().unwrap();
+        assert_eq!(modal.title, "Discard block");
+    }
+
+    #[test]
+    fn change_navigation_scrolls_between_blocks() {
+        let mut app = app_with_inline_diff();
+        let height = crate::ui::diff::ROW_HEIGHT;
+        // 123 rows, 60 visible (default viewport): scrolling stops at 63.
+        assert_eq!(open_diff(&app).rows.len(), 123);
+        assert_eq!(open_diff(&app).block_rows[1], 101);
+        let _ = app.update(Message::DiffJumpChange { next: true });
+        assert_eq!(open_diff(&app).scroll.offset, 63.0 * height);
+        let _ = app.update(Message::DiffJumpChange { next: true });
+        assert_eq!(open_diff(&app).scroll.offset, 63.0 * height, "last change");
+        let _ = app.update(Message::DiffJumpChange { next: false });
+        assert_eq!(open_diff(&app).scroll.offset, 56.0 * height);
     }
 
     #[test]

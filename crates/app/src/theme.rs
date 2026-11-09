@@ -435,6 +435,17 @@ pub fn mode_active(theme: &Theme, _: button::Status) -> button::Style {
 }
 
 /// Toolbar pickers: readable text even while they cannot be opened yet.
+/// Bar above a change block in the Inline diff view (M7-03).
+pub fn diff_block_bar(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.bg_panel)),
+        border: Border::default().width(0),
+        text_color: Some(p.text_muted),
+        ..container::Style::default()
+    }
+}
+
 pub fn picker(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
     match status {

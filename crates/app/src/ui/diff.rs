@@ -5,7 +5,7 @@ use iced::widget::{button, column, container, mouse_area, row, scrollable, space
 use iced::{alignment, Element, Fill, Font};
 
 use crate::app::{DiscardTarget, Message};
-use crate::repo_view::{DiffView, Loadable, RepoView, HUNK_HEADER};
+use crate::repo_view::{DiffLayout, DiffRow, DiffView, Loadable, RepoView};
 use crate::settings::DiffMode;
 use crate::theme;
 use crate::ui::muted;
@@ -54,7 +54,13 @@ fn view_with<'a>(
 
     // Until the Inline and Split renderers land (M7-03/M7-04), both show
     // the full-context diff with the hunk renderer.
-    let modes = row(DiffMode::ALL.map(|m| mode_button(m, m == mode))).spacing(2);
+    let mut modes = row![].spacing(2).align_y(iced::Center);
+    if diff.layout == DiffLayout::Inline && matches!(diff.diff, Loadable::Ready(_)) {
+        modes = modes
+            .push(change_navigation(diff))
+            .push(space::horizontal().width(8));
+    }
+    let modes = modes.extend(DiffMode::ALL.map(|m| mode_button(m, m == mode)));
 
     // Staging actions for the selected lines (working tree diffs only).
     let selection_action = match diff.staged() {
@@ -208,14 +214,25 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
     let mut rows = Column::with_capacity(last - first + 2)
         .push(space::vertical().height(first as f32 * LINE_HEIGHT));
     let staged = diff.staged();
-    for (offset, &(h, l)) in diff.rows[first..last].iter().enumerate() {
+    for (offset, &row) in diff.rows[first..last].iter().enumerate() {
         let row_index = first + offset;
+        let (h, l) = match row {
+            DiffRow::Header(h) => {
+                if let Some(hunk) = file.hunks.get(h as usize) {
+                    rows = rows.push(hunk_header(repo, hunk, h as usize, staged));
+                }
+                continue;
+            }
+            DiffRow::Block(b) => {
+                rows = rows.push(block_bar(repo, b as usize, staged));
+                continue;
+            }
+            DiffRow::Line(h, l) => (h, l),
+        };
         let Some(hunk) = file.hunks.get(h as usize) else {
             continue;
         };
-        rows = rows.push(if l == HUNK_HEADER {
-            hunk_header(repo, hunk, h as usize, staged)
-        } else {
+        rows = rows.push({
             match hunk.lines.get(l as usize) {
                 Some(line) => {
                     let selected = diff.selection.contains(&(h, l));
@@ -285,6 +302,69 @@ fn hunk_header<'a>(
         .style(theme::diff_hunk_header)
         .into()
 }
+
+/// Slim bar above a change block (Inline view, M7-03): the block's
+/// stage/unstage/discard actions; read-only diffs show just the bar.
+fn block_bar<'a>(repo: &'a RepoView, index: usize, staged: Option<bool>) -> Element<'a, Message> {
+    let mut content = row![space::horizontal()].align_y(iced::Center);
+    if let Some(staged) = staged {
+        if !staged {
+            let discard = button(text("Discard block").size(11))
+                .padding([0, 8])
+                .style(button::danger);
+            content = content
+                .push(write_action(
+                    repo,
+                    discard,
+                    Message::Discard(DiscardTarget::Block(index)),
+                ))
+                .push(space::horizontal().width(6));
+        }
+        let label = if staged {
+            "Unstage block"
+        } else {
+            "Stage block"
+        };
+        let button = button(text(label).size(11))
+            .padding([0, 8])
+            .style(button::secondary);
+        content = content.push(write_action(repo, button, Message::ApplyBlock(index)));
+    }
+    container(content)
+        .padding([0, 12])
+        .height(LINE_HEIGHT)
+        .width(Fill)
+        .align_y(alignment::Vertical::Center)
+        .style(theme::diff_block_bar)
+        .into()
+}
+
+/// "Previous change" / "Next change" (Inline and Split, like GitKraken's
+/// arrows); disabled at the ends.
+fn change_navigation<'a>(diff: &DiffView) -> Element<'a, Message> {
+    let top = (diff.scroll.offset / LINE_HEIGHT).round() as usize;
+    let visible = (diff.scroll.height / LINE_HEIGHT).floor() as usize;
+    let arrow = |next: bool| {
+        let enabled = diff.change_target(top, visible, next).is_some();
+        let (icon, tip) = if next {
+            (crate::icons::Icon::ChevronDown, "Next change")
+        } else {
+            (crate::icons::Icon::ChevronUp, "Previous change")
+        };
+        crate::ui::panel::with_tooltip_text(
+            button(crate::icons::button_icon(icon, 14.0, enabled))
+                .on_press_maybe(enabled.then_some(Message::DiffJumpChange { next }))
+                .padding([2, 6])
+                .style(theme::flat)
+                .into(),
+            tip.to_owned(),
+        )
+    };
+    row![arrow(false), arrow(true)].spacing(2).into()
+}
+
+/// Height of one diff row (for scrolling to rows).
+pub const ROW_HEIGHT: f32 = LINE_HEIGHT;
 
 fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
     let number = |n: Option<u32>| {

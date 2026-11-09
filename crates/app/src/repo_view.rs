@@ -59,8 +59,17 @@ pub enum DetailChanges {
 pub struct DiffView {
     pub request: DiffRequest,
     pub diff: Loadable<FileDiff>,
-    /// Display rows `(hunk, line)`; `line == u32::MAX` is the hunk header.
-    pub rows: Vec<(u32, u32)>,
+    /// How the loaded diff is laid out (from the diff mode when it loaded).
+    pub layout: DiffLayout,
+    /// Display rows of the layout.
+    pub rows: Vec<DiffRow>,
+    /// Change blocks of the Inline layout (M7-03) and the row of each
+    /// block's bar.
+    pub blocks: Vec<crate::diff_blocks::Block>,
+    pub block_rows: Vec<usize>,
+    /// Scroll to the first change once the diff is loaded (opening the
+    /// file or switching the mode, not reloads after staging).
+    pub scroll_to_change: bool,
     pub scroll_id: iced::widget::Id,
     pub scroll: Scroll,
     /// Selected changed lines as `(hunk, line)`.
@@ -118,15 +127,50 @@ pub enum ClickMode {
     Toggle,
 }
 
-/// Marks a hunk header row in [`DiffView::rows`].
-pub const HUNK_HEADER: u32 = u32::MAX;
+/// Layout of a loaded diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiffLayout {
+    /// Hunk headers with "Stage hunk" (3-line context).
+    #[default]
+    Hunks,
+    /// The whole file with a bar above every change block (M7-03).
+    Inline,
+}
+
+impl DiffLayout {
+    pub fn of(mode: crate::settings::DiffMode) -> Self {
+        match mode {
+            crate::settings::DiffMode::Hunk => Self::Hunks,
+            // Split gets its own layout in M7-04.
+            crate::settings::DiffMode::Inline | crate::settings::DiffMode::Split => Self::Inline,
+        }
+    }
+}
+
+/// One display row of a diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffRow {
+    /// Header of hunk `h` (Hunk layout).
+    Header(u32),
+    /// Line `l` of hunk `h`.
+    Line(u32, u32),
+    /// Bar of change block `b` (Inline layout).
+    Block(u32),
+}
+
+/// Rows kept above a change when jumping to it.
+pub const JUMP_MARGIN: usize = 3;
 
 impl DiffView {
     pub fn new(request: DiffRequest) -> Self {
         Self {
             request,
             diff: Loadable::Loading,
+            layout: DiffLayout::default(),
             rows: Vec::new(),
+            blocks: Vec::new(),
+            block_rows: Vec::new(),
+            scroll_to_change: true,
             scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
             selection: std::collections::BTreeSet::new(),
@@ -150,14 +194,11 @@ impl DiffView {
         let Loadable::Ready(file) = &self.diff else {
             return false;
         };
-        self.rows.get(row).is_some_and(|&(h, l)| {
-            l != HUNK_HEADER
-                && file
-                    .hunks
-                    .get(h as usize)
-                    .and_then(|hunk| hunk.lines.get(l as usize))
-                    .is_some_and(|line| line.kind != git_core::DiffLineKind::Context)
-        })
+        matches!(self.rows.get(row), Some(&DiffRow::Line(h, l)) if file
+            .hunks
+            .get(h as usize)
+            .and_then(|hunk| hunk.lines.get(l as usize))
+            .is_some_and(|line| line.kind != git_core::DiffLineKind::Context))
     }
 
     /// Applies a click on display row `row` to the line selection.
@@ -166,15 +207,18 @@ impl DiffView {
         if self.staged().is_none() || !self.is_changed(row) {
             return;
         }
-        let Some(&key) = self.rows.get(row) else {
+        let Some(&DiffRow::Line(h, l)) = self.rows.get(row) else {
             return;
         };
+        let key = (h, l);
         match (mode, self.anchor) {
             (ClickMode::Range, Some(anchor)) => {
                 let (from, to) = (anchor.min(row), anchor.max(row));
                 for r in from..=to {
-                    if self.is_changed(r) {
-                        self.selection.insert(self.rows[r]);
+                    if let (true, Some(&DiffRow::Line(h, l))) =
+                        (self.is_changed(r), self.rows.get(r))
+                    {
+                        self.selection.insert((h, l));
                     }
                 }
             }
@@ -192,17 +236,59 @@ impl DiffView {
         }
     }
 
+    /// Top row to scroll to for the previous or next change block, seen
+    /// from the scroll position `top` (in rows); `None` at the ends.
+    /// `visible` rows fit in the viewport (0 if unknown).
+    pub fn change_target(&self, top: usize, visible: usize, next: bool) -> Option<usize> {
+        let max_top = if visible > 0 {
+            self.rows.len().saturating_sub(visible)
+        } else {
+            usize::MAX
+        };
+        let target = |row: usize| row.saturating_sub(JUMP_MARGIN).min(max_top);
+        if next {
+            self.block_rows
+                .iter()
+                .map(|&r| target(r))
+                .find(|&t| t > top)
+        } else {
+            self.block_rows
+                .iter()
+                .rev()
+                .map(|&r| target(r))
+                .find(|&t| t < top)
+        }
+    }
+
     /// Stores the loaded diff and flattens its hunks into display rows.
     pub fn set_diff(&mut self, diff: Result<FileDiff, String>) {
         self.rows.clear();
+        self.blocks.clear();
+        self.block_rows.clear();
         self.selection.clear();
         self.anchor = None;
         match diff {
             Ok(diff) => {
+                if self.layout == DiffLayout::Inline {
+                    self.blocks = crate::diff_blocks::blocks(&diff);
+                }
+                let mut next_block = 0;
                 for (h, hunk) in diff.hunks.iter().enumerate() {
-                    self.rows.push((h as u32, HUNK_HEADER));
-                    self.rows
-                        .extend((0..hunk.lines.len()).map(|l| (h as u32, l as u32)));
+                    let h = h as u32;
+                    if self.layout == DiffLayout::Hunks {
+                        self.rows.push(DiffRow::Header(h));
+                    }
+                    for l in 0..hunk.lines.len() as u32 {
+                        // The bar sits right above the block's first change.
+                        if let Some(block) = self.blocks.get(next_block) {
+                            if block.hunk == h && block.first == l {
+                                self.block_rows.push(self.rows.len());
+                                self.rows.push(DiffRow::Block(next_block as u32));
+                                next_block += 1;
+                            }
+                        }
+                        self.rows.push(DiffRow::Line(h, l));
+                    }
                 }
                 self.diff = Loadable::Ready(diff);
             }
@@ -974,6 +1060,67 @@ mod tests {
         assert_eq!(view.selection.len(), 2);
         view.click(3, ClickMode::Replace);
         assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 2)]);
+    }
+
+    /// Inline diff of a 40-line file with changes at lines 5 and 30.
+    fn inline_diff() -> DiffView {
+        let old: String = (1..=40).map(|i| format!("line {i}\n")).collect();
+        let new = old.replace("line 5\n", "five\n").replace("line 30\n", "");
+        let text =
+            git_core::text_diff_with(old.as_bytes(), new.as_bytes(), git_core::DiffContext::Full);
+        let mut view = DiffView::new(DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "f".into(),
+            old_path: None,
+        });
+        view.layout = DiffLayout::Inline;
+        view.set_diff(Ok(FileDiff {
+            old_path: Some("f".into()),
+            new_path: Some("f".into()),
+            binary: false,
+            too_large: false,
+            hunks: text.hunks,
+        }));
+        view
+    }
+
+    #[test]
+    fn inline_rows_have_a_bar_above_each_block_and_no_hunk_header() {
+        let view = inline_diff();
+        // 40 old lines + 1 added = 41 lines, 2 bars.
+        assert_eq!(view.rows.len(), 43);
+        assert!(!view.rows.iter().any(|r| matches!(r, DiffRow::Header(_))));
+        assert_eq!(view.block_rows, [4, 31]);
+        assert_eq!(view.rows[4], DiffRow::Block(0));
+        assert_eq!(view.rows[5], DiffRow::Line(0, 4), "first change of block 0");
+        assert_eq!(view.rows[31], DiffRow::Block(1));
+        // Lines of a block can be clicked like in Hunk mode.
+        let mut view = view;
+        view.click(5, ClickMode::Replace);
+        assert_eq!(view.selection.iter().copied().collect::<Vec<_>>(), [(0, 4)]);
+        view.click(4, ClickMode::Replace);
+        assert_eq!(view.selection.len(), 1, "bars are not selectable");
+    }
+
+    #[test]
+    fn change_navigation_targets() {
+        let view = inline_diff();
+        // Jumps keep 3 rows above the bar.
+        assert_eq!(view.change_target(0, 0, true), Some(1));
+        assert_eq!(view.change_target(1, 0, true), Some(28));
+        assert_eq!(view.change_target(28, 0, true), None, "last change");
+        assert_eq!(view.change_target(28, 0, false), Some(1));
+        assert_eq!(view.change_target(1, 0, false), None, "first change");
+        // Near the end the target is where scrolling stops.
+        assert_eq!(view.change_target(1, 20, true), Some(23));
+        assert_eq!(view.change_target(23, 20, true), None);
+    }
+
+    #[test]
+    fn hunk_layout_is_unchanged() {
+        let view = loaded_diff();
+        assert_eq!(view.rows[0], DiffRow::Header(0));
+        assert!(view.blocks.is_empty() && view.block_rows.is_empty());
     }
 
     #[test]

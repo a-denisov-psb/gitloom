@@ -39,6 +39,7 @@ pub use cli_backend::{
 pub use conflict::{
     with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,
 };
+pub use diff::{text_diff_with, TextDiff};
 pub use discard::{
     discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
     FileSnapshot, IndexSnapshot,

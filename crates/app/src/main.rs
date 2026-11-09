@@ -13,6 +13,7 @@ mod avatars;
 mod branch_tree;
 mod conflict;
 mod crash;
+mod diff_blocks;
 mod fetch;
 mod file_history;
 mod format;

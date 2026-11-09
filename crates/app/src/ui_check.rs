@@ -241,4 +241,18 @@ mod tests {
         );
         snapshot(&app, "diff-mode-1-split-loading");
     }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_inline_diff() {
+        let mut app = crate::app::tests::inline_diff_at_top();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("inline-diff-{theme}"));
+        }
+    }
 }
