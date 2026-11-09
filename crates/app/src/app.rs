@@ -1343,8 +1343,8 @@ impl App {
         view.flow_finishing = true;
         view.flow_resumed_at = Some(plan.next);
         let label = plan.title();
-        self.run_write(tab, label, |git| {
-            git_core::flow_finish::resume(git).map(drop)
+        self.run_undoable(tab, label, |git| {
+            git_core::flow_finish::resume(git).map(finish_history)
         })
     }
 
@@ -1764,8 +1764,8 @@ impl App {
                     view.flow_resumed_at = None;
                 }
                 let label = format!("Finish {} {}", flow_branch.kind.noun(), flow_branch.name);
-                self.run_write(tab, label, move |git| {
-                    git_core::flow_finish::start(git, &plan).map(drop)
+                self.run_undoable(tab, label, move |git| {
+                    git_core::flow_finish::start(git, &plan).map(finish_history)
                 })
             }
             FormAction::StartFlow { tab, kind } => {
@@ -3075,6 +3075,14 @@ impl App {
                 } else {
                     git_core::redo_history(git, &root, &change)?
                 }),
+                UndoAction::FlowFinish(record) => {
+                    if undo {
+                        git_core::flow_finish::undo(git, &record)?;
+                    } else {
+                        git_core::flow_finish::redo(git, &record)?;
+                    }
+                    UndoAction::FlowFinish(record)
+                }
                 UndoAction::Discard { label, snapshot } => {
                     // Restoring returns the replaced state, which reverts the restore.
                     let replaced = git_core::restore_snapshot(git, &root, &snapshot)?;
@@ -6845,6 +6853,17 @@ fn scroll_to(view: &RepoView, offset: f32) -> Task<Message> {
     scroll_by_id(view.graph_scroll_id.clone(), offset)
 }
 
+/// A completed finish becomes one undo entry; a stopped one none yet
+/// (M7-11).
+fn finish_history(outcome: git_core::flow_finish::FinishOutcome) -> Option<History> {
+    match outcome {
+        git_core::flow_finish::FinishOutcome::Done(record) => {
+            Some(History::Push(UndoAction::FlowFinish(record)))
+        }
+        git_core::flow_finish::FinishOutcome::Conflicts => None,
+    }
+}
+
 /// Changed line `l` of hunk `h` belongs to change block `index` of `diff`.
 fn in_block(diff: &crate::repo_view::DiffView, index: usize, h: usize, l: usize) -> bool {
     diff.blocks.get(index).is_some_and(|b| b.contains(h, l))
@@ -9197,6 +9216,34 @@ pub(crate) mod tests {
         form_input(&mut app, 0, "v1.2.0");
         let _ = app.update(Message::FormSubmit);
         assert_eq!(running_args(&app), ["Finish release 1.2.0"]);
+    }
+
+    #[test]
+    fn a_finish_is_one_undo_entry() {
+        let mut app = flow_app();
+        let record = git_core::flow_finish::FinishRecord {
+            label: "Finish release 1.2.0".into(),
+            refs: Vec::new(),
+            head_before: Some("release/1.2.0".into()),
+            head_after: Some("develop".into()),
+        };
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FlowFinishRequested("release/1.2.0".into()));
+        form_input(&mut app, 0, "v1.2.0");
+        let _ = app.update(Message::FormSubmit);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Finish release 1.2.0".into(),
+            result: Ok(Some(History::Push(UndoAction::FlowFinish(Box::new(
+                record,
+            ))))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.undo.len(), 1);
+        assert_eq!(view.undo[0].label(), "Finish release 1.2.0");
+        assert!(view.undo[0].moves_head());
+        let _ = app.update(Message::Undo);
+        assert_eq!(running_args(&app), ["Undo Finish release 1.2.0"]);
     }
 
     #[test]

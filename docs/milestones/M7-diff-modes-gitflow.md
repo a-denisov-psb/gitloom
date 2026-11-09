@@ -222,12 +222,14 @@ Acceptance: `iced_test` snapshots of the dialogs; a scripted walkthrough (Linux)
 
 Note (2026-11-09): done. "Finish <type> <name>" in the menu of every Git flow branch (left panel and graph pill share the branch menu) and "Finish current Gitflow branch" in the palette. Dialog: feature "Rebase on <develop> before finishing" (off) / "Delete branch" (on); release and hotfix tag name, tag message, "Delete branch"; a warning names production/development branches behind their upstream; an empty, invalid or existing tag is refused. Forms gained a checkbox field. The snapshot reads the running finish (`.git/gitloom/gitflow-finish.json`); while its merge waits the operation banner reads "Finishing <type> <name> · Merging …" and its Abort aborts the finish; once the merge is committed (Continue) the remaining steps run automatically, but only for a finish started or continued in this session and only once per step (a failing step does not loop). After a restart, or after a failed step, the banner offers "Continue finishing" / "Abort". The abort confirmation lists the steps already done. Snapshots `ui_check_gitflow_finish`. The scripted conflict walkthrough is covered by the git-core tests (conflict in either merge, resume after restart) plus the app tests of the automatic continuation; a hand walkthrough is in the M7 release checklist (M7-12).
 
-### [ ] M7-11 Undo/redo for finish
+### [x] M7-11 Undo/redo for finish
 
 - One undo entry per finish (decisions table, ADR-014 extension): records old/new values of the production, development and finished branch, the tag (ref and tag object id) and the checked-out branch; undo/redo move refs (`git update-ref` with old-value check), recreate or delete the branch and tag ref, and check out with `--keep` semantics.
 - Precondition failures show "the repository changed" like other undo entries.
 
 Acceptance: integration tests: finish → undo restores all refs and HEAD exactly; redo restores the finished state with the identical tag object; undo refused after an extra commit on develop.
+
+Note (2026-11-09): done. The finish plan stores the values of every touched ref (finished branch, production/development, tag) and the checked-out branch when it starts, so a finish that continued after a conflict or a restart is still undone as a whole. On completion `FinishOutcome::Done` carries a `FinishRecord` (old/new value per ref, branch before/after), pushed as one `UndoAction::FlowFinish`. Undo/redo check a clean working tree, no operation and that every ref is where it was left ("The repository changed since then …" otherwise), detach HEAD, move/create/delete the refs with `git update-ref` and the expected old value, then check out the branch (`git switch` refuses to lose local changes). Redo restores the identical annotated tag object.
 
 ### [ ] M7-12 Documentation and walkthrough
 
