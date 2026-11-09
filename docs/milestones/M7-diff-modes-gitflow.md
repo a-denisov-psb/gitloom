@@ -211,7 +211,7 @@ Acceptance: integration tests for feature/release/hotfix finish (with and withou
 
 Note (2026-11-09): done. `git_core::merge_no_ff` and `git_core::flow_finish` (`plan`, `problem`, `start`, `resume`, `pending`, `abort`). A step that stops with conflicts counts as started (the user concludes it), so `next` points after it; `resume` waits while the operation is still in progress. Abort aborts a stopped merge/rebase and lists the steps done before it; later steps are not undone (that is undo's job, M7-11). Preconditions as `FinishProblem` (local changes to tracked files, operation in progress, another finish running, missing branch, tag exists/empty); untracked files do not block. Hotfix with an open release branch: no GitKraken answer, so the hotfix is merged into development (GitKraken's documentation), noted in UX-PARITY. The `git-flow` CLI is not in CI; tests compare with the history `git flow … finish` produces (merge parents, Git's default merge message, annotated tag on the production merge, deleted branch). git-core gains `serde`/`serde_json` (same versions as the app) for the plan file.
 
-### [ ] M7-10 Finish UI, conflicts and resume
+### [x] M7-10 Finish UI, conflicts and resume
 
 - "Finish …" entries in the branch menus (left panel, graph pill) and the palette; finish dialog with the options from the decisions table; behind-upstream warning.
 - Progress in the status bar; on conflicts the existing banner and conflict view, banner text "Finishing <type> <name>"; after Continue commits the merge, the remaining steps run without another click.
@@ -219,6 +219,8 @@ Note (2026-11-09): done. `git_core::merge_no_ff` and `git_core::flow_finish` (`p
 - Abort dialog lists the steps already done.
 
 Acceptance: `iced_test` snapshots of the dialogs; a scripted walkthrough (Linux) of a release finish with a conflict in the develop merge, resolved in the conflict view.
+
+Note (2026-11-09): done. "Finish <type> <name>" in the menu of every Git flow branch (left panel and graph pill share the branch menu) and "Finish current Gitflow branch" in the palette. Dialog: feature "Rebase on <develop> before finishing" (off) / "Delete branch" (on); release and hotfix tag name, tag message, "Delete branch"; a warning names production/development branches behind their upstream; an empty, invalid or existing tag is refused. Forms gained a checkbox field. The snapshot reads the running finish (`.git/gitloom/gitflow-finish.json`); while its merge waits the operation banner reads "Finishing <type> <name> · Merging …" and its Abort aborts the finish; once the merge is committed (Continue) the remaining steps run automatically, but only for a finish started or continued in this session and only once per step (a failing step does not loop). After a restart, or after a failed step, the banner offers "Continue finishing" / "Abort". The abort confirmation lists the steps already done. Snapshots `ui_check_gitflow_finish`. The scripted conflict walkthrough is covered by the git-core tests (conflict in either merge, resume after restart) plus the app tests of the automatic continuation; a hand walkthrough is in the M7 release checklist (M7-12).
 
 ### [ ] M7-11 Undo/redo for finish
 
