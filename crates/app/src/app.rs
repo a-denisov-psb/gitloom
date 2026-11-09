@@ -8316,6 +8316,60 @@ pub(crate) mod tests {
         app
     }
 
+    /// Unstaged diff of a ~2 MB file of `lines` lines with every 100th line
+    /// changed, in `mode` (M7-05 performance check).
+    pub(crate) fn large_diff_app(mode: settings::DiffMode, lines: u32) -> (App, Duration) {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "a".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old: String = (0..lines)
+            .map(|i| format!("{i:06} lorem ipsum dolor sit amet\n"))
+            .collect();
+        let new: String = (0..lines)
+            .map(|i| {
+                if i % 100 == 50 {
+                    format!("{i:06} changed line\n")
+                } else {
+                    format!("{i:06} lorem ipsum dolor sit amet\n")
+                }
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        let text = git_core::text_diff_with(old.as_bytes(), new.as_bytes(), mode.context());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("a".into()),
+                new_path: Some("a".into()),
+                binary: text.binary,
+                too_large: text.too_large,
+                hunks: text.hunks,
+            }),
+        });
+        (app, start.elapsed())
+    }
+
+    /// Scrolls the open diff of `app` to `offset` (as the scrollable reports it).
+    pub(crate) fn scroll_diff(app: &mut App, offset: f32) {
+        let _ = app.update(Message::DiffScrolled {
+            offset,
+            height: 800.0,
+        });
+    }
+
+    /// Rows of the open diff of `app`.
+    pub(crate) fn diff_rows(app: &App) -> usize {
+        open_diff(app).rows.len()
+    }
+
     /// `mode_app` shown from the top with git available (UI checks).
     pub(crate) fn diff_at_top(mode: settings::DiffMode, changed: u32, removed: u32) -> App {
         let mut app = mode_app(mode, 30, changed, removed);
@@ -10099,6 +10153,60 @@ pub(crate) mod tests {
             CenterView::FileHistory(history) => history,
             other => panic!("no file history: {other:?}"),
         }
+    }
+
+    /// File history of "f.txt" with commit "c" selected and its diff
+    /// loaded in `mode` (UI check of M7-05).
+    pub(crate) fn file_history_app(mode: settings::DiffMode) -> App {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "f.txt".into(),
+            start: None,
+        });
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "f.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![file_entry("c", "f.txt"), file_entry("a", "f.txt")]),
+        });
+        let request = history(&app).diff.as_ref().unwrap().request.clone();
+        let old: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        let new = old
+            .replace("line 4\n", "four\nfour b\n")
+            .replace("line 20\n", "");
+        let text = git_core::text_diff_with(old.as_bytes(), new.as_bytes(), mode.context());
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("f.txt".into()),
+                new_path: Some("f.txt".into()),
+                binary: false,
+                too_large: false,
+                hunks: text.hunks,
+            }),
+        });
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        app
+    }
+
+    #[test]
+    fn file_history_diff_follows_the_mode_without_bars() {
+        let app = file_history_app(settings::DiffMode::Split);
+        let diff = history(&app).diff.as_ref().unwrap();
+        assert_eq!(diff.layout, DiffLayout::Split);
+        assert!(diff.staged().is_none());
+        assert!(!diff
+            .rows
+            .iter()
+            .any(|r| matches!(r, crate::repo_view::DiffRow::Block(_))));
+        assert_eq!(diff.block_rows.len(), 2);
     }
 
     #[test]

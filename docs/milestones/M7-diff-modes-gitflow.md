@@ -69,7 +69,7 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 - [x] The left panel shows branch folders, icons, the highlighted checked-out branch and the hidden-branch counter like GitKraken; all branch interactions work unchanged in the tree.
 - [ ] Every diff (unstaged, staged, untracked, commit, stash, file history) can be shown as Hunk, Inline and Split; the mode is remembered across restarts.
 - [ ] Line staging, unstaging and discarding work in all three modes and produce the same index as `git add -p` with the same selection; block actions in Inline/Split equal "Stage hunk" in Hunk mode where the blocks coincide.
-- [ ] A 2 MB text file opens in Inline and Split without a frame over 50 ms while scrolling (`docs/PERFORMANCE.md`).
+- [x] A 2 MB text file opens in Inline and Split without a frame over 50 ms while scrolling (`docs/PERFORMANCE.md`).
 - [ ] Git flow can be initialized, edited and removed in Preferences; a repository initialized with the `git-flow` CLI is recognized and vice versa.
 - [ ] Feature, release and hotfix can be started and finished from the left panel, the branch menus and the palette; the result equals `git flow <type> finish` (merge commits, tag, deleted branch) in a scripted comparison test.
 - [ ] A finish that hits a conflict can be resolved and continues automatically, also after a restart; Abort leaves a consistent state and says what was done.
@@ -158,12 +158,14 @@ Acceptance: tests for the row pairing (only removals, only additions, more remov
 
 Note (2026-11-09): done. `DiffRow::Split(hunk, left, right)` rows from `diff_blocks::split_rows` (runs of changes paired row by row, a removal after additions starts a new run); blocks, bars, navigation and staging are shared with Inline (same full-context data, same `(hunk, line)` selection keys, so block and line actions equal M7-03 by construction). Shift+click selects the changed lines of both sides in the range. The "File added" / "File deleted" note sits in the first row of the empty side. Snapshots `ui_check_split_diff` (dark/light × 100/200 %, added file) checked.
 
-### [ ] M7-05 Diff modes in embedded views, snapshots, performance
+### [x] M7-05 Diff modes in embedded views, snapshots, performance
 
 - The diff embedded in file history (and any other embedded diff) uses the global mode and toggle; read-only diffs (commit, stash, history) show no staging bars.
 - Measure opening and scrolling a 2 MB / ~50 000 line file in Inline and Split (`docs/PERFORMANCE.md`, M7 section); fix hot spots (e.g. precomputed row list, no per-frame allocation of the full file).
 
 Acceptance: target from the milestone acceptance met and documented; snapshots for the file history diff in Split.
+
+Note (2026-11-09): done. The file history diff already followed the global mode since M7-01; read-only diffs (commit, stash, history) now have no block bars at all, and the change navigation jumps to a block's first changed row there. Performance in `docs/PERFORMANCE.md` (M7 section): frames 6–8 ms median, at most 19 ms, opening 43–51 ms for a 2 MB / 50 000 line file; no fix needed. Snapshot `ui_check_file_history_split` (dark/light).
 
 ### [ ] M7-06 Git flow configuration model
 

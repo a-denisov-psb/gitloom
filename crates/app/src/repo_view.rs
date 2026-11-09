@@ -310,6 +310,9 @@ impl DiffView {
                 if self.layout.has_blocks() {
                     self.blocks = crate::diff_blocks::blocks(&diff);
                 }
+                // Read-only diffs (commit, stash) have no bars: navigation
+                // jumps to a block's first changed row instead (M7-05).
+                let bars = self.staged().is_some();
                 let mut next_block = 0;
                 for (h, hunk) in diff.hunks.iter().enumerate() {
                     let h = h as u32;
@@ -322,7 +325,9 @@ impl DiffView {
                                 let starts = |side: Option<u32>| side == Some(block.first);
                                 if block.hunk == h && (starts(left) || starts(right)) {
                                     self.block_rows.push(self.rows.len());
-                                    self.rows.push(DiffRow::Block(next_block as u32));
+                                    if bars {
+                                        self.rows.push(DiffRow::Block(next_block as u32));
+                                    }
                                     next_block += 1;
                                 }
                             }
@@ -335,7 +340,9 @@ impl DiffView {
                         if let Some(block) = self.blocks.get(next_block) {
                             if block.hunk == h && block.first == l {
                                 self.block_rows.push(self.rows.len());
-                                self.rows.push(DiffRow::Block(next_block as u32));
+                                if bars {
+                                    self.rows.push(DiffRow::Block(next_block as u32));
+                                }
                                 next_block += 1;
                             }
                         }
@@ -1193,6 +1200,27 @@ mod tests {
             view.selection.iter().copied().collect::<Vec<_>>(),
             [(0, 4), (0, 5), (0, 30)]
         );
+    }
+
+    #[test]
+    fn read_only_diffs_have_no_block_bars() {
+        let mut view = inline_diff();
+        view.request.kind = git_core::DiffKind::Commit("c".into());
+        let file = match &view.diff {
+            Loadable::Ready(file) => Ok(file.clone()),
+            _ => unreachable!(),
+        };
+        for layout in [DiffLayout::Inline, DiffLayout::Split] {
+            view.layout = layout;
+            view.set_diff(file.clone());
+            assert!(!view.rows.iter().any(|r| matches!(r, DiffRow::Block(_))));
+            assert_eq!(view.blocks.len(), 2, "navigation still knows the blocks");
+            // The first changed row of each block.
+            assert!(matches!(
+                view.rows[view.block_rows[0]],
+                DiffRow::Line(0, 4) | DiffRow::Split(0, Some(4), _)
+            ));
+        }
     }
 
     #[test]
