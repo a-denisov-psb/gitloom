@@ -233,13 +233,13 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
                     continue;
                 };
                 // The empty side of an added/deleted file says so once.
-                let note = (row_index == diff.block_rows.first().map_or(0, |b| b + 1))
-                    .then(|| match (&file.old_path, &file.new_path) {
-                        (None, Some(_)) => Some((false, "File added")),
-                        (Some(_), None) => Some((true, "File deleted")),
-                        _ => None,
-                    })
-                    .flatten();
+                let first_row = diff.block_rows.first().map_or(0, |b| b + 1);
+                let note = match (&file.old_path, &file.new_path) {
+                    _ if row_index != first_row => None,
+                    (None, Some(_)) => Some((false, "File added")),
+                    (Some(_), None) => Some((true, "File deleted")),
+                    _ => None,
+                };
                 let cell = |side: Option<u32>, right: bool| {
                     let note = note.filter(|(r, _)| *r == right).map(|(_, t)| t);
                     split_cell(
