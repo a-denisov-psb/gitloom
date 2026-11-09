@@ -33,8 +33,8 @@ mod watch;
 
 pub use blame::{blame, parse_porcelain, Blame, BlameCommit, BlameGroup, UNCOMMITTED};
 pub use cli_backend::{
-    branch_not_merged, checkout_blocked, detect_git, CliBackend, GitAvailability, GitOutput,
-    GitVersion, GitWriter, RunOptions, MIN_GIT_VERSION,
+    branch_not_merged, checkout_blocked, detect_git, missing_remote, CliBackend, GitAvailability,
+    GitOutput, GitVersion, GitWriter, RunOptions, MIN_GIT_VERSION,
 };
 pub use conflict::{
     with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,
@@ -178,6 +178,28 @@ pub struct Reference {
     pub upstream: Option<String>,
     /// Commits `(ahead, behind)` compared to the upstream, if both exist.
     pub ahead_behind: Option<(usize, usize)>,
+}
+
+/// Config level that defines something outside the repository's own config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigScope {
+    /// `~/.gitconfig`, `$XDG_CONFIG_HOME/git/config` or `GIT_CONFIG_GLOBAL`.
+    Global,
+    /// System or Git installation config.
+    System,
+    /// Environment, command line or an unknown source.
+    Other,
+}
+
+impl ConfigScope {
+    /// Hint for controls that cannot change it.
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Global => "Defined in the global Git configuration",
+            Self::System => "Defined in the system Git configuration",
+            Self::Other => "Defined outside the repository's Git configuration",
+        }
+    }
 }
 
 impl Reference {
@@ -444,6 +466,17 @@ pub trait GitBackend: Send + Sync {
 
     /// Fetch URL of remote `name`, if configured.
     fn remote_url(&self, name: &str) -> Result<Option<String>>;
+
+    /// Remotes of [`GitBackend::remotes`] that are not defined in the
+    /// repository's own config (e.g. in the global config), with where they
+    /// are defined. `git remote remove/rename/set-url` cannot change them.
+    fn external_remotes(&self) -> Result<Vec<(String, ConfigScope)>> {
+        Ok(Vec::new())
+    }
+
+    /// Forgets cached repository state (e.g. the config) so the next call
+    /// reads it again. Cheap: no I/O happens here.
+    fn reload(&self) {}
 
     fn stashes(&self) -> Result<Vec<Stash>>;
 

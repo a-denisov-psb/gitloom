@@ -49,6 +49,9 @@ pub struct RepoSnapshot {
     pub remotes: Vec<String>,
     /// Fetch URL per remote (name, URL).
     pub remote_urls: Vec<(String, String)>,
+    /// Remotes defined outside the repository config (e.g. global), which
+    /// cannot be removed, renamed or edited here (M6-18).
+    pub external_remotes: Vec<(String, git_core::ConfigScope)>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
@@ -60,7 +63,51 @@ pub struct RepoSnapshot {
     pub applied_filter: crate::ref_filter::RefFilter,
 }
 
+/// The remotes part of a snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Remotes {
+    pub names: Vec<String>,
+    pub urls: Vec<(String, String)>,
+    pub external: Vec<(String, git_core::ConfigScope)>,
+}
+
+impl Remotes {
+    /// Reads the remotes from the backend. Blocking.
+    pub fn load(backend: &dyn GitBackend) -> Result<Self, String> {
+        let names = backend.remotes().map_err(|e| e.to_string())?;
+        let mut urls = Vec::new();
+        for remote in &names {
+            if let Some(url) = backend.remote_url(remote).map_err(|e| e.to_string())? {
+                urls.push((remote.clone(), url));
+            }
+        }
+        let external = backend.external_remotes().map_err(|e| e.to_string())?;
+        Ok(Self {
+            names,
+            urls,
+            external,
+        })
+    }
+
+    /// The remotes `snapshot` shows.
+    pub fn of(snapshot: &RepoSnapshot) -> Self {
+        Self {
+            names: snapshot.remotes.clone(),
+            urls: snapshot.remote_urls.clone(),
+            external: snapshot.external_remotes.clone(),
+        }
+    }
+}
+
 impl RepoSnapshot {
+    /// Where remote `name` is defined if not in the repository config.
+    pub fn external_remote(&self, name: &str) -> Option<git_core::ConfigScope> {
+        self.external_remotes
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, scope)| *scope)
+    }
+
     /// Reads everything from the backend. Blocking; call via `spawn_blocking`.
     pub fn load(backend: &dyn GitBackend) -> Result<Self, String> {
         let log = backend.log(LOG_LIMIT).map_err(|e| e.to_string())?;
@@ -70,12 +117,10 @@ impl RepoSnapshot {
         let working_tree = backend.working_tree().map_err(|e| e.to_string())?;
         let mut snapshot = Self::build(log, head, refs, stashes, working_tree)?;
         snapshot.state = backend.state().map_err(|e| e.to_string())?;
-        snapshot.remotes = backend.remotes().map_err(|e| e.to_string())?;
-        for remote in &snapshot.remotes {
-            if let Some(url) = backend.remote_url(remote).map_err(|e| e.to_string())? {
-                snapshot.remote_urls.push((remote.clone(), url));
-            }
-        }
+        let remotes = Remotes::load(backend)?;
+        snapshot.remotes = remotes.names;
+        snapshot.remote_urls = remotes.urls;
+        snapshot.external_remotes = remotes.external;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
         Ok(snapshot)
@@ -190,6 +235,7 @@ impl RepoSnapshot {
             state: git_core::RepoState::Clean,
             remotes: Vec::new(),
             remote_urls: Vec::new(),
+            external_remotes: Vec::new(),
             merge_message: None,
             commit_template: None,
             unfiltered: None,
@@ -265,6 +311,7 @@ impl RepoSnapshot {
         filtered.state = base.state.clone();
         filtered.remotes = base.remotes.clone();
         filtered.remote_urls = base.remote_urls.clone();
+        filtered.external_remotes = base.external_remotes.clone();
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
         filtered.unfiltered = Some(Arc::new(base));

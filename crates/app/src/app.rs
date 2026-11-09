@@ -2998,10 +2998,12 @@ impl App {
                 let refs = backend.references().map_err(|e| e.to_string())?;
                 let stashes = backend.stashes().map_err(|e| e.to_string())?;
                 let state = backend.state().map_err(|e| e.to_string())?;
-                let remotes = backend.remotes().map_err(|e| e.to_string())?;
+                // Remotes, URLs and where they are defined (`git remote` in a
+                // terminal changes only the config).
+                let remotes = crate::snapshot::Remotes::load(backend.as_ref())?;
                 Ok(refs_changed(&snapshot, &head, &refs, &stashes)
                     || state != snapshot.state
-                    || remotes != snapshot.remotes)
+                    || remotes != crate::snapshot::Remotes::of(&snapshot))
             }),
             move |changed| Message::RefsChecked { tab: id, changed },
         )
@@ -4561,6 +4563,16 @@ impl App {
                             self.modal = merge_blocked_dialog(error, request);
                         }
                     }
+                    // `git remote remove/rename/set-url` on a remote that is
+                    // gone (changed outside Gitloom): reload instead of an
+                    // error dialog (M6-18).
+                    Err(error) if git_core::missing_remote(&error).is_some() => {
+                        let name = git_core::missing_remote(&error).unwrap_or_default();
+                        self.status = format!("Remote {name} no longer exists");
+                        if let Some(view) = self.tab_mut(tab).and_then(|t| t.view()) {
+                            view.backend.reload();
+                        }
+                    }
                     Err(error) if push && git_core::push_rejection(&error).is_some() => {
                         self.modal = Some(push_rejected_dialog(error));
                     }
@@ -4905,6 +4917,15 @@ impl App {
             }
             Message::RemoteContextMenu { name, position } => {
                 let writable = self.write_block().is_none();
+                let (external, has_url) =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .map_or((None, false), |view| {
+                            (
+                                view.snapshot.external_remote(&name),
+                                view.snapshot.remote_urls.iter().any(|(n, _)| *n == name),
+                            )
+                        });
                 let (any_shown, any_hidden) =
                     self.active_tab()
                         .and_then(Tab::view)
@@ -4928,7 +4949,16 @@ impl App {
                         });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::remote(&name, writable, any_shown, any_hidden),
+                    crate::menus::remote(
+                        &name,
+                        &crate::menus::RemoteFacts {
+                            writable,
+                            any_shown,
+                            any_hidden,
+                            external,
+                            has_url,
+                        },
+                    ),
                 ));
             }
             Message::FetchRemote(name) => {
@@ -5949,12 +5979,14 @@ impl App {
             }
             Message::FocusRefreshDue(seq) => {
                 if seq == self.focus_seq {
-                    // With a healthy watcher only the status can be stale.
+                    // With a healthy watcher the status and files outside the
+                    // repository (global Git config) can be stale; the refs
+                    // check reloads everything only if something moved.
                     let target = self
                         .active_tab()
                         .and_then(|t| t.view().map(|v| (t.id, v.watcher)));
                     return match target {
-                        Some((id, WatchState::Running)) => self.refresh_status(id),
+                        Some((id, WatchState::Running)) => self.check_refs(id),
                         _ => self.update(Message::Refresh),
                     };
                 }
@@ -10015,6 +10047,14 @@ pub(crate) mod tests {
         let tab = app.tabs[0].id;
         let _ = app.update(Message::WatcherStarted(tab));
         let _ = app.update(Message::FocusRefreshDue(app.focus_seq));
+        // A refs check first (the global Git config is outside the watcher);
+        // unchanged refs and remotes then refresh only the status.
+        let view = app.tabs[0].view().unwrap();
+        assert!(!view.status_refreshing && !view.refreshing);
+        let _ = app.update(Message::RefsChecked {
+            tab,
+            changed: Ok(false),
+        });
         let view = app.tabs[0].view().unwrap();
         assert!(view.status_refreshing && !view.refreshing);
 
@@ -11595,6 +11635,49 @@ pub(crate) mod tests {
         let mut app = tag_app(&["origin"]);
         let _ = app.update(Message::FetchRemote("origin".into()));
         assert_eq!(running_args(&app), ["Fetch origin"]);
+    }
+
+    #[test]
+    fn remote_outside_the_repository_config_cannot_be_removed() {
+        let mut app = tag_app(&["glob", "origin"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.remote_urls = vec![("glob".into(), "https://x/g.git".into())];
+        snapshot.external_remotes = vec![("glob".into(), git_core::ConfigScope::Global)];
+        view.snapshot = Arc::new(snapshot);
+
+        let _ = app.update(Message::RemoteContextMenu {
+            name: "glob".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::FetchRemote(r)) if r == "glob"));
+        assert!(menu.select(4).is_none(), "Remove is disabled");
+    }
+
+    #[test]
+    fn a_vanished_remote_reloads_instead_of_an_error_dialog() {
+        let mut app = tag_app(&["github-fc"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::RemoveRemote("github-fc".into()));
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Remove remote github-fc"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Remove remote github-fc".into(),
+            result: Err("Git failed (exit code 2): error: No such remote: 'github-fc'".into()),
+        });
+        assert!(app.modal.is_none(), "no error dialog");
+        assert_eq!(app.status, "Remote github-fc no longer exists");
+        assert!(app.tabs[0].view().unwrap().refreshing, "repository reloads");
+
+        // Other errors still show the dialog.
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Remove remote github-fc".into(),
+            result: Err("error: could not remove config section".into()),
+        });
+        assert!(app.modal.is_some());
     }
 
     #[test]

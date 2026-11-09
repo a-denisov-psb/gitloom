@@ -63,7 +63,7 @@ Out of scope (later):
 - [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
 - [ ] No console window on Windows (M6-16).
 - [x] No toolbar control shows "Not available yet" (M6-17).
-- [ ] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
+- [x] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
 - [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
@@ -298,7 +298,7 @@ Acceptance: app tests: clicking each picker opens the palette in the right mode;
 
 Note (2026-11-09): done. The registry reason for "Checkout branch…" now also covers a missing Git and an operation in progress (`Guarded::Checkout`, "Cannot check out a branch while a rebase is in progress"; `git switch` refuses then), so the palette entry and the picker share it; a disabled picker shows its value muted like other disabled toolbar buttons. The `iced_test` toolbar render (`ui_check_toolbar_pickers`) is pixel-identical to `develop` in the enabled state; clicks were checked in the simulator (no renderer under Xvfb in the cloud session). Audit: the only other control in the running app with "Not available yet" is the Inline/Split toggle in the diff header (planned in M7-01 … M7-04); the Submodules header is out of scope.
 
-### [ ] M6-18 Remotes in sync with the Git configuration
+### [x] M6-18 Remotes in sync with the Git configuration
 
 Finding of the maintainer (2026-11-09): the left panel shows an empty remote `github-fc`; "Remove" fails with `error: No such remote: 'github-fc'`. Facts: `git config --show-origin --get-regexp "^remote\.github-fc\."` prints nothing in that repository; the only remote is `origin` with URL `git@github-fc:a-denisov-psb/gitloom.git` (`github-fc` is an SSH host alias); the history was rewritten (M6-11) while Gitloom may have been open. `GixBackend::remotes` lists `remote.<name>` sections of gix's resolved config only, so the likely cause is a stale configuration in the backend (a `.git/config` change that the reopen logic of M3 missed).
 
@@ -311,6 +311,8 @@ Finding of the maintainer (2026-11-09): the left panel shows an empty remote `gi
 - CHANGELOG `[Unreleased]` → Fixed: "The left panel no longer shows remotes that were removed or renamed outside Gitloom." (wording per the actual cause).
 
 Acceptance: integration tests for cases 1–3; the task note names the root cause found; Windows CI green.
+
+Note (2026-11-09): done. Root cause: `GixBackend` reopened gix only when the modification time of `.git/config` changed. Several config writes within one timestamp tick (Windows advances file times in steps of about 16 ms; `git remote rename/remove` and `git filter-repo` write the config several times in a row) were lost if gix had re-read the config in between, and files outside `.git` (global and system config, includes) were never checked; the stale gix state stayed until a restart (reproduced in `tests/config_reload.rs` with a temp-file rewrite that keeps the time). Fix: a content fingerprint of every config file gix depends on (repository, worktree, global, system, includes, also when missing), taken before opening; the focus refresh now also checks refs and remotes (the global config is outside the watcher) and the refs check compares URLs and config scopes as well. The watcher itself was fine (`config` events, rename targets, `.lock` ignored). Notable: Git itself answers `No such remote: 'x'` for a remote that exists only in the global config, which is exactly the maintainer's error message; so `github-fc` was either stale (fixed) or defined outside the repository config at a level the shell check did not see (e.g. a different HOME or Git installation) – now shown with "Defined in the global Git configuration" (or system/other) and not removable. The restart check in the maintainer to-dos tells which. Other sources of remote nodes: only remote-tracking refs (`refs/remotes/<x>/…`, a node with branches); empty directories under `.git/refs/remotes/` and session data create none.
 
 ### [ ] M6-15 Release v1.0.0
 
