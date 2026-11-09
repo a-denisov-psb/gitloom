@@ -103,6 +103,17 @@ pub struct FinishPlan {
 }
 
 impl FinishPlan {
+    /// Steps done so far; `stopped` (a merge or rebase of the plan waits
+    /// for its conclusion) means the last started step is not done yet.
+    pub fn done(&self, stopped: bool) -> &[FinishStep] {
+        let done = if stopped {
+            self.next.saturating_sub(1)
+        } else {
+            self.next
+        };
+        &self.steps[..done.min(self.steps.len())]
+    }
+
     /// "Finishing release 1.2.0" (operation banner).
     pub fn title(&self) -> String {
         format!("Finishing {} {}", self.kind.noun(), self.name)
@@ -220,8 +231,17 @@ fn plan_path(git: &dyn GitWriter) -> Result<PathBuf> {
 
 /// The running finish, if any.
 pub fn pending(git: &dyn GitWriter) -> Result<Option<FinishPlan>> {
-    let path = plan_path(git)?;
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    read_plan(&plan_path(git)?)
+}
+
+/// The running finish of the repository with git dir `git_dir` (read
+/// side, for the snapshot).
+pub fn pending_in(git_dir: &std::path::Path) -> Result<Option<FinishPlan>> {
+    read_plan(&git_dir.join(crate::identity::BINARY_NAME).join(PLAN_FILE))
+}
+
+fn read_plan(path: &std::path::Path) -> Result<Option<FinishPlan>> {
+    let Ok(text) = std::fs::read_to_string(path) else {
         return Ok(None);
     };
     serde_json::from_str(&text)

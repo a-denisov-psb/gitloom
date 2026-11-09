@@ -180,6 +180,13 @@ pub enum Message {
     FlowSave,
     /// "Remove Gitflow" (asks first).
     FlowRemove,
+    /// "Finish …" of a Git flow branch: opens the finish dialog (M7-10).
+    FlowFinishRequested(String),
+    /// Banner: run the remaining steps of a stopped finish.
+    FlowFinishContinue,
+    /// Banner: abort the running finish (asks first, lists what is done).
+    FlowFinishAbort,
+    FlowFinishAbortConfirmed,
     /// Green "+" of the GITFLOW section: menu of the start actions (M7-08).
     FlowStartMenu(iced::Point),
     /// Start feature / release / hotfix: opens the name dialog.
@@ -1250,6 +1257,97 @@ impl App {
         task
     }
 
+    /// Finish dialog of Git flow branch `branch` (M7-10): options of the
+    /// decisions table and a warning when production or development is
+    /// behind its upstream.
+    fn finish_dialog(&mut self, branch: String) -> Task<Message> {
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let tab = self.tabs[self.active].id;
+        let Some(config) = view.snapshot.flow.clone() else {
+            return Task::none();
+        };
+        let Some(flow_branch) = config.classify(&branch) else {
+            return Task::none();
+        };
+        let defaults = git_core::flow_finish::FinishOptions::defaults(&config, &flow_branch);
+        let feature = flow_branch.kind == git_core::FlowKind::Feature;
+        let fields = if feature {
+            vec![
+                FormField::check(
+                    format!("Rebase on {} before finishing", config.development),
+                    defaults.rebase,
+                ),
+                FormField::check("Delete branch", defaults.delete),
+            ]
+        } else {
+            vec![
+                FormField::text("Tag name", defaults.tag),
+                FormField::text("Tag message", defaults.tag_message),
+                FormField::check("Delete branch", defaults.delete),
+            ]
+        };
+        let mut text = if feature {
+            format!("Merges {branch} into {}.", config.development)
+        } else {
+            format!(
+                "Merges {branch} into {} and tags it, then merges it into {}.",
+                config.production, config.development
+            )
+        };
+        let targets: &[&String] = if feature {
+            &[&config.development]
+        } else {
+            &[&config.production, &config.development]
+        };
+        for target in targets {
+            let behind = view
+                .snapshot
+                .refs
+                .iter()
+                .find(|r| r.kind == git_core::RefKind::LocalBranch && &r.name == *target);
+            if let Some((_, behind)) = behind.and_then(|r| r.ahead_behind) {
+                if behind > 0 {
+                    text.push_str(&format!(
+                        "\n\n{target} is {behind} commit{} behind its upstream; pull it first to \
+                         finish on the latest state.",
+                        if behind == 1 { "" } else { "s" }
+                    ));
+                }
+            }
+        }
+        self.form = Some(Form {
+            title: format!("Finish {} {}", flow_branch.kind.noun(), flow_branch.name),
+            text,
+            fields,
+            submit: "Finish".into(),
+            action: FormAction::FinishFlow { tab, branch },
+            error: None,
+        });
+        if feature {
+            Task::none()
+        } else {
+            iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
+        }
+    }
+
+    /// Runs the remaining steps of the stopped finish of tab `tab`.
+    fn resume_finish(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let Some(plan) = &view.snapshot.flow_finish else {
+            return Task::none();
+        };
+        view.flow_finishing = true;
+        view.flow_resumed_at = Some(plan.next);
+        let label = plan.title();
+        self.run_write(tab, label, |git| {
+            git_core::flow_finish::resume(git).map(drop)
+        })
+    }
+
     /// Creates branch `name` at `start` and checks it out, undoable (undo
     /// deletes it and returns to the previous branch).
     fn create_and_switch(
@@ -1548,9 +1646,22 @@ impl App {
         let Some(action) = self.form.as_ref().map(|f| f.action.clone()) else {
             return Task::none();
         };
-        // Git flow start: configuration, existing branches, operation state.
+        // Git flow start/finish: configuration, existing branches, operation state.
+        let flow_tags = match &action {
+            FormAction::FinishFlow { tab, .. } => {
+                self.tab_mut(*tab).and_then(|t| t.view()).map(|v| {
+                    v.snapshot
+                        .refs
+                        .iter()
+                        .filter(|r| r.kind == git_core::RefKind::Tag)
+                        .map(|r| r.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }
+            _ => None,
+        };
         let flow_start = match &action {
-            FormAction::StartFlow { tab, .. } => {
+            FormAction::StartFlow { tab, .. } | FormAction::FinishFlow { tab, .. } => {
                 self.tab_mut(*tab).and_then(|t| t.view()).map(|v| {
                     (
                         v.snapshot.flow.clone(),
@@ -1604,6 +1715,57 @@ impl App {
                 self.form = None;
                 self.run_write(tab, format!("Edit URL of {name}"), move |git| {
                     git.set_remote_url(&name, &url)
+                })
+            }
+            FormAction::FinishFlow { tab, branch } => {
+                let Some((Some(config), _, _)) = flow_start.clone() else {
+                    self.form = None;
+                    return Task::none();
+                };
+                let Some(flow_branch) = config.classify(&branch) else {
+                    self.form = None;
+                    return Task::none();
+                };
+                let feature = flow_branch.kind == git_core::FlowKind::Feature;
+                let options = if feature {
+                    git_core::flow_finish::FinishOptions {
+                        rebase: form.checked(0),
+                        delete: form.checked(1),
+                        tag: String::new(),
+                        tag_message: String::new(),
+                    }
+                } else {
+                    git_core::flow_finish::FinishOptions {
+                        rebase: false,
+                        delete: form.checked(2),
+                        tag: form.value(0).to_owned(),
+                        tag_message: form.value(1).to_owned(),
+                    }
+                };
+                let tags = flow_tags.clone().unwrap_or_default();
+                if !feature {
+                    let problem = if options.tag.is_empty() {
+                        Some("Enter a tag name".to_owned())
+                    } else if tags.contains(&options.tag) {
+                        Some(format!("The tag {} exists already", options.tag))
+                    } else {
+                        git_core::check_branch_name(&options.tag)
+                            .map(|p| p.replace("Branch names", "Tag names"))
+                    };
+                    if let Some(problem) = problem {
+                        form.error = Some(problem);
+                        return Task::none();
+                    }
+                }
+                self.form = None;
+                let plan = git_core::flow_finish::plan(&config, &flow_branch, &options);
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    view.flow_finishing = true;
+                    view.flow_resumed_at = None;
+                }
+                let label = format!("Finish {} {}", flow_branch.kind.noun(), flow_branch.name);
+                self.run_write(tab, label, move |git| {
+                    git_core::flow_finish::start(git, &plan).map(drop)
                 })
             }
             FormAction::StartFlow { tab, kind } => {
@@ -2275,6 +2437,15 @@ impl App {
             Shortcut::About => return self.update(Message::AboutOpened),
             Shortcut::DiffView(mode) => return self.update(Message::DiffModeChanged(mode)),
             Shortcut::FlowStart(kind) => return self.update(Message::FlowStartRequested(kind)),
+            Shortcut::FlowFinish => {
+                let head = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.head.branch().map(str::to_owned));
+                if let Some(head) = head {
+                    return self.update(Message::FlowFinishRequested(head));
+                }
+            }
             Shortcut::InitializeGitflow => {
                 return self.update(Message::SettingsOpenedAt(settings::Category::Gitflow))
             }
@@ -3359,10 +3530,18 @@ impl App {
             }
             _ => {}
         }
-        if let Shortcut::FlowStart(_) = id {
+        if let Shortcut::FlowStart(_) | Shortcut::FlowFinish = id {
             let view = self.active_tab().and_then(Tab::view)?;
-            if view.snapshot.flow.is_none() {
+            let Some(config) = &view.snapshot.flow else {
                 return Some("Initialize Gitflow first (Preferences → Gitflow)".to_owned());
+            };
+            let on_flow_branch = view
+                .snapshot
+                .head
+                .branch()
+                .is_some_and(|head| config.classify(head).is_some());
+            if id == Shortcut::FlowFinish && !on_flow_branch {
+                return Some("Check out a feature, release or hotfix branch".to_owned());
             }
         }
         if id == Shortcut::CheckoutBranch {
@@ -5043,6 +5222,16 @@ impl App {
                     } else {
                         &[]
                     };
+                    if let Some(branch) = config.classify(&name) {
+                        entries.push(MenuEntry::Separator);
+                        entries.push(MenuEntry::Item {
+                            hint: None,
+                            label: format!("Finish {} {}", branch.kind.noun(), branch.name),
+                            shortcut: None,
+                            enabled: writable,
+                            message: Box::new(Message::FlowFinishRequested(name.clone())),
+                        });
+                    }
                     if !kinds.is_empty() {
                         entries.push(MenuEntry::Separator);
                         entries.extend(kinds.iter().map(|&kind| MenuEntry::Item {
@@ -5708,6 +5897,51 @@ impl App {
                         git_core::flow::init(git, &config)
                     })
                 };
+            }
+            Message::FlowFinishRequested(branch) => return self.finish_dialog(branch),
+            Message::FlowFinishContinue => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    return self.resume_finish(tab);
+                }
+            }
+            Message::FlowFinishAbort => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let Some(plan) = &view.snapshot.flow_finish else {
+                    return Task::none();
+                };
+                let stopped = !view.snapshot.state.is_clean();
+                let done: Vec<String> = plan
+                    .done(stopped)
+                    .iter()
+                    .map(|step| format!("• {}", step.done_label()))
+                    .collect();
+                let mut text = format!(
+                    "Abort {}? A stopped merge or rebase is aborted; nothing else is undone.",
+                    plan.title().to_lowercase()
+                );
+                if !done.is_empty() {
+                    text.push_str("\n\nAlready done (stays as it is; use Undo to revert):\n");
+                    text.push_str(&done.join("\n"));
+                }
+                self.modal = Some(Modal::confirm(
+                    "Abort finish",
+                    text,
+                    "Abort",
+                    true,
+                    Message::FlowFinishAbortConfirmed,
+                ));
+            }
+            Message::FlowFinishAbortConfirmed => {
+                if let Some(tab) = self.active_tab().map(|t| t.id) {
+                    if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                        view.flow_finishing = false;
+                    }
+                    return self.run_write(tab, "Abort finish", |git| {
+                        git_core::flow_finish::abort(git).map(drop)
+                    });
+                }
             }
             Message::FlowStartMenu(position) => {
                 let writable = self.write_block().is_none();
@@ -6525,6 +6759,24 @@ impl App {
                 }
                 if let Some(dialog) = empty_pick.flatten() {
                     self.modal = Some(dialog);
+                }
+                // A finish of this session whose merge was concluded: the
+                // remaining steps follow without another click (M7-10).
+                let resume = self
+                    .tab_mut(id)
+                    .and_then(Tab::view_mut)
+                    .is_some_and(|view| {
+                        let Some(plan) = &view.snapshot.flow_finish else {
+                            view.flow_finishing = false;
+                            return false;
+                        };
+                        view.flow_finishing
+                            && view.busy.is_none()
+                            && view.snapshot.state.is_clean()
+                            && view.flow_resumed_at != Some(plan.next)
+                    });
+                if resume {
+                    return Task::batch([self.resume_finish(id), self.load_details()]);
                 }
                 // Branches that no longer exist leave the filter; a filter
                 // changed while loading is applied now.
@@ -8050,8 +8302,8 @@ pub(crate) mod tests {
         let blocked: Vec<&str> = crate::actions::registry()
             .iter()
             .filter(|a| a.context != crate::actions::Context::RebasePanel)
-            // Starting a Git flow branch needs Git flow (M7-08).
-            .filter(|a| !matches!(a.id, Shortcut::FlowStart(_)))
+            // Starting/finishing a Git flow branch needs Git flow (M7-08, M7-10).
+            .filter(|a| !matches!(a.id, Shortcut::FlowStart(_) | Shortcut::FlowFinish))
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
@@ -8846,6 +9098,161 @@ pub(crate) mod tests {
         assert!(app.form.as_ref().unwrap().text.contains("from main"));
         assert_eq!(submit_start(&mut app, "1.2.1"), None);
         assert_eq!(running_args(&app), ["Start hotfix 1.2.1"]);
+    }
+
+    /// `flow_app` with a stopped release finish of 1.2.0 (next step `next`).
+    pub(crate) fn finishing_app(next: usize, finishing: bool) -> App {
+        let mut app = flow_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let config = snapshot.flow.clone().unwrap();
+        let branch = git_core::FlowBranch {
+            kind: git_core::FlowKind::Release,
+            name: "1.2.0".into(),
+        };
+        let mut plan = git_core::flow_finish::plan(
+            &config,
+            &branch,
+            &git_core::flow_finish::FinishOptions::defaults(&config, &branch),
+        );
+        plan.next = next;
+        snapshot.flow_finish = Some(plan);
+        view.snapshot = Arc::new(snapshot);
+        view.flow_finishing = finishing;
+        app
+    }
+
+    /// Delivers the current snapshot of tab 0 again as a refresh result.
+    fn reload_same(app: &mut App) {
+        let tab = app.tabs[0].id;
+        let generation = app.tabs[0].generation;
+        let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+        let _ = app.update(Message::SnapshotLoaded {
+            tab,
+            generation,
+            result: Ok(snapshot),
+        });
+    }
+
+    #[test]
+    fn gitflow_finish_dialogs_and_entries() {
+        let mut app = flow_app();
+        // Branch menu of a feature branch.
+        let _ = app.update(Message::BranchContextMenu {
+            name: "feature/login".into(),
+            kind: git_core::RefKind::LocalBranch,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        let finish = menu.entries.iter().find_map(|e| match e {
+            MenuEntry::Item { label, message, .. } if label.starts_with("Finish") => {
+                Some((label.clone(), message.as_ref().clone()))
+            }
+            _ => None,
+        });
+        assert!(matches!(
+            finish,
+            Some((label, Message::FlowFinishRequested(b)))
+                if label == "Finish feature login" && b == "feature/login"
+        ));
+
+        // Feature: rebase off, delete on.
+        let _ = app.update(Message::FlowFinishRequested("feature/login".into()));
+        let form = app.form.as_ref().unwrap();
+        assert_eq!(form.title, "Finish feature login");
+        assert_eq!(form.fields.len(), 2);
+        assert!(!form.checked(0) && form.checked(1));
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Finish feature login"]);
+        assert!(app.tabs[0].view().unwrap().flow_finishing);
+
+        // Release: tag defaults, an existing tag is refused.
+        let mut app = flow_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs.push(git_core::Reference {
+            name: "1.2.0".into(),
+            kind: git_core::RefKind::Tag,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        if let Some(develop) = snapshot.refs.iter_mut().find(|r| r.name == "develop") {
+            develop.ahead_behind = Some((0, 2));
+        }
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::FlowFinishRequested("release/1.2.0".into()));
+        let form = app.form.as_ref().unwrap();
+        assert_eq!(form.value(0), "1.2.0");
+        assert_eq!(form.value(1), "Release 1.2.0");
+        assert!(form
+            .text
+            .contains("develop is 2 commits behind its upstream"));
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(
+            app.form.as_ref().unwrap().error.as_deref(),
+            Some("The tag 1.2.0 exists already")
+        );
+        form_input(&mut app, 0, "v1.2.0");
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(running_args(&app), ["Finish release 1.2.0"]);
+    }
+
+    #[test]
+    fn gitflow_finish_palette_needs_a_flow_branch() {
+        let app = flow_app();
+        assert_eq!(
+            app.action_block(Shortcut::FlowFinish).as_deref(),
+            Some("Check out a feature, release or hotfix branch")
+        );
+    }
+
+    #[test]
+    fn a_concluded_merge_continues_the_finish_once() {
+        // Started in this session: the remaining steps run on their own.
+        let mut app = finishing_app(5, true);
+        reload_same(&mut app);
+        assert_eq!(running_args(&app), ["Finishing release 1.2.0"]);
+        assert_eq!(app.tabs[0].view().unwrap().flow_resumed_at, Some(5));
+        // Continuing failed (same step again): no second automatic attempt.
+        let _ = app.update(Message::WriteFinished {
+            tab: app.tabs[0].id,
+            label: "Finishing release 1.2.0".into(),
+            result: Err("boom".into()),
+        });
+        let _ = app.update(Message::ModalClosed);
+        reload_same(&mut app);
+        assert!(running_args(&app).is_empty());
+
+        // After a restart: nothing runs, the banner asks.
+        let mut app = finishing_app(5, false);
+        reload_same(&mut app);
+        assert!(running_args(&app).is_empty());
+        let _ = app.update(Message::FlowFinishContinue);
+        assert_eq!(running_args(&app), ["Finishing release 1.2.0"]);
+    }
+
+    #[test]
+    fn aborting_a_finish_lists_the_steps_done() {
+        let mut app = finishing_app(5, true);
+        // The 5th step (merge into develop) stopped with conflicts.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.state = git_core::RepoState::Merging {
+            merge_head: "x".into(),
+        };
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::FlowFinishAbort);
+        let modal = app.modal.as_ref().unwrap();
+        assert_eq!(modal.title, "Abort finish");
+        let text = &modal.text;
+        assert!(text.contains("• Merged release/1.2.0 into main"), "{text}");
+        assert!(text.contains("• Checked out develop"));
+        assert!(!text.contains("into develop"), "the 5th step is not done");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(running_args(&app), ["Abort finish"]);
+        assert!(!app.tabs[0].view().unwrap().flow_finishing);
     }
 
     #[test]

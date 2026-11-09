@@ -54,6 +54,8 @@ pub struct RepoSnapshot {
     pub external_remotes: Vec<(String, git_core::ConfigScope)>,
     /// Git flow configuration, if initialized (M7-06).
     pub flow: Option<git_core::FlowConfig>,
+    /// A Git flow finish that has not completed yet (M7-10).
+    pub flow_finish: Option<git_core::flow_finish::FinishPlan>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
@@ -129,6 +131,7 @@ impl RepoSnapshot {
         snapshot.remote_urls = remotes.urls;
         snapshot.external_remotes = remotes.external;
         snapshot.flow = remotes.flow;
+        snapshot.flow_finish = backend.flow_finish().map_err(|e| e.to_string())?;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
         Ok(snapshot)
@@ -245,6 +248,7 @@ impl RepoSnapshot {
             remote_urls: Vec::new(),
             external_remotes: Vec::new(),
             flow: None,
+            flow_finish: None,
             merge_message: None,
             commit_template: None,
             unfiltered: None,
@@ -322,6 +326,7 @@ impl RepoSnapshot {
         filtered.remote_urls = base.remote_urls.clone();
         filtered.external_remotes = base.external_remotes.clone();
         filtered.flow = base.flow.clone();
+        filtered.flow_finish = base.flow_finish.clone();
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
         filtered.unfiltered = Some(Arc::new(base));

@@ -101,6 +101,17 @@ pub fn form(form: &Form) -> Element<'_, Message> {
                 .width(Fill)
                 .into()
             }
+            FieldKind::Check => {
+                content = content.push(
+                    iced::widget::checkbox(field.value == "true")
+                        .label(field.label.clone())
+                        .on_toggle(move |checked| Message::FormInput {
+                            field: index,
+                            value: checked.to_string(),
+                        }),
+                );
+                continue;
+            }
         };
         content = content.push(column![muted(&field.label).size(12), input].spacing(4));
     }

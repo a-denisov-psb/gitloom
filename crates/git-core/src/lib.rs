@@ -494,6 +494,11 @@ pub trait GitBackend: Send + Sync {
         Ok(None)
     }
 
+    /// The running Git flow finish of the repository, if any (M7-10).
+    fn flow_finish(&self) -> Result<Option<flow_finish::FinishPlan>> {
+        Ok(None)
+    }
+
     /// Forgets cached repository state (e.g. the config) so the next call
     /// reads it again. Cheap: no I/O happens here.
     fn reload(&self) {}

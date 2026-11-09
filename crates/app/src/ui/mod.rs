@@ -152,8 +152,20 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
             };
             let mut content =
                 column![toolbar::view(view, app.pull_mode, compact, pickers)].spacing(1);
-            if let Some(state) = view.snapshot.state_banner() {
-                content = content.push(state_banner(view, state));
+            let finish = view.snapshot.flow_finish.as_ref();
+            match (view.snapshot.state_banner(), finish) {
+                // A Git flow finish stopped in a merge: "Finishing … · Merging …".
+                (Some(state), Some(plan)) => {
+                    content = content.push(state_banner(
+                        view,
+                        format!("{} · {state}", plan.title()),
+                        true,
+                    ));
+                }
+                (Some(state), None) => content = content.push(state_banner(view, state, false)),
+                // A finish waits (after a restart or a failed step).
+                (None, Some(plan)) => content = content.push(finish_banner(view, plan)),
+                (None, None) => {}
             }
             if let Some(error) = &view.error {
                 content = content.push(banner(error, tab.id));
@@ -222,7 +234,45 @@ fn notice_banner(notice: &str) -> Element<'_, Message> {
 
 /// Operation in progress, like GitKraken's "Merging X into Y" bar, with
 /// Continue (uses the commit panel's message), Skip and Abort.
-fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
+/// A Git flow finish that is not running (after a restart or a failed
+/// step): "Continue finishing" / "Abort" (M7-10).
+fn finish_banner<'a>(
+    view: &'a RepoView,
+    plan: &git_core::flow_finish::FinishPlan,
+) -> Element<'a, Message> {
+    let idle = view.write_block.is_none() && view.busy.is_none();
+    container(
+        row![
+            crate::icons::tinted(crate::icons::Icon::Merge, 15.0, |p| p.accent),
+            text(plan.title()).style(theme::text_normal),
+            muted(format!(
+                "{} of {} steps done.",
+                plan.next.min(plan.steps.len()),
+                plan.steps.len()
+            ))
+            .size(12),
+            space::horizontal(),
+            button(text("Continue finishing").size(12))
+                .padding([3, 10])
+                .style(button::primary)
+                .on_press_maybe(idle.then_some(Message::FlowFinishContinue)),
+            button(text("Abort").size(12))
+                .padding([3, 10])
+                .style(button::danger)
+                .on_press_maybe(idle.then_some(Message::FlowFinishAbort)),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([6, 12])
+    .width(Fill)
+    .style(theme::state_banner)
+    .into()
+}
+
+/// `finishing`: the operation belongs to a Git flow finish; Abort aborts
+/// the finish (M7-10).
+fn state_banner(view: &RepoView, state: String, finishing: bool) -> Element<'_, Message> {
     let Some(operation) = view.snapshot.state.kind() else {
         return space::horizontal().into();
     };
@@ -251,9 +301,12 @@ fn state_banner(view: &RepoView, state: String) -> Element<'_, Message> {
                 .on_press_maybe(idle.then_some(Message::SkipOperation)),
         );
     }
-    actions = actions.push(
-        action("Abort", button::danger).on_press_maybe(idle.then_some(Message::AbortOperation)),
-    );
+    let abort = if finishing {
+        Message::FlowFinishAbort
+    } else {
+        Message::AbortOperation
+    };
+    actions = actions.push(action("Abort", button::danger).on_press_maybe(idle.then_some(abort)));
     container(
         row![
             crate::icons::tinted(crate::icons::Icon::Merge, 15.0, |p| p.accent),

@@ -558,6 +558,10 @@ impl GitBackend for GixBackend {
         }))
     }
 
+    fn flow_finish(&self) -> Result<Option<crate::flow_finish::FinishPlan>> {
+        crate::flow_finish::pending_in(self.local().git_dir())
+    }
+
     fn reload(&self) {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).stale = true;
     }
