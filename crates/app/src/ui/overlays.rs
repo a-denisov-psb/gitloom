@@ -8,7 +8,8 @@ use iced::{Element, Fill, Font, Length, Padding};
 
 use crate::app::Message;
 use crate::overlay::{
-    ButtonKind, ContextMenu, FieldKind, Form, MenuEntry, Modal, MENU_ITEM_HEIGHT, MENU_WIDTH,
+    ButtonKind, ContextMenu, FieldKind, Form, MenuEntry, Modal, MENU_ITEM_HEIGHT, MENU_LABEL_SIZE,
+    MENU_SHORTCUT_SIZE,
 };
 use crate::theme;
 use crate::ui::muted;
@@ -416,11 +417,13 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
             } => {
                 // Items never wrap: a wrapped label would overlap the next item.
                 let mut line = row![
-                    text(label).size(13).wrapping(text::Wrapping::None),
+                    text(label)
+                        .size(MENU_LABEL_SIZE)
+                        .wrapping(text::Wrapping::None),
                     space::horizontal()
                 ];
                 if let Some(shortcut) = shortcut {
-                    line = line.push(muted(shortcut).size(11));
+                    line = line.push(muted(shortcut).size(MENU_SHORTCUT_SIZE));
                 }
                 let highlighted = menu.highlighted == Some(index);
                 let item = button(line.align_y(iced::Center))
@@ -446,7 +449,7 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
     }));
 
     let menu = container(entries)
-        .width(MENU_WIDTH)
+        .width(menu.width.min(window.width))
         .padding(4)
         .style(theme::menu);
 
