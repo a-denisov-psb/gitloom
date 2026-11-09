@@ -2,7 +2,7 @@
 
 use gix::diff::blob::{sources, Algorithm, Diff, InternedInput};
 
-use crate::{DiffHunk, DiffLine, DiffLineKind};
+use crate::{DiffContext, DiffHunk, DiffLine, DiffLineKind};
 
 /// Files above this size (either side) are not diffed.
 pub const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -24,7 +24,14 @@ pub fn is_binary(data: &[u8]) -> bool {
 }
 
 /// Diffs `old` against `new` line by line with Git's default context of 3 lines.
+#[cfg(any(test, feature = "mock"))]
 pub fn text_diff(old: &[u8], new: &[u8]) -> TextDiff {
+    text_diff_with(old, new, DiffContext::Hunks)
+}
+
+/// Diffs `old` against `new` line by line; [`DiffContext::Full`] yields one
+/// hunk spanning both files (none for identical content).
+pub fn text_diff_with(old: &[u8], new: &[u8], context: DiffContext) -> TextDiff {
     if old.len() > MAX_DIFF_BYTES || new.len() > MAX_DIFF_BYTES {
         return TextDiff {
             too_large: true,
@@ -46,6 +53,11 @@ pub fn text_diff(old: &[u8], new: &[u8]) -> TextDiff {
     let old_lines: Vec<&[u8]> = input.before.iter().map(|t| input.interner[*t]).collect();
     let new_lines: Vec<&[u8]> = input.after.iter().map(|t| input.interner[*t]).collect();
     let (old_len, new_len) = (old_lines.len() as u32, new_lines.len() as u32);
+    // Full context reaches every line: all changes merge into one hunk.
+    let context = match context {
+        DiffContext::Hunks => CONTEXT,
+        DiffContext::Full => old_len.max(new_len),
+    };
 
     let mut hunks = Vec::new();
     let mut start = 0;
@@ -53,16 +65,16 @@ pub fn text_diff(old: &[u8], new: &[u8]) -> TextDiff {
         // Merge changes whose context would overlap or touch.
         let mut end = start + 1;
         while end < changes.len()
-            && changes[end].before.start - changes[end - 1].before.end <= 2 * CONTEXT
+            && changes[end].before.start - changes[end - 1].before.end <= context.saturating_mul(2)
         {
             end += 1;
         }
         let group = &changes[start..end];
         let (first, last) = (&group[0], &group[group.len() - 1]);
 
-        let old_start = first.before.start.saturating_sub(CONTEXT);
+        let old_start = first.before.start.saturating_sub(context);
         let new_start = first.after.start - (first.before.start - old_start);
-        let old_end = (last.before.end + CONTEXT).min(old_len);
+        let old_end = last.before.end.saturating_add(context).min(old_len);
         let new_end = last.after.end + (old_end - last.before.end);
 
         let mut lines = Vec::new();
@@ -289,5 +301,69 @@ mod tests {
         let big = vec![b'a'; MAX_DIFF_BYTES + 1];
         let diff = text_diff(b"", &big);
         assert!(diff.too_large && !diff.binary && diff.hunks.is_empty());
+    }
+
+    fn full(old: &str, new: &str) -> TextDiff {
+        text_diff_with(old.as_bytes(), new.as_bytes(), DiffContext::Full)
+    }
+
+    #[test]
+    fn full_context_is_one_hunk_over_the_whole_file() {
+        let old = numbered(1..21);
+        let new = old
+            .replace("line 2\n", "two\n")
+            .replace("line 18\n", "eighteen\n");
+        let diff = full(&old, &new);
+        assert_eq!(diff.hunks.len(), 1);
+        let hunk = &diff.hunks[0];
+        assert_eq!(hunk.header, "@@ -1,20 +1,20 @@");
+        assert_eq!(
+            (
+                hunk.old_start,
+                hunk.old_count,
+                hunk.new_start,
+                hunk.new_count
+            ),
+            (1, 20, 1, 20)
+        );
+        assert_eq!(hunk.lines.len(), 22);
+        assert_eq!(hunk.lines[0].content, "line 1");
+        assert_eq!(hunk.lines[21].content, "line 20");
+    }
+
+    #[test]
+    fn full_context_line_numbers_follow_insertions() {
+        let old = numbered(1..6);
+        let new = old.replace("line 3\n", "line 3\nnew a\nnew b\n");
+        let diff = full(&old, &new);
+        let hunk = &diff.hunks[0];
+        assert_eq!(hunk.header, "@@ -1,5 +1,7 @@");
+        let last = hunk.lines.last().unwrap();
+        assert_eq!((last.old_line, last.new_line), (Some(5), Some(7)));
+    }
+
+    #[test]
+    fn full_context_edge_cases() {
+        assert_eq!(full("a\nb\n", "a\nb\n"), TextDiff::default(), "identical");
+        assert_eq!(unified(&full("", "a\nb\n")), "@@ -0,0 +1,2 @@\n+a\n+b\n");
+        assert_eq!(unified(&full("a\n", "")), "@@ -1 +0,0 @@\n-a\n");
+        assert_eq!(
+            unified(&full("a\nb", "a\nb\n")),
+            "@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+b\n"
+        );
+        assert_eq!(
+            unified(&full("x\r\na\r\n", "x\r\nb\r\n")),
+            "@@ -1,2 +1,2 @@\n x\n-a\n+b\n"
+        );
+        assert!(full("text\n", "bin\0ary").binary);
+        let big = "a".repeat(MAX_DIFF_BYTES + 1);
+        assert!(full("", &big).too_large);
+    }
+
+    #[test]
+    fn full_and_hunk_context_agree_when_the_change_spans_the_file() {
+        let old = numbered(1..5);
+        let new = old.replace("line 2\n", "two\n");
+        assert_eq!(full(&old, &new), text_diff(old.as_bytes(), new.as_bytes()));
     }
 }

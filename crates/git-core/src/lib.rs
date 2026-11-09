@@ -325,6 +325,17 @@ impl StashChanges {
     }
 }
 
+/// Unchanged lines around the changes of a diff (ADR-038).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DiffContext {
+    /// Git's default: 3 lines, nearby changes share a hunk (Hunk view).
+    #[default]
+    Hunks,
+    /// The whole file as one hunk (Inline and Split view); no hunk for
+    /// identical content.
+    Full,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffRequest {
     pub kind: DiffKind,
@@ -488,8 +499,13 @@ pub trait GitBackend: Send + Sync {
     /// Staged, unstaged and untracked changes of the stash commit `id`.
     fn stash_changes(&self, id: &str) -> Result<StashChanges>;
 
-    /// Line diff of one file.
-    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff>;
+    /// Line diff of one file with Git's 3 lines of context.
+    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
+        self.file_diff_with(request, DiffContext::Hunks)
+    }
+
+    /// Line diff of one file with the given context (ADR-038).
+    fn file_diff_with(&self, request: &DiffRequest, context: DiffContext) -> Result<FileDiff>;
 
     /// Content of the configured `commit.template`, if any.
     fn commit_template(&self) -> Result<Option<String>>;
