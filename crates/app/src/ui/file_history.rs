@@ -23,6 +23,7 @@ pub fn view<'a>(
     repo: &'a RepoView,
     history: &'a FileHistoryView,
     avatars: &'a crate::avatars::Avatars,
+    mode: crate::settings::DiffMode,
 ) -> Element<'a, Message> {
     let has_selection = history.selected_entry().is_some();
     let header = container(
@@ -111,7 +112,7 @@ pub fn view<'a>(
     };
 
     let diff: Element<'a, Message> = match &history.diff {
-        Some(diff) => crate::ui::diff::embedded(repo, diff),
+        Some(diff) => crate::ui::diff::embedded(repo, diff, mode),
         None => centered(""),
     };
 

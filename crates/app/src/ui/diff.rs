@@ -6,9 +6,9 @@ use iced::{alignment, Element, Fill, Font};
 
 use crate::app::{DiscardTarget, Message};
 use crate::repo_view::{DiffView, Loadable, RepoView, HUNK_HEADER};
+use crate::settings::DiffMode;
 use crate::theme;
 use crate::ui::muted;
-use crate::ui::panel::with_tooltip;
 
 const LINE_HEIGHT: f32 = 20.0;
 const NUMBER_WIDTH: f32 = 52.0;
@@ -16,16 +16,25 @@ const MARKER_WIDTH: f32 = 16.0;
 const OVERSCAN: usize = 20;
 const TEXT_SIZE: f32 = 12.0;
 
-pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
-    view_with(repo, diff, true)
+pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView, mode: DiffMode) -> Element<'a, Message> {
+    view_with(repo, diff, mode, true)
 }
 
 /// Diff inside another view (file history): no close or history button.
-pub fn embedded<'a>(repo: &'a RepoView, diff: &'a DiffView) -> Element<'a, Message> {
-    view_with(repo, diff, false)
+pub fn embedded<'a>(
+    repo: &'a RepoView,
+    diff: &'a DiffView,
+    mode: DiffMode,
+) -> Element<'a, Message> {
+    view_with(repo, diff, mode, false)
 }
 
-fn view_with<'a>(repo: &'a RepoView, diff: &'a DiffView, standalone: bool) -> Element<'a, Message> {
+fn view_with<'a>(
+    repo: &'a RepoView,
+    diff: &'a DiffView,
+    mode: DiffMode,
+    standalone: bool,
+) -> Element<'a, Message> {
     let request = &diff.request;
     let source = match &request.kind {
         DiffKind::Unstaged => "Unstaged".to_string(),
@@ -43,12 +52,9 @@ fn view_with<'a>(repo: &'a RepoView, diff: &'a DiffView, standalone: bool) -> El
         None => request.path.clone(),
     };
 
-    let modes = row![
-        mode_button("Hunk", true),
-        with_tooltip(mode_button("Inline", false)),
-        with_tooltip(mode_button("Split", false)),
-    ]
-    .spacing(2);
+    // Until the Inline and Split renderers land (M7-03/M7-04), both show
+    // the full-context diff with the hunk renderer.
+    let modes = row(DiffMode::ALL.map(|m| mode_button(m, m == mode))).spacing(2);
 
     // Staging actions for the selected lines (working tree diffs only).
     let selection_action = match diff.staged() {
@@ -339,14 +345,17 @@ fn write_action<'a>(
         .into()
 }
 
-fn mode_button(label: &str, active: bool) -> Element<'_, Message> {
-    let button = button(text(label).size(12)).padding([2, 8]);
-    if active {
-        button.style(theme::mode_active).into()
+/// Hunk / Inline / Split; the active one is highlighted.
+fn mode_button<'a>(mode: DiffMode, active: bool) -> Element<'a, Message> {
+    let button = button(text(mode.label()).size(12))
+        .padding([2, 8])
+        .on_press(Message::DiffModeChanged(mode));
+    let button = if active {
+        button.style(theme::mode_active)
     } else {
-        // Disabled: no `on_press`.
-        button.style(theme::flat).into()
-    }
+        button.style(theme::flat)
+    };
+    crate::ui::panel::with_tooltip_text(button.into(), format!("{} view", mode.label()))
 }
 
 fn centered<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {

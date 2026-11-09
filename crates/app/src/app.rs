@@ -169,6 +169,8 @@ pub enum Message {
     PaneResized(pane_grid::ResizeEvent),
     FilterChanged(String),
     SectionToggled(Section),
+    /// Hunk / Inline / Split in the diff header or the palette (M7-01).
+    DiffModeChanged(settings::DiffMode),
     /// Click on a branch folder or remote in the left panel (M7-14); the
     /// key is [`crate::branch_tree::folder_key`].
     FolderToggled(String),
@@ -181,6 +183,8 @@ pub enum Message {
     DiffLoaded {
         tab: TabId,
         request: DiffRequest,
+        /// Context it was loaded with; results of another mode are dropped.
+        context: git_core::DiffContext,
         result: Result<git_core::FileDiff, git_core::Error>,
     },
     /// Fetching a blob missing from a partial clone finished.
@@ -2189,6 +2193,7 @@ impl App {
             }
             Shortcut::Settings => return self.open_settings(),
             Shortcut::About => return self.update(Message::AboutOpened),
+            Shortcut::DiffView(mode) => return self.update(Message::DiffModeChanged(mode)),
             Shortcut::Pull => return self.update(Message::Pull(None)),
             Shortcut::Push => return self.update(Message::Push { force: false }),
             Shortcut::Stash => return self.update(Message::StashPush),
@@ -2944,6 +2949,7 @@ impl App {
 
     /// Reloads the shown diff after a write, keeping its scroll position.
     fn reload_diff(&mut self, tab: TabId) -> Task<Message> {
+        let context = self.diff_context();
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
             return Task::none();
         };
@@ -2962,7 +2968,32 @@ impl App {
         {
             diff.request.kind = git_core::DiffKind::Unstaged;
         }
-        load_diff(tab, backend, diff.request.clone())
+        load_diff(tab, backend, diff.request.clone(), context)
+    }
+
+    /// Loads every open diff again for the current diff mode; the shown
+    /// file stays, its line selection is cleared (positions differ).
+    fn reload_open_diffs(&mut self) -> Task<Message> {
+        let context = self.diff_context();
+        let mut tasks = Vec::new();
+        for tab in &mut self.tabs {
+            let id = tab.id;
+            let Some(view) = tab.view_mut() else {
+                continue;
+            };
+            let backend = Arc::clone(&view.backend);
+            if let Some(diff) = view.center.diff_mut() {
+                diff.selection.clear();
+                diff.anchor = None;
+                tasks.push(load_diff(id, backend, diff.request.clone(), context));
+            }
+        }
+        Task::batch(tasks)
+    }
+
+    /// Context of the diff mode (M7-01).
+    fn diff_context(&self) -> git_core::DiffContext {
+        self.settings.diff.view_mode.context()
     }
 
     /// File whose diff is open in the active tab, with the list it belongs to.
@@ -3336,6 +3367,7 @@ impl App {
         let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
         };
+        let context = self.diff_context();
         let Some(view) = self.active_view_mut() else {
             return Task::none();
         };
@@ -3344,7 +3376,7 @@ impl App {
             return Task::none();
         };
         match change(history) {
-            Some(request) => load_diff(tab, backend, request),
+            Some(request) => load_diff(tab, backend, request, context),
             None => Task::none(),
         }
     }
@@ -4197,6 +4229,7 @@ impl App {
                 start,
                 result,
             } => {
+                let context = self.diff_context();
                 let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
                     return Task::none();
                 };
@@ -4207,7 +4240,7 @@ impl App {
                 match result {
                     Ok(entries) if history.path == path && history.start == start => {
                         if let Some(request) = history.set_entries(entries) {
-                            return load_diff(tab, backend, request);
+                            return load_diff(tab, backend, request, context);
                         }
                     }
                     Ok(_) => {}
@@ -5442,6 +5475,14 @@ impl App {
                     view.filter = filter;
                 }
             }
+            Message::DiffModeChanged(mode) => {
+                if self.settings.diff.view_mode == mode {
+                    return Task::none();
+                }
+                self.settings.diff.view_mode = mode;
+                let save = self.save_settings();
+                return Task::batch([save, self.reload_open_diffs()]);
+            }
             Message::FolderToggled(key) => {
                 if let Some(view) = self.active_view_mut() {
                     if !view.folders_collapsed.remove(&key) {
@@ -5491,6 +5532,7 @@ impl App {
                 return Task::batch([task, self.reveal_selection()]);
             }
             Message::DiffOpened(request) => {
+                let context = self.diff_context();
                 let Some(tab) = self.tabs.get_mut(self.active) else {
                     return Task::none();
                 };
@@ -5500,13 +5542,18 @@ impl App {
                 };
                 view.center =
                     CenterView::Diff(Box::new(crate::repo_view::DiffView::new(request.clone())));
-                return load_diff(tab_id, Arc::clone(&view.backend), request);
+                return load_diff(tab_id, Arc::clone(&view.backend), request, context);
             }
             Message::DiffLoaded {
                 tab,
                 request,
+                context,
                 result,
             } => {
+                // Loaded for another diff mode: the current one is on its way.
+                if context != self.diff_context() {
+                    return Task::none();
+                }
                 let can_fetch = self.write_block().is_none();
                 let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
                     return Task::none();
@@ -5544,6 +5591,7 @@ impl App {
                 request,
                 result,
             } => {
+                let context = self.diff_context();
                 let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
                     return Task::none();
                 };
@@ -5556,7 +5604,7 @@ impl App {
                 }
                 diff.fetching = false;
                 match result {
-                    Ok(()) => return load_diff(tab, backend, request),
+                    Ok(()) => return load_diff(tab, backend, request, context),
                     Err(error) => {
                         diff.set_diff(Err(git_core::Error::MissingObject {
                             id: String::new(),
@@ -7012,14 +7060,21 @@ fn tool_missing_dialog(merge: bool) -> Modal {
     modal
 }
 
-/// Loads the diff of `request` in the background.
-fn load_diff(tab: TabId, backend: Arc<dyn GitBackend>, request: DiffRequest) -> Task<Message> {
+/// Loads the diff of `request` in the background with `context` (the
+/// current diff mode's).
+fn load_diff(
+    tab: TabId,
+    backend: Arc<dyn GitBackend>,
+    request: DiffRequest,
+    context: git_core::DiffContext,
+) -> Task<Message> {
     let load = request.clone();
     Task::perform(
-        blocking(move || Ok(backend.file_diff(&load))),
+        blocking(move || Ok(backend.file_diff_with(&load, context))),
         move |result: Result<_, String>| Message::DiffLoaded {
             tab,
             request: request.clone(),
+            context,
             result: result.unwrap_or_else(|e| Err(git_core::Error::Backend(e))),
         },
     )
@@ -8057,6 +8112,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request: request("other"),
+            context: git_core::DiffContext::Hunks,
             result: Ok(sample_diff(1)),
         });
         assert_eq!(diff_state(&app).0, Loadable::Loading);
@@ -8064,6 +8120,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request: request("f"),
+            context: git_core::DiffContext::Hunks,
             result: Ok(sample_diff(3)),
         });
         let (diff, rows) = diff_state(&app);
@@ -8073,7 +8130,7 @@ pub(crate) mod tests {
     }
 
     /// Staging app showing a loaded unstaged diff of "a" with three added lines.
-    fn app_with_open_diff(kind: git_core::DiffKind) -> App {
+    pub(crate) fn app_with_open_diff(kind: git_core::DiffKind) -> App {
         let mut app = staging_app(&["a"], &[]);
         let request = DiffRequest {
             kind,
@@ -8085,6 +8142,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request,
+            context: git_core::DiffContext::Hunks,
             result: Ok(sample_diff(3)),
         });
         app
@@ -8095,6 +8153,52 @@ pub(crate) mod tests {
             CenterView::Diff(diff) => diff,
             _ => panic!("no diff"),
         }
+    }
+
+    #[test]
+    fn diff_mode_switch_reloads_with_full_context_and_keeps_the_file() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        let _ = app.update(Message::DiffLineClicked(1));
+        assert!(!open_diff(&app).selection.is_empty());
+        let request = open_diff(&app).request.clone();
+
+        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Split));
+        assert_eq!(app.settings.diff.view_mode, settings::DiffMode::Split);
+        assert_eq!(open_diff(&app).request, request, "same file");
+        assert!(open_diff(&app).selection.is_empty(), "positions differ");
+
+        // A late result of the old mode is dropped, the new one is shown.
+        let tab = app.tabs[0].id;
+        let before = open_diff(&app).diff.clone();
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            context: git_core::DiffContext::Hunks,
+            result: Ok(sample_diff(1)),
+        });
+        assert_eq!(open_diff(&app).diff, before);
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: git_core::DiffContext::Full,
+            result: Ok(sample_diff(1)),
+        });
+        assert_eq!(open_diff(&app).diff, Loadable::Ready(sample_diff(1)));
+    }
+
+    #[test]
+    fn diff_modes_are_in_the_palette() {
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("diff: inline view".into()));
+        let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
+        assert_eq!(entry.label, "Diff: Inline view");
+        assert!(entry.disabled.is_none());
+        let _ = app.update(Message::PaletteSubmit);
+        assert_eq!(app.settings.diff.view_mode, settings::DiffMode::Inline);
+        // Choosing the active mode again changes nothing.
+        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
+        assert_eq!(app.settings.diff.view_mode, settings::DiffMode::Inline);
     }
 
     #[test]
@@ -8162,6 +8266,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request,
+            context: git_core::DiffContext::Hunks,
             result: Err(git_core::Error::Backend("boom".into())),
         });
         assert!(matches!(
@@ -8193,6 +8298,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request: request.clone(),
+            context: git_core::DiffContext::Hunks,
             result: missing("abc"),
         });
         let diff = shown_diff_view(&app);
@@ -8209,6 +8315,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request,
+            context: git_core::DiffContext::Hunks,
             result: missing("abc"),
         });
         assert_eq!(
@@ -8226,6 +8333,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request: request.clone(),
+            context: git_core::DiffContext::Hunks,
             result: missing("abc"),
         });
         let _ = app.update(Message::ObjectFetched {
@@ -8248,6 +8356,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffLoaded {
             tab,
             request,
+            context: git_core::DiffContext::Hunks,
             result: missing("abc"),
         });
         assert_eq!(

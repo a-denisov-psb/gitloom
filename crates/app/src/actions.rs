@@ -85,6 +85,8 @@ pub enum ActionId {
     PopStash,
     /// Shift+F10 / Menu key: context menu of the selected commit.
     ContextMenu,
+    /// Diff: Hunk / Inline / Split view (M7-01).
+    DiffView(crate::settings::DiffMode),
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -662,6 +664,15 @@ fn table() -> Vec<Action> {
     );
 
     // Interface
+    for mode in crate::settings::DiffMode::ALL {
+        add(
+            A::DiffView(mode),
+            &format!("Diff: {} view", mode.label()),
+            Interface,
+            Global,
+            &[],
+        );
+    }
     add(
         A::Fullscreen,
         "Toggle fullscreen",
