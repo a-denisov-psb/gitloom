@@ -176,7 +176,7 @@ Acceptance: unit tests for parsing, classification and defaults; integration tes
 
 Note (2026-11-09): done. `git_core::flow` (`FlowConfig`, `FlowKind`, `FlowBranch`, `write`, `remove`, `init`) and `GitBackend::flow_config` (resolved config via gix, `None` unless both branch keys are set; missing prefixes take git-flow's defaults). `remove` drops every `gitflow` section (incl. AVH's `bugfix`/`support`/`path` keys), never branches. Classification picks the longest matching prefix. Validation: branch names like Ctrl+B, production ≠ development, a prefix must be able to start a branch name (git-flow accepts prefixes without "/", so does Gitloom), the tag prefix a tag name. The `git-flow` CLI is not installed in CI, so the CLI case uses the keys `git flow init -d` (AVH) writes.
 
-### [ ] M7-07 Gitflow preferences (initialize, edit, remove)
+### [x] M7-07 Gitflow preferences (initialize, edit, remove)
 
 - Preferences → category "Gitflow", applying to the active tab's repository (title shows the repository name); on the start screen the category explains "Open a repository first".
 - Not initialized: fields with defaults (M7 decisions) and "Initialize Gitflow". Initialized: fields with the current values, "Save", "Remove Gitflow" (confirmation; branches untouched).
@@ -184,6 +184,8 @@ Note (2026-11-09): done. `git_core::flow` (`FlowConfig`, `FlowKind`, `FlowBranch
 - The palette gets "Initialize Gitflow" (opens the category).
 
 Acceptance: tests for validation; initialize, edit and remove in a test repo update `.git/config` as expected; the GITFLOW section (M7-08) appears/disappears without restart.
+
+Note (2026-11-09): done. Preferences → "Gitflow" (title "Gitflow · <repository>"); the form starts from the repository's values or the defaults (`main` if it exists). Not initialized: "Initialize Gitflow" (`flow::init`, creates missing branches); initialized: "Save" (`flow::write`) and "Remove Gitflow" (confirmation, `flow::remove`, branches untouched). Validation from `FlowConfig::problem` is shown live and disables the button; writes run like other writes (busy/Git missing disable the buttons with the reason). The snapshot carries the Gitflow config and the refs check compares it, so a change (also from a terminal) refreshes the tab. Palette: "Initialize Gitflow" opens the category. Snapshot `ui_check_gitflow_preferences`.
 
 ### [ ] M7-08 GITFLOW section and start
 
