@@ -62,7 +62,7 @@ Out of scope (later):
 - [ ] A tag on `master` produces a draft release with AppImage, Linux `.tar.gz`, macOS universal dmg, Windows x64 `.zip` + `.msi` (signed), Windows x86 (best effort) and `SHA256SUMS`.
 - [ ] Packages start on a clean machine of each platform (Windows by the maintainer, Linux AppImage on the oldest supported LTS, macOS at least in CI).
 - [ ] No console window on Windows (M6-16).
-- [ ] No toolbar control shows "Not available yet" (M6-17).
+- [x] No toolbar control shows "Not available yet" (M6-17).
 - [ ] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
@@ -283,7 +283,7 @@ Acceptance: Windows CI green including the `--release` editor tests; the maintai
 
 Note (2026-11-09): implemented; Windows CI green including the `--release` editor tests and a PE header test (`crates/app/tests/windows_subsystem.rs`); editor mode of the GUI-subsystem binary checked by hand against Git for Windows. Console-only diff/merge tools are listed as a known limitation. The checkbox waits for the maintainer's confirmation on the next release candidate.
 
-### [ ] M6-17 Repository and branch pickers
+### [x] M6-17 Repository and branch pickers
 
 Finding of the maintainer (2026-11-09): the "repository" and "branch" pickers on the left of the toolbar still show "Not available yet" (disabled since M1). They stay (GitKraken layout) and open the existing palette lists.
 
@@ -295,6 +295,8 @@ Finding of the maintainer (2026-11-09): the "repository" and "branch" pickers on
 - CHANGELOG `[Unreleased]` → Fixed: "The repository and branch pickers in the toolbar open the recent repositories and the branch list."
 
 Acceptance: app tests: clicking each picker opens the palette in the right mode; disabled state with reason; `iced_test` toolbar snapshot unchanged apart from hover; the audit result is in the task note.
+
+Note (2026-11-09): done. The registry reason for "Checkout branch…" now also covers a missing Git and an operation in progress (`Guarded::Checkout`, "Cannot check out a branch while a rebase is in progress"; `git switch` refuses then), so the palette entry and the picker share it; a disabled picker shows its value muted like other disabled toolbar buttons. The `iced_test` toolbar render (`ui_check_toolbar_pickers`) is pixel-identical to `develop` in the enabled state; clicks were checked in the simulator (no renderer under Xvfb in the cloud session). Audit: the only other control in the running app with "Not available yet" is the Inline/Split toggle in the diff header (planned in M7-01 … M7-04); the Submodules header is out of scope.
 
 ### [ ] M6-18 Remotes in sync with the Git configuration
 
