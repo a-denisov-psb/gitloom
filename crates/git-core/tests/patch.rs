@@ -6,8 +6,8 @@ mod support;
 use std::collections::HashSet;
 
 use git_core::{
-    build_patch, CliBackend, DiffKind, DiffLineKind, DiffRequest, FileDiff, GitBackend, GitWriter,
-    GixBackend, PatchDirection,
+    build_patch, CliBackend, DiffContext, DiffKind, DiffLineKind, DiffRequest, FileDiff,
+    GitBackend, GitWriter, GixBackend, PatchDirection,
 };
 use support::TestRepo;
 
@@ -297,4 +297,89 @@ fn crlf_file_without_conversion() {
         .collect();
     apply(&repo, &diff, PatchDirection::Stage, &all);
     assert_eq!(index_content(&repo), "a\r\nB\r\nc\r\nd\r\n");
+}
+
+fn load_diff_with(repo: &TestRepo, kind: DiffKind, context: DiffContext) -> FileDiff {
+    GixBackend::discover(repo.path())
+        .unwrap()
+        .file_diff_with(
+            &DiffRequest {
+                kind,
+                path: PATH.into(),
+                old_path: None,
+            },
+            context,
+        )
+        .unwrap()
+}
+
+/// Positions `(hunk, line)` of the changed lines, in order.
+fn changed_lines(diff: &FileDiff) -> Vec<(usize, usize)> {
+    diff.hunks
+        .iter()
+        .enumerate()
+        .flat_map(|(h, hunk)| {
+            hunk.lines
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| l.kind != DiffLineKind::Context)
+                .map(move |(l, _)| (h, l))
+        })
+        .collect()
+}
+
+/// M7-02: a selection made in a full-context diff (Inline/Split) gives the
+/// same index as the same selection in the 3-line-context diff (Hunk view).
+#[test]
+fn full_context_selections_equal_hunk_selections() {
+    let mut rng = Rng(0x0f00_d1ff);
+    let mut cases = 0;
+    while cases < 30 {
+        let old = random_lines(&mut rng, 40);
+        let new = mutate(&mut rng, &old);
+        let old_text = join(&old, rng.below(4) != 0);
+        let new_text = join(&new, rng.below(4) != 0);
+        if old_text == new_text {
+            continue;
+        }
+        let unstage = rng.below(2) == 0;
+        let (kind, direction) = if unstage {
+            (DiffKind::Staged, PatchDirection::Unstage)
+        } else {
+            (DiffKind::Unstaged, PatchDirection::Stage)
+        };
+        let setup = || {
+            let repo = TestRepo::new();
+            repo.commit(PATH, &old_text, "Base");
+            repo.write(PATH, &new_text);
+            if unstage {
+                repo.git(&["add", PATH]);
+            }
+            repo
+        };
+        let (hunk_repo, full_repo) = (setup(), setup());
+        let hunk_diff = load_diff_with(&hunk_repo, kind.clone(), DiffContext::Hunks);
+        let full_diff = load_diff_with(&full_repo, kind, DiffContext::Full);
+        assert_eq!(full_diff.hunks.len(), 1);
+        let (hunk_lines, full_lines) = (changed_lines(&hunk_diff), changed_lines(&full_diff));
+        assert_eq!(hunk_lines.len(), full_lines.len());
+        // The same changed lines, picked by their position in the change list.
+        let picks: Vec<usize> = (0..hunk_lines.len())
+            .filter(|_| rng.below(2) == 0)
+            .collect();
+        if picks.is_empty() {
+            continue;
+        }
+        let selection = |lines: &[(usize, usize)]| -> HashSet<(usize, usize)> {
+            picks.iter().map(|&i| lines[i]).collect()
+        };
+        apply(&hunk_repo, &hunk_diff, direction, &selection(&hunk_lines));
+        apply(&full_repo, &full_diff, direction, &selection(&full_lines));
+        assert_eq!(
+            index_content(&full_repo),
+            index_content(&hunk_repo),
+            "old {old_text:?} new {new_text:?} unstage {unstage}"
+        );
+        cases += 1;
+    }
 }

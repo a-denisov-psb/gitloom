@@ -220,7 +220,11 @@ impl GitBackend for MockBackend {
         Ok(None)
     }
 
-    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
+    fn file_diff_with(
+        &self,
+        request: &DiffRequest,
+        _context: crate::DiffContext,
+    ) -> Result<FileDiff> {
         Ok(Self::sample_diff(request))
     }
 }

@@ -628,7 +628,11 @@ impl GitBackend for GixBackend {
         }
     }
 
-    fn file_diff(&self, request: &DiffRequest) -> Result<FileDiff> {
+    fn file_diff_with(
+        &self,
+        request: &DiffRequest,
+        context: crate::DiffContext,
+    ) -> Result<FileDiff> {
         let repo = self.local();
         let old_path = request.old_path.as_deref().unwrap_or(&request.path);
         let (old, new) = match &request.kind {
@@ -690,9 +694,10 @@ impl GitBackend for GixBackend {
                 too_large: true,
                 ..diff::TextDiff::default()
             },
-            _ => diff::text_diff(
+            _ => diff::text_diff_with(
                 old.as_ref().map_or(&[][..], Blob::bytes),
                 new.as_ref().map_or(&[][..], Blob::bytes),
+                context,
             ),
         };
         Ok(FileDiff {
