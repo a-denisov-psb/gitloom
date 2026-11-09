@@ -454,6 +454,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Status: accepted (M7 plan, 2026-11-06)
 - Decision: Git flow (initialize, start, finish for feature, release and hotfix) is implemented in Gitloom on top of the existing `GitWriter` operations; the `git-flow` CLI is neither required nor called. The configuration uses git-flow's keys (`gitflow.branch.master`, `gitflow.branch.develop`, `gitflow.prefix.feature|release|hotfix|versiontag`) in the repository config, so repositories initialized by the CLI, GitKraken or Gitloom are interchangeable; unknown `gitflow.*` keys are kept. A running finish is persisted in `.git/gitloom/gitflow-finish.json` and resumed after conflicts or a restart. Finish never pushes.
 - Why: GitKraken works without the CLI; the CLI is not installed everywhere (and differs between nvie and AVH editions); native steps get Gitloom's conflict handling, progress and undo.
+- Undo (M7-11, extends ADR-014): a finish is one undo entry recording every touched ref and the checked-out branch before and after; undo/redo move refs only (commits and the tag object stay) and refuse when a ref moved meanwhile.
 - Consequences: Gitloom's finish follows GitKraken's documented behavior, which may differ from a CLI edition in details (e.g. hotfix while a release branch exists); differences are listed in `docs/UX-PARITY.md`.
 
 ## ADR-038 Diff view modes
