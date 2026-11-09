@@ -101,6 +101,18 @@ App started on the generated repository (release build), sampled from
 | Off | 307 MB | 117 MB | no TCP socket at all (sampled every 50 ms) |
 | On (50 authors, all misses, cached) | 313 MB | 120 MB | requests to gravatar.com, 4 at a time |
 
+## M7: diff view modes (task M7-05)
+
+Cloud container (4 vCPU Intel Xeon @ 2.30 GHz, Linux), release build, no GPU: a frame is measured as building the view and laying it out with `iced_test` (what iced does per redraw before drawing). File: 50 000 lines, 1.95 MB, every 100th line changed (500 blocks).
+
+| Mode | Open (diff + rows) | Rows | Frame median | Frame max (60 positions over the file) |
+|---|---|---|---|---|
+| Hunk | 51 ms | 4 500 | 6.1 ms | 16.5 ms |
+| Inline | 45 ms | 51 000 | 6.3 ms | 18.7 ms |
+| Split | 43 ms | 50 500 | 8.4 ms | 10.8 ms |
+
+Target (milestone acceptance): no frame over 50 ms while scrolling a 2 MB file in Inline and Split; met. The row list is built once per load; a frame builds only the visible rows plus overscan, and the change navigation scans the block list only. No hot spot needed a fix. How: `cargo test -p gitloom --release --bin gitloom perf_large_diff_modes -- --ignored --nocapture`.
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |
