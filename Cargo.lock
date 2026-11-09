@@ -1537,6 +1537,8 @@ name = "git-core"
 version = "1.0.0-rc.2"
 dependencies = [
  "gix",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

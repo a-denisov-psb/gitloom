@@ -132,6 +132,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Deviation | Reason |
 |---|---|
+| A hotfix finished while a release branch exists is merged into the development branch | GitKraken's documentation; the `git-flow` CLI merges into the release branch instead (M7-09, GitKraken check open) |
 | Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
 | Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow in M9; until then the message stays readable on wide graphs |

@@ -149,12 +149,30 @@ pub fn rebase_blocked(stderr: &str) -> bool {
         || merge_blocked(stderr)
 }
 
+/// Merges `rev` into HEAD always with a merge commit (`git merge --no-ff`),
+/// Git's default message (Git flow finish, M7-09).
+pub fn merge_no_ff(git: &dyn GitWriter, rev: &str) -> Result<MergeOutcome> {
+    match git.run(
+        &["merge", "--no-ff", short_branch(rev)],
+        RunOptions::default(),
+    ) {
+        Ok(_) => Ok(MergeOutcome::Done),
+        Err(error) => {
+            if merge_in_progress(git)? {
+                Ok(MergeOutcome::Conflicts)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
 /// True if a merge stopped and waits for its conclusion.
-fn merge_in_progress(git: &dyn GitWriter) -> Result<bool> {
+pub(crate) fn merge_in_progress(git: &dyn GitWriter) -> Result<bool> {
     pseudo_ref_exists(git, "MERGE_HEAD")
 }
 
-fn pseudo_ref_exists(git: &dyn GitWriter, name: &str) -> Result<bool> {
+pub(crate) fn pseudo_ref_exists(git: &dyn GitWriter, name: &str) -> Result<bool> {
     let read = RunOptions {
         read_only: true,
         ..RunOptions::default()

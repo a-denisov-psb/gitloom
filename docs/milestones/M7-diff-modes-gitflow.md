@@ -196,7 +196,7 @@ Acceptance: tests for validation; initialize, edit and remove in a test repo upd
 
 Acceptance: `iced_test` snapshot of the section; tests for start from all entry points; undo removes the started branch and returns to the previous branch.
 
-### [ ] M7-09 Finish engine (git-core)
+### [x] M7-09 Finish engine (git-core)
 
 - `merge` gains a `no_ff` option (`--no-ff`); everything else reuses existing operations.
 - `FlowFinish` plan: list of steps (rebase, checkout, merge, tag, delete) built from the type, options and config; executor runs steps in order, persists the plan with the index of the next step in `.git/gitloom/gitflow-finish.json`, stops on conflicts (`MergeOutcome::Conflicts`) and resumes from the saved step; removes the file when done or aborted.
@@ -204,6 +204,8 @@ Acceptance: `iced_test` snapshot of the section; tests for start from all entry 
 - Preconditions as in the decisions table, returned as typed errors.
 
 Acceptance: integration tests for feature/release/hotfix finish (with and without delete, with rebase) compared with the result of `git flow … finish` where the CLI is available (otherwise against hand-written expected history); conflict in the first and in the second merge of a release finish, resume after resolution and after a simulated restart; abort.
+
+Note (2026-11-09): done. `git_core::merge_no_ff` and `git_core::flow_finish` (`plan`, `problem`, `start`, `resume`, `pending`, `abort`). A step that stops with conflicts counts as started (the user concludes it), so `next` points after it; `resume` waits while the operation is still in progress. Abort aborts a stopped merge/rebase and lists the steps done before it; later steps are not undone (that is undo's job, M7-11). Preconditions as `FinishProblem` (local changes to tracked files, operation in progress, another finish running, missing branch, tag exists/empty); untracked files do not block. Hotfix with an open release branch: no GitKraken answer, so the hotfix is merged into development (GitKraken's documentation), noted in UX-PARITY. The `git-flow` CLI is not in CI; tests compare with the history `git flow … finish` produces (merge parents, Git's default merge message, annotated tag on the production merge, deleted branch). git-core gains `serde`/`serde_json` (same versions as the app) for the plan file.
 
 ### [ ] M7-10 Finish UI, conflicts and resume
 

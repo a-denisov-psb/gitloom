@@ -14,6 +14,7 @@ mod editor;
 mod external_tools;
 mod file_history;
 pub mod flow;
+pub mod flow_finish;
 mod gix_backend;
 mod history;
 mod history_ops;
@@ -63,8 +64,8 @@ pub use history_ops::{
 };
 pub use identity::{ASKPASS_ENV, EDITOR_DIR_ENV, EDITOR_ENV};
 pub use merge::{
-    fast_forward_branch, fast_forward_head, merge, merge_blocked, rebase, rebase_blocked,
-    rebase_commits, rebase_interactive, MergeOutcome,
+    fast_forward_branch, fast_forward_head, merge, merge_blocked, merge_no_ff, rebase,
+    rebase_blocked, rebase_commits, rebase_interactive, MergeOutcome,
 };
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
