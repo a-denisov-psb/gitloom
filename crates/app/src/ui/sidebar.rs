@@ -89,7 +89,11 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             "REMOTE",
             groups.remote_count.label(hide_active),
             remote,
-            Some((Icon::Plus, "Add remote", Message::AddRemoteStart)),
+            Some((
+                Icon::Plus,
+                "Add remote",
+                HeaderAction::Press(Message::AddRemoteStart)
+            )),
         ),
         section(repo, Section::Tags, "TAGS", tags.len().to_string(), tags),
         section(
@@ -99,9 +103,14 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             stashes.len().to_string(),
             stashes
         ),
-        submodules(),
     ]
     .spacing(6);
+    // GITFLOW between STASHES and SUBMODULES, only when initialized.
+    let sections = match &repo.snapshot.flow {
+        Some(config) => sections.push(gitflow(repo, config, &needle)),
+        None => sections,
+    }
+    .push(submodules());
 
     let filter = text_input("Filter", &repo.filter)
         .id(crate::app::FILTER_INPUT)
@@ -143,7 +152,7 @@ fn section_with_action<'a>(
     title: &'a str,
     count: String,
     items: Vec<Element<'a, Message>>,
-    action: Option<(Icon, &'a str, Message)>,
+    action: Option<(Icon, &'a str, HeaderAction)>,
 ) -> Element<'a, Message> {
     let collapsed = repo.collapsed.contains(&section);
     let arrow = if collapsed {
@@ -156,6 +165,7 @@ fn section_with_action<'a>(
         Section::Remote => Icon::Cloud,
         Section::Tags => Icon::Tag,
         Section::Stashes => Icon::Stash,
+        Section::Gitflow => Icon::Merge,
         Section::Submodules => Icon::Package,
     };
 
@@ -167,16 +177,34 @@ fn section_with_action<'a>(
     ]
     .spacing(6)
     .align_y(iced::Center);
-    if let Some((icon, tip, message)) = action {
+    if let Some((icon, tip, action)) = action {
         let writable = repo.write_block.is_none() && repo.busy.is_none();
-        line = line.push(crate::ui::panel::with_tooltip_text(
-            button(icons::button_icon(icon, 13.0, writable))
+        let control: Element<'a, Message> = match action {
+            HeaderAction::Press(message) => button(icons::button_icon(icon, 13.0, writable))
                 .on_press_maybe(writable.then_some(message))
                 .padding([1, 5])
                 .style(theme::flat)
                 .into(),
-            tip.to_owned(),
-        ));
+            // Green "+" opening a menu at the pointer (GITFLOW, M7-08).
+            HeaderAction::Menu(menu) => {
+                let plus = container(if writable {
+                    icons::tinted(icon, 14.0, |p| p.success)
+                } else {
+                    icons::button_icon(icon, 14.0, false)
+                })
+                .padding([1, 5]);
+                if writable {
+                    crate::ui::context_area::click_area(
+                        iced::widget::mouse_area(plus)
+                            .interaction(iced::mouse::Interaction::Pointer),
+                        menu,
+                    )
+                } else {
+                    plus.into()
+                }
+            }
+        };
+        line = line.push(crate::ui::panel::with_tooltip_text(control, tip.to_owned()));
     }
     line = line.push(text(count).size(11));
     let header = button(line)
@@ -190,6 +218,75 @@ fn section_with_action<'a>(
     } else {
         column![header].extend(items).into()
     }
+}
+
+/// Small control in a section header: a button, or a menu at the pointer.
+enum HeaderAction {
+    Press(Message),
+    Menu(fn(iced::Point) -> Message),
+}
+
+/// GITFLOW section (M7-08): Features / Releases / Hotfixes with the branch
+/// names without prefix; the same rows as LOCAL; a green "+" starts one.
+fn gitflow<'a>(
+    repo: &'a RepoView,
+    config: &git_core::FlowConfig,
+    needle: &str,
+) -> Element<'a, Message> {
+    let filtering = !needle.is_empty();
+    let mut items = Vec::new();
+    let mut count = 0;
+    for (kind, title) in [
+        (git_core::FlowKind::Feature, "Features"),
+        (git_core::FlowKind::Release, "Releases"),
+        (git_core::FlowKind::Hotfix, "Hotfixes"),
+    ] {
+        let branches: Vec<(&Reference, String)> = repo
+            .snapshot
+            .refs
+            .iter()
+            .filter(|r| r.kind == RefKind::LocalBranch)
+            .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(needle))
+            .filter_map(|r| {
+                config
+                    .classify(&r.name)
+                    .filter(|b| b.kind == kind)
+                    .map(|b| (r, b.name))
+            })
+            .collect();
+        count += branches.len();
+        // Like GitKraken: a group is listed only when it has branches.
+        if branches.is_empty() {
+            continue;
+        }
+        let key = format!("gitflow:{}", kind.noun());
+        let expanded = filtering || !repo.folders_collapsed.contains(&key);
+        items.push(folder_row(
+            format!("{title} ({})", branches.len()),
+            key,
+            expanded,
+            1,
+        ));
+        if expanded {
+            items.extend(
+                branches
+                    .into_iter()
+                    .map(|(reference, name)| ref_item(repo, reference, name, 2)),
+            );
+        }
+    }
+    section_with_action(
+        repo,
+        Section::Gitflow,
+        "GITFLOW",
+        count.to_string(),
+        items,
+        Some((
+            Icon::Plus,
+            "Start a feature, release or hotfix",
+            HeaderAction::Menu(Message::FlowStartMenu),
+        )),
+    )
 }
 
 /// Submodules are listed from M2 on; the header stays visible but inactive.

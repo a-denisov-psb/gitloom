@@ -89,6 +89,8 @@ pub enum ActionId {
     DiffView(crate::settings::DiffMode),
     /// Opens Preferences → Gitflow (M7-07).
     InitializeGitflow,
+    /// Start feature / release / hotfix (M7-08).
+    FlowStart(git_core::FlowKind),
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -672,6 +674,15 @@ fn table() -> Vec<Action> {
         Global,
         &[],
     );
+    for kind in git_core::FlowKind::ALL {
+        add(
+            A::FlowStart(kind),
+            &format!("Start {}", kind.noun()),
+            RepoActions,
+            Global,
+            &[],
+        );
+    }
 
     // Interface
     for mode in crate::settings::DiffMode::ALL {
@@ -813,6 +824,7 @@ fn table() -> Vec<Action> {
                 | A::OpenFileManager
                 | A::ExternalDiff
                 | A::InitializeGitflow
+                | A::FlowStart(_)
         ) {
             action.requires = Requires::Repository;
         }

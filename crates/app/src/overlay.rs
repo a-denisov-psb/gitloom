@@ -228,6 +228,11 @@ pub enum FormAction {
     },
     /// Add a remote (name, URL).
     AddRemote { tab: crate::app::TabId },
+    /// Start a Git flow branch of `kind` (name field; M7-08).
+    StartFlow {
+        tab: crate::app::TabId,
+        kind: git_core::FlowKind,
+    },
     /// Change the URL of remote `name`.
     SetRemoteUrl {
         tab: crate::app::TabId,

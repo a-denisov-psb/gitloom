@@ -180,6 +180,10 @@ pub enum Message {
     FlowSave,
     /// "Remove Gitflow" (asks first).
     FlowRemove,
+    /// Green "+" of the GITFLOW section: menu of the start actions (M7-08).
+    FlowStartMenu(iced::Point),
+    /// Start feature / release / hotfix: opens the name dialog.
+    FlowStartRequested(git_core::FlowKind),
     FlowRemoveConfirmed,
     /// Click on a branch folder or remote in the left panel (M7-14); the
     /// key is [`crate::branch_tree::folder_key`].
@@ -1236,7 +1240,26 @@ impl App {
         }
         let start = input.start.clone();
         let label = format!("Create branch {name}");
-        let task = self.run_undoable(tab, label, move |git| {
+        let task = self.create_and_switch(tab, name, start, label);
+        if let Some(view) = self.active_view_mut() {
+            let running = view.busy.is_some();
+            if let Some(input) = view.new_branch.as_mut() {
+                input.submitted = running;
+            }
+        }
+        task
+    }
+
+    /// Creates branch `name` at `start` and checks it out, undoable (undo
+    /// deletes it and returns to the previous branch).
+    fn create_and_switch(
+        &mut self,
+        tab: TabId,
+        name: String,
+        start: String,
+        label: String,
+    ) -> Task<Message> {
+        self.run_undoable(tab, label, move |git| {
             let from = git_core::head_position(git)?;
             git.create_branch(&name, &start)?;
             Ok(from.map(|from| {
@@ -1246,14 +1269,7 @@ impl App {
                     from,
                 }))
             }))
-        });
-        if let Some(view) = self.active_view_mut() {
-            let running = view.busy.is_some();
-            if let Some(input) = view.new_branch.as_mut() {
-                input.submitted = running;
-            }
-        }
-        task
+        })
     }
 
     /// Checks out `target` in the active tab; `stash_first` stashes local
@@ -1532,6 +1548,19 @@ impl App {
         let Some(action) = self.form.as_ref().map(|f| f.action.clone()) else {
             return Task::none();
         };
+        // Git flow start: configuration, existing branches, operation state.
+        let flow_start = match &action {
+            FormAction::StartFlow { tab, .. } => {
+                self.tab_mut(*tab).and_then(|t| t.view()).map(|v| {
+                    (
+                        v.snapshot.flow.clone(),
+                        local_branch_names(&v.snapshot),
+                        v.state_block(Guarded::Checkout),
+                    )
+                })
+            }
+            _ => None,
+        };
         let remotes: Vec<String> = match &action {
             FormAction::AddRemote { tab } | FormAction::RenameRemote { tab, .. } => self
                 .tab_mut(*tab)
@@ -1576,6 +1605,36 @@ impl App {
                 self.run_write(tab, format!("Edit URL of {name}"), move |git| {
                     git.set_remote_url(&name, &url)
                 })
+            }
+            FormAction::StartFlow { tab, kind } => {
+                let Some((Some(config), names, blocked)) = flow_start else {
+                    self.form = None;
+                    return Task::none();
+                };
+                let name = form.value(0).to_owned();
+                let full = config.branch_name(kind, &name);
+                let base = match kind {
+                    git_core::FlowKind::Feature | git_core::FlowKind::Release => {
+                        config.development.clone()
+                    }
+                    git_core::FlowKind::Hotfix => config.production.clone(),
+                };
+                let problem = if name.is_empty() {
+                    Some(format!("Enter a {} name", kind.noun()))
+                } else if let Some(reason) = blocked {
+                    Some(reason)
+                } else if !names.contains(&base) {
+                    Some(format!("The branch {base} does not exist"))
+                } else {
+                    branch_name_problem(&full, &names)
+                };
+                if let Some(problem) = problem {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                self.form = None;
+                let label = format!("Start {} {name}", kind.noun());
+                self.create_and_switch(tab, full, base, label)
             }
             FormAction::RenameRemote { tab, old } => {
                 let new = form.value(0).to_owned();
@@ -2215,6 +2274,7 @@ impl App {
             Shortcut::Settings => return self.open_settings(),
             Shortcut::About => return self.update(Message::AboutOpened),
             Shortcut::DiffView(mode) => return self.update(Message::DiffModeChanged(mode)),
+            Shortcut::FlowStart(kind) => return self.update(Message::FlowStartRequested(kind)),
             Shortcut::InitializeGitflow => {
                 return self.update(Message::SettingsOpenedAt(settings::Category::Gitflow))
             }
@@ -3298,6 +3358,12 @@ impl App {
                 return Some("Open a repository first".to_owned());
             }
             _ => {}
+        }
+        if let Shortcut::FlowStart(_) = id {
+            let view = self.active_tab().and_then(Tab::view)?;
+            if view.snapshot.flow.is_none() {
+                return Some("Initialize Gitflow first (Preferences → Gitflow)".to_owned());
+            }
         }
         if id == Shortcut::CheckoutBranch {
             let view = self.active_tab().and_then(Tab::view)?;
@@ -4966,6 +5032,28 @@ impl App {
                     }
                     git_core::RefKind::Tag => crate::menus::tag(&name, writable),
                 };
+                // Git flow: start entries on the development/production branch.
+                let mut entries = entries;
+                if let (git_core::RefKind::LocalBranch, Some(config)) = (kind, &view.snapshot.flow)
+                {
+                    let kinds: &[git_core::FlowKind] = if name == config.development {
+                        &[git_core::FlowKind::Feature, git_core::FlowKind::Release]
+                    } else if name == config.production {
+                        &[git_core::FlowKind::Hotfix]
+                    } else {
+                        &[]
+                    };
+                    if !kinds.is_empty() {
+                        entries.push(MenuEntry::Separator);
+                        entries.extend(kinds.iter().map(|&kind| MenuEntry::Item {
+                            hint: None,
+                            label: format!("Start {}", kind.noun()),
+                            shortcut: None,
+                            enabled: writable,
+                            message: Box::new(Message::FlowStartRequested(kind)),
+                        }));
+                    }
+                }
                 self.context_menu = Some(ContextMenu::new(position, entries));
             }
             Message::RenameStart(old) => {
@@ -5620,6 +5708,46 @@ impl App {
                         git_core::flow::init(git, &config)
                     })
                 };
+            }
+            Message::FlowStartMenu(position) => {
+                let writable = self.write_block().is_none();
+                let entries = git_core::FlowKind::ALL
+                    .into_iter()
+                    .map(|kind| MenuEntry::Item {
+                        hint: None,
+                        label: format!("Start {}", kind.noun()),
+                        shortcut: None,
+                        enabled: writable,
+                        message: Box::new(Message::FlowStartRequested(kind)),
+                    })
+                    .collect();
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::FlowStartRequested(kind) => {
+                let Some((tab, config)) = self.active_tab().and_then(|t| {
+                    t.view()
+                        .and_then(|v| v.snapshot.flow.clone())
+                        .map(|c| (t.id, c))
+                }) else {
+                    return Task::none();
+                };
+                let (field, base) = match kind {
+                    git_core::FlowKind::Feature => ("Feature name", &config.development),
+                    git_core::FlowKind::Release => ("Release version", &config.development),
+                    git_core::FlowKind::Hotfix => ("Hotfix version", &config.production),
+                };
+                self.form = Some(Form {
+                    title: format!("Start {}", kind.noun()),
+                    text: format!(
+                        "Creates {} from {base} and checks it out.",
+                        config.branch_name(kind, "<name>")
+                    ),
+                    fields: vec![FormField::text(field, "")],
+                    submit: format!("Start {}", kind.noun()),
+                    action: FormAction::StartFlow { tab, kind },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
             }
             Message::FlowRemove => {
                 self.modal = Some(Modal::confirm(
@@ -8616,6 +8744,128 @@ pub(crate) mod tests {
         view.snapshot = Arc::new(snapshot);
         let _ = app_remove.update(Message::FlowRemove);
         assert_eq!(app_remove.modal.as_ref().unwrap().title, "Remove Gitflow");
+    }
+
+    /// `checkout_app` (main checked out, topic, origin/…) with Git flow
+    /// initialized, develop and feature/login (M7-08).
+    pub(crate) fn flow_app() -> App {
+        let mut app = checkout_app();
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for name in [
+            "develop",
+            "feature/login",
+            "feature/ui/toolbar",
+            "release/1.2.0",
+        ] {
+            snapshot.refs.push(git_core::Reference {
+                name: name.into(),
+                kind: git_core::RefKind::LocalBranch,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        snapshot.flow = Some(git_core::FlowConfig::defaults(&["main"]));
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    fn submit_start(app: &mut App, name: &str) -> Option<String> {
+        form_input(app, 0, name);
+        let _ = app.update(Message::FormSubmit);
+        app.form.as_ref().and_then(|f| f.error.clone())
+    }
+
+    #[test]
+    fn gitflow_start_from_every_entry_point() {
+        // Palette.
+        let mut app = flow_app();
+        let _ = app.update(checked(
+            Shortcut::FlowStart(git_core::FlowKind::Feature),
+            false,
+        ));
+        assert_eq!(app.form.as_ref().unwrap().title, "Start feature");
+        assert_eq!(
+            submit_start(&mut app, ""),
+            Some("Enter a feature name".into())
+        );
+        assert!(submit_start(&mut app, "login")
+            .unwrap()
+            .contains("already exists"));
+        assert!(submit_start(&mut app, "bad name").is_some());
+        assert_eq!(submit_start(&mut app, "search"), None);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Start feature search"]);
+
+        // The green "+" menu.
+        let mut app = flow_app();
+        let _ = app.update(Message::FlowStartMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(
+            menu.select(1),
+            Some(Message::FlowStartRequested(git_core::FlowKind::Release))
+        ));
+
+        // Branch menus: develop starts features and releases, main hotfixes.
+        let mut app = flow_app();
+        let starts = |app: &mut App, name: &str| -> Vec<String> {
+            let _ = app.update(Message::BranchContextMenu {
+                name: name.into(),
+                kind: git_core::RefKind::LocalBranch,
+                position: iced::Point::ORIGIN,
+            });
+            app.context_menu
+                .take()
+                .unwrap()
+                .entries
+                .iter()
+                .filter_map(|e| match e {
+                    MenuEntry::Item { label, .. } if label.starts_with("Start ") => {
+                        Some(label.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            starts(&mut app, "develop"),
+            ["Start feature", "Start release"]
+        );
+        assert_eq!(starts(&mut app, "main"), ["Start hotfix"]);
+        assert!(starts(&mut app, "topic").is_empty());
+
+        // A hotfix starts from main.
+        let _ = app.update(Message::FlowStartRequested(git_core::FlowKind::Hotfix));
+        assert!(app.form.as_ref().unwrap().text.contains("from main"));
+        assert_eq!(submit_start(&mut app, "1.2.1"), None);
+        assert_eq!(running_args(&app), ["Start hotfix 1.2.1"]);
+    }
+
+    #[test]
+    fn gitflow_start_is_blocked_by_an_operation_and_without_gitflow() {
+        let mut app = flow_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.state = git_core::RepoState::Merging {
+            merge_head: "x".into(),
+        };
+        view.snapshot = Arc::new(snapshot);
+        let _ = app.update(Message::FlowStartRequested(git_core::FlowKind::Feature));
+        assert!(submit_start(&mut app, "x")
+            .unwrap()
+            .contains("merge is in progress"));
+
+        let app = checkout_app();
+        assert_eq!(
+            app.action_block(Shortcut::FlowStart(git_core::FlowKind::Feature))
+                .as_deref(),
+            Some("Initialize Gitflow first (Preferences → Gitflow)")
+        );
     }
 
     #[test]
