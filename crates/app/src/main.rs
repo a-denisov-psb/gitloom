@@ -1,3 +1,9 @@
+// Release builds on Windows use the GUI subsystem, so no console window opens
+// next to Gitloom and a terminal returns to the prompt right away (M6-16).
+// Debug builds keep the console for panics and logs. Helper modes (askpass,
+// Git editor) still use the stdio handles Git passes in.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod about;
 mod actions;
 mod app;

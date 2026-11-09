@@ -20,7 +20,7 @@ Another Git process (an IDE, a terminal, a crashed tool) holds `index.lock` or a
 
 ## External tools
 
-- **Diff and merge tools** come from Git (`git difftool --tool-help`). If none is configured, choose one in Preferences → External tools. Gitloom waits for the tool and refreshes when it closes.
+- **Diff and merge tools** come from Git (`git difftool --tool-help`). If none is configured, choose one in Preferences → External tools. Gitloom waits for the tool and refreshes when it closes. Only graphical tools work; terminal tools such as `vimdiff` get no window.
 - **Terminal (Alt+T):** if no terminal is found or the wrong one opens, set a command in Preferences → External tools, e.g. `wt -d {path}` (Windows Terminal), `open -a iTerm {path}` (macOS) or `konsole --workdir {path}` (Linux).
 
 ## The folder dialog does not open (Linux)

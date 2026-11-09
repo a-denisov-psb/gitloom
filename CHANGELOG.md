@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: no console window opens next to Gitloom.
+
 ## [1.0.0-rc.1] - 2026-11-06
 
 First release candidate of Gitloom 1.0: installers for Linux, macOS and Windows, a new license (GPL-3.0-or-later), crash reports, an opt-in update check, an accessibility pass and a user guide.
