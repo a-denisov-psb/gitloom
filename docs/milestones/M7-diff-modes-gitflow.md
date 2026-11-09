@@ -136,7 +136,7 @@ Acceptance: unit tests for the cases above; an integration test stages a selecti
 
 Note (2026-11-09): done before M7-01, which needs it to re-request diffs. The context is a parameter of the new `GitBackend::file_diff_with(request, context)` (`file_diff` = `DiffContext::Hunks`) instead of a field of `DiffRequest`, so the request stays the identity of the shown file across mode switches. `text_diff_with(old, new, context)`: `Full` uses the length of the longer file as context, so every change lands in one hunk; binary, size limit, CRLF, missing newline, added/deleted files and the filter pipeline are shared. `tests/patch.rs` stages and unstages 30 random selections through both contexts and compares the index.
 
-### [ ] M7-03 Inline view
+### [x] M7-03 Inline view
 
 - Renderer for Inline: the full file with old/new line numbers, markers and the same colors as Hunk mode; virtualized rows (same approach as today) so large files scroll smoothly.
 - Change blocks: computed in the app from the full-context hunk (changes whose 3-line contexts touch, same rule as `text_diff`); each block gets a slim bar with "Stage block" / "Unstage block" / "Discard block" (discard asks for confirmation like a hunk, see UX-PARITY deviations); the actions build a line selection of the block and use the existing line path.
@@ -145,6 +145,8 @@ Note (2026-11-09): done before M7-01, which needs it to re-request diffs. The co
 - After staging, the diff reloads and keeps the scroll position near the acted-on block.
 
 Acceptance: stage/unstage/discard by block and by line in a test repo (incl. CRLF and a file without trailing newline) give the same results as in Hunk mode; `iced_test` snapshot of an Inline diff in both themes.
+
+Note (2026-11-09): done. Diff rows are typed (`DiffRow::Header/Line/Block`); the layout comes from the mode when the diff loaded (Split uses the Inline layout until M7-04). Blocks (`crate::diff_blocks`) use the hunk rule of `text_diff` (at most 6 unchanged lines between changes); the bar sits right above a block's first changed line, same row height as lines so the virtualization stays exact. Block actions pass the block's lines to the existing line path (`apply_diff_lines`, `discard_diff_lines`); discard asks "Discard block". Jumps keep 3 rows above the bar and stop where scrolling ends; opening a file or switching the mode jumps to the first change, reloads after staging keep the scroll position (same scrollable id). Tests: blocks equal hunks of the Hunk view; in real repositories (LF, CRLF, no trailing newline) stage/unstage/discard by block equals the hunk action and a line selection gives the same index as in Hunk mode; `ui_check_inline_diff` in both themes.
 
 ### [ ] M7-04 Split view
 
