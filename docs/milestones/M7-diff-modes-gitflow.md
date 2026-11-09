@@ -124,13 +124,15 @@ Note (2026-11-09): done. Tree model `crates/app/src/branch_tree.rs` (pure, unit-
 
 Acceptance: the mode survives a restart; Hunk mode looks and behaves exactly as before (existing `iced_test` snapshots unchanged); unit test for loading old settings.
 
-### [ ] M7-02 Full-context diffs in git-core
+### [x] M7-02 Full-context diffs in git-core
 
 - `DiffContext { Hunks, Full }` passed from the diff request down to `text_diff` (e.g. `text_diff_with(old, new, context)`); `Full` yields one hunk spanning the whole file with correct `old_start`/`new_start`/counts and header, or no hunk for identical content.
 - Same handling as today for binary, `too_large`, CRLF, missing trailing newline, added/deleted/renamed files, partial clone fetch and the filter pipeline (ADR-018).
 - `build_patch` accepts selections inside a full-context hunk; the resulting patch applies with `git apply --cached` (and `--reverse` for unstaging) exactly like a 3-line-context patch.
 
 Acceptance: unit tests for the cases above; an integration test stages a selection from a full-context diff and compares the index with the same selection applied via a 3-line-context diff; Hunk mode output unchanged (existing tests green).
+
+Note (2026-11-09): done before M7-01, which needs it to re-request diffs. The context is a parameter of the new `GitBackend::file_diff_with(request, context)` (`file_diff` = `DiffContext::Hunks`) instead of a field of `DiffRequest`, so the request stays the identity of the shown file across mode switches. `text_diff_with(old, new, context)`: `Full` uses the length of the longer file as context, so every change lands in one hunk; binary, size limit, CRLF, missing newline, added/deleted files and the filter pipeline are shared. `tests/patch.rs` stages and unstages 30 random selections through both contexts and compares the index.
 
 ### [ ] M7-03 Inline view
 
