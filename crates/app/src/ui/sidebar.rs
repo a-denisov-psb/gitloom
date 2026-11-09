@@ -92,7 +92,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             Some((
                 Icon::Plus,
                 "Add remote",
-                HeaderAction::Press(Message::AddRemoteStart)
+                HeaderAction::Press(Box::new(Message::AddRemoteStart))
             )),
         ),
         section(repo, Section::Tags, "TAGS", tags.len().to_string(), tags),
@@ -181,7 +181,7 @@ fn section_with_action<'a>(
         let writable = repo.write_block.is_none() && repo.busy.is_none();
         let control: Element<'a, Message> = match action {
             HeaderAction::Press(message) => button(icons::button_icon(icon, 13.0, writable))
-                .on_press_maybe(writable.then_some(message))
+                .on_press_maybe(writable.then_some(*message))
                 .padding([1, 5])
                 .style(theme::flat)
                 .into(),
@@ -222,7 +222,7 @@ fn section_with_action<'a>(
 
 /// Small control in a section header: a button, or a menu at the pointer.
 enum HeaderAction {
-    Press(Message),
+    Press(Box<Message>),
     Menu(fn(iced::Point) -> Message),
 }
 

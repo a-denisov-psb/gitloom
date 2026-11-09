@@ -8050,6 +8050,8 @@ pub(crate) mod tests {
         let blocked: Vec<&str> = crate::actions::registry()
             .iter()
             .filter(|a| a.context != crate::actions::Context::RebasePanel)
+            // Starting a Git flow branch needs Git flow (M7-08).
+            .filter(|a| !matches!(a.id, Shortcut::FlowStart(_)))
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
