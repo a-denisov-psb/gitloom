@@ -26,7 +26,7 @@ Gitloom remembers the open tabs, the active tab and the pane sizes and restores 
 |---|---|
 | Tabs (top) | One tab per repository; **+** or Ctrl+T opens a new tab, Ctrl+W closes it, Ctrl+Tab / Ctrl+1…9 switch |
 | Toolbar | Repository and branch, Undo/Redo, Pull/Push, Branch, Stash/Pop, Terminal, Preferences (gear) |
-| Left panel | Local branches, remote branches per remote, tags, stashes, submodules; filter on top (Ctrl+Alt+F); Ctrl+J hides it |
+| Left panel | Local branches (in folders), remote branches per remote, tags, stashes, Git flow (when set up), submodules; filter on top (Ctrl+Alt+F); Ctrl+J hides it |
 | Graph | All commits with the lane graph, branch and tag pills, the "WIP" row for your uncommitted changes |
 | Right panel | Details of the selected commit, or the staging area when the WIP row is selected; Ctrl+K hides it |
 | Status bar | Messages, running operations (with Cancel), notices |

@@ -8,6 +8,7 @@ Gitloom is a native Git client with the layout, interactions and keyboard shortc
 | [Coming from GitKraken](coming-from-gitkraken.md) | What is the same, what is different, shortcuts |
 | [Daily workflow](daily-workflow.md) | Graph, diffs, staging, committing, stashing, search, file history |
 | [Branches and remotes](branches-and-remotes.md) | Checkout, branches, tags, fetch, pull, push, remotes |
+| [Git flow](git-flow.md) | Set up Git flow, start and finish features, releases and hotfixes |
 | [Merge, rebase and conflicts](merge-rebase-conflicts.md) | Merge, rebase, interactive rebase, cherry-pick, revert, reset, conflicts |
 | [Undo and redo](undo.md) | What can be undone and when |
 | [Settings](settings.md) | Preferences, themes, zoom, external tools, files on disk |

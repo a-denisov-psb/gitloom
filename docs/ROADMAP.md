@@ -4,7 +4,7 @@
 
 **M6 – Release readiness (1.0)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md) (maintainer steps open; 1.0 line on `master`, ADR-039)
 
-**M7 – Left panel tree, diff view modes and Git flow (1.1)** → [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md) (in progress on `develop` since 2026-11-09)
+**M7 – Left panel tree, diff view modes and Git flow (1.1)** → [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md) (implemented on `develop`; release 1.1.0 follows 1.0.0)
 
 ## Vision
 
@@ -21,7 +21,7 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M4 | 0.5.0 | Merge, rebase, conflicts, undo | Done |
 | M5 | 0.6.0 | Productivity parity | Done |
 | M6 | 1.0.0 | Release readiness | In progress (maintainer steps open) |
-| M7 | 1.1.0 | Left panel tree, diff view modes and Git flow | In progress |
+| M7 | 1.1.0 | Left panel tree, diff view modes and Git flow | Implemented, release after 1.0.0 |
 | M8 | 1.2.0 | Repository settings and tools | Outline |
 | M9 | 1.3.0 | Graph columns, themes and syntax highlighting | Outline |
 
