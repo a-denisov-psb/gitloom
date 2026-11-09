@@ -95,6 +95,8 @@ pub enum Guarded {
     Merge,
     /// Reset HEAD to another commit.
     Reset,
+    /// Switch to another branch (`git switch` refuses during an operation).
+    Checkout,
 }
 
 /// How a line click changes the selection.
@@ -481,7 +483,8 @@ impl RepoView {
             | Guarded::Stash
             | Guarded::MoveHead
             | Guarded::Merge
-            | Guarded::Reset => true,
+            | Guarded::Reset
+            | Guarded::Checkout => true,
         };
         blocked.then(|| {
             let verb = match action {
@@ -491,6 +494,7 @@ impl RepoView {
                 Guarded::MoveHead => "undo or redo commits",
                 Guarded::Merge => "merge",
                 Guarded::Reset => "reset",
+                Guarded::Checkout => "check out a branch",
             };
             format!("Cannot {verb} while a {operation} is in progress")
         })

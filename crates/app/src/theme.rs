@@ -439,7 +439,8 @@ pub fn picker(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
     match status {
         button::Status::Hovered | button::Status::Pressed => button_style(Some(p.bg_hover), p.text),
-        _ => button_style(None, p.text),
+        button::Status::Disabled => button_style(None, p.text_muted),
+        button::Status::Active => button_style(None, p.text),
     }
 }
 

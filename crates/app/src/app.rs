@@ -309,6 +309,8 @@ pub enum Message {
     Retry(TabId),
     Refresh,
     Shortcut(Shortcut),
+    /// Click on a toolbar picker: runs its palette action (M6-17).
+    PickerClicked(Shortcut),
     SettingsLoaded(settings::Loaded),
     /// The status bar message number `seq` may disappear now.
     StatusExpired(u64),
@@ -3176,6 +3178,15 @@ impl App {
             }
             _ => {}
         }
+        if id == Shortcut::CheckoutBranch {
+            let view = self.active_tab().and_then(Tab::view)?;
+            if let Some(reason) = &view.write_block {
+                return Some(reason.clone());
+            }
+            if let Some(reason) = view.state_block(Guarded::Checkout) {
+                return Some(reason);
+            }
+        }
         let in_rebase_panel = self
             .active_tab()
             .and_then(Tab::view)
@@ -5876,6 +5887,12 @@ impl App {
                     Some(path) => self.open_in_tab(id, path),
                     None => self.refresh(id),
                 };
+            }
+            Message::PickerClicked(id) => {
+                if self.action_block(id).is_none() {
+                    self.palette = None;
+                    return self.shortcut(id);
+                }
             }
             Message::Shortcut(shortcut) if shortcut.works_in_text_input() => {
                 return self.shortcut(shortcut)
@@ -11068,6 +11085,64 @@ pub(crate) mod tests {
         let _ = app.update(Message::PaletteRun(0));
         assert!(app.palette.is_none());
         assert_eq!(running_args(&app), ["Checkout origin/feature"]);
+    }
+
+    #[test]
+    fn toolbar_pickers_open_their_palette_lists() {
+        let mut app = checkout_app();
+        app.session
+            .touch_recent(std::path::Path::new("/repos/other"), 1);
+        assert_eq!(app.action_block(Shortcut::OpenRepoPalette), None);
+        assert_eq!(app.action_block(Shortcut::CheckoutBranch), None);
+
+        let _ = app.update(Message::PickerClicked(Shortcut::OpenRepoPalette));
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::OpenRepository)
+        );
+        assert_eq!(palette_labels(&app), ["Browse…", "other"]);
+
+        // A click on the other picker replaces the open list.
+        let _ = app.update(Message::PickerClicked(Shortcut::CheckoutBranch));
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::CheckoutBranch)
+        );
+        assert!(palette_labels(&app).contains(&"origin/feature".to_owned()));
+    }
+
+    #[test]
+    fn branch_picker_is_disabled_while_an_operation_blocks_checkout() {
+        let mut app = app_in_state(rebasing());
+        let reason = app.action_block(Shortcut::CheckoutBranch);
+        assert_eq!(
+            reason.as_deref(),
+            Some("Cannot check out a branch while a rebase is in progress")
+        );
+        let _ = app.update(Message::PickerClicked(Shortcut::CheckoutBranch));
+        assert!(app.palette.is_none());
+        // The palette lists the action disabled with the same reason.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("checkout branch".into()));
+        let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
+        assert_eq!(entry.disabled, reason);
+        // The repository picker stays available.
+        let _ = app.update(Message::PaletteClosed);
+        assert_eq!(app.action_block(Shortcut::OpenRepoPalette), None);
+        let _ = app.update(Message::PickerClicked(Shortcut::OpenRepoPalette));
+        assert!(app.palette.is_some());
+    }
+
+    #[test]
+    fn branch_picker_is_disabled_without_git() {
+        let mut app = checkout_app();
+        app.tabs[0].view_mut().unwrap().write_block = Some("Git was not found".into());
+        assert_eq!(
+            app.action_block(Shortcut::CheckoutBranch).as_deref(),
+            Some("Git was not found")
+        );
+        let _ = app.update(Message::PickerClicked(Shortcut::CheckoutBranch));
+        assert!(app.palette.is_none());
     }
 
     #[test]
