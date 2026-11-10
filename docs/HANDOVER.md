@@ -20,7 +20,7 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (M6 in progress, 1.0.0-rc.2 tagged, 2026-11-09)
+## Current state (M6 in progress, 1.0.0-rc.3 tagged, 2026-11-10)
 
 M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
@@ -28,9 +28,10 @@ M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md
 - Done with the maintainer: M6-11 (content approved, history rewritten to the GitHub noreply address). Claude Code part done, waiting for the maintainer: M6-13 (run `docs/RELEASE-CHECKLIST.md` on the packaged rc).
 - M6-14: `v1.0.0-rc.1` tagged on `master`; the release workflow creates the draft pre-release. Repository public since 2026-11-06. Open for the maintainer: publish the draft, apply at SignPath (M6-10). Further rcs for findings of M6-10/M6-13; M6-15 (1.0.0) only when the maintainer asks.
 - rc.2 (2026-11-09, `v1.0.0-rc.2` on `master`): M6-16 no console window on Windows, M6-17 toolbar pickers open the palette lists, M6-18 remotes in sync with the Git configuration (root cause: config reload keyed on the mtime of `.git/config` only). Open for the maintainer: publish the draft, confirm M6-16 and M6-18 on rc.2, check that the update check of an rc.1 build sees rc.2 (M6-14).
+- rc.3 (2026-11-10, `v1.0.0-rc.3` on `master`, ADR-039: made from `master` on `release/1.0.0`, merged back into `develop`): M6-19 context menu width (backport), M6-20 empty `[remote "…"]` sections are not remotes (root cause of `github-fc`), M6-21 "Open file location" and "Copy file path" with absolute native paths, M6-22 scrollbars reserve their room, M6-23 no gaps between graph rows at fractional scales. Open for the maintainer: publish the draft, run the new items of section 7 of the release checklist.
 - Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
 - Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).
-- Branches: `master` with `v0.1.0` … `v0.6.1`, `v1.0.0-rc.1` and `v1.0.0-rc.2`; `develop` (default branch on GitHub).
+- Branches: `master` with `v0.1.0` … `v0.6.1`, `v1.0.0-rc.1`, `v1.0.0-rc.2` and `v1.0.0-rc.3`; `develop` (default branch on GitHub).
 
 Earlier milestones (M1–M5) are described in their milestone files; the summary of M5 is in `docs/PLANNING-HANDOVER.md`.
 
@@ -55,7 +56,8 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M6-13: run `docs/RELEASE-CHECKLIST.md` against the packaged release candidate (Windows required, macOS if available) and answer its GitKraken verification items. The open Windows and keyboard checks of M2–M5 were moved there (M6-13).
 - [ ] M6-16: on the next release candidate, confirm that no console window appears (Start menu, zip, terminal) and that the HTTPS prompt and interactive rebase still work (also in `docs/RELEASE-CHECKLIST.md`).
 - [ ] M7: answer the GitKraken verification items in docs/milestones/M7-diff-modes-gitflow.md (diff modes, Gitflow) if possible before M7 starts.
-- [ ] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown.
+- [x] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown. (root cause: empty section, fixed in M6-20)
+- [ ] rc.3: publish the draft pre-release `v1.0.0-rc.3`; run the new items of section 7 of `docs/RELEASE-CHECKLIST.md`; check that the update check of an rc.2 build sees rc.3.
 
 - [x] GitHub → Settings → General → Default branch: set to `develop`.
 - [x] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`

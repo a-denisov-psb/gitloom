@@ -191,4 +191,129 @@ mod tests {
         );
         snapshot(&app, "pickers-3-branch");
     }
+
+    /// Menu items must stay inside their menu (the layout iced computes,
+    /// with the fonts of this machine): long labels widen the menu, too
+    /// long ones end in "…". Runs without a renderer, so it is part of
+    /// every test run.
+    #[test]
+    fn context_menu_labels_stay_inside_the_menu() {
+        use crate::overlay::{ContextMenu, MenuEntry, MENU_MAX_WIDTH};
+        let mut app = ready_app(&["c"]);
+        // Fonts are loaded with the first simulator (in the app: at start),
+        // before any menu is measured.
+        drop(simulator(&app));
+        let long = "Merge origin/feature/sidebar-tree-with-folders into feature/ui/toolbar-pickers";
+        let longest = format!("Rebase {long} onto {long}");
+        let labels = ["Copy the SHA of this commit", long, longest.as_str()];
+        let entries = labels
+            .iter()
+            .map(|label| MenuEntry::item(*label, Message::DismissNotice))
+            .chain([MenuEntry::Item {
+                label: "Fetch all remotes now".into(),
+                shortcut: Some("Ctrl+Alt+Shift+L".into()),
+                enabled: true,
+                message: Box::new(Message::DismissNotice),
+                hint: None,
+            }])
+            .collect();
+        let menu = ContextMenu::new(iced::Point::new(40.0, 60.0), entries);
+        assert!(menu.width > crate::overlay::MENU_MIN_WIDTH, "widened");
+        assert_eq!(menu.width, MENU_MAX_WIDTH, "capped");
+        let origin = menu.origin(iced::Size::new(SIZE.0, SIZE.1));
+        let right = origin.x + menu.width;
+        let shown: Vec<String> = menu
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                MenuEntry::Item { label, .. } => Some(label.clone()),
+                MenuEntry::Separator => None,
+            })
+            .collect();
+        assert!(shown[2].ends_with('…'), "{}", shown[2]);
+        app.context_menu = Some(menu);
+        let mut sim = simulator(&app);
+        let shortcut = "Ctrl+Alt+Shift+L".to_owned();
+        for label in shown.iter().chain(std::iter::once(&shortcut)) {
+            let found = sim
+                .find(label.as_str())
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+            let bounds = iced_test::selector::Bounded::bounds(&found);
+            // iced clamps a text's layout to the room it gets: text that
+            // does not fit is cut off. The full text must fit its bounds.
+            let size = if *label == shortcut {
+                crate::overlay::MENU_SHORTCUT_SIZE
+            } else {
+                crate::overlay::MENU_LABEL_SIZE
+            };
+            let needed = crate::overlay::text_width(label, size);
+            assert!(
+                needed <= bounds.width + 0.5,
+                "{label:?} needs {needed} px but gets {}",
+                bounds.width
+            );
+            assert!(
+                bounds.x + bounds.width <= right - 4.0,
+                "{label:?} ends at {} but the menu at {right}",
+                bounds.x + bounds.width
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_wide_context_menu() {
+        let mut app = crate::app::tests::menu_app();
+        let _ = app.update(Message::BranchContextMenu {
+            name: "feature/ui/toolbar".into(),
+            kind: git_core::RefKind::LocalBranch,
+            position: iced::Point::new(300.0, 120.0),
+        });
+        snapshot(&app, "context-menu-wide");
+    }
+
+    /// The section counts of a scrolling left panel end left of its
+    /// scrollbar (M6-22). Layout only, so part of every test run.
+    #[test]
+    fn left_panel_counts_stay_clear_of_the_scrollbar() {
+        let app = crate::app::tests::crowded_app();
+        let mut sim = simulator(&app);
+        let count = sim.find("57").unwrap_or_else(|e| panic!("no count: {e}"));
+        let count = iced_test::selector::Bounded::bounds(&count);
+        // The filter input sits 8 px inside the panel on both sides.
+        let filter = sim
+            .find(iced::widget::Id::new(crate::app::FILTER_INPUT))
+            .unwrap_or_else(|e| panic!("no filter: {e}"));
+        let filter = iced_test::selector::Bounded::bounds(&filter);
+        let panel_right = filter.x + filter.width + 8.0;
+        // Default scrollbar width of iced.
+        let scrollbar_left = panel_right - 10.0;
+        assert!(
+            count.x + count.width + crate::ui::SCROLLBAR_GAP <= scrollbar_left,
+            "count ends at {} but the scrollbar starts at {scrollbar_left}",
+            count.x + count.width
+        );
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_left_panel_scrollbar_both_themes() {
+        let mut app = crate::app::tests::crowded_app();
+        for (light, name) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("left-panel-scrollbar-{name}"));
+        }
+    }
+
+    /// Graph rows with dashed and solid lines across rows (M6-23).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_graph_rows() {
+        let app = ready_app(&["e", "d", "c", "b", "a"]);
+        snapshot(&app, "graph-rows");
+    }
 }

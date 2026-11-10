@@ -103,7 +103,7 @@ pub fn view<'a>(
                     Message::FileHistoryEntryMenu { index, position }
                 })
             }));
-            scrollable(rows)
+            crate::ui::vscroll(rows)
                 .id(history.list_scroll_id.clone())
                 .height(Fill)
                 .into()

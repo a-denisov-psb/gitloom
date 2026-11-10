@@ -64,6 +64,10 @@ Out of scope (later):
 - [ ] No console window on Windows (M6-16).
 - [x] No toolbar control shows "Not available yet" (M6-17).
 - [x] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
+- [x] Context menus are as wide as their longest entry (M6-19).
+- [x] Empty `[remote "…"]` sections are not shown as remotes (M6-20).
+- [x] "Open file location" selects the file in Explorer/Finder for every path, "Copy file path" copies the absolute path (M6-21).
+- [x] No scrollbar covers content (M6-22); the graph has no gaps between rows at any scale (M6-23).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
 - [ ] All Windows and keyboard maintainer to-dos from M2–M5 are checked off or explicitly moved to the backlog; GitKraken verification items answered and the code adjusted.
@@ -92,6 +96,11 @@ Out of scope (later):
 | M6-16 | No console window on Windows | M6-08 |
 | M6-17 | Repository and branch pickers | M6-08 |
 | M6-18 | Remotes in sync with the Git configuration | – |
+| M6-19 | Context menu width (backport from develop) | – |
+| M6-20 | Remotes without configuration keys | – |
+| M6-21 | Open file location and Copy file path | – |
+| M6-22 | Scrollbars cover content | – |
+| M6-23 | Gaps between graph rows | – |
 | M6-15 | Release v1.0.0 | all |
 
 ---
@@ -270,6 +279,8 @@ Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG s
 
 Note (2026-11-09): `v1.0.0-rc.2` tagged on `master` by Claude Code (maintainer request "mach weiter mit rc.2") with M6-16, M6-17 and M6-18; same branch `release/1.0.0`, version `1.0.0-rc.2` (MSI 1.0.0.2). Open (maintainer): publish the draft pre-release; the update check of an rc.1 build should now see rc.2.
 
+Note (2026-11-10): `v1.0.0-rc.3` tagged on `master` by Claude Code (maintainer request "mach weiter mit rc.3") with M6-19 … M6-23; `release/1.0.0` branched from `master` (ADR-039), version `1.0.0-rc.3` (MSI 1.0.0.3). Open (maintainer): publish the draft pre-release; the update check of an rc.2 build should see rc.3.
+
 ### [ ] M6-16 No console window on Windows
 
 Finding of the maintainer (2026-11-06): the Windows build opens a console window next to Gitloom, because the binary uses the console subsystem (`crates/app/src/main.rs` has no `windows_subsystem` attribute).
@@ -315,6 +326,62 @@ Finding of the maintainer (2026-11-09): the left panel shows an empty remote `gi
 Acceptance: integration tests for cases 1–3; the task note names the root cause found; Windows CI green.
 
 Note (2026-11-09): done. Root cause: `GixBackend` reopened gix only when the modification time of `.git/config` changed. Several config writes within one timestamp tick (Windows advances file times in steps of about 16 ms; `git remote rename/remove` and `git filter-repo` write the config several times in a row) were lost if gix had re-read the config in between, and files outside `.git` (global and system config, includes) were never checked; the stale gix state stayed until a restart (reproduced in `tests/config_reload.rs` with a temp-file rewrite that keeps the time). Fix: a content fingerprint of every config file gix depends on (repository, worktree, global, system, includes, also when missing), taken before opening; the focus refresh now also checks refs and remotes (the global config is outside the watcher) and the refs check compares URLs and config scopes as well. The watcher itself was fine (`config` events, rename targets, `.lock` ignored). Notable: Git itself answers `No such remote: 'x'` for a remote that exists only in the global config, which is exactly the maintainer's error message; so `github-fc` was either stale (fixed) or defined outside the repository config at a level the shell check did not see (e.g. a different HOME or Git installation) – now shown with "Defined in the global Git configuration" (or system/other) and not removable. The restart check in the maintainer to-dos tells which. Other sources of remote nodes: only remote-tracking refs (`refs/remotes/<x>/…`, a node with branches); empty directories under `.git/refs/remotes/` and session data create none.
+
+### [x] M6-19 Context menu width (backport from develop)
+
+Finding during M7 (2026-11-09): context menus had a fixed width of 260 px, so long entries like "Merge … into …" stuck out. Fixed on `develop` (691d79e).
+
+- `git cherry-pick -x 691d79e`; tests and `ui_check` limited to the menus that exist in 1.0 (no Gitflow menu); the layout test still fails with the old fixed width.
+
+Acceptance: CI green; the maintainer checks a long-named branch on rc.3 (release checklist, section 7).
+
+Note (2026-11-10): done. Cherry-picked with `-x`; the conflicts were test-only. The app test runs on a `menu_app` (checkout app plus `develop`) without the Gitflow start menu; `ui_check_wide_context_menu` uses it too. `context_menu_labels_stay_inside_the_menu` fails with the old fixed width of 260 px (checked).
+
+### [x] M6-20 Remotes without configuration keys
+
+Finding of the maintainer (2026-11-10, rc.2): the remote `github-fc` is still listed and cannot be removed ("Remote github-fc no longer exists"). Root cause found in planning: the repository's `.git/config` contains an empty section `[remote "github-fc"]` without any key. Git does not treat it as a remote (`git remote` does not list it, `git remote remove` answers "No such remote"); `GixBackend::remotes` lists every `remote.<name>` section. Empty sections are left behind when all keys of a section are removed one by one with `git config --unset`.
+
+- List a remote only if its section has at least one key in any configuration file (Git's rule). Remote-tracking refs `refs/remotes/<x>/…` without configuration behave as today (M6-18).
+- Check Gitloom's own writes (add, rename, remove, edit URL, push URL, upstream) for key-by-key `--unset` sequences that can leave empty sections; use `git remote …` or `git config --remove-section` where needed.
+- CHANGELOG `[1.0.0-rc.3]` → Fixed (see below).
+
+Acceptance: integration tests: an empty section in the local and in the global configuration is not listed; a section with one key is listed; after each of Gitloom's remote operations no empty `remote` section is left. The maintainer confirms that `github-fc` is gone on rc.3.
+
+Note (2026-11-10): done. `GixBackend::remotes` and `external_remotes` share `configured_remote_names`: gix's trusted remote names, kept only if some `remote.<name>` section has a key. Gitloom's own writes were already safe: add, edit URL, rename and remove use `git remote …`, upstreams use `git branch --set-upstream-to/--unset-upstream`; there is no push-URL edit in 1.0. Tests: `tests/empty_remote_section.rs` (the empty section is written directly, since Git 2.43 removes it itself on `--unset` of the last key) and `tests/empty_global_remote.rs` (own binary for `GIT_CONFIG_GLOBAL`); both fail without the fix.
+
+### [x] M6-21 Open file location and Copy file path
+
+Finding of the maintainer (2026-11-10, Windows, repository "git test"): "Open file location" opens Explorer in "Documents" instead of selecting the file; "Copy file path" copies the path relative to the repository. Causes found in planning: the absolute path is built with `root.join(<repo-relative path with "/">)` (mixed separators), and Rust quotes `/select,<path>` as one argument, which Explorer does not parse when the path contains spaces.
+
+- One helper builds the absolute path of a repository file: native separators (`\` on Windows), no `\\?\` prefix.
+- Windows: start `explorer` with `/select,"<path>"` through `std::os::windows::process::CommandExt::raw_arg`; if the file does not exist (deleted), open its nearest existing parent folder instead. macOS/Linux unchanged apart from the helper.
+- "Copy file path" copies the absolute path with native separators (maintainer decision), everywhere the entry exists (staging lists, commit file list, file history, conflict view).
+- `docs/RELEASE-CHECKLIST.md` section 7: see below.
+
+Acceptance: unit tests for the helper (subfolder, spaces, umlauts, `#`, `&`, `,`) and for the Windows command line of the reveal launch (built, not executed); Windows CI green.
+
+Note (2026-11-10): done. `launch::repo_file_path` (string core `native_join`, testable for every platform) builds the path; `reveal_file` takes an `exists` check, starts in the nearest existing folder on every platform (a deleted folder cannot be the working directory) and on Windows passes `/select,"<path>"` as `Launch::raw_arg` (`CommandExt::raw_arg`), or opens the nearest existing folder for a deleted file. In 1.0 the file entries exist only in the file context menu (staging lists including conflicts, commit file list); the file history and the conflict view have no file-path entries on this line. The crash report "Open report folder" uses the same reveal.
+
+### [x] M6-22 Scrollbars cover content
+
+Finding of the maintainer (2026-11-10): when the left panel scrolls, its scrollbar covers the section counts.
+
+- Every vertical scrollable whose rows have right-aligned content (left panel, staging lists, commit file list, Preferences, palette lists and the other lists with counts or buttons on the right) reserves room for its scrollbar, so content is never drawn below it (embedded scrollbar or a matching right padding).
+
+Acceptance: `iced_test` snapshot of the left panel with enough branches to scroll, counts fully visible, both themes; existing snapshots otherwise unchanged except for the reserved space.
+
+Note (2026-11-10): done. `ui::vscroll` is a scrollable with an embedded scrollbar (`Scrollable::spacing`, gap 2 px): iced narrows the content by the bar's width only while the bar is shown, so lists that do not scroll keep their layout. Used by the left panel, the staging lists, the commit details with the file list, the multi-commit list, Preferences, the palette lists, the shortcut list and the third-party list in About (both had a fixed right padding of 12 px before), the file history list and the interactive rebase list. Not changed: the graph (its header row is outside the scrollable and the columns must stay aligned; the SHA column is not right-aligned) and the diff, blame and conflict code views (left-aligned text). Tests: `left_panel_counts_stay_clear_of_the_scrollbar` (layout, runs always; without the fix the count ends exactly at the scrollbar's left edge, the test asks for the 2 px gap) and `ui_check_left_panel_scrollbar_both_themes` (rendered with tiny-skia and checked by eye).
+
+### [x] M6-23 Gaps between graph rows
+
+Finding of the maintainer (2026-11-10, Windows with display scaling): thin gaps between rows interrupt the graph lines (and the row backgrounds). Each row is its own canvas of `ROW_HEIGHT`; at scale factors where a row is not a whole number of physical pixels, rounding leaves a gap.
+
+- Lines (solid and dashed) and row backgrounds join without gaps at any scale factor and zoom: e.g. vertical segments drawn past the row edges by at least one physical pixel, or row positions snapped to physical pixels. Dashes continue their pattern across rows where possible.
+- Reproduce with a scale factor where the row height is fractional in physical pixels (e.g. 1.25 × 110 %); if `iced_test` cannot set it, test the geometry (segment end points, row bounds) directly.
+
+Acceptance: test of the geometry at fractional scales; `iced_test` snapshot checked by eye; the maintainer confirms on rc.3 at his Windows scaling.
+
+Note (2026-11-10): done. Cause in iced 0.14 (wgpu): each row's canvas mesh is moved to the physical pixel grid (top left rounded) and clipped to its snapped bounds, so a line from 0 to `ROW_HEIGHT` ends up to a pixel short of the clip at fractional scales; the row backgrounds are anti-aliased quads whose shared fractional edge blends into a seam. Fix: lines run `EDGE_OVERLAP` = 2 px past both row edges (the clip cuts them exactly at the snapped edge shared with the neighbour); dashed lines entering a row start at the global dash phase (`line_top`), so the pattern continues across rows for through lines and lead-ins (a line leaving a node starts its pattern at the node); row backgrounds use `snap: true`. `iced_test` cannot set a scale factor, so `lines_join_across_rows_at_fractional_scales` replays the renderer's snapping for scales 0.9 … 2.25, three scroll offsets and 400 rows (and shows that the old end points leave gaps); `ui_check_graph_rows` was checked by eye.
 
 ### [ ] M6-15 Release v1.0.0
 

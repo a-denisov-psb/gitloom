@@ -63,6 +63,10 @@ pub struct Launch {
     pub dir: PathBuf,
     /// Windows: the program needs its own console window.
     pub new_console: bool,
+    /// Windows: appended to the command line verbatim, after `args`
+    /// (Explorer parses `/select,"<path>"` itself, so Rust's quoting of the
+    /// whole argument would break paths with spaces).
+    pub raw_arg: Option<String>,
 }
 
 impl Launch {
@@ -72,6 +76,7 @@ impl Launch {
             args,
             dir: dir.to_path_buf(),
             new_console: false,
+            raw_arg: None,
         }
     }
 }
@@ -178,19 +183,79 @@ pub fn open_target(platform: Platform, target: &str) -> Launch {
     Launch::new(program, vec![target.to_owned()], &std::env::temp_dir())
 }
 
-/// File manager with `file` selected (where the platform can select).
-pub fn reveal_file(platform: Platform, file: &Path) -> Launch {
-    let dir = file.parent().unwrap_or(file);
-    match platform {
-        Platform::Windows => {
-            Launch::new("explorer", vec![format!("/select,{}", file.display())], dir)
+/// Absolute path of the repository file `rel` (relative to `root`, with
+/// `/` as Git writes it): native separators and, on Windows, without the
+/// `\\?\` prefix of verbatim paths, which Explorer and the clipboard
+/// consumers do not expect (M6-21).
+pub fn repo_file_path(root: &Path, rel: &str) -> PathBuf {
+    match root.to_str() {
+        Some(root) => PathBuf::from(native_join(Platform::current(), root, rel)),
+        // Not UTF-8 (Unix only): join without touching the root.
+        None => {
+            let mut path = root.to_path_buf();
+            path.extend(rel_parts(rel));
+            path
         }
+    }
+}
+
+/// [`repo_file_path`] for `platform`, on strings.
+pub fn native_join(platform: Platform, root: &str, rel: &str) -> String {
+    let separator = match platform {
+        Platform::Windows => '\\',
+        Platform::MacOs | Platform::Linux => '/',
+    };
+    let mut path = match platform {
+        Platform::Windows => {
+            let root = if let Some(rest) = root.strip_prefix(r"\\?\UNC\") {
+                format!(r"\\{rest}")
+            } else {
+                root.strip_prefix(r"\\?\").unwrap_or(root).to_owned()
+            };
+            root.replace('/', "\\")
+        }
+        Platform::MacOs | Platform::Linux => root.to_owned(),
+    };
+    while path.len() > 1 && path.ends_with(separator) && !path.ends_with(&format!(":{separator}")) {
+        path.pop();
+    }
+    for part in rel_parts(rel) {
+        if !path.ends_with(separator) {
+            path.push(separator);
+        }
+        path.push_str(part);
+    }
+    path
+}
+
+fn rel_parts(rel: &str) -> impl Iterator<Item = &str> {
+    rel.split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+}
+
+/// File manager with `file` selected (where the platform can select). A
+/// file that no longer exists (`exists` says no) shows its nearest existing
+/// folder on Windows.
+pub fn reveal_file(platform: Platform, file: &Path, exists: &dyn Fn(&Path) -> bool) -> Launch {
+    // Start in a folder that exists: a deleted folder cannot be the
+    // working directory.
+    let folder = file
+        .ancestors()
+        .skip(1)
+        .find(|dir| exists(dir))
+        .unwrap_or_else(|| file.parent().unwrap_or(file));
+    match platform {
+        Platform::Windows if exists(file) => Launch {
+            raw_arg: Some(format!("/select,\"{}\"", file.display())),
+            ..Launch::new("explorer", Vec::new(), folder)
+        },
+        Platform::Windows => file_manager(platform, folder),
         Platform::MacOs => Launch::new(
             "open",
             vec!["-R".into(), file.to_string_lossy().into_owned()],
-            dir,
+            folder,
         ),
-        Platform::Linux => file_manager(platform, dir),
+        Platform::Linux => file_manager(platform, folder),
     }
 }
 
@@ -254,6 +319,13 @@ pub fn spawn(launch: &Launch) -> Result<(), String> {
         if launch.new_console {
             command.creation_flags(CREATE_NEW_CONSOLE);
         }
+        if let Some(raw) = &launch.raw_arg {
+            command.raw_arg(raw);
+        }
+    }
+    #[cfg(not(windows))]
+    if let Some(raw) = &launch.raw_arg {
+        command.arg(raw);
     }
     command
         .spawn()
@@ -300,6 +372,7 @@ mod tests {
     fn command(launch: &Launch) -> Vec<String> {
         std::iter::once(launch.program.clone())
             .chain(launch.args.iter().cloned())
+            .chain(launch.raw_arg.iter().cloned())
             .collect()
     }
 
@@ -417,17 +490,77 @@ mod tests {
             ["explorer", "/r"]
         );
         let file = Path::new("/r/src/a.rs");
+        let all = |_: &Path| true;
         assert_eq!(
-            command(&reveal_file(Platform::MacOs, file)),
+            command(&reveal_file(Platform::MacOs, file, &all)),
             ["open", "-R", "/r/src/a.rs"]
         );
         assert_eq!(
-            command(&reveal_file(Platform::Linux, file)),
+            command(&reveal_file(Platform::Linux, file, &all)),
             ["xdg-open", "/r/src"]
         );
         assert_eq!(
-            command(&reveal_file(Platform::Windows, file)),
-            ["explorer", "/select,/r/src/a.rs"]
+            command(&reveal_file(Platform::Windows, file, &all)),
+            ["explorer", "/select,\"/r/src/a.rs\""]
         );
+    }
+
+    #[test]
+    fn repository_file_paths_use_native_separators() {
+        let win = |root: &str, rel: &str| native_join(Platform::Windows, root, rel);
+        let unix = |root: &str, rel: &str| native_join(Platform::Linux, root, rel);
+        assert_eq!(
+            win(r"C:\Users\me\git test", "sub dir/a b.txt"),
+            r"C:\Users\me\git test\sub dir\a b.txt"
+        );
+        assert_eq!(
+            unix("/home/me/git test", "sub dir/a b.txt"),
+            "/home/me/git test/sub dir/a b.txt"
+        );
+        // Umlauts and characters that are special in shells or Explorer.
+        for name in ["Übersicht ä.md", "#1 & more, too.txt"] {
+            assert_eq!(
+                win(r"C:\Repos\Grüße & Co", &format!("dir #2/{name}")),
+                format!(r"C:\Repos\Grüße & Co\dir #2\{name}")
+            );
+            assert_eq!(
+                unix("/r/Grüße & Co", &format!("dir #2/{name}")),
+                format!("/r/Grüße & Co/dir #2/{name}")
+            );
+        }
+        // Verbatim prefix, forward slashes and trailing separators.
+        assert_eq!(win(r"\\?\C:\repo", "a/b.rs"), r"C:\repo\a\b.rs");
+        assert_eq!(
+            win(r"\\?\UNC\server\share\repo", "a.rs"),
+            r"\\server\share\repo\a.rs"
+        );
+        assert_eq!(win("C:/work/repo/", "src/a.rs"), r"C:\work\repo\src\a.rs");
+        assert_eq!(win(r"D:\", "a.rs"), r"D:\a.rs");
+        assert_eq!(unix("/", "a.rs"), "/a.rs");
+        assert_eq!(unix("/r/", "./a.rs"), "/r/a.rs");
+        // The real helper on this platform.
+        let root = std::env::temp_dir().join("git test");
+        let path = repo_file_path(&root, "sub/a b.txt");
+        assert_eq!(path, root.join("sub").join("a b.txt"));
+    }
+
+    #[test]
+    fn windows_reveal_command_line() {
+        let file = Path::new(r"C:\Users\me\git test\sub, dir\a & b #1.txt");
+        let launch = reveal_file(Platform::Windows, file, &|_| true);
+        assert_eq!(launch.program, "explorer");
+        assert!(launch.args.is_empty());
+        assert_eq!(
+            launch.raw_arg.as_deref(),
+            Some(r#"/select,"C:\Users\me\git test\sub, dir\a & b #1.txt""#)
+        );
+
+        // Deleted file (and folder): the nearest existing folder opens.
+        let gone = Path::new("/r/gone/deeper/a.txt");
+        let exists = |p: &Path| p == Path::new("/r") || p == Path::new("/");
+        let launch = reveal_file(Platform::Windows, gone, &exists);
+        assert_eq!(command(&launch), ["explorer", "/r"]);
+        assert_eq!(launch.dir, Path::new("/r"));
+        assert_eq!(launch.raw_arg, None);
     }
 }

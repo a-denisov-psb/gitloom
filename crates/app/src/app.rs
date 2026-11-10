@@ -3714,6 +3714,7 @@ impl App {
                         crate::launch::spawn(&crate::launch::reveal_file(
                             crate::launch::Platform::current(),
                             &file,
+                            &|p| p.exists(),
                         ))
                     }),
                     |result| Message::StatusText(result.err().unwrap_or_default()),
@@ -4388,9 +4389,16 @@ impl App {
                         Message::OpenFileLocation(file.path.clone()),
                     ));
                 }
+                // The absolute path with native separators (M6-21).
+                let path = match self.active_tab().and_then(Tab::path) {
+                    Some(root) => crate::launch::repo_file_path(root, &file.path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    None => file.path,
+                };
                 entries.push(MenuEntry::item(
                     "Copy file path",
-                    Message::CopyToClipboard(file.path),
+                    Message::CopyToClipboard(path),
                 ));
                 self.context_menu = Some(ContextMenu::new(position, entries));
             }
@@ -5374,7 +5382,8 @@ impl App {
                         blocking(move || {
                             crate::launch::spawn(&crate::launch::reveal_file(
                                 crate::launch::Platform::current(),
-                                &root.join(&path),
+                                &crate::launch::repo_file_path(&root, &path),
+                                &|p| p.exists(),
                             ))
                         }),
                         |result| Message::StatusText(result.err().unwrap_or_default()),
@@ -7513,6 +7522,25 @@ pub(crate) mod tests {
         assert_eq!(details.changes, Loadable::Loading);
     }
 
+    /// Ready app whose left panel needs to scroll: 57 local branches.
+    pub(crate) fn crowded_app() -> App {
+        let mut app = ready_app(&["c"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for i in 0..57 {
+            snapshot.refs.push(git_core::Reference {
+                name: format!("feature/branch-{i:02}"),
+                kind: git_core::RefKind::LocalBranch,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
     /// App with one ready tab showing commits `ids` (linear, newest first).
     pub(crate) fn ready_app(ids: &[&str]) -> App {
         use git_core::{Commit, Head, Log, WorkingTree};
@@ -9632,6 +9660,36 @@ pub(crate) mod tests {
                 "Copy file path"
             ]
         );
+        // The copied path is absolute, with native separators (M6-21).
+        let root = app.tabs[0].path().unwrap().to_path_buf();
+        let copy = menu.select(6);
+        let expected = crate::launch::repo_file_path(&root, "a")
+            .to_string_lossy()
+            .into_owned();
+        assert!(matches!(copy, Some(Message::CopyToClipboard(t)) if t == expected));
+    }
+
+    #[test]
+    fn copied_paths_of_nested_files_are_absolute() {
+        let mut app = staging_app(&[], &["src/dir with space/a.rs"]);
+        let _ = app.update(Message::FileContextMenu {
+            file: file("src/dir with space/a.rs"),
+            area: FileArea::Staged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        let root = app.tabs[0].path().unwrap().to_path_buf();
+        let last = menu.entries.len() - 1;
+        let Some(Message::CopyToClipboard(text)) = menu.select(last) else {
+            panic!("last entry is not Copy file path");
+        };
+        assert_eq!(
+            std::path::PathBuf::from(&text),
+            root.join("src").join("dir with space").join("a.rs")
+        );
+        if cfg!(windows) {
+            assert!(!text.contains('/'), "{text}");
+        }
     }
 
     #[test]
@@ -10520,6 +10578,129 @@ pub(crate) mod tests {
         }
         view.snapshot = Arc::new(snapshot);
         app
+    }
+
+    /// `checkout_app` with Git available and a `develop` branch (menu checks).
+    pub(crate) fn menu_app() -> App {
+        let mut app = checkout_app();
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for name in ["develop", "feature/ui/toolbar"] {
+            snapshot.refs.push(git_core::Reference {
+                name: name.into(),
+                kind: git_core::RefKind::LocalBranch,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    /// Every context menu, opened on very long names, fits its labels:
+    /// the menu widens (up to its maximum) instead of letting text stick out.
+    #[test]
+    fn every_context_menu_fits_long_names() {
+        let long = "feature/a-really-long-branch-name-that-keeps-going-for-the-menu-check";
+        let mut app = menu_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let reference = |name: &str, kind| git_core::Reference {
+            name: name.into(),
+            kind,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        snapshot
+            .refs
+            .push(reference(long, git_core::RefKind::LocalBranch));
+        snapshot.refs.push(reference(
+            &format!("origin/{long}"),
+            git_core::RefKind::RemoteBranch,
+        ));
+        snapshot.refs.push(reference(
+            "v1.2.3-release-candidate-with-a-long-suffix",
+            git_core::RefKind::Tag,
+        ));
+        snapshot
+            .remotes
+            .push("a-remote-with-a-rather-long-name".into());
+        view.snapshot = Arc::new(snapshot);
+
+        let at = iced::Point::ORIGIN;
+        let branch = |name: &str, kind| Message::BranchContextMenu {
+            name: name.into(),
+            kind,
+            position: at,
+        };
+        let file = git_core::FileChange {
+            path: "src/some/deeply/nested/folder/with/a/really/long/file-name.rs".into(),
+            kind: git_core::ChangeKind::Modified,
+            old_path: None,
+        };
+        let menus = [
+            branch(long, git_core::RefKind::LocalBranch),
+            branch("develop", git_core::RefKind::LocalBranch),
+            branch("main", git_core::RefKind::LocalBranch),
+            branch(&format!("origin/{long}"), git_core::RefKind::RemoteBranch),
+            branch(
+                "v1.2.3-release-candidate-with-a-long-suffix",
+                git_core::RefKind::Tag,
+            ),
+            Message::RemoteContextMenu {
+                name: "a-remote-with-a-rather-long-name".into(),
+                position: at,
+            },
+            Message::CommitContextMenu {
+                id: "c".into(),
+                position: at,
+            },
+            Message::FileContextMenu {
+                file: file.clone(),
+                area: FileArea::Unstaged,
+                position: at,
+            },
+            Message::FileContextMenu {
+                file,
+                area: FileArea::Staged,
+                position: at,
+            },
+            Message::PullMenu(at),
+        ];
+        for open in menus {
+            let label = format!("{open:?}");
+            let _ = app.update(open);
+            let menu = app
+                .context_menu
+                .take()
+                .unwrap_or_else(|| panic!("no menu for {label}"));
+            assert!(menu.width <= crate::overlay::MENU_MAX_WIDTH);
+            for index in 0..menu.entries.len() {
+                assert!(menu.item_fits(index), "{label}: item {index} does not fit");
+            }
+        }
+        // A branch dropped onto another one ("Merge … into …").
+        let _ = app.update(Message::BranchDragStart {
+            name: long.into(),
+            kind: git_core::RefKind::LocalBranch,
+        });
+        let _ = app.update(Message::BranchDropped {
+            name: "develop".into(),
+            kind: git_core::RefKind::LocalBranch,
+            position: at,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(menu.width > crate::overlay::MENU_MIN_WIDTH, "widened");
+        for index in 0..menu.entries.len() {
+            assert!(menu.item_fits(index), "drop menu item {index}");
+        }
     }
 
     #[test]
