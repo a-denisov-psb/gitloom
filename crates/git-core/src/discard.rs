@@ -285,6 +285,7 @@ mod tests {
             new_path: Some("f".into()),
             binary: false,
             too_large: false,
+            encoding: None,
             hunks: text_diff(old.as_bytes(), new.as_bytes()).hunks,
         }
     }

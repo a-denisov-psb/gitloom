@@ -165,6 +165,7 @@ mod tests {
             new_path: Some("f".into()),
             binary: text.binary,
             too_large: text.too_large,
+            encoding: None,
             hunks: text.hunks,
         }
     }

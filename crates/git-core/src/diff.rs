@@ -2,7 +2,7 @@
 
 use gix::diff::blob::{sources, Algorithm, Diff, InternedInput};
 
-use crate::{DiffContext, DiffHunk, DiffLine, DiffLineKind};
+use crate::{DiffContext, DiffHunk, DiffLine, DiffLineKind, TextEncoding};
 
 /// Files above this size (either side) are not diffed.
 pub const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -16,11 +16,36 @@ const BINARY_PROBE: usize = 8000;
 pub struct TextDiff {
     pub binary: bool,
     pub too_large: bool,
+    /// Encoding of a side decoded from UTF-16 (M7-17).
+    pub encoding: Option<TextEncoding>,
     pub hunks: Vec<DiffHunk>,
 }
 
 pub fn is_binary(data: &[u8]) -> bool {
     data[..data.len().min(BINARY_PROBE)].contains(&0)
+}
+
+/// `data` as UTF-8 if it starts with a UTF-16 byte order mark: decoded
+/// without the mark, invalid sequences and an odd last byte replaced by
+/// U+FFFD. Other content is returned unchanged (`None`): without a mark
+/// UTF-16 stays binary, as in Git.
+pub fn decode_utf16(data: &[u8]) -> Option<(Vec<u8>, TextEncoding)> {
+    let (encoding, body) = match data {
+        [0xFF, 0xFE, rest @ ..] => (TextEncoding::Utf16Le, rest),
+        [0xFE, 0xFF, rest @ ..] => (TextEncoding::Utf16Be, rest),
+        _ => return None,
+    };
+    let units = body.chunks_exact(2).map(|pair| match encoding {
+        TextEncoding::Utf16Le => u16::from_le_bytes([pair[0], pair[1]]),
+        TextEncoding::Utf16Be => u16::from_be_bytes([pair[0], pair[1]]),
+    });
+    let mut text: String = char::decode_utf16(units)
+        .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect();
+    if body.len() % 2 == 1 {
+        text.push(char::REPLACEMENT_CHARACTER);
+    }
+    Some((text.into_bytes(), encoding))
 }
 
 /// Diffs `old` against `new` line by line with Git's default context of 3 lines.
@@ -38,9 +63,24 @@ pub fn text_diff_with(old: &[u8], new: &[u8], context: DiffContext) -> TextDiff 
             ..TextDiff::default()
         };
     }
+    // UTF-16 with a byte order mark is text (M7-17); the size limit above
+    // applies to the bytes in the file.
+    let old_decoded = decode_utf16(old);
+    let new_decoded = decode_utf16(new);
+    let encoding = old_decoded
+        .as_ref()
+        .or(new_decoded.as_ref())
+        .map(|(_, encoding)| *encoding);
+    let old = old_decoded
+        .as_ref()
+        .map_or(old, |(text, _)| text.as_slice());
+    let new = new_decoded
+        .as_ref()
+        .map_or(new, |(text, _)| text.as_slice());
     if is_binary(old) || is_binary(new) {
         return TextDiff {
             binary: true,
+            encoding,
             ..TextDiff::default()
         };
     }
@@ -154,6 +194,7 @@ pub fn text_diff_with(old: &[u8], new: &[u8], context: DiffContext) -> TextDiff 
 
     TextDiff {
         hunks,
+        encoding,
         ..TextDiff::default()
     }
 }
@@ -177,6 +218,99 @@ fn display(line: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn utf16le(text: &str) -> Vec<u8> {
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        bytes
+    }
+
+    fn utf16be(text: &str) -> Vec<u8> {
+        let mut bytes = vec![0xFE, 0xFF];
+        bytes.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        bytes
+    }
+
+    fn contents(diff: &TextDiff) -> Vec<(DiffLineKind, &str)> {
+        diff.hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .map(|l| (l.kind, l.content.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn utf16_with_bom_is_text() {
+        // PowerShell 5: `echo test > file` writes UTF-16 LE with BOM and CRLF.
+        let new = utf16le("test\r\n");
+        let diff = text_diff_with(&[], &new, DiffContext::Hunks);
+        assert!(!diff.binary);
+        assert_eq!(diff.encoding, Some(TextEncoding::Utf16Le));
+        assert_eq!(contents(&diff), [(DiffLineKind::Added, "test")]);
+        assert!(diff.hunks[0].lines[0].crlf);
+
+        let old = utf16be("eins\nzwei\n");
+        let new = utf16be("eins\nzwölf\n");
+        let diff = text_diff_with(&old, &new, DiffContext::Hunks);
+        assert_eq!(diff.encoding, Some(TextEncoding::Utf16Be));
+        assert_eq!(
+            contents(&diff),
+            [
+                (DiffLineKind::Context, "eins"),
+                (DiffLineKind::Removed, "zwei"),
+                (DiffLineKind::Added, "zwölf")
+            ]
+        );
+        assert_eq!(TextEncoding::Utf16Be.label(), "UTF-16 BE");
+    }
+
+    #[test]
+    fn bom_on_one_side_only() {
+        // Converted from UTF-8 to UTF-16: both sides decode to the same text.
+        let diff = text_diff_with(b"a\nb\n", &utf16le("a\nb\n"), DiffContext::Hunks);
+        assert_eq!(diff.encoding, Some(TextEncoding::Utf16Le));
+        assert!(!diff.binary);
+        assert!(diff.hunks.is_empty(), "same text");
+        // UTF-16 without a BOM stays binary (Git's behavior).
+        let raw: Vec<u8> = "a\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let diff = text_diff_with(b"a\n", &raw, DiffContext::Hunks);
+        assert!(diff.binary);
+        assert_eq!(diff.encoding, None);
+    }
+
+    #[test]
+    fn odd_byte_count_and_invalid_units_are_replaced() {
+        let mut bytes = utf16le("ok\n");
+        bytes.push(0x41);
+        let (text, _) = decode_utf16(&bytes).unwrap();
+        assert_eq!(String::from_utf8(text).unwrap(), "ok\n\u{FFFD}");
+        // A lone high surrogate.
+        let (text, _) = decode_utf16(&[0xFF, 0xFE, 0x00, 0xD8, 0x41, 0x00]).unwrap();
+        assert_eq!(String::from_utf8(text).unwrap(), "\u{FFFD}A");
+        assert_eq!(decode_utf16(b"plain"), None);
+        assert_eq!(
+            decode_utf16(&[0xFF, 0xFE]).map(|(t, _)| t),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn utf16_with_mixed_newlines() {
+        let old = utf16le("a\r\nb\nc\r\n");
+        let new = utf16le("a\r\nB\nc\r\n");
+        let diff = text_diff_with(&old, &new, DiffContext::Full);
+        let lines = &diff.hunks[0].lines;
+        assert_eq!(
+            contents(&diff),
+            [
+                (DiffLineKind::Context, "a"),
+                (DiffLineKind::Removed, "b"),
+                (DiffLineKind::Added, "B"),
+                (DiffLineKind::Context, "c")
+            ]
+        );
+        assert!(lines[0].crlf && !lines[1].crlf && lines[3].crlf);
+    }
 
     /// Renders hunks like `git diff` (without file headers).
     fn unified(diff: &TextDiff) -> String {

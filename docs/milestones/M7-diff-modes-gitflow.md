@@ -271,7 +271,7 @@ Acceptance: unit tests for width, clamping and the wheel mapping (Shift+vertical
 
 Note (2026-11-10): done. `DiffView` keeps `h_offset` (kept across reloads, a new file gets a new view), the measured `text_width` of the longest line (one monospace measurement per load, `diff_hscroll::text_width`) and the range the scrollbar last reported. The code text of each line sits in a `pin` moved left by the offset and clipped to its room; numbers, markers, hunk headers and block bars are not moved; Split uses one offset for both halves. iced's vertical scrollable drops horizontal wheel input, so a small `wheel_observer` widget around it reports horizontal deltas without capturing the event (Shift+wheel, tilt wheel, touchpad x); the horizontal scrollbar under the text (a horizontal scrollable whose range is the largest offset, computed per layout pass from the width via `responsive`) reports drags and follows wheel scrolling through `scroll_to`. The conflict view has its own line rendering and is unchanged (backlog candidate). Measured (release, 2 MB, scrolled 120 px to the right): frame max 9–19 ms, open 49–58 ms (`docs/PERFORMANCE.md`).
 
-### [ ] M7-17 UTF-16 text files
+### [x] M7-17 UTF-16 text files
 
 Finding of the maintainer (2026-11-10, Windows): a text file created with `echo test > file` (PowerShell 5 writes UTF-16 LE with BOM) is shown as "Binary file not shown". Binary detection looks for NUL bytes like Git, and UTF-16 text contains them.
 
@@ -281,6 +281,8 @@ Finding of the maintainer (2026-11-10, Windows): a text file created with `echo 
 - CHANGELOG and user guide (`known-limitations.md`: line staging for UTF-16).
 
 Acceptance: unit tests (LE, BE, BOM only on one side, odd byte count, mixed newlines); app test: the line actions are disabled with the hint, staging the whole file works; snapshot of a UTF-16 diff.
+
+Note (2026-11-10): done. `git_core::diff::decode_utf16` runs before the binary check in `text_diff_with` (after the size check on the raw bytes); `FileDiff`/`TextDiff` carry `encoding`, shown in the diff header. `DiffView::line_staging_block` disables the hunk and block buttons (tooltip with the hint), line selection, and guards Apply/Discard of hunks, blocks and lines (status bar shows the hint). `working-tree-encoding` (checked in `tests/gix_diff.rs`): with `UTF-16` gix's filter pipeline converts the working tree file, so the diff is plain UTF-8 text and line staging stays available; Git's own name `UTF-16LE-BOM` is unknown to gix's encoding filter, the diff then reports "Filtered file – diff not available" as before (known limitation in the user guide). Blame and the conflict view still treat UTF-16 as binary (outside this task).
 
 ### [ ] M7-18 Graph line style like GitKraken
 

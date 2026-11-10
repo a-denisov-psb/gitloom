@@ -332,3 +332,61 @@ fn failing_required_filter_reports_unavailable_diff() {
         "{error}"
     );
 }
+
+fn utf16le(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+    bytes
+}
+
+/// M7-17: a UTF-16 file with BOM is diffed as text in every diff kind.
+#[test]
+fn utf16_files_are_text() {
+    let repo = TestRepo::new();
+    std::fs::write(repo.path().join("u.txt"), utf16le("test\r\n")).unwrap();
+    let untracked = diff(&repo, &request(DiffKind::Untracked, "u.txt"));
+    assert!(!untracked.binary);
+    assert_eq!(untracked.encoding, Some(git_core::TextEncoding::Utf16Le));
+    assert_eq!(unified(&untracked), "@@ -0,0 +1 @@\n+test\n");
+
+    repo.git(&["add", "u.txt"]);
+    repo.git(&["commit", "-q", "-m", "utf16"]);
+    std::fs::write(repo.path().join("u.txt"), utf16le("test\r\nmore\r\n")).unwrap();
+    let unstaged = diff(&repo, &request(DiffKind::Unstaged, "u.txt"));
+    assert_eq!(unstaged.encoding, Some(git_core::TextEncoding::Utf16Le));
+    assert_eq!(unified(&unstaged), "@@ -1 +1,2 @@\n test\n+more\n");
+    let head = repo.head();
+    let commit = diff(&repo, &request(DiffKind::Commit(head), "u.txt"));
+    assert_eq!(unified(&commit), "@@ -0,0 +1 @@\n+test\n");
+}
+
+/// M7-17: with `working-tree-encoding`, Git stores UTF-8 and the filter
+/// pipeline (ADR-018) converts the working tree file, so the diff is plain
+/// UTF-8 text and line staging stays available.
+#[test]
+fn working_tree_encoding_is_converted_by_the_filters() {
+    let repo = TestRepo::new();
+    repo.write(".gitattributes", "*.txt working-tree-encoding=UTF-16\n");
+    std::fs::write(repo.path().join("w.txt"), utf16le("one\n")).unwrap();
+    repo.git(&["add", "."]);
+    repo.git(&["commit", "-q", "-m", "encoded"]);
+    // The index holds UTF-8.
+    assert_eq!(repo.git(&["show", "HEAD:w.txt"]), "one");
+    std::fs::write(repo.path().join("w.txt"), utf16le("one\ntwo\n")).unwrap();
+    let unstaged = diff(&repo, &request(DiffKind::Unstaged, "w.txt"));
+    assert!(!unstaged.binary);
+    assert_eq!(unstaged.encoding, None);
+    assert_eq!(unified(&unstaged), "@@ -1 +1,2 @@\n one\n+two\n");
+
+    // Git's own name `UTF-16LE-BOM` is unknown to gix's encoding filter:
+    // the diff reports the filtered file instead (as before M7-17).
+    repo.write(
+        ".gitattributes",
+        "*.txt working-tree-encoding=UTF-16LE-BOM\n",
+    );
+    let error = backend(&repo)
+        .file_diff(&request(DiffKind::Unstaged, "w.txt"))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Filtered file"), "{error}");
+}

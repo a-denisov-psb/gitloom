@@ -715,6 +715,7 @@ impl GitBackend for GixBackend {
             new_path: new.is_some().then(|| request.path.clone()),
             binary: text.binary,
             too_large: text.too_large,
+            encoding: text.encoding,
             hunks: text.hunks,
         })
     }

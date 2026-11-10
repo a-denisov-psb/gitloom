@@ -2668,6 +2668,10 @@ impl App {
         let CenterView::Diff(diff) = &view.center else {
             return Task::none();
         };
+        if let Some(reason) = diff.line_staging_block() {
+            self.status = reason.into();
+            return Task::none();
+        }
         let (Some(staged), Loadable::Ready(file)) = (diff.staged(), &diff.diff) else {
             return Task::none();
         };
@@ -5697,6 +5701,19 @@ impl App {
                 ));
             }
             Message::Discard(target) => {
+                if matches!(
+                    target,
+                    DiscardTarget::Hunk(_) | DiscardTarget::Lines | DiscardTarget::Block(_)
+                ) {
+                    let reason = self
+                        .active_view_mut()
+                        .and_then(|v| v.center.diff_mut())
+                        .and_then(|d| d.line_staging_block());
+                    if let Some(reason) = reason {
+                        self.status = reason.into();
+                        return Task::none();
+                    }
+                }
                 let (title, text) = match &target {
                     DiscardTarget::File(file) => (
                         "Discard changes".to_string(),
@@ -8702,6 +8719,7 @@ pub(crate) mod tests {
             new_path: Some("f".into()),
             binary: false,
             too_large: false,
+            encoding: None,
             hunks: vec![DiffHunk {
                 header: "@@ -1 +1 @@".into(),
                 old_start: 1,
@@ -8868,6 +8886,7 @@ pub(crate) mod tests {
                 new_path: Some("a".into()),
                 binary: false,
                 too_large: false,
+                encoding: None,
                 hunks: text.hunks,
             }),
         });
@@ -8909,6 +8928,7 @@ pub(crate) mod tests {
                 new_path: Some("a".into()),
                 binary: text.binary,
                 too_large: text.too_large,
+                encoding: None,
                 hunks: text.hunks,
             }),
         });
@@ -9003,6 +9023,7 @@ pub(crate) mod tests {
                 new_path: Some("a".into()),
                 binary: false,
                 too_large: false,
+                encoding: None,
                 hunks: text.hunks,
             }),
         });
@@ -9011,6 +9032,93 @@ pub(crate) mod tests {
             height: 600.0,
         });
         app
+    }
+
+    /// Unstaged diff of "a", a UTF-16 LE file (M7-17), in `mode`.
+    pub(crate) fn utf16_diff_app(mode: settings::DiffMode) -> App {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "a".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let utf16 = |text: &str| -> Vec<u8> {
+            let mut bytes = vec![0xFF, 0xFE];
+            bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+            bytes
+        };
+        let text = git_core::text_diff_with(
+            &utf16("eins\r\nzwei\r\ndrei\r\n"),
+            &utf16("eins\r\nzwölf\r\ndrei\r\n"),
+            mode.context(),
+        );
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("a".into()),
+                new_path: Some("a".into()),
+                binary: text.binary,
+                too_large: text.too_large,
+                encoding: text.encoding,
+                hunks: text.hunks,
+            }),
+        });
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        app
+    }
+
+    #[test]
+    fn utf16_files_show_text_but_no_line_staging() {
+        for mode in settings::DiffMode::ALL {
+            let mut app = utf16_diff_app(mode);
+            let diff = open_diff(&app);
+            assert!(matches!(&diff.diff, Loadable::Ready(f) if !f.binary && f.encoding.is_some()));
+            let hint = crate::repo_view::UTF16_LINE_HINT;
+            assert_eq!(diff.line_staging_block(), Some(hint));
+            // Clicking a changed line selects nothing.
+            let changed = diff
+                .rows
+                .iter()
+                .position(|r| {
+                    !matches!(
+                        r,
+                        crate::repo_view::DiffRow::Header(_) | crate::repo_view::DiffRow::Block(_)
+                    )
+                })
+                .unwrap_or(0);
+            let _ = app.update(Message::DiffLineClicked(changed + 1));
+            let _ = app.update(Message::DiffSideClicked {
+                row: changed + 1,
+                right: true,
+            });
+            assert!(open_diff(&app).selection.is_empty(), "{mode:?}");
+            // Hunk, block and line actions say why and do nothing.
+            for message in [
+                Message::ApplyHunk(0),
+                Message::ApplyBlock(0),
+                Message::ApplySelectedLines,
+                Message::Discard(DiscardTarget::Hunk(0)),
+                Message::Discard(DiscardTarget::Block(0)),
+                Message::Discard(DiscardTarget::Lines),
+            ] {
+                app.status.clear();
+                let _ = app.update(message);
+                assert_eq!(app.status, hint);
+                assert!(app.modal.is_none());
+                assert!(app.tabs[0].view().unwrap().busy.is_none());
+            }
+            // The whole file stages as usual.
+            let _ = app.update(Message::Stage(file("a")));
+            assert_eq!(running_args(&app), ["Stage a"], "{mode:?}");
+        }
     }
 
     #[test]
@@ -11345,6 +11453,7 @@ pub(crate) mod tests {
                 new_path: Some("f.txt".into()),
                 binary: false,
                 too_large: false,
+                encoding: None,
                 hunks: text.hunks,
             }),
         });

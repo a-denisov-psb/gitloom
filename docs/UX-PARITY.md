@@ -154,4 +154,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Focused text fields get a 2 px accent border; Esc closes a dialog or menu even while one of its fields has focus | Accessibility pass (M6-07): visible focus and one Esc per overlay |
 | Screen readers are not supported | iced 0.14 exposes no accessibility tree (M6 plan); documented as a known limitation |
 | The GITFLOW section sits between LOCAL and REMOTE | Maintainer decision (2026-11-10, M7-15); GitKraken's position not verified |
+| UTF-16 files show as text, but line and block staging is disabled for them | M7-17: `git apply` treats UTF-16 as binary; whole-file staging works |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
