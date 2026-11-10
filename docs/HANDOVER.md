@@ -20,7 +20,7 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (M6 waiting for the maintainer, 1.0.0-rc.3 tagged; M7 in progress, 2026-11-10)
+## Current state (M6 waiting for the maintainer, 1.0.0-rc.4 prepared; M7 implemented, 2026-11-10)
 
 M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
@@ -30,9 +30,10 @@ M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md
 - M7 started on `develop` on the maintainer's request (ADR-039): 1.0 fixes and 1.0.0 come from `master`, never from `develop`. Done: M7-01 … M7-12 and M7-14 (left panel tree, Hunk/Inline/Split diffs, Git flow with finish across conflicts and undo); also a fix for context menus that were too narrow for long branch names. Open: M7-13 (release 1.1.0) after `v1.0.0`; the GitKraken verification items of the M7 file and section 7a of `docs/RELEASE-CHECKLIST.md`.
 - rc.2 (2026-11-09, `v1.0.0-rc.2` on `master`): M6-16 no console window on Windows, M6-17 toolbar pickers open the palette lists, M6-18 remotes in sync with the Git configuration (root cause: config reload keyed on the mtime of `.git/config` only). Open for the maintainer: publish the draft, confirm M6-16 and M6-18 on rc.2, check that the update check of an rc.1 build sees rc.2 (M6-14).
 - rc.3 (2026-11-10, `v1.0.0-rc.3` on `master`, ADR-039: made from `master` on `release/1.0.0`, merged back into `develop`): M6-19 context menu width (backport), M6-20 empty `[remote "…"]` sections are not remotes (root cause of `github-fc`), M6-21 "Open file location" and "Copy file path" with absolute native paths, M6-22 scrollbars reserve their room, M6-23 no gaps between graph rows at fractional scales. Open for the maintainer: publish the draft, run the new items of section 7 of the release checklist.
+- rc.4 (2026-11-10, prepared on `master`, maintainer request "Ja, rc.4 vorbereiten"): toolbar buttons center icon and label (fix requested by the maintainer, also on `release/1.1.0` and `develop`). The tag push is refused in the Claude Code session; the maintainer tags and pushes it.
 - Hotfix v0.6.1 (2026-11-06): the v0.6.0 Windows CI hung in `cancel_before_start_stops_immediately`; network cancel no longer joins pipe readers after the kill and never starts Git for a cancelled token.
 - Tooling added in M6: `cargo-deny`, `cargo-about`, `cargo-packager` (see Environment notes), headless UI checks with `iced_test` (ADR-035).
-- Branches: `master` with `v0.1.0` … `v0.6.1`, `v1.0.0-rc.1`, `v1.0.0-rc.2` and `v1.0.0-rc.3`; `develop` (default branch on GitHub).
+- Branches: `master` with `v0.1.0` … `v0.6.1`, `v1.0.0-rc.1` … `v1.0.0-rc.3` (rc.4 prepared); `develop` (default branch on GitHub).
 
 Earlier milestones (M1–M5) are described in their milestone files; the summary of M5 is in `docs/PLANNING-HANDOVER.md`.
 
@@ -59,6 +60,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [ ] M7: answer the GitKraken verification items in docs/milestones/M7-diff-modes-gitflow.md (left panel, diff modes, Gitflow; Claude Code used the planned defaults) and run section 7a of docs/RELEASE-CHECKLIST.md on Windows before 1.1.0.
 - [x] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown. (root cause: empty section, fixed in M6-20)
 - [ ] rc.3: create and push the tag on `master` 71f0f44 (`git tag -a v1.0.0-rc.3 71f0f44 -m v1.0.0-rc.3` and `git push origin v1.0.0-rc.3`; the Claude Code session cannot push tags, the proxy drops the push), then publish the draft pre-release `v1.0.0-rc.3`; run the new items of section 7 of `docs/RELEASE-CHECKLIST.md`; check that the update check of an rc.2 build sees rc.3.
+- [ ] rc.4: tag and push `v1.0.0-rc.4` on `master` (commit in the rc.4 report), publish the draft pre-release, check the toolbar item of section 7 of `docs/RELEASE-CHECKLIST.md`, and that the update check of an rc.3 build sees rc.4.
 
 - [x] GitHub → Settings → General → Default branch: set to `develop`.
 - [x] Push `master` (tags `v0.1.0` and `v0.2.0` are already on origin): `git push -u origin master --tags`

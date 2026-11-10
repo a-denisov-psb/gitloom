@@ -281,6 +281,8 @@ Note (2026-11-09): `v1.0.0-rc.2` tagged on `master` by Claude Code (maintainer r
 
 Note (2026-11-10): `v1.0.0-rc.3` prepared on `master` (71f0f44, CI green on all platforms) by Claude Code; the tag push is refused in the Claude Code session, so the maintainer pushes the tag (maintainer request "mach weiter mit rc.3") with M6-19 … M6-23; `release/1.0.0` branched from `master` (ADR-039), version `1.0.0-rc.3` (MSI 1.0.0.3). Open (maintainer): publish the draft pre-release; the update check of an rc.2 build should see rc.3.
 
+Note (2026-11-10): `1.0.0-rc.4` (MSI 1.0.0.4) prepared on `master` by Claude Code (maintainer request "Ja, rc.4 vorbereiten") with the toolbar centering fix the maintainer asked for; `release/1.0.0` fast-forwarded to `master` first. The session cannot push tags: the maintainer tags `v1.0.0-rc.4` and publishes the draft; the update check of an rc.3 build should see rc.4.
+
 ### [ ] M6-16 No console window on Windows
 
 Finding of the maintainer (2026-11-06): the Windows build opens a console window next to Gitloom, because the binary uses the console subsystem (`crates/app/src/main.rs` has no `windows_subsystem` attribute).

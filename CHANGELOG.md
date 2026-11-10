@@ -22,6 +22,13 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Fixed
 
 - UTF-16 text files with a byte order mark (for example written by PowerShell 5) are shown as text with their encoding instead of "Binary file not shown"; their lines, blocks and hunks cannot be staged one by one, the whole file can.
+
+## [1.0.0-rc.4] - 2026-11-10
+
+Fourth release candidate of Gitloom 1.0: centered toolbar buttons.
+
+### Fixed
+
 - Toolbar buttons center their icon and label.
 
 ## [1.0.0-rc.3] - 2026-11-10
