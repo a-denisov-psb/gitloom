@@ -6,7 +6,7 @@
 
 **M7 – Left panel tree, diff view modes and Git flow (1.1)** → [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md) (implemented; release 1.1.0 from `release/1.1.0` after 1.0.0, ADR-040)
 
-**M8 – Repository settings and tools (1.2)** → [`milestones/M8-repository-settings.md`](milestones/M8-repository-settings.md) (planned; runs on `develop`, ADR-040)
+**M8 – Repository settings and tools (1.2)** → [`milestones/M8-repository-settings.md`](milestones/M8-repository-settings.md) (implemented on `develop`; release 1.2.0 after 1.1.0, ADR-040)
 
 ## Vision
 
@@ -24,7 +24,7 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M5 | 0.6.0 | Productivity parity | Done |
 | M6 | 1.0.0 | Release readiness | In progress (maintainer steps open) |
 | M7 | 1.1.0 | Left panel tree, diff view modes and Git flow | Implemented, release after 1.0.0 |
-| M8 | 1.2.0 | Repository settings and tools | Planned |
+| M8 | 1.2.0 | Repository settings and tools | Implemented |
 | M9 | 1.3.0 | Graph columns, themes and syntax highlighting | Outline |
 
 Only the current and the next milestone are planned in task-level detail; later milestones are outlines until they are next.
