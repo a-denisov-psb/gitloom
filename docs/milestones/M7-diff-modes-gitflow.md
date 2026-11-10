@@ -298,4 +298,4 @@ Note (2026-11-10): done. Values from the maintainer's two reference screenshots 
 
 ### [ ] M7-13 Release v1.1.0
 
-`/release` (ADR-034).
+`/release` (ADR-034) on `release/1.1.0` (ADR-040), only after `v1.0.0`; merge `release/1.1.0` into `master` and back into `develop`.

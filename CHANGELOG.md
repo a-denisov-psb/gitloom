@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.1.0] - unreleased
+
 ### Added
 
 - The left panel groups local and remote branches into folders at `/` like GitKraken: folders and remotes collapse with a click (remembered per repository), branch rows show a branch icon and the last name segment (full name in the tooltip), the checked-out branch is highlighted.

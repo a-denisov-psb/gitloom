@@ -42,6 +42,10 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
 | Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | done (M7: one global setting; staging by line in all modes and by block in Inline/Split; read-only diffs have no bars; GitKraken checks on remembering, block buttons and Split alignment open) |
 | Gitflow | Preferences → Gitflow initializes; GITFLOW section in the left panel with a green start button; branch menu "Finish …" | done (M7: native, git-flow compatible config, ADR-037; also palette entries; finish across conflicts and one undo step; GitKraken checks on dialogs and section position open) |
+| Commit identity | Profiles (Preferences → Profiles) hold author name and email; the active profile commits | M8: Preferences → Identities; per repository "Committing as …" in the commit panel, written to the repository config (see deviations) |
+| Repo-specific preferences | Group of categories for the open repository (Encoding, Gitflow, Git Hooks, LFS, Commit, Submodules, …) | M8: group "Repository · <name>" with Identity, SSH key, Gitflow |
+| SSH key | Preferences → SSH: one key pair or the local SSH agent | M8: per repository via `core.sshCommand`, system default otherwise (see deviations) |
+| External editor | Preferences → External tools: VS Code, Sublime, IntelliJ or a custom path | M8: presets fill a command template with `{path}`; repository via palette, Alt+E and toolbar; files via their context menus |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
@@ -104,6 +108,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Pull, Push, Stash, Pop stash | Command palette | done (M6-07; the toolbar actions are palette entries) |
 | Open repo in terminal | Alt+T | done (M5-13; the system terminal, see deviations) |
 | Open repo in file manager | Alt+O | done (M5-13) |
+| Open repo in external editor | Alt+E | M8 (Gitloom shortcut next to Alt+T/Alt+O; GitKraken check open) |
 | Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts) |
 | Close current repo | Ctrl+W | done (M1) |
 
@@ -155,4 +160,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Screen readers are not supported | iced 0.14 exposes no accessibility tree (M6 plan); documented as a known limitation |
 | The GITFLOW section sits between LOCAL and REMOTE | Maintainer decision (2026-11-10, M7-15); GitKraken's position not verified |
 | UTF-16 files show as text, but line and block staging is disabled for them | M7-17: `git apply` treats UTF-16 as binary; whole-file staging works |
+| Identity per repository (`user.name`/`user.email` in the repository config) instead of switching a global profile | ADR-041; identities only, no workspace profiles (planning decision 2026-11-09) |
+| SSH key per repository instead of one global key | ADR-041; uses Git's own `core.sshCommand`, so the command line behaves the same |
+| Toolbar button "Editor" and Alt+E for the external editor | M8 plan; mirrors Terminal (Alt+T) |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

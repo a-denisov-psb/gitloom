@@ -4,7 +4,9 @@
 
 **M6 – Release readiness (1.0)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md) (maintainer steps open; 1.0 line on `master`, ADR-039)
 
-**M7 – Left panel tree, diff view modes and Git flow (1.1)** → [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md) (implemented on `develop`; release 1.1.0 follows 1.0.0)
+**M7 – Left panel tree, diff view modes and Git flow (1.1)** → [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md) (implemented; release 1.1.0 from `release/1.1.0` after 1.0.0, ADR-040)
+
+**M8 – Repository settings and tools (1.2)** → [`milestones/M8-repository-settings.md`](milestones/M8-repository-settings.md) (planned; runs on `develop`, ADR-040)
 
 ## Vision
 
@@ -22,7 +24,7 @@ A fast, native, open-source Git client that GitKraken users can use without rele
 | M5 | 0.6.0 | Productivity parity | Done |
 | M6 | 1.0.0 | Release readiness | In progress (maintainer steps open) |
 | M7 | 1.1.0 | Left panel tree, diff view modes and Git flow | Implemented, release after 1.0.0 |
-| M8 | 1.2.0 | Repository settings and tools | Outline |
+| M8 | 1.2.0 | Repository settings and tools | Planned |
 | M9 | 1.3.0 | Graph columns, themes and syntax highlighting | Outline |
 
 Only the current and the next milestone are planned in task-level detail; later milestones are outlines until they are next.
@@ -59,12 +61,9 @@ Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or
 
 Branch folders, icons, highlighted checked-out branch and hidden-branch counter in the left panel like GitKraken; Hunk, Inline and Split diff views with staging in every mode; GitKraken's Git flow: initialize per repository (git-flow compatible config), GITFLOW section in the left panel, start and finish of features, releases and hotfixes with conflict resume and undo. Details: [`milestones/M7-diff-modes-gitflow.md`](milestones/M7-diff-modes-gitflow.md).
 
-### M8 – Repository settings and tools (1.2, outline)
+### M8 – Repository settings and tools (1.2)
 
-- Preferences category "Repository" for settings of the active tab's repository; the Gitflow settings of M7 move there.
-- Git identities: profiles with name and email (identity only, no workspace profiles like GitKraken's); one is the global default (`user.name`/`user.email` global); per repository chosen in the commit panel ("Committing as …") and the palette; the choice writes `user.name`/`user.email` to the repository config, "Use global" removes them; an unknown identity in a repository can be saved as a profile.
-- SSH key per repository: `core.sshCommand = ssh -i "<key>" -o IdentitiesOnly=yes` in the repository config; no choice = system default (ssh-agent, `~/.ssh/config`); keys from `~/.ssh` or a file dialog; an existing `core.sshCommand` is only replaced after confirmation; passphrases via the askpass dialog, nothing stored.
-- External editor: Preferences → External tools, command template with `{path}`; "Open repository in editor" (palette, Alt+E, toolbar button next to Terminal shown only when an editor is set); file context menu in the unstaged/staged lists "Open in external editor" (disabled with a hint when no editor is set or the file is deleted).
+Preferences group "Repository · <name>" (Identity, SSH key, Gitflow) like GitKraken's repo-specific preferences; identities (name and email) with a default kept in the global Git config; "Committing as …" in the commit panel with a per-repository choice written to the repository config; SSH key per repository via `core.sshCommand`; external editor for the repository (palette, Alt+E, toolbar) and single files (file context menus). Details: [`milestones/M8-repository-settings.md`](milestones/M8-repository-settings.md).
 
 ### M9 – Graph columns, themes and syntax highlighting (1.3, outline)
 
