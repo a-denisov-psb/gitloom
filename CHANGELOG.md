@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Fixed
+
+- Toolbar buttons center their icon and label.
+
 ## [1.0.0-rc.3] - 2026-11-10
 
 Third release candidate of Gitloom 1.0: fixes for context menus, remotes, file locations, scrollbars and the graph.
