@@ -68,6 +68,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] The empty remote `github-fc` (empty `[remote "github-fc"]` section in `.git/config`) is no longer listed; afterwards remove the section with `git config --remove-section remote.github-fc`.
 - [ ] In a repository whose path contains a space: "Open file location" on a file in a subfolder selects it in Explorer; "Copy file path" copies the full Windows path.
 - [ ] Left panel with more branches than fit: the scrollbar does not cover the counts.
+- [ ] Graph at 125 % Windows scaling and zoom 110 %/120 %: no gaps between rows in lines or row backgrounds.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 

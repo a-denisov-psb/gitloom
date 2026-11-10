@@ -353,6 +353,10 @@ pub fn graph_row(selected: bool, lane: u32) -> impl Fn(&Theme, button::Status) -
         };
         button::Style {
             border: Border::default(),
+            // Snapped to physical pixels: neighbouring rows share their
+            // edge instead of blending two anti-aliased edges into a seam
+            // at fractional scale factors (M6-23).
+            snap: true,
             ..button_style(background, p.text)
         }
     }

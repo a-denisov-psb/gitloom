@@ -34,6 +34,11 @@ const MAX_LANES: u16 = 12;
 const NODE_RADIUS: f32 = 9.0;
 const MERGE_RADIUS: f32 = 4.5;
 const DASH: [f32; 2] = [4.0, 3.0];
+/// Lines run this far past the top and bottom edge of their row. The canvas
+/// clips them at the row edge, which the renderer snaps to physical pixels
+/// the same way for both neighbours, so rows join without a gap at any
+/// scale factor (M6-23). At least one physical pixel down to a scale of 0.5.
+const EDGE_OVERLAP: f32 = 2.0;
 /// Rows rendered above and below the viewport.
 const OVERSCAN: usize = 10;
 
@@ -278,7 +283,10 @@ pub fn graph_row<'a>(
         };
         let content = row![
             cell(refs, COL_REFS),
-            cell(graph_cell(layout_row, Node::Wip, false), graph_width),
+            cell(
+                graph_cell(layout_row, row_index, Node::Wip, false),
+                graph_width,
+            ),
             cell(summary, Fill),
         ];
         return row_button(
@@ -324,7 +332,10 @@ pub fn graph_row<'a>(
     };
     let mut content = row![
         cell(refs_cell, COL_REFS),
-        cell(graph_with_avatar(layout_row, node, dimmed), graph_width),
+        cell(
+            graph_with_avatar(layout_row, row_index, node, dimmed),
+            graph_width,
+        ),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
     if columns.author {
@@ -625,6 +636,8 @@ enum Node {
 /// Graph slice of one row.
 struct GraphCell {
     row: Row,
+    /// Position of the row in the graph (dash phase across rows).
+    index: usize,
     node: Node,
     /// The commit does not match the search: faint node.
     dimmed: bool,
@@ -632,7 +645,7 @@ struct GraphCell {
 
 /// Graph cell; an avatar is an image widget on top of the node, because the
 /// canvas does not round images (M5-11).
-fn graph_with_avatar<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
+fn graph_with_avatar<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> Element<'a, Message> {
     let avatar = match &node {
         Node::Commit {
             avatar: Some(handle),
@@ -641,7 +654,7 @@ fn graph_with_avatar<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Mess
         _ => None,
     };
     let x = lane_x(row.lane);
-    let cell = graph_cell(row, node, dimmed);
+    let cell = graph_cell(row, index, node, dimmed);
     let Some(handle) = avatar else {
         return cell;
     };
@@ -662,11 +675,16 @@ fn graph_with_avatar<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Mess
     .into()
 }
 
-fn graph_cell<'a>(row: Row, node: Node, dimmed: bool) -> Element<'a, Message> {
-    canvas::Canvas::new(GraphCell { row, node, dimmed })
-        .width(Fill)
-        .height(Fill)
-        .into()
+fn graph_cell<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> Element<'a, Message> {
+    canvas::Canvas::new(GraphCell {
+        row,
+        index,
+        node,
+        dimmed,
+    })
+    .width(Fill)
+    .height(Fill)
+    .into()
 }
 
 fn lane_x(lane: u16) -> f32 {
@@ -696,21 +714,36 @@ impl canvas::Program<Message> for GraphCell {
                     lane,
                     color,
                     dashed,
-                } => (
-                    Path::line(
-                        Point::new(lane_x(lane), 0.0),
-                        Point::new(lane_x(lane), height),
-                    ),
-                    color,
-                    dashed,
-                ),
+                } => {
+                    let x = lane_x(lane);
+                    let top = line_top(self.index, dashed);
+                    (
+                        Path::line(Point::new(x, top), Point::new(x, height + EDGE_OVERLAP)),
+                        color,
+                        dashed,
+                    )
+                }
                 Segment::IntoNode {
                     from,
                     color,
                     dashed,
-                } => (curve(Point::new(lane_x(from), 0.0), node), color, dashed),
+                } => {
+                    let x = lane_x(from);
+                    let lead_in = Point::new(x, line_top(self.index, dashed));
+                    (
+                        curve(&[lead_in], Point::new(x, 0.0), node, &[]),
+                        color,
+                        dashed,
+                    )
+                }
                 Segment::FromNode { to, color, dashed } => {
-                    (curve(node, Point::new(lane_x(to), height)), color, dashed)
+                    let x = lane_x(to);
+                    let lead_out = Point::new(x, height + EDGE_OVERLAP);
+                    (
+                        curve(&[], node, Point::new(x, height), &[lead_out]),
+                        color,
+                        dashed,
+                    )
                 }
             };
             frame.stroke(&path, line(theme::lane_color(p, color.0), dashed));
@@ -763,19 +796,41 @@ impl canvas::Program<Message> for GraphCell {
     }
 }
 
-/// Straight line for vertical connections, smooth S-curve for lane changes.
-fn curve(from: Point, to: Point) -> Path {
-    if (from.x - to.x).abs() < f32::EPSILON {
-        return Path::line(from, to);
+/// Local y where a line entering row `index` from above starts: past the
+/// top edge by at least [`EDGE_OVERLAP`]. A dashed line starts where the
+/// pattern of the whole graph (from the top of row 0) is at its beginning,
+/// so the dashes continue across rows.
+fn line_top(index: usize, dashed: bool) -> f32 {
+    if !dashed {
+        return -EDGE_OVERLAP;
     }
-    let bend = (to.y - from.y) / 2.0;
+    let period = f64::from(DASH[0] + DASH[1]);
+    let phase = (index as f64 * f64::from(ROW_HEIGHT)) % period;
+    (-phase - period) as f32
+}
+
+/// Straight line for vertical connections, smooth S-curve for lane changes;
+/// `before` and `after` are straight extensions past the row edges.
+fn curve(before: &[Point], from: Point, to: Point, after: &[Point]) -> Path {
     Path::new(|builder| {
-        builder.move_to(from);
-        builder.bezier_curve_to(
-            Point::new(from.x, from.y + bend),
-            Point::new(to.x, to.y - bend),
-            to,
-        );
+        let start = before.first().copied().unwrap_or(from);
+        builder.move_to(start);
+        if !before.is_empty() {
+            builder.line_to(from);
+        }
+        if (from.x - to.x).abs() < f32::EPSILON {
+            builder.line_to(to);
+        } else {
+            let bend = (to.y - from.y) / 2.0;
+            builder.bezier_curve_to(
+                Point::new(from.x, from.y + bend),
+                Point::new(to.x, to.y - bend),
+                to,
+            );
+        }
+        for point in after {
+            builder.line_to(*point);
+        }
     })
 }
 
@@ -866,6 +921,71 @@ mod tests {
     #[test]
     fn no_refs_no_labels() {
         assert!(ref_labels(&[], &on_branch(), &commit()).is_empty());
+    }
+
+    /// The renderer translates each row's mesh to the physical pixel grid
+    /// (top left rounded) and clips it to its snapped bounds. A line from
+    /// local `top` to `bottom` must cover that clip, plus half a pixel for
+    /// anti-aliasing, at every row and scale (M6-23).
+    fn covers_snapped_row(top: f32, bottom: f32, scale: f32, scroll: f32, row: usize) -> bool {
+        let row_top = (row as f32 * ROW_HEIGHT - scroll) * scale;
+        let row_bottom = row_top + ROW_HEIGHT * scale;
+        let (clip_top, clip_bottom) = (row_top.round(), row_bottom.round());
+        let line_top = clip_top + top * scale;
+        let line_bottom = clip_top + bottom * scale;
+        line_top <= clip_top - 0.5 && line_bottom >= clip_bottom + 0.5
+    }
+
+    #[test]
+    fn lines_join_across_rows_at_fractional_scales() {
+        // System scale × zoom: 1.25 × 110 % and others.
+        let scales = [1.0, 1.1, 1.25, 1.375, 1.5, 1.65, 1.75, 2.25, 0.9];
+        let height = ROW_HEIGHT;
+        let mut naive_gap = false;
+        for scale in scales {
+            for scroll in [0.0, 7.3, 1234.56] {
+                for row in 0..400 {
+                    for dashed in [false, true] {
+                        // Through segments and the straight lead-in of a
+                        // segment entering a node.
+                        let top = line_top(row, dashed);
+                        assert!(
+                            covers_snapped_row(top, height + EDGE_OVERLAP, scale, scroll, row),
+                            "gap at scale {scale}, scroll {scroll}, row {row}"
+                        );
+                    }
+                    naive_gap |= !covers_snapped_row(0.0, height, scale, scroll, row);
+                }
+            }
+        }
+        assert!(naive_gap, "lines ending at the row edges leave gaps");
+    }
+
+    #[test]
+    fn dashes_continue_across_rows() {
+        let period = DASH[0] + DASH[1];
+        for row in [0usize, 1, 2, 6, 7, 99, 100_000] {
+            let top = line_top(row, true);
+            assert!(top <= -EDGE_OVERLAP);
+            // The pattern starts at a multiple of the period of the graph.
+            let start = row as f64 * f64::from(ROW_HEIGHT) + f64::from(top);
+            let rest = start.rem_euclid(f64::from(period));
+            assert!(
+                rest < 1e-3 || rest > f64::from(period) - 1e-3,
+                "row {row}: {rest}"
+            );
+        }
+        assert_eq!(line_top(5, false), -EDGE_OVERLAP);
+    }
+
+    #[test]
+    fn row_backgrounds_snap_to_pixels() {
+        let theme = crate::theme::app_theme(false);
+        for selected in [false, true] {
+            let style =
+                crate::theme::graph_row(selected, 0)(&theme, iced::widget::button::Status::Hovered);
+            assert!(style.snap);
+        }
     }
 
     #[test]
