@@ -14,6 +14,7 @@ mod branch_tree;
 mod conflict;
 mod crash;
 mod diff_blocks;
+mod diff_hscroll;
 mod fetch;
 mod file_history;
 mod format;

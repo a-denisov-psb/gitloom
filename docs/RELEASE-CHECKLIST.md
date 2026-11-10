@@ -78,6 +78,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Git flow: initialize in Preferences on a repository without `develop`; start a feature from the green "+", finish it with "Delete branch"; start and finish a release (tag created, merged into main and develop); Ctrl+Z undoes the finish, Ctrl+Y redoes it.
 - [ ] Release finish with a conflict in the merge into develop: resolve in the conflict view, Continue, the finish completes by itself; close Gitloom while the conflict is open, reopen, "Continue finishing" completes it.
 - [ ] A repository initialized with the `git-flow` CLI (Git for Windows ships it) shows the GITFLOW section; one initialized by Gitloom works with `git flow feature start` in a terminal.
+- [ ] Diff with a line longer than the view: Shift+wheel and the horizontal scrollbar scroll it in Hunk, Inline and Split; line selection still works after scrolling.
 - [ ] GITFLOW sits between LOCAL and REMOTE.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)

@@ -11,6 +11,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Inline diff view: the whole file with each change block marked by a bar with "Stage block" / "Unstage block" / "Discard block"; line selection works as in the Hunk view; "Previous change" / "Next change" arrows in the header, and opening a file shows its first change.
 - Split diff view: old and new side by side with paired changed lines, the same block bars, line selection (removed lines on the left, added on the right) and change arrows; added and deleted files show the empty side as "File added" / "File deleted".
 - Git flow (git-flow compatible): Preferences → Gitflow initializes, edits or removes it for the active repository; a GITFLOW section in the left panel lists features, releases and hotfixes; start them with the green "+", the menu of the development or production branch, or the command palette; finish them from their branch menu or the palette (merge commits, tag for releases and hotfixes, optional rebase and branch deletion). A finish that hits a conflict continues by itself after the conflict is resolved, also after a restart ("Continue finishing"). A finish is one Undo/Redo step.
+- Diff views scroll horizontally (Shift+wheel, horizontal wheel, touchpad, scrollbar below the text) in Hunk, Inline and Split; line numbers and markers stay in place.
 - While branches are hidden or soloed, "Viewing x/y · Show All" above the filter tells how many are shown and shows all again; LOCAL and REMOTE count "shown/total".
 
 ### Changed

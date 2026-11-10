@@ -113,6 +113,8 @@ Cloud container (4 vCPU Intel Xeon @ 2.30 GHz, Linux), release build, no GPU: a 
 
 Target (milestone acceptance): no frame over 50 ms while scrolling a 2 MB file in Inline and Split; met. The row list is built once per load; a frame builds only the visible rows plus overscan, and the change navigation scans the block list only. No hot spot needed a fix. How: `cargo test -p gitloom --release --bin gitloom perf_large_diff_modes -- --ignored --nocapture`.
 
+M7-16 (horizontal scrolling, 2026-11-10, same container): the measurement now runs with the text scrolled 120 px to the right. Hunk open 51–58 ms, frame median 7.2–7.6 ms, max 10.0–11.2 ms; Inline open 57 ms, median 7.5–7.6 ms, max 9.2–19.4 ms; Split open 49–53 ms, median 8.0–10.6 ms, max 15.9–18.6 ms (two runs). The target of 50 ms per frame is met; the width of the longest line is measured once per load.
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |

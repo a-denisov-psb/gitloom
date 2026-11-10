@@ -316,6 +316,8 @@ mod tests {
         for mode in DiffMode::ALL {
             let (mut app, open) = crate::app::tests::large_diff_app(mode, 50_000);
             let rows = crate::app::tests::diff_rows(&app);
+            // Scrolled to the right as well (M7-16): the text is moved.
+            let _ = app.update(Message::DiffWheel(120.0));
             // A frame: build the view and lay it out (what iced does per
             // redraw before drawing), at 60 positions over the whole file.
             let mut frames = Vec::new();
@@ -524,5 +526,19 @@ mod tests {
         ]
         .map(&mut top);
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    }
+
+    /// Hunk and Split diffs scrolled to the right (M7-16): numbers,
+    /// markers and headers stay, the text moves, the scrollbar shows.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_diff_horizontal_scroll() {
+        use crate::settings::DiffMode;
+        for (mode, name) in [(DiffMode::Hunk, "hunk"), (DiffMode::Split, "split")] {
+            let mut app = crate::app::tests::wide_diff_app(mode);
+            snapshot(&app, &format!("diff-hscroll-{name}-0"));
+            let _ = app.update(Message::DiffWheel(240.0));
+            snapshot(&app, &format!("diff-hscroll-{name}-1"));
+        }
     }
 }
