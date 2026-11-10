@@ -140,13 +140,15 @@ Acceptance: unit tests for parse/format (Windows paths, spaces, custom commands)
 
 Note (2026-11-10): done. `git_core::ssh`: `SshSetting`/`SshConfig` (`GitBackend::ssh_config`, the last `core.sshCommand` value gix read, with its origin), `ssh_command`/`parse_ssh_command` (exactly the written form is a key, everything else custom), `find_keys`, `set_ssh_key`, `unset_ssh_command` (exit code 5 ignored), `is_ssh_url`/`has_ssh_remotes` (also `ssh+git://`; Windows drive paths are not scp-like URLs). The setting is part of the config part of the snapshot (refresh after outside changes). `CliBackend` sets neither `GIT_SSH` nor `GIT_SSH_COMMAND` (checked); a `GIT_SSH_COMMAND` in the user's environment still overrides `core.sshCommand`, as in Git (noted for the user guide, M8-09). `tests/ssh_key.rs` (Unix only, own binary) sets `GIT_SSH_VARIANT=ssh` so Git does not probe the fake ssh with `-G`.
 
-### [ ] M8-06 SSH key per repository (UI)
+### [x] M8-06 SSH key per repository (UI)
 
 - Preferences → Repository → SSH key with the choices from the decisions table, "Browse…" (file dialog, path input as fallback like the start screen), custom and inherited display, "Replace…" with confirmation, the no-SSH-remotes hint.
 - Status bar confirmation ("SSH key for <repository>: <file name>" / "system default").
 - An authentication error while a key is set adds "Uses SSH key <path> (Preferences → Repository → SSH key)" to the error dialog's hint.
 
 Acceptance: app tests: choosing a key writes the config, "System default" unsets it, a custom command is not replaced without confirmation, an inherited value is shown with its origin; snapshot of the category in both themes.
+
+Note (2026-11-10): done. Category `SshKey` between Identity and Gitflow. Keys are looked up off the UI thread when the category opens (`directories::BaseDirs` home, `find_keys`); "Browse…" uses the `rfd` file dialog, the path input next to it is the fallback (as on the start screen). With an inherited value the first choice reads "Inherited (from the … config)" instead of "System default", since removing the local value brings that one back. A local custom command shows read-only with "Replace…"; the confirmation enables the choices until the category is opened again, and `choose_ssh_key` refuses without it. A path with `"` is refused with the message of `ssh_command`. `auth_hint_with_key` appends "Uses SSH key <path> (Preferences → Repository → SSH key)." to the hint of write and pull errors while a key from the repository config is set. Selected list entries keep the normal text color when disabled (`theme::list_item`). Snapshot `ui_check_ssh_key` checked by eye; `inherited_ssh_command_shows_its_origin` checks the texts.
 
 ### [ ] M8-07 External editor setting and launcher
 

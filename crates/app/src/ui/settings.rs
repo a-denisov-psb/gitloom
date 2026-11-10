@@ -59,6 +59,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Identities => identities(app),
         Category::ExternalTools => external_tools(&app.settings, page),
         Category::Identity => repository_identity(app),
+        Category::SshKey => ssh_key(app, page),
         Category::Gitflow => gitflow(app, page),
     };
 
@@ -132,6 +133,7 @@ fn category_title(app: &App, category: Category) -> String {
     match (category, app.active_repo_name()) {
         (Category::Gitflow, Some(name)) => format!("Gitflow · {name}"),
         (Category::Identity, Some(name)) => format!("Identity · {name}"),
+        (Category::SshKey, Some(name)) => format!("SSH key · {name}"),
         _ => category.title().to_owned(),
     }
 }
@@ -198,6 +200,145 @@ fn repository_identity(app: &App) -> Element<'_, Message> {
     ]
     .spacing(16)
     .into()
+}
+
+/// Preferences → Repository → SSH key (M8-06): the system default or a key
+/// for this repository's network operations (`core.sshCommand`).
+fn ssh_key<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
+    use git_core::{ConfigOrigin, SshSetting};
+    let Some(view) = app.active_tab().and_then(crate::app::Tab::view) else {
+        return muted(NO_REPOSITORY).into();
+    };
+    let ssh = &view.snapshot.ssh;
+    let local = ssh.origin == Some(ConfigOrigin::Local);
+    let custom_local = local && matches!(ssh.setting, SshSetting::Custom(_));
+    let writable = app.write_block().is_none() && view.busy.is_none();
+    let enabled = writable && (!custom_local || page.ssh_replace);
+    let describe = |setting: &SshSetting| match setting {
+        SshSetting::SystemDefault => "the system default".to_owned(),
+        SshSetting::Key(path) => path.display().to_string(),
+        SshSetting::Custom(command) => format!("custom command {command}"),
+    };
+
+    let mut content = column![muted(
+        "The key Git uses for fetch, pull and push of this repository (core.sshCommand in \
+         its Git config). Passphrases are asked for when needed and never stored."
+    )
+    .size(12)]
+    .spacing(16);
+    let urls = view
+        .snapshot
+        .remote_urls
+        .iter()
+        .map(|(_, url)| url.as_str());
+    if !git_core::ssh::has_ssh_remotes(urls) {
+        content = content.push(
+            text("This repository has no SSH remotes")
+                .size(12)
+                .style(theme::text_warning),
+        );
+    }
+    // What applies now.
+    let current: Element<'a, Message> = match (&ssh.setting, ssh.origin) {
+        (SshSetting::Custom(command), Some(ConfigOrigin::Local)) => {
+            let mut line = row![text(format!("Custom SSH command: {command}"))]
+                .spacing(10)
+                .align_y(iced::Center);
+            if !page.ssh_replace {
+                line = line.push(
+                    button(text("Replace…").size(12))
+                        .on_press_maybe(
+                            writable.then_some(Message::SshReplace { confirmed: false }),
+                        )
+                        .padding([2, 10])
+                        .style(button::secondary),
+                );
+            }
+            line.into()
+        }
+        (setting, Some(origin)) if origin != ConfigOrigin::Local => text(format!(
+            "Inherited {}: {}. Choosing a key overrides it for this repository.",
+            origin.description(),
+            describe(setting)
+        ))
+        .into(),
+        (setting, _) => text(format!("Uses {}", describe(setting))).into(),
+    };
+    content = content.push(current);
+
+    // Choices: system default (or the inherited value), the keys, a file.
+    let current_key = match (&ssh.setting, local) {
+        (SshSetting::Key(path), true) => Some(git_core::ssh::normalized_key_path(path)),
+        _ => None,
+    };
+    let default_label = match ssh.origin {
+        Some(origin) if origin != ConfigOrigin::Local => {
+            format!("Inherited ({})", origin.description())
+        }
+        _ => "System default (ssh-agent, ~/.ssh/config)".to_owned(),
+    };
+    let choice = |label: String, current: bool, message: Message| -> Element<'a, Message> {
+        let label = if current {
+            format!("{label} · current")
+        } else {
+            label
+        };
+        button(text(label))
+            .on_press_maybe((enabled && !current).then_some(message))
+            .padding([5, 12])
+            .width(Fill)
+            .style(theme::list_item(current))
+            .into()
+    };
+    let mut choices =
+        Column::new()
+            .spacing(2)
+            .push(choice(default_label, !local, Message::SshKeyChosen(None)));
+    match &page.ssh_keys {
+        None => choices = choices.push(muted("Looking for keys in ~/.ssh…").size(12)),
+        Some(keys) if keys.is_empty() => {
+            choices = choices.push(muted("No keys found in ~/.ssh").size(12));
+        }
+        Some(keys) => {
+            for key in keys {
+                let current = current_key.as_deref()
+                    == Some(git_core::ssh::normalized_key_path(key).as_str());
+                choices = choices.push(choice(
+                    key.display().to_string(),
+                    current,
+                    Message::SshKeyChosen(Some(key.clone())),
+                ));
+            }
+        }
+    }
+    // A key elsewhere: file dialog, or a typed path (like the start screen).
+    let mut path = text_input("Path of a key file", &page.ssh_path)
+        .padding(6)
+        .style(theme::input);
+    if enabled {
+        path = path
+            .on_input(Message::SshPathInput)
+            .on_submit(Message::SshPathSubmit);
+    }
+    let other = row![
+        button(text("Browse…"))
+            .on_press_maybe(enabled.then_some(Message::SshBrowse))
+            .padding([5, 14])
+            .style(button::secondary),
+        path,
+        button(text("Use"))
+            .on_press_maybe(
+                (enabled && !page.ssh_path.trim().is_empty()).then_some(Message::SshPathSubmit)
+            )
+            .padding([5, 14])
+            .style(button::secondary),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    content
+        .push(field("Use", choices.into(), None))
+        .push(field("Other key", other.into(), None))
+        .into()
 }
 
 /// Preferences → Gitflow (M7-07): initialize, edit or remove Git flow for

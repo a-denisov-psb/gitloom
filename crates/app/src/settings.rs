@@ -250,6 +250,8 @@ pub enum Category {
     ExternalTools,
     /// Identity of the active tab's repository (M8-04).
     Identity,
+    /// SSH key of the active tab's repository (M8-06).
+    SshKey,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
 }
@@ -265,7 +267,7 @@ impl Category {
     /// Categories of the active tab's repository, below the group header
     /// "Repository · <name>" (M8-01, like GitKraken's repo-specific
     /// preferences).
-    pub const REPOSITORY: [Self; 2] = [Self::Identity, Self::Gitflow];
+    pub const REPOSITORY: [Self; 3] = [Self::Identity, Self::SshKey, Self::Gitflow];
 
     /// The category belongs to the repository group.
     pub fn is_repository(self) -> bool {
@@ -278,6 +280,7 @@ impl Category {
             Self::Appearance => "Appearance",
             Self::Identities => "Identities",
             Self::Identity => "Identity",
+            Self::SshKey => "SSH key",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
         }
@@ -296,6 +299,12 @@ pub struct Page {
     pub tools: Option<Result<(git_core::ToolInfo, git_core::ToolInfo), String>>,
     /// Gitflow form (filled when the category opens with a repository).
     pub flow: Option<FlowForm>,
+    /// SSH key category (M8-06): keys found in `~/.ssh` (`None` while
+    /// loading), the typed key path, and whether replacing a custom
+    /// `core.sshCommand` was confirmed.
+    pub ssh_keys: Option<Vec<std::path::PathBuf>>,
+    pub ssh_path: String,
+    pub ssh_replace: bool,
     /// Repository the repository category's form was built for; the form
     /// follows the active tab (M8-01).
     pub repo: Option<(crate::app::TabId, std::path::PathBuf)>,
@@ -352,6 +361,9 @@ impl Page {
             error: None,
             tools: None,
             flow: None,
+            ssh_keys: None,
+            ssh_path: String::new(),
+            ssh_replace: false,
             repo: None,
         }
     }

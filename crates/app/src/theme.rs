@@ -264,7 +264,7 @@ pub fn list_item(selected: bool) -> impl Fn(&Theme, button::Status) -> button::S
         };
         // Disabled entries (e.g. repository categories without a
         // repository, M8-01) are muted.
-        let text = if status == button::Status::Disabled {
+        let text = if status == button::Status::Disabled && !selected {
             p.text_muted
         } else {
             p.text
