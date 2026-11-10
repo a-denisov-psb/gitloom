@@ -153,12 +153,17 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Self; 4] = [
-        Self::General,
-        Self::Appearance,
-        Self::ExternalTools,
-        Self::Gitflow,
-    ];
+    /// Categories that apply everywhere, at the top of the list.
+    pub const GLOBAL: [Self; 3] = [Self::General, Self::Appearance, Self::ExternalTools];
+    /// Categories of the active tab's repository, below the group header
+    /// "Repository · <name>" (M8-01, like GitKraken's repo-specific
+    /// preferences).
+    pub const REPOSITORY: [Self; 1] = [Self::Gitflow];
+
+    /// The category belongs to the repository group.
+    pub fn is_repository(self) -> bool {
+        Self::REPOSITORY.contains(&self)
+    }
 
     pub fn title(self) -> &'static str {
         match self {
@@ -182,6 +187,9 @@ pub struct Page {
     pub tools: Option<Result<(git_core::ToolInfo, git_core::ToolInfo), String>>,
     /// Gitflow form (filled when the category opens with a repository).
     pub flow: Option<FlowForm>,
+    /// Repository the repository category's form was built for; the form
+    /// follows the active tab (M8-01).
+    pub repo: Option<(crate::app::TabId, std::path::PathBuf)>,
 }
 
 /// Fields of the Gitflow category, in [`FlowForm::values`] order.
@@ -235,6 +243,7 @@ impl Page {
             error: None,
             tools: None,
             flow: None,
+            repo: None,
         }
     }
 

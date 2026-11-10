@@ -4,7 +4,7 @@ Gitloom supports Git flow like GitKraken: feature, release and hotfix branches w
 
 ## Set it up
 
-**Preferences → Gitflow** (or the command palette, "Initialize Gitflow") applies to the repository of the active tab:
+**Preferences → Repository · <name> → Gitflow** (or the command palette, "Initialize Gitflow") applies to the repository of the active tab:
 
 | Field | Default |
 |---|---|

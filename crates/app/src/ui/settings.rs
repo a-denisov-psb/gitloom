@@ -14,15 +14,33 @@ use crate::ui::muted;
 pub const AUTO_FETCH_INPUT: &str = "settings-auto-fetch";
 
 pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
-    let categories = Column::with_children(Category::ALL.into_iter().map(|category| {
-        button(text(category.title()))
-            .on_press(Message::SettingsCategory(category))
+    let category_button = |category: Category, enabled: bool| -> Element<'a, Message> {
+        let button = button(text(category.title()))
+            .on_press_maybe(enabled.then_some(Message::SettingsCategory(category)))
             .padding([6, 12])
             .width(Fill)
-            .style(theme::list_item(category == page.category))
-            .into()
-    }))
+            .style(theme::list_item(category == page.category));
+        if enabled {
+            button.into()
+        } else {
+            crate::ui::panel::with_tooltip_text(button.into(), NO_REPOSITORY.to_owned())
+        }
+    };
+    // Global categories, then the group of the active tab's repository
+    // (M8-01, GitKraken's "Repo-Specific Preferences").
+    let repo = app.active_repo_name();
+    let categories = Column::with_children(
+        Category::GLOBAL
+            .into_iter()
+            .map(|category| category_button(category, true)),
+    )
     .spacing(2)
+    .push(repository_header(repo))
+    .extend(
+        Category::REPOSITORY
+            .into_iter()
+            .map(|category| category_button(category, repo.is_some())),
+    )
     .push(space::vertical())
     .push(
         button(text(format!("About {}", git_core::identity::DISPLAY_NAME)))
@@ -71,6 +89,40 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// Why the repository categories are disabled on the start screen.
+pub const NO_REPOSITORY: &str = "Open a repository first";
+
+/// Header of the repository group: "Repository · <name>" (cut with "…"
+/// and the full name as tooltip when long), "Repository" without one.
+fn repository_header<'a>(repo: Option<&str>) -> Element<'a, Message> {
+    let label = repository_label(repo);
+    let header = container(muted(label.clone()).size(11).wrapping(text::Wrapping::None))
+        .padding(iced::Padding::default().top(14).bottom(4).left(12).right(8))
+        .width(Fill)
+        .clip(true);
+    match repo {
+        Some(name) if label != format!("Repository · {name}") => {
+            crate::ui::panel::with_tooltip_text(header.into(), name.to_owned())
+        }
+        _ => header.into(),
+    }
+}
+
+/// Longest repository name shown in the group header.
+const HEADER_NAME_CHARS: usize = 22;
+
+/// Text of the repository group header.
+pub fn repository_label(repo: Option<&str>) -> String {
+    match repo {
+        None => "Repository".to_owned(),
+        Some(name) if name.chars().count() > HEADER_NAME_CHARS => {
+            let cut: String = name.chars().take(HEADER_NAME_CHARS - 1).collect();
+            format!("Repository · {cut}…")
+        }
+        Some(name) => format!("Repository · {name}"),
+    }
 }
 
 /// Title of the form; Gitflow names the repository it applies to.
