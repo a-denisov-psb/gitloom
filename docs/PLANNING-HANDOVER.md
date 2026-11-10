@@ -101,6 +101,7 @@ One line per milestone: version, date, scope, notable deviations.
 | Hotfix | 0.6.1 | 2026-11-06 | Network cancel could hang (v0.6.0 Windows CI timed out) | – |
 | M6 release candidate 2 | 1.0.0-rc.2 | 2026-11-09 | M6-16 no console window on Windows, M6-17 toolbar pickers, M6-18 remotes in sync with the Git configuration | M6-17 pickers open the palette lists instead of a dropdown (UX-PARITY deviation, dropdown in the backlog) |
 | M6 release candidate 3 | 1.0.0-rc.3 | 2026-11-10 | M6-19 context menu width (backport), M6-20 empty remote sections, M6-21 file location and path, M6-22 scrollbars, M6-23 graph row gaps | – |
+| M6 release candidate 4 | 1.0.0-rc.4 | 2026-11-10 | Toolbar buttons center icon and label (maintainer finding) | Tag pushed by the maintainer |
 | M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
@@ -135,7 +136,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. rc.3 tagged 2026-11-10 (M6-19 … M6-23; rc.2: M6-16 … M6-18). Next: findings of M6-10/M6-13 on rc.3 (further rcs if needed), then M6-15 (1.0.0) on request.
+1. rc.4 prepared 2026-11-10 (toolbar centering; rc.3: M6-19 … M6-23; rc.2: M6-16 … M6-18). Next: findings of M6-10/M6-13 on rc.3 (further rcs if needed), then M6-15 (1.0.0) on request.
 2. M7 runs autonomously after `v1.0.0` (ADR-034); the maintainer answers the GitKraken verification items in the M7 file beforehand.
 3. Detail plan for M8 when M7 is released (outline in ROADMAP); M9 after that.
 

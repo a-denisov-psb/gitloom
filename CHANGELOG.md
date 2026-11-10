@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-11-10
+
+Fourth release candidate of Gitloom 1.0: centered toolbar buttons.
+
 ### Fixed
 
 - Toolbar buttons center their icon and label.
