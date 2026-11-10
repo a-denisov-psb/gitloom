@@ -74,6 +74,9 @@ fn tool_button<'a>(
         .align_x(iced::Center)
         .into()
     };
+    // Icon and label centered in the fixed button width (the column alone
+    // shrinks to its content and would sit at the left edge).
+    let content = container(content).width(Fill).align_x(iced::Center);
     button(content)
         .on_press_maybe(on_press)
         .padding(if compact { [8, 8] } else { [3, 10] })
