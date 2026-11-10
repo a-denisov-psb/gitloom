@@ -15,6 +15,7 @@ mod external_tools;
 mod file_history;
 pub mod flow;
 pub mod flow_finish;
+mod git_identity;
 mod gix_backend;
 mod history;
 mod history_ops;
@@ -53,6 +54,10 @@ pub use external_tools::{
 };
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use flow::{FlowBranch, FlowConfig, FlowKind};
+pub use git_identity::{
+    identity_problem, set_identity, unset_local_identity, ConfigOrigin, ConfigValue, Identity,
+    IdentityScope, ResolvedIdentity,
+};
 pub use gix_backend::GixBackend;
 pub use history::{
     branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
@@ -509,6 +514,12 @@ pub trait GitBackend: Send + Sync {
     /// are defined. `git remote remove/rename/set-url` cannot change them.
     fn external_remotes(&self) -> Result<Vec<(String, ConfigScope)>> {
         Ok(Vec::new())
+    }
+
+    /// What `user.name` and `user.email` resolve to, with their origin
+    /// (M8-02).
+    fn identity(&self) -> Result<ResolvedIdentity> {
+        Ok(ResolvedIdentity::default())
     }
 
     /// Git flow configuration of the repository, if initialized (M7-06).

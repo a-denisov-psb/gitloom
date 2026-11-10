@@ -548,6 +548,12 @@ impl GitBackend for GixBackend {
             .collect())
     }
 
+    fn identity(&self) -> Result<crate::ResolvedIdentity> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        Ok(resolved_identity(config.plumbing()))
+    }
+
     fn flow_config(&self) -> Result<Option<crate::FlowConfig>> {
         let repo = self.local();
         let config = repo.config_snapshot();
@@ -723,6 +729,39 @@ impl GitBackend for GixBackend {
 
 /// Local branches, remote branches (without symbolic `*/HEAD`) and tags with
 /// the commit they point to. Tags pointing to non-commits are skipped.
+/// `user.name` and `user.email` as Git resolves them: the last value in
+/// the files gix read in order (system, global, local), with its file. An
+/// empty value counts as unset (Git refuses an empty identity).
+fn resolved_identity(config: &gix::config::File) -> crate::ResolvedIdentity {
+    use gix::config::Source;
+
+    let mut resolved = crate::ResolvedIdentity::default();
+    let Some(sections) = config.sections_by_name("user") else {
+        return resolved;
+    };
+    for section in sections {
+        if section.header().subsection_name().is_some() {
+            continue;
+        }
+        let origin = match section.meta().source {
+            Source::Local | Source::Worktree => crate::ConfigOrigin::Local,
+            Source::User | Source::Git => crate::ConfigOrigin::Global,
+            Source::System | Source::GitInstallation => crate::ConfigOrigin::System,
+            _ => crate::ConfigOrigin::Other,
+        };
+        for (key, slot) in [("name", &mut resolved.name), ("email", &mut resolved.email)] {
+            if let Some(value) = section.value(key) {
+                let value = value.to_string();
+                *slot = (!value.trim().is_empty()).then(|| crate::ConfigValue {
+                    value: value.trim().to_owned(),
+                    origin,
+                });
+            }
+        }
+    }
+    resolved
+}
+
 /// Remotes as Git sees them: a `remote.<name>` section counts only if it has
 /// at least one key in some configuration file. Empty sections are left
 /// behind by `git config --unset` of the last key; `git remote` ignores them

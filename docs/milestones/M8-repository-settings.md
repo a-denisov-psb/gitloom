@@ -94,7 +94,7 @@ Acceptance: app tests for the group with and without a repository, a tab switch 
 
 Note (2026-11-10): done. `Category::GLOBAL` / `Category::REPOSITORY` (Identities is added to the global list by M8-03); the group header is a muted section label like the left panel's, names longer than 22 characters end in "…" with the full name as tooltip. `Page::repo` remembers the tab and repository a repository form was built for; the central `App::update` reloads the form when the active tab shows another repository and returns to General when it shows none (also covers tabs that finish loading or close). `SettingsCategory` ignores repository categories without a repository; disabled list items are now drawn muted (`theme::list_item`). The Gitflow form title stays "Gitflow · <name>" (unchanged). Snapshot `ui_check_preferences_repository_group` checked by eye in both themes.
 
-### [ ] M8-02 Git identity model (git-core)
+### [x] M8-02 Git identity model (git-core)
 
 - `Identity { name, email }` with the validation from the decisions table (shared with the app).
 - Reading: resolved `user.name` and `user.email`, each with its origin (local, global, system, other), from the gix config the backend already holds; part of the repository snapshot, compared by the refs/config check so outside changes refresh the tab.
@@ -102,6 +102,8 @@ Note (2026-11-10): done. `Category::GLOBAL` / `Category::REPOSITORY` (Identities
 - Tests never touch the user's global config (`GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM` set to temporary values).
 
 Acceptance: integration tests: local over global, unset local falls back to global and leaves no empty `[user]` section, global write, nothing set = no identity, an outside `git config` change refreshes the snapshot; unit tests for the validation.
+
+Note (2026-11-10): done. `git_core::git_identity`: `Identity` with `identity_problem` (also refuses `<`/`>` in the name, which Git would reject), `ConfigOrigin`, `ResolvedIdentity` (`GitBackend::identity`, read by `GixBackend` from the `user` sections in load order, the last non-empty value wins, empty values count as unset), `set_identity` (local/global) and `unset_local_identity` (`--unset-all`, exit code 5 ignored, `--remove-section user` only when no `user.*` key is left, so e.g. `user.signingkey` stays). The identity is part of the config part of the snapshot (`snapshot::Remotes`), so the refs/config check refreshes the tab after an outside `git config` change. Tests: `tests/git_identity.rs` (own binary, temporary `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`), unit tests in the module, `a_changed_gitflow_config_counts_as_changed_refs` extended.
 
 ### [ ] M8-03 Identities in the Preferences
 
