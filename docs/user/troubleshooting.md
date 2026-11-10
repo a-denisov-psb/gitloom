@@ -12,7 +12,7 @@ Gitloom uses Git's own credential handling:
 - **SSH:** ssh-agent answers first. A passphrase-protected key without an agent opens Gitloom's prompt; unknown host keys ask Yes/No.
 - The prompt window is Gitloom itself started by Git as `GIT_ASKPASS` / `SSH_ASKPASS`; Esc or Cancel aborts the operation.
 
-If authentication fails, the error dialog shows Git's output with a hint. Check the remote URL (right click the remote → Edit URL), your token's permissions and `ssh -T git@<host>`.
+If authentication fails, the error dialog shows Git's output with a hint; with a key chosen in Preferences → Repository → SSH key it names that key. An environment variable `GIT_SSH_COMMAND` set outside Gitloom wins over that setting, as it does for `git` itself. Check the remote URL (right click the remote → Edit URL), your token's permissions and `ssh -T git@<host>`.
 
 ## An operation fails because of a lock
 
@@ -21,6 +21,7 @@ Another Git process (an IDE, a terminal, a crashed tool) holds `index.lock` or a
 ## External tools
 
 - **Diff and merge tools** come from Git (`git difftool --tool-help`). If none is configured, choose one in Preferences → External tools. Gitloom waits for the tool and refreshes when it closes. Only graphical tools work; terminal tools such as `vimdiff` get no window.
+- **External editor (Alt+E):** "Could not start the editor" means the command was not found: use the full path in Preferences → External tools, e.g. `"C:\Users\<you>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd" {path}`, or make sure `code` is on `PATH`.
 - **Terminal (Alt+T):** if no terminal is found or the wrong one opens, set a command in Preferences → External tools, e.g. `wt -d {path}` (Windows Terminal), `open -a iTerm {path}` (macOS) or `konsole --workdir {path}` (Linux).
 
 ## The folder dialog does not open (Linux)

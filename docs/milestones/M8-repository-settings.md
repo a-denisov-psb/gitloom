@@ -53,13 +53,13 @@ Answer what you can in GitKraken before or during M8. Claude Code decides the re
 
 ## Milestone acceptance
 
-- [ ] Preferences show the group "Repository · <name>" with Identity, SSH key and Gitflow for the active tab; Gitflow works as in 1.1.
-- [ ] Identities can be added, edited, removed and set as default; the default updates the global Git config only while the option is on.
-- [ ] The commit panel shows the identity the next commit uses; choosing another writes the repository config and the next commit uses it as author and committer; "Use global identity" removes the local keys.
-- [ ] Without an identity, Commit, Amend and Continue are disabled with the reason.
-- [ ] A key chosen for a repository is used by fetch, pull and push of that repository (scripted test with a fake `ssh`); "System default" restores the previous behavior; a foreign `core.sshCommand` is never replaced without confirmation.
-- [ ] The repository and single files open in the configured editor from every entry point, also with `code.cmd` on Windows.
-- [ ] Changes to `user.*` or `core.sshCommand` made outside Gitloom appear without a restart.
+- [x] Preferences show the group "Repository · <name>" with Identity, SSH key and Gitflow for the active tab; Gitflow works as in 1.1.
+- [x] Identities can be added, edited, removed and set as default; the default updates the global Git config only while the option is on.
+- [x] The commit panel shows the identity the next commit uses; choosing another writes the repository config and the next commit uses it as author and committer; "Use global identity" removes the local keys.
+- [x] Without an identity, Commit, Amend and Continue are disabled with the reason.
+- [x] A key chosen for a repository is used by fetch, pull and push of that repository (scripted test with a fake `ssh`); "System default" restores the previous behavior; a foreign `core.sshCommand` is never replaced without confirmation.
+- [x] The repository and single files open in the configured editor from every entry point, also with `code.cmd` on Windows.
+- [x] Changes to `user.*` or `core.sshCommand` made outside Gitloom appear without a restart.
 - [ ] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
 - [ ] Released as `v1.2.0` after `v1.1.0`.
 
@@ -169,13 +169,15 @@ Acceptance: app tests for every entry point with a recording launcher, including
 
 Note (2026-11-10): done. Action `OpenEditor` (Alt+E, palette, shortcut list; disabled with "Set an external editor in Preferences → External tools"), toolbar button "Editor" (vendored Lucide `code-xml`, ISC like the other icons) after Terminal while a template is set, `Message::OpenInEditor` with `App::editor_request` (template and target, the testable part instead of a recording launcher; the start itself runs off the UI thread). File menus: unstaged, staged and commit file lists (`FileContextMenu`) and the file history entry menu (the history's path) get "Open in external editor". Decision: whether a file exists in the working tree is only known without I/O for deleted entries (disabled with "The file does not exist in the working tree"); otherwise the background start checks it and shows the same text in the status bar, as does a failed start ("Could not start the editor: …"). Snapshot `ui_check_toolbar_editor` checked by eye.
 
-### [ ] M8-09 Documentation and walkthrough
+### [x] M8-09 Documentation and walkthrough
 
 - User guide: `settings.md` (Identities, Repository group, External editor), "Committing as" in `daily-workflow.md`, SSH key in `branches-and-remotes.md` and `troubleshooting.md`, "Coming from GitKraken" (identities instead of profiles, SSH key per repository).
 - `docs/UX-PARITY.md`: M8 rows set to done with the verification results; deviations confirmed or adjusted.
 - CHANGELOG `[Unreleased]`; `docs/RELEASE-CHECKLIST.md` section "7b. New in 1.2" with the Windows checks (identity switch and commit, default identity and global config, SSH key with a passphrase via the prompt, `code.cmd` from all entry points, no console window).
 
 Acceptance: docs reviewed against the implemented behavior; checklist section present.
+
+Note (2026-11-10): done. `settings.md` (Identities, the Repository group with Identity, SSH key, Gitflow, External editor), `daily-workflow.md` ("Committing as", editor entry points), `branches-and-remotes.md` (SSH key per repository), `troubleshooting.md` (key named in auth errors, `GIT_SSH_COMMAND` wins, editor not found), `coming-from-gitkraken.md` (identities instead of profiles, SSH key per repository, Editor button), `docs/RELEASE-CHECKLIST.md` section 7b. UX-PARITY rows were set to done in M8-03 … M8-08; the deviations of the plan stay as written (GitKraken checks open). The CHANGELOG entries were added per task.
 
 ### [ ] M8-10 Release v1.2.0
 

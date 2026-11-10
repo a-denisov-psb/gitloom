@@ -48,6 +48,8 @@ Write a summary (the counter shows the remaining characters of 72) and an option
 
 With a detached HEAD, the commit panel reminds you to create a branch.
 
+**Committing as <name> <email>** above the summary shows the identity the next commit uses; the tooltip says whether it comes from the repository's or the global Git config. Click it to use one of your saved identities in this repository (written to `user.name`/`user.email` of the repository config), **Use global identity** to remove the repository's own values, **Save as identity** to keep the current one, or **Manage identities…**. The same choices are in the command palette ("Choose identity…") and in Preferences → Repository → Identity. Without a name and email, the line reads "No Git identity set" and Commit, Amend and Continue stay disabled until you choose or add one. Saved identities and the default live in Preferences → Identities ([Settings](settings.md)).
+
 ## Stashing
 
 **Stash** in the toolbar stashes all changes including untracked files; **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop** and **Delete**. Selecting a stash shows its staged, unstaged and untracked files.
@@ -60,6 +62,8 @@ Right click a file → **File history**, the **History** button of a diff, or Ct
 
 Switch to **Blame** to see author, commit and age for each block of lines, for the working copy or any commit of the history; clicking a block shows that commit.
 
-## Terminal and file manager
+## Terminal, editor and file manager
 
 **Terminal** in the toolbar or Alt+T opens your terminal in the repository; Alt+O (or "Open file location") opens the file manager. The terminal command can be set in Preferences → External tools.
+
+With an external editor set (Preferences → External tools), **Editor** in the toolbar, Alt+E or "Open repository in editor" in the palette opens the repository in it; **Open in external editor** in the context menu of a file (unstaged, staged, commit files, file history) opens that file. Deleted files cannot be opened.

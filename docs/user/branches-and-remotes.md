@@ -36,6 +36,10 @@ Fetch, pull and push cannot be undone.
 
 Changes made outside Gitloom (new remotes, upstreams, `.git/config`) show up automatically.
 
+## SSH key per repository
+
+Preferences → Repository → SSH key chooses the key Git uses for this repository's fetch, pull and push: **System default** (ssh-agent and `~/.ssh/config`), one of the keys in `~/.ssh` (files with a matching `.pub`), or any key file (**Browse…** or a typed path). Gitloom writes `core.sshCommand = ssh -i "<key>" -o IdentitiesOnly=yes` to the repository's Git config, so `git` in a terminal uses the same key; the key itself is never copied. A `core.sshCommand` you set yourself is shown and only replaced after **Replace…**; one from the global Git config is shown as inherited. A key with a passphrase asks for it in Gitloom's prompt; the passphrase is not stored.
+
 ## Credentials
 
 Gitloom never stores credentials. Git's credential helpers and ssh-agent are used first; when they cannot answer, Gitloom shows a small prompt window (masked for passwords and passphrases, Yes/No for SSH host keys). See [Troubleshooting](troubleshooting.md#credentials).

@@ -83,6 +83,14 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] GITFLOW sits between LOCAL and REMOTE.
 - [ ] Graph lines at 125 % Windows scaling look like GitKraken's (corners, width, dashes) and have no gaps.
 
+## 7b. New in 1.2 (M8; Windows required, Linux checked in CI)
+
+- [ ] Identity: on a fresh profile the global identity appears in Preferences → Identities as default; add a second identity, choose it in the commit panel ("Committing as …"), commit: author and committer of the new commit are that identity; "Use global identity" removes `user.name`/`user.email` from `.git/config`.
+- [ ] Default identity with "Keep the global Git config updated" on: setting another default changes `git config --global user.name`; off: nothing changes.
+- [ ] Without any identity (empty global config): the commit panel shows "No Git identity set", Commit is disabled with "Choose an identity first".
+- [ ] SSH key with a passphrase: choose it in Preferences → Repository → SSH key, fetch an SSH remote: the passphrase prompt appears, the fetch works; "System default" restores the previous behavior; a hand-written `core.sshCommand` is only replaced after "Replace…".
+- [ ] External editor VS Code (`code.cmd`): Alt+E, the toolbar button "Editor", the palette and "Open in external editor" on a file in a folder with spaces open VS Code; no console window flashes up.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

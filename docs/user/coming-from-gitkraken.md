@@ -46,4 +46,7 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - The author, date and SHA columns hide automatically when the commit message would get too narrow; columns cannot be resized yet.
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
+- **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.
+- **SSH key per repository** (Preferences → Repository → SSH key) instead of one global key; it is Git's own `core.sshCommand`.
+- **Editor** button and Alt+E open the external editor, next to Terminal (Alt+T).
 - Git flow needs no `git-flow` tool; a hotfix finished while a release branch exists is merged into the development branch (see [Git flow](git-flow.md)).
