@@ -720,4 +720,25 @@ mod tests {
         app.settings.tools.editor_command = "code {path}".into();
         snapshot(&app, "toolbar-editor");
     }
+
+    /// Toolbar buttons center icon and label (fixed width 64, spacing 2):
+    /// labels of different length on adjacent buttons are exactly one
+    /// button apart. Layout only, part of every test run.
+    #[test]
+    fn toolbar_labels_are_centered() {
+        let app = ready_app(&["c"]);
+        let mut sim = simulator(&app);
+        let mut center = |label: &str| {
+            let found = sim.find(label).unwrap_or_else(|e| panic!("{label}: {e}"));
+            let bounds = iced_test::selector::Bounded::bounds(&found);
+            bounds.x + bounds.width / 2.0
+        };
+        for (left, right) in [("Branch", "Stash"), ("Stash", "Pop"), ("Undo", "Redo")] {
+            let distance = center(right) - center(left);
+            assert!(
+                (distance - 66.0).abs() < 0.5,
+                "{left} → {right}: {distance} px between the label centers"
+            );
+        }
+    }
 }

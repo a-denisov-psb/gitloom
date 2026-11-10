@@ -15,6 +15,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - Preferences: the settings of the active tab's repository sit in a group "Repository · <name>" below the global categories (Gitflow for now); on the start screen the group is disabled.
 
+### Fixed
+
+- Toolbar buttons center their icon and label.
+
 ## [1.1.0] - unreleased
 
 ### Added
