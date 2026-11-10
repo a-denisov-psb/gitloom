@@ -30,6 +30,7 @@ mod refname;
 mod reset;
 mod resolve;
 mod rewrite;
+pub mod ssh;
 mod state;
 mod todo;
 mod watch;
@@ -91,6 +92,7 @@ pub use resolve::{
     ConflictStages, LoadedConflict, StageEntry, WholeFileReason, MAX_CONFLICT_SIZE,
 };
 pub use rewrite::{reword_commit, squash_commits};
+pub use ssh::{SshConfig, SshSetting};
 pub use state::{locked_file, Operation, RepoState};
 pub use todo::{
     build as build_todo, chains, default_message, needs_message, validate as validate_todo, Chain,
@@ -521,6 +523,11 @@ pub trait GitBackend: Send + Sync {
     /// (M8-02).
     fn identity(&self) -> Result<ResolvedIdentity> {
         Ok(ResolvedIdentity::default())
+    }
+
+    /// `core.sshCommand` with its origin (M8-05).
+    fn ssh_config(&self) -> Result<SshConfig> {
+        Ok(SshConfig::default())
     }
 
     /// Git flow configuration of the repository, if initialized (M7-06).

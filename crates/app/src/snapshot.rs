@@ -56,6 +56,8 @@ pub struct RepoSnapshot {
     pub flow: Option<git_core::FlowConfig>,
     /// What `user.name` / `user.email` resolve to, with their origin (M8-02).
     pub identity: git_core::ResolvedIdentity,
+    /// `core.sshCommand` with its origin (M8-05).
+    pub ssh: git_core::SshConfig,
     /// A Git flow finish that has not completed yet (M7-10).
     pub flow_finish: Option<git_core::flow_finish::FinishPlan>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
@@ -79,6 +81,8 @@ pub struct Remotes {
     pub flow: Option<git_core::FlowConfig>,
     /// Git identity (only in the config, M8-02).
     pub identity: git_core::ResolvedIdentity,
+    /// SSH key setting (only in the config, M8-05).
+    pub ssh: git_core::SshConfig,
 }
 
 impl Remotes {
@@ -94,12 +98,14 @@ impl Remotes {
         let external = backend.external_remotes().map_err(|e| e.to_string())?;
         let flow = backend.flow_config().map_err(|e| e.to_string())?;
         let identity = backend.identity().map_err(|e| e.to_string())?;
+        let ssh = backend.ssh_config().map_err(|e| e.to_string())?;
         Ok(Self {
             names,
             urls,
             external,
             flow,
             identity,
+            ssh,
         })
     }
 
@@ -111,6 +117,7 @@ impl Remotes {
             external: snapshot.external_remotes.clone(),
             flow: snapshot.flow.clone(),
             identity: snapshot.identity.clone(),
+            ssh: snapshot.ssh.clone(),
         }
     }
 }
@@ -139,6 +146,7 @@ impl RepoSnapshot {
         snapshot.external_remotes = remotes.external;
         snapshot.flow = remotes.flow;
         snapshot.identity = remotes.identity;
+        snapshot.ssh = remotes.ssh;
         snapshot.flow_finish = backend.flow_finish().map_err(|e| e.to_string())?;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
@@ -257,6 +265,7 @@ impl RepoSnapshot {
             external_remotes: Vec::new(),
             flow: None,
             identity: git_core::ResolvedIdentity::default(),
+            ssh: git_core::SshConfig::default(),
             flow_finish: None,
             merge_message: None,
             commit_template: None,
@@ -336,6 +345,7 @@ impl RepoSnapshot {
         filtered.external_remotes = base.external_remotes.clone();
         filtered.flow = base.flow.clone();
         filtered.identity = base.identity.clone();
+        filtered.ssh = base.ssh.clone();
         filtered.flow_finish = base.flow_finish.clone();
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
@@ -985,8 +995,10 @@ mod tests {
             value: "ana@x.org".into(),
             origin: git_core::ConfigOrigin::Local,
         });
+        full.ssh = git_core::SshConfig::from_value(Some(("ssh -v", git_core::ConfigOrigin::Local)));
         let hidden = full.with_filter(&filter(&["topic"], &[])).unwrap();
         assert_eq!(hidden.identity, full.identity);
+        assert_eq!(hidden.ssh, full.ssh);
     }
 }
 
