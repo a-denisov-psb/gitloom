@@ -279,6 +279,8 @@ Note (2026-11-06): `release/1.0.0` with version `1.0.0-rc.1` and its CHANGELOG s
 
 Note (2026-11-09): `v1.0.0-rc.2` tagged on `master` by Claude Code (maintainer request "mach weiter mit rc.2") with M6-16, M6-17 and M6-18; same branch `release/1.0.0`, version `1.0.0-rc.2` (MSI 1.0.0.2). Open (maintainer): publish the draft pre-release; the update check of an rc.1 build should now see rc.2.
 
+Note (2026-11-10): `v1.0.0-rc.3` tagged on `master` by Claude Code (maintainer request "mach weiter mit rc.3") with M6-19 … M6-23; `release/1.0.0` branched from `master` (ADR-039), version `1.0.0-rc.3` (MSI 1.0.0.3). Open (maintainer): publish the draft pre-release; the update check of an rc.2 build should see rc.3.
+
 ### [ ] M6-16 No console window on Windows
 
 Finding of the maintainer (2026-11-06): the Windows build opens a console window next to Gitloom, because the binary uses the console subsystem (`crates/app/src/main.rs` has no `windows_subsystem` attribute).
