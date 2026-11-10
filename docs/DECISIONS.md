@@ -470,3 +470,17 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: M7 starts on `develop` while 1.0.0 is still in release candidates (rc.2 tagged, not published). `master` (`v1.0.0-rc.2`) is the 1.0 line: further release candidates and 1.0.0 itself (M6-15) are made from `master` with `hotfix/1.0.x`-style branches (`release/1.0.0` from `master` for the final version), never from `develop`; each such fix is merged back into `develop`.
 - Why: the remaining M6 steps wait for the maintainer (publishing, SignPath, checklist run); development should not stall, and 1.0 must not contain M7 work.
 - Consequences: `/release` for M6-15 branches from `master`, not `develop`; CHANGELOG `[Unreleased]` on `develop` collects 1.1 changes, fixes for 1.0 get their own section on the 1.0 line.
+
+## ADR-040 M8 on develop before 1.1.0
+
+- Status: accepted (maintainer, 2026-11-10)
+- Decision: before the first M8 merge, `release/1.1.0` is branched from `develop` (M7 complete including the follow-ups M7-15 … M7-18 and the rc.3 merge-back). It is the 1.1 line: M7-13 (version, CHANGELOG date, tag) happens there after `v1.0.0`; fixes for 1.1 are made on it and merged back into `develop`. `develop` continues with M8. In `develop`'s CHANGELOG the M7 entries move from `[Unreleased]` to a section `## [1.1.0] - unreleased`; `[Unreleased]` collects M8 only.
+- Why: same reasoning as ADR-039: development does not wait for the maintainer's release steps, and 1.1 must not contain M8 work.
+- Consequences: three lines exist for a while (`master` 1.0, `release/1.1.0`, `develop`); a fix for 1.0 is merged from `master` into `release/1.1.0` and `develop`; `/release` for M7-13 runs on `release/1.1.0`.
+
+## ADR-041 Identities and per-repository Git settings
+
+- Status: accepted (M8 plan, 2026-11-10)
+- Decision: Gitloom keeps a list of identities (name and email only) in `settings.json`. A repository's identity, SSH key and Git flow live in Git's own configuration (`user.name`/`user.email`, `core.sshCommand`, `gitflow.*`) and are read from it with their origin. Gitloom writes the repository config only on an explicit choice, and the global config only for the default identity while "Keep the global Git config updated with the default identity" is on. SSH keys are referenced by path (`ssh -i "<key>" -o IdentitiesOnly=yes`), never copied; passphrases are not stored. A `core.sshCommand` that Gitloom did not write is replaced only after confirmation.
+- Why: the command line, other clients and Gitloom see the same settings; no hidden per-repository state that drifts from Git's; no secrets in Gitloom's files.
+- Consequences: identity and SSH key per repository are Gitloom extensions (GitKraken switches a global profile and has one global key); UX-PARITY lists them as deviations. Automatic selection (`includeIf`), signing keys and a key generator stay in the backlog.

@@ -113,6 +113,8 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - M6 detailed plan (2026-11-03): `docs/milestones/M6-release-readiness.md`, ADR-028 … ADR-030, ADR-008/016 updated, ROADMAP backlog entries.
 
 - rc.2 scope, M7 left panel tree, M8/M9 outlines (2026-11-09): M6-17, M6-18, M7-14 in the milestone files, ROADMAP M8/M9, backlog updated.
+- rc.3 fixes and M7 follow-ups (2026-11-10): M6-19 … M6-23 on the 1.0 line, M7-15 … M7-18 on `develop`.
+- M8 detailed plan and the 1.1 line (2026-11-10): `docs/milestones/M8-repository-settings.md`, ADR-040, ADR-041, ROADMAP, UX-PARITY rows and deviations; `release/1.1.0` branched from `develop`.
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -136,8 +138,8 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 ## 8. Suggested next planning steps
 
 1. rc.3 tagged 2026-11-10 (M6-19 … M6-23; rc.2: M6-16 … M6-18). Next: findings of M6-10/M6-13 on rc.3 (further rcs if needed), then M6-15 (1.0.0) on request.
-2. M7 runs autonomously after `v1.0.0` (ADR-034); the maintainer answers the GitKraken verification items in the M7 file beforehand.
-3. Detail plan for M8 when M7 is released (outline in ROADMAP); M9 after that.
+2. M7 is implemented including M7-15 … M7-18; release 1.1.0 from `release/1.1.0` after `v1.0.0` (ADR-040). The maintainer answers the GitKraken verification items of M7 and runs section 7a of the release checklist.
+3. M8 runs on `develop` (one Claude Code chat for the milestone); release 1.2.0 after 1.1.0. Detail plan for M9 when M8 is implemented (outline in ROADMAP).
 
 ## 9. Document map
 
