@@ -69,6 +69,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] In a repository whose path contains a space: "Open file location" on a file in a subfolder selects it in Explorer; "Copy file path" copies the full Windows path.
 - [ ] Left panel with more branches than fit: the scrollbar does not cover the counts.
 - [ ] Graph at 125 % Windows scaling and zoom 110 %/120 %: no gaps between rows in lines or row backgrounds.
+- [ ] Toolbar: icon and label of every button (Undo … Pop, Terminal, Settings) are centered, also at 125 % scaling and in the compact toolbar of a narrow window.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
