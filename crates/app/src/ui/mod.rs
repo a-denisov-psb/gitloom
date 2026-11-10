@@ -149,6 +149,7 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
             let pickers = toolbar::Pickers {
                 repository: app.action_block(crate::shortcuts::Shortcut::OpenRepoPalette),
                 branch: app.action_block(crate::shortcuts::Shortcut::CheckoutBranch),
+                editor: !app.settings.tools.editor_command.trim().is_empty(),
             };
             let mut content =
                 column![toolbar::view(view, app.pull_mode, compact, pickers)].spacing(1);

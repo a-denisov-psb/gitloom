@@ -710,4 +710,14 @@ mod tests {
             .is_ok());
         assert!(sim.find("This repository has no SSH remotes").is_ok());
     }
+
+    /// Toolbar without and with an external editor (M8-08).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_toolbar_editor() {
+        let mut app = ready_app(&["c"]);
+        snapshot(&app, "toolbar-no-editor");
+        app.settings.tools.editor_command = "code {path}".into();
+        snapshot(&app, "toolbar-editor");
+    }
 }

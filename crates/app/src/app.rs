@@ -454,6 +454,9 @@ pub enum Message {
     OpenFileManager,
     /// Terminal command template typed in Preferences → External tools.
     TerminalCommandInput(String),
+    /// Opens the active repository (`None`) or one of its files (path
+    /// relative to the root) in the external editor (M8-08).
+    OpenInEditor(Option<String>),
     /// Preferences → External tools → External editor (M8-07).
     EditorPresetChosen(settings::EditorPreset),
     EditorCommandInput(String),
@@ -2564,6 +2567,7 @@ impl App {
             Shortcut::FileHistory => return self.open_file_list(),
             Shortcut::ExternalDiff => return self.external_diff(),
             Shortcut::OpenTerminal => return self.update(Message::OpenTerminal),
+            Shortcut::OpenEditor => return self.update(Message::OpenInEditor(None)),
             Shortcut::OpenFileManager => return self.update(Message::OpenFileManager),
             Shortcut::ZoomIn => {
                 return self.set_zoom(settings::zoom_step(
@@ -3726,6 +3730,9 @@ impl App {
                 return Some("Check out a feature, release or hotfix branch".to_owned());
             }
         }
+        if id == Shortcut::OpenEditor && self.settings.tools.editor_command.trim().is_empty() {
+            return Some(crate::launch::NO_EDITOR.to_owned());
+        }
         if id == Shortcut::CheckoutBranch {
             let view = self.active_tab().and_then(Tab::view)?;
             if let Some(reason) = &view.write_block {
@@ -4228,6 +4235,24 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// Template and target of "open in editor" (M8-08): the repository root
+    /// for `None`, else the absolute path of the file; an error without an
+    /// editor, `None` without a repository.
+    pub fn editor_request(&self, file: Option<&str>) -> Result<Option<(String, PathBuf)>, String> {
+        let template = self.settings.tools.editor_command.trim().to_owned();
+        if template.is_empty() {
+            return Err(crate::launch::NO_EDITOR.to_owned());
+        }
+        let Some((_, root)) = self.active_repo_path() else {
+            return Ok(None);
+        };
+        let target = match file {
+            Some(path) => crate::launch::repo_file_path(&root, path),
+            None => root,
+        };
+        Ok(Some((template, target)))
     }
 
     /// Writes saved identity `index` to the repository config of `tab`
@@ -4822,6 +4847,32 @@ impl App {
                     |result| Message::StatusText(result.err().unwrap_or_default()),
                 );
             }
+            Message::OpenInEditor(file) => {
+                let (template, target) = match self.editor_request(file.as_deref()) {
+                    Ok(Some(request)) => request,
+                    Ok(None) => return Task::none(),
+                    Err(reason) => {
+                        self.status = reason;
+                        return Task::none();
+                    }
+                };
+                return Task::perform(
+                    blocking(move || {
+                        if !target.exists() {
+                            return Err(NOT_IN_WORKTREE.to_owned());
+                        }
+                        let launch = crate::launch::editor(
+                            crate::launch::Platform::current(),
+                            &crate::launch::SystemLookup,
+                            &template,
+                            &target,
+                        )?;
+                        crate::launch::spawn(&launch)
+                            .map_err(|e| format!("Could not start the editor: {e}"))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
             Message::TerminalCommandInput(command) => {
                 self.settings.tools.terminal_command = command;
                 return self.save_settings();
@@ -5297,6 +5348,14 @@ impl App {
                         if matches!(&h.entries, Loadable::Ready(e)
                             if e.get(index).is_some_and(|e| e.status == "D")))
                 });
+                // The file as it is in the working tree (the history's path).
+                let history_path =
+                    self.active_tab()
+                        .and_then(Tab::view)
+                        .and_then(|view| match &view.center {
+                            CenterView::FileHistory(h) => Some(h.path.clone()),
+                            _ => None,
+                        });
                 self.context_menu = Some(ContextMenu::new(
                     position,
                     vec![
@@ -5308,6 +5367,11 @@ impl App {
                             hint: deletion.then(|| "The file is deleted in this commit".to_owned()),
                         },
                         MenuEntry::item("Show in graph", Message::FileHistoryShowInGraph),
+                        editor_entry(
+                            &self.settings.tools.editor_command,
+                            history_path.as_deref().unwrap_or_default(),
+                            false,
+                        ),
                     ],
                 ));
                 return self.file_history_select(|h| h.select(index));
@@ -5433,6 +5497,11 @@ impl App {
                         Message::OpenFileLocation(file.path.clone()),
                     ));
                 }
+                entries.push(editor_entry(
+                    &self.settings.tools.editor_command,
+                    &file.path,
+                    file.kind == git_core::ChangeKind::Deleted,
+                ));
                 // The absolute path with native separators (M6-21).
                 let path = match self.active_tab().and_then(Tab::path) {
                     Some(root) => crate::launch::repo_file_path(root, &file.path)
@@ -8465,6 +8534,28 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
 }
 
 /// Why committing is not possible right now, if it is not.
+/// Why a file cannot be opened in the external editor (M8-08).
+pub const NOT_IN_WORKTREE: &str = "The file does not exist in the working tree";
+
+/// "Open in external editor" for a file menu (M8-08): disabled without an
+/// editor or for a file that is known to be deleted.
+pub fn editor_entry(editor_command: &str, path: &str, deleted: bool) -> MenuEntry {
+    let reason = if editor_command.trim().is_empty() {
+        Some(crate::launch::NO_EDITOR.to_owned())
+    } else if deleted {
+        Some(NOT_IN_WORKTREE.to_owned())
+    } else {
+        None
+    };
+    MenuEntry::Item {
+        label: "Open in external editor".into(),
+        shortcut: None,
+        enabled: reason.is_none(),
+        message: Box::new(Message::OpenInEditor(Some(path.to_owned()))),
+        hint: reason,
+    }
+}
+
 /// Why Commit, Amend and Continue are disabled without a Git identity.
 pub const NO_IDENTITY: &str = "Choose an identity first";
 
@@ -9173,6 +9264,8 @@ pub(crate) mod tests {
             .filter(|a| a.context != crate::actions::Context::RebasePanel)
             // Starting/finishing a Git flow branch needs Git flow (M7-08, M7-10).
             .filter(|a| !matches!(a.id, Shortcut::FlowStart(_) | Shortcut::FlowFinish))
+            // The external editor needs one in the settings (M8-08).
+            .filter(|a| a.id != Shortcut::OpenEditor)
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
@@ -10509,6 +10602,97 @@ pub(crate) mod tests {
             "{hint}"
         );
         assert_eq!(auth_hint_with_key("fatal: other", &key), None);
+    }
+
+    fn editor_entry_of(app: &App) -> (bool, Option<String>, Option<Message>) {
+        let menu = app.context_menu.as_ref().unwrap();
+        menu.entries
+            .iter()
+            .find_map(|e| match e {
+                MenuEntry::Item {
+                    label,
+                    enabled,
+                    hint,
+                    message,
+                    ..
+                } if label == "Open in external editor" => {
+                    Some((*enabled, hint.clone(), Some((**message).clone())))
+                }
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn editor_entry_points() {
+        let mut app = staging_app(&["a"], &["gone"]);
+        // Without an editor: every entry point says why.
+        assert_eq!(
+            app.action_block(Shortcut::OpenEditor).as_deref(),
+            Some(crate::launch::NO_EDITOR)
+        );
+        assert_eq!(
+            app.editor_request(None),
+            Err(crate::launch::NO_EDITOR.to_owned())
+        );
+        let _ = app.update(checked(Shortcut::OpenEditor, false));
+        assert_eq!(app.status, crate::launch::NO_EDITOR);
+        let _ = app.update(Message::FileContextMenu {
+            file: file("a"),
+            area: FileArea::Unstaged,
+            position: iced::Point::ORIGIN,
+        });
+        let (enabled, hint, _) = editor_entry_of(&app);
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
+
+        // With one: Alt+E and the toolbar open the root, files their path.
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        assert_eq!(app.settings.tools.editor_command, "code {path}");
+        assert_eq!(app.action_block(Shortcut::OpenEditor), None);
+        let root = app.tabs[0].path().unwrap().to_path_buf();
+        assert_eq!(
+            app.editor_request(None),
+            Ok(Some(("code {path}".to_owned(), root.clone())))
+        );
+        for area in [FileArea::Unstaged, FileArea::Staged, FileArea::Commit] {
+            let _ = app.update(Message::FileContextMenu {
+                file: file("src/a.rs"),
+                area,
+                position: iced::Point::ORIGIN,
+            });
+            let (enabled, hint, message) = editor_entry_of(&app);
+            assert!(enabled && hint.is_none(), "{area:?}");
+            assert!(
+                matches!(&message, Some(Message::OpenInEditor(Some(path))) if path == "src/a.rs"),
+                "{message:?}"
+            );
+        }
+        assert_eq!(
+            app.editor_request(Some("src/a.rs")).unwrap().unwrap().1,
+            root.join("src").join("a.rs")
+        );
+        // A deleted file is not in the working tree.
+        let mut deleted = file("gone");
+        deleted.kind = git_core::ChangeKind::Deleted;
+        let _ = app.update(Message::FileContextMenu {
+            file: deleted,
+            area: FileArea::Staged,
+            position: iced::Point::ORIGIN,
+        });
+        let (enabled, hint, _) = editor_entry_of(&app);
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some(NOT_IN_WORKTREE));
+        // Custom keeps the text editable; None clears it.
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::Custom));
+        assert!(app.settings_page.is_none() || app.settings_page.as_ref().unwrap().editor_custom);
+        let _ = app.update(Message::EditorCommandInput("code -n {path}".into()));
+        assert_eq!(
+            settings::EditorPreset::of(&app.settings.tools.editor_command),
+            settings::EditorPreset::Custom
+        );
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
+        assert_eq!(app.settings.tools.editor_command, "");
     }
 
     #[test]
@@ -12659,12 +12843,13 @@ pub(crate) mod tests {
                 "Ignore",
                 "File history",
                 "Open file location",
+                "Open in external editor",
                 "Copy file path"
             ]
         );
         // The copied path is absolute, with native separators (M6-21).
         let root = app.tabs[0].path().unwrap().to_path_buf();
-        let copy = menu.select(6);
+        let copy = menu.select(7);
         let expected = crate::launch::repo_file_path(&root, "a")
             .to_string_lossy()
             .into_owned();
@@ -12726,8 +12911,8 @@ pub(crate) mod tests {
         // Other shortcuts are ignored while the menu is open.
         let _ = app.update(checked(Shortcut::NewTab, false));
         assert_eq!(app.tabs.len(), 1);
-        // "File history", then "Copy file path".
-        let _ = app.update(Message::MenuSelected(1));
+        // "File history", "Open in external editor", then "Copy file path".
+        let _ = app.update(Message::MenuSelected(2));
         assert!(app.context_menu.is_none());
         assert_eq!(app.status, "Copied to the clipboard");
     }
@@ -12957,6 +13142,10 @@ pub(crate) mod tests {
         let menu = app.context_menu.as_ref().unwrap();
         assert!(menu.entries.iter().any(|e| matches!(e,
             MenuEntry::Item { label, enabled: false, .. } if label == "Blame at this commit")));
+        // The history's file opens in the external editor (M8-08).
+        let (enabled, hint, message) = editor_entry_of(&app);
+        assert!(!enabled && hint.as_deref() == Some(crate::launch::NO_EDITOR));
+        assert!(matches!(message, Some(Message::OpenInEditor(Some(p))) if p == "f.txt"));
     }
 
     #[test]

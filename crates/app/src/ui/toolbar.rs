@@ -22,6 +22,8 @@ enum ToolbarAction {
     Stash,
     Pop,
     Terminal,
+    /// External editor (M8-08), shown while one is set.
+    Editor,
 }
 
 impl ToolbarAction {
@@ -35,6 +37,7 @@ impl ToolbarAction {
             Self::Stash => "Stash",
             Self::Pop => "Pop",
             Self::Terminal => "Terminal",
+            Self::Editor => "Editor",
         }
     }
 
@@ -48,6 +51,7 @@ impl ToolbarAction {
             Self::Stash => Icon::Stash,
             Self::Pop => Icon::Pop,
             Self::Terminal => Icon::Terminal,
+            Self::Editor => Icon::Editor,
         }
     }
 }
@@ -95,6 +99,8 @@ fn toolbar_button<'a>(
 pub struct Pickers {
     pub repository: Option<String>,
     pub branch: Option<String>,
+    /// An external editor is set: the "Editor" button shows (M8-08).
+    pub editor: bool,
 }
 
 /// `compact`: the window is too narrow for labelled buttons (icons only).
@@ -140,8 +146,13 @@ pub fn view(
         actions,
         space::horizontal(),
         action(view, compact, ToolbarAction::Terminal),
-        settings_button(compact),
     ]
+    .push(
+        blocks
+            .editor
+            .then(|| action(view, compact, ToolbarAction::Editor)),
+    )
+    .push(settings_button(compact))
     .padding([4, 12])
     .align_y(iced::Center);
 
@@ -269,6 +280,13 @@ fn action<'a>(view: &RepoView, compact: bool, action: ToolbarAction) -> Element<
         (ToolbarAction::Pop, _) if view.write_block.is_none() => {
             with_tooltip_text(disabled(), "Pop: no stash to pop".to_owned())
         }
+        (ToolbarAction::Editor, _) => with_tooltip_text(
+            toolbar_button(action, Some(Message::OpenInEditor(None)), compact).into(),
+            match crate::actions::ActionId::OpenEditor.shortcut_text() {
+                Some(keys) => format!("Open this repository in the external editor ({keys})"),
+                None => "Open this repository in the external editor".to_owned(),
+            },
+        ),
         (ToolbarAction::Terminal, _) => with_tooltip_text(
             toolbar_button(action, Some(Message::OpenTerminal), compact).into(),
             match crate::actions::ActionId::OpenTerminal.shortcut_text() {
