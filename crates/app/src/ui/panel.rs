@@ -247,6 +247,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
 
     let mut content = column![
         row![muted("Commit"), space::horizontal(), amend].align_y(iced::Center),
+        identity_line(view),
         row![summary, counter].spacing(6).align_y(iced::Center),
         description,
         commit,
@@ -273,6 +274,48 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         content = content.push(muted(hint).size(11));
     }
     content.into()
+}
+
+/// "Committing as <name> <email>" above the summary (M8-04): the identity
+/// the next commit uses, its origin as tooltip; a click opens the identity
+/// menu. Without one: "No Git identity set" in the warning color.
+fn identity_line(view: &RepoView) -> Element<'_, Message> {
+    let resolved = &view.snapshot.identity;
+    let (label, tip): (Element<'_, Message>, String) = match resolved.identity() {
+        Some(identity) => (
+            muted(format!("Committing as {}", identity.label()))
+                .size(11)
+                .wrapping(text::Wrapping::None)
+                .into(),
+            match resolved.origin() {
+                Some(origin) => format!("{}; click to choose another", origin.description()),
+                None => "Click to choose another identity".to_owned(),
+            },
+        ),
+        None => (
+            text("No Git identity set")
+                .size(11)
+                .style(theme::text_warning)
+                .into(),
+            "Commits need a name and email: click to choose an identity".to_owned(),
+        ),
+    };
+    let line = container(
+        row![
+            label,
+            crate::icons::tinted(crate::icons::Icon::ChevronDown, 11.0, |p| p.text_muted)
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
+    )
+    .clip(true);
+    let area = crate::ui::context_area::click_area(line, Message::IdentityMenu);
+    with_tooltip_text(
+        iced::widget::mouse_area(area)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into(),
+        tip,
+    )
 }
 
 /// GitKraken counts down from 72 characters for the summary.

@@ -584,6 +584,9 @@ pub struct RepoView {
     pub reload_diff: bool,
     /// Clear the commit message when the running write (a commit) succeeds.
     pub clear_message_after_write: bool,
+    /// Status bar text once the running write succeeds (e.g. "Committing as
+    /// … in …", M8-04).
+    pub after_write_status: Option<String>,
     pub last_write: Option<LastWrite>,
     /// Last fetch (or when the tab was opened), for auto-fetch.
     pub last_fetch: std::time::Instant,
@@ -807,6 +810,7 @@ impl RepoView {
             status_refreshing: false,
             reload_diff: false,
             clear_message_after_write: false,
+            after_write_status: None,
             last_write: None,
             last_fetch: std::time::Instant::now(),
             fetch_error_shown: false,

@@ -58,6 +58,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Appearance => appearance(app),
         Category::Identities => identities(app),
         Category::ExternalTools => external_tools(&app.settings, page),
+        Category::Identity => repository_identity(app),
         Category::Gitflow => gitflow(app, page),
     };
 
@@ -130,8 +131,73 @@ pub fn repository_label(repo: Option<&str>) -> String {
 fn category_title(app: &App, category: Category) -> String {
     match (category, app.active_repo_name()) {
         (Category::Gitflow, Some(name)) => format!("Gitflow · {name}"),
+        (Category::Identity, Some(name)) => format!("Identity · {name}"),
         _ => category.title().to_owned(),
     }
+}
+
+/// Preferences → Repository → Identity (M8-04): what the next commit uses,
+/// with its origin, and the identity choices of the commit panel.
+fn repository_identity(app: &App) -> Element<'_, Message> {
+    let Some(view) = app.active_tab().and_then(crate::app::Tab::view) else {
+        return muted(NO_REPOSITORY).into();
+    };
+    let resolved = &view.snapshot.identity;
+    let value = |label: &'static str, value: &Option<git_core::ConfigValue>| {
+        let shown: Element<'_, Message> = match value {
+            Some(v) => row![
+                text(v.value.clone()),
+                muted(v.origin.description()).size(12)
+            ]
+            .spacing(8)
+            .align_y(iced::Center)
+            .into(),
+            None => text("not set").style(theme::text_warning).into(),
+        };
+        row![muted(label).width(70), shown]
+            .spacing(8)
+            .align_y(iced::Center)
+    };
+    let writable = app.write_block().is_none() && view.busy.is_none();
+    let options = crate::app::identity_options(resolved, &app.settings.identities.list);
+    let choices = Column::with_children(options.into_iter().map(|option| {
+        let writes = matches!(
+            option.choice,
+            crate::app::IdentityChoice::Saved(_)
+                | crate::app::IdentityChoice::UseGlobal
+                | crate::app::IdentityChoice::Add
+        );
+        let label = if option.current {
+            format!("{} · current", option.label)
+        } else {
+            option.label
+        };
+        button(text(label))
+            .on_press_maybe(
+                ((writable || !writes) && !option.current)
+                    .then_some(Message::IdentityChosen(option.choice)),
+            )
+            .padding([5, 12])
+            .width(Fill)
+            .style(theme::list_item(option.current))
+            .into()
+    }))
+    .spacing(2);
+    column![
+        muted(
+            "The identity this repository's commits use: user.name and user.email from its \
+               own Git config, otherwise from the global one."
+        )
+        .size(12),
+        column![
+            value("Name", &resolved.name),
+            value("Email", &resolved.email)
+        ]
+        .spacing(6),
+        field("Use identity", choices.into(), None),
+    ]
+    .spacing(16)
+    .into()
 }
 
 /// Preferences → Gitflow (M7-07): initialize, edit or remove Git flow for

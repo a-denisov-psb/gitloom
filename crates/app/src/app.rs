@@ -69,6 +69,83 @@ pub enum DiscardTarget {
     Block(usize),
 }
 
+/// An entry of the identity menu (commit panel, palette, Preferences;
+/// M8-04).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityChoice {
+    /// Use saved identity `index` in the repository.
+    Saved(usize),
+    /// Remove the repository's own `user.name`/`user.email`.
+    UseGlobal,
+    /// Save the identity the repository uses to the list.
+    SaveCurrent,
+    /// Add an identity and use it in the repository.
+    Add,
+    /// Preferences → Identities.
+    Manage,
+}
+
+/// One entry of the identity menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityOption {
+    pub label: String,
+    pub choice: IdentityChoice,
+    /// The identity the repository uses now.
+    pub current: bool,
+}
+
+/// The identity menu for a repository using `resolved` (M8 decisions
+/// table): the saved identities, "Use global identity (<name>)" when the
+/// repository has its own values, "Save as identity" when the current one
+/// is not saved, "Add identity…" without one, "Manage identities…".
+pub fn identity_options(
+    resolved: &git_core::ResolvedIdentity,
+    saved: &[settings::SavedIdentity],
+) -> Vec<IdentityOption> {
+    let current = resolved.identity();
+    let mut options: Vec<IdentityOption> = saved
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| IdentityOption {
+            label: entry.label(),
+            choice: IdentityChoice::Saved(index),
+            current: current.as_ref() == Some(&entry.identity()),
+        })
+        .collect();
+    if resolved.has_local() {
+        let label = match &resolved.inherited {
+            Some(global) => format!("Use global identity ({})", global.name),
+            None => "Use global identity (none set)".to_owned(),
+        };
+        options.push(IdentityOption {
+            label,
+            choice: IdentityChoice::UseGlobal,
+            current: false,
+        });
+    }
+    match &current {
+        Some(identity) if !saved.iter().any(|s| s.identity() == *identity) => {
+            options.push(IdentityOption {
+                label: format!("Save as identity ({})", identity.label()),
+                choice: IdentityChoice::SaveCurrent,
+                current: false,
+            });
+        }
+        Some(_) => {}
+        None => options.push(IdentityOption {
+            label: "Add identity…".to_owned(),
+            choice: IdentityChoice::Add,
+            current: false,
+        }),
+    }
+    options.push(IdentityOption {
+        label: "Manage identities…".to_owned(),
+        choice: IdentityChoice::Manage,
+        current: false,
+    });
+    options
+}
+
 /// What to check out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckoutTarget {
@@ -412,6 +489,10 @@ pub enum Message {
     },
     IdentitySetDefault(usize),
     IdentitySyncToggled(bool),
+    /// Commit panel: "Committing as …" opens the identity menu (M8-04).
+    IdentityMenu(iced::Point),
+    /// An identity menu entry was chosen for the active repository.
+    IdentityChosen(IdentityChoice),
     /// The global identity was read at start (import on first use).
     GlobalIdentityRead(Result<Option<git_core::Identity>, String>),
     /// Writing the default identity to the global config finished.
@@ -967,7 +1048,7 @@ impl App {
     }
 
     /// Why write actions are blocked, if they are (unknown counts as blocked).
-    fn write_block(&self) -> Option<String> {
+    pub fn write_block(&self) -> Option<String> {
         match &self.git {
             Some(git) => git.reason(),
             None => Some("Checking for Git…".into()),
@@ -1715,7 +1796,7 @@ impl App {
                     git.set_upstream(&local, &upstream)
                 })
             }
-            FormAction::Identity { index } => {
+            FormAction::Identity { index, apply } => {
                 let (name, email) = (form.value(0).to_owned(), form.value(1).to_owned());
                 if let Some(problem) = self.settings.identities.problem(&name, &email, index) {
                     form.error = Some(problem);
@@ -1740,6 +1821,11 @@ impl App {
                 let save = self.save_settings();
                 if edits_default {
                     return Task::batch([save, self.sync_global_identity()]);
+                }
+                // "Add identity…" from the identity menu also uses it.
+                if let Some(tab) = apply {
+                    let index = self.settings.identities.list.len() - 1;
+                    return Task::batch([save, self.use_identity(tab, index)]);
                 }
                 save
             }
@@ -2450,6 +2536,11 @@ impl App {
             }
             Shortcut::CommandPalette => return self.open_palette(palette::Mode::Actions),
             Shortcut::OpenRepoPalette => return self.open_palette(palette::Mode::OpenRepository),
+            Shortcut::ChooseIdentity => {
+                if self.active_tab().and_then(Tab::view).is_some() {
+                    return self.open_palette(palette::Mode::ChooseIdentity);
+                }
+            }
             Shortcut::CheckoutBranch => {
                 if self.active_tab().and_then(Tab::view).is_some() {
                     return self.open_palette(palette::Mode::CheckoutBranch);
@@ -3662,6 +3753,7 @@ impl App {
                         let target = match action.id {
                             Shortcut::OpenRepoPalette => Target::Mode(Mode::OpenRepository),
                             Shortcut::CheckoutBranch => Target::Mode(Mode::CheckoutBranch),
+                            Shortcut::ChooseIdentity => Target::Mode(Mode::ChooseIdentity),
                             Shortcut::FileHistory => Target::Mode(Mode::Files),
                             id => Target::Action(id),
                         };
@@ -3711,6 +3803,41 @@ impl App {
                 }
                 entries
             }
+            Mode::ChooseIdentity => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Vec::new();
+                };
+                let writes_blocked = self.write_block().or_else(|| {
+                    view.busy
+                        .as_ref()
+                        .map(|_| "Wait for the running operation".to_owned())
+                });
+                identity_options(&view.snapshot.identity, &self.settings.identities.list)
+                    .into_iter()
+                    .map(|option| {
+                        let writes = matches!(
+                            option.choice,
+                            IdentityChoice::Saved(_)
+                                | IdentityChoice::UseGlobal
+                                | IdentityChoice::Add
+                        );
+                        let disabled = if option.current {
+                            Some("In use".to_owned())
+                        } else if writes {
+                            writes_blocked.clone()
+                        } else {
+                            None
+                        };
+                        let entry = Entry::new(option.label, Target::Identity(option.choice))
+                            .disabled(disabled);
+                        if option.current {
+                            entry.detail("current")
+                        } else {
+                            entry
+                        }
+                    })
+                    .collect()
+            }
             Mode::Files => Vec::new(),
         }
     }
@@ -3737,6 +3864,7 @@ impl App {
             Target::Browse => self.update(Message::OpenRepository),
             Target::Checkout(target) => self.update(Message::Checkout(target)),
             Target::File(path) => self.update(Message::FileHistoryOpened { path, start: None }),
+            Target::Identity(choice) => self.update(Message::IdentityChosen(choice)),
             Target::Mode(_) => Task::none(),
         }
     }
@@ -4088,6 +4216,43 @@ impl App {
         }
     }
 
+    /// Writes saved identity `index` to the repository config of `tab`
+    /// (M8-04); not undoable, the status bar confirms it.
+    fn use_identity(&mut self, tab: TabId, index: usize) -> Task<Message> {
+        let Some(identity) = self
+            .settings
+            .identities
+            .list
+            .get(index)
+            .map(|s| s.identity())
+        else {
+            return Task::none();
+        };
+        let Some(name) = self
+            .tab_mut(tab)
+            .and_then(|t| t.view())
+            .map(|v| v.name().to_owned())
+        else {
+            return Task::none();
+        };
+        let status = format!("Committing as {} in {name}", identity.name);
+        let label = format!("Use identity {}", identity.name);
+        let task = self.run_write(tab, label, move |git| {
+            git_core::set_identity(git, git_core::IdentityScope::Local, &identity)
+        });
+        self.set_after_write_status(tab, status);
+        task
+    }
+
+    /// Shows `status` when the write just started in `tab` succeeds.
+    fn set_after_write_status(&mut self, tab: TabId, status: String) {
+        if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+            if view.busy.is_some() {
+                view.after_write_status = Some(status);
+            }
+        }
+    }
+
     /// Form dialog to add (`None`) or edit identity `index` (M8-03).
     fn identity_form(&mut self, index: Option<usize>) -> Task<Message> {
         let (name, email) = match index {
@@ -4109,7 +4274,7 @@ impl App {
                 FormField::text("Email", &email),
             ],
             submit: submit.into(),
-            action: FormAction::Identity { index },
+            action: FormAction::Identity { index, apply: None },
             error: None,
         });
         iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
@@ -4235,6 +4400,91 @@ impl App {
                             "Could not update the global Git identity",
                             error,
                         ));
+                    }
+                }
+            }
+            Message::IdentityMenu(position) => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let writable = self.write_block().is_none() && view.busy.is_none();
+                let entries =
+                    identity_options(&view.snapshot.identity, &self.settings.identities.list)
+                        .into_iter()
+                        .map(|option| {
+                            // Writing entries need Git; Save and Manage do not.
+                            let writes = matches!(
+                                option.choice,
+                                IdentityChoice::Saved(_)
+                                    | IdentityChoice::UseGlobal
+                                    | IdentityChoice::Add
+                            );
+                            MenuEntry::Item {
+                                label: option.label,
+                                shortcut: option.current.then(|| "current".to_owned()),
+                                enabled: (writable || !writes) && !option.current,
+                                message: Box::new(Message::IdentityChosen(option.choice)),
+                                hint: None,
+                            }
+                        })
+                        .collect();
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::IdentityChosen(choice) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                match choice {
+                    IdentityChoice::Saved(index) => return self.use_identity(tab, index),
+                    IdentityChoice::UseGlobal => {
+                        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                            return Task::none();
+                        };
+                        let name = view.name().to_owned();
+                        let status = match &view.snapshot.identity.inherited {
+                            Some(global) => format!("Committing as {} in {name}", global.name),
+                            None => format!("No Git identity set in {name}"),
+                        };
+                        let task = self.run_write(tab, "Use global identity", |git| {
+                            git_core::unset_local_identity(git)
+                        });
+                        self.set_after_write_status(tab, status);
+                        return task;
+                    }
+                    IdentityChoice::SaveCurrent => {
+                        let current = self
+                            .tab_mut(tab)
+                            .and_then(|t| t.view())
+                            .and_then(|v| v.snapshot.identity.identity());
+                        let Some(current) = current else {
+                            return Task::none();
+                        };
+                        let identities = &mut self.settings.identities;
+                        if identities
+                            .problem(&current.name, &current.email, None)
+                            .is_some()
+                        {
+                            return Task::none();
+                        }
+                        identities
+                            .list
+                            .push(settings::SavedIdentity::from(&current));
+                        self.status = format!("Saved identity {}", current.label());
+                        return self.save_settings();
+                    }
+                    IdentityChoice::Add => {
+                        let task = self.identity_form(None);
+                        if let Some(form) = self.form.as_mut() {
+                            form.action = FormAction::Identity {
+                                index: None,
+                                apply: Some(tab),
+                            };
+                        }
+                        return task;
+                    }
+                    IdentityChoice::Manage => {
+                        return self
+                            .update(Message::SettingsOpenedAt(settings::Category::Identities))
                     }
                 }
             }
@@ -5110,6 +5360,7 @@ impl App {
                 let mut inline_error = false;
                 let mut not_merged = None;
                 let mut then_network = None;
+                let mut success_status = None;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
@@ -5194,6 +5445,7 @@ impl App {
                         view.pending_history = None;
                     }
                     let clears_message = std::mem::take(&mut view.clear_message_after_write);
+                    success_status = view.after_write_status.take().filter(|_| result.is_ok());
                     if let (Some(last), Err(error)) = (&mut view.last_write, &result) {
                         if git_core::locked_file(error).is_some() {
                             last.clears_message = clears_message;
@@ -5265,7 +5517,11 @@ impl App {
                             },
                         });
                     }
-                    Ok(_) => {}
+                    Ok(_) => {
+                        if let Some(status) = success_status {
+                            self.status = status;
+                        }
+                    }
                 }
                 let refresh = self.refresh(tab);
                 if let Some(request) = then_network {
@@ -5847,7 +6103,7 @@ impl App {
                 }
                 // Identities validate while typing (M8-03).
                 if let Some(form) = self.form.as_mut() {
-                    if let FormAction::Identity { index } = form.action {
+                    if let FormAction::Identity { index, .. } = form.action {
                         form.error = self
                             .settings
                             .identities
@@ -8031,6 +8287,9 @@ fn global_event(event: Event, status: event::Status, _window: window::Id) -> Opt
 }
 
 /// Why committing is not possible right now, if it is not.
+/// Why Commit, Amend and Continue are disabled without a Git identity.
+pub const NO_IDENTITY: &str = "Choose an identity first";
+
 pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     let tree = &view.snapshot.working_tree;
     // Continuing an operation may commit nothing new (e.g. a resolved rebase step).
@@ -8045,6 +8304,9 @@ pub fn commit_blocker(view: &RepoView, stage_all: bool) -> Option<String> {
     let conflicts = view.conflicted_files();
     if let Some(reason) = view.state_block(state) {
         Some(reason)
+    } else if view.snapshot.identity.identity().is_none() {
+        // Git would refuse the commit (M8-04).
+        Some(NO_IDENTITY.into())
     } else if continues && !conflicts.is_empty() && !stage_all {
         Some(unresolved_conflicts(&conflicts))
     } else if !has_changes && !continues && !merging && !view.amend {
@@ -8474,6 +8736,7 @@ pub(crate) mod tests {
             WorkingTree::default(),
         )
         .unwrap();
+        let snapshot = with_test_identity(snapshot);
         let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("mock"));
         let first = app.tabs[0].id;
         app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
@@ -8569,9 +8832,27 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
+        let snapshot = with_test_identity(snapshot);
         let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("mock"));
         app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
         app
+    }
+
+    /// Test repositories resolve a global identity, as a configured Git
+    /// would (commits need one, M8-04).
+    pub(crate) fn with_test_identity(mut snapshot: RepoSnapshot) -> RepoSnapshot {
+        let value = |value: &str| {
+            Some(git_core::ConfigValue {
+                value: value.into(),
+                origin: git_core::ConfigOrigin::Global,
+            })
+        };
+        snapshot.identity = git_core::ResolvedIdentity {
+            name: value("Test Author"),
+            email: value("author@example.com"),
+            inherited: git_core::Identity::new("Test Author", "author@example.com").ok(),
+        };
+        snapshot
     }
 
     /// App with one ready tab showing commits `ids` (linear, newest first).
@@ -8607,6 +8888,7 @@ pub(crate) mod tests {
             WorkingTree::default(),
         )
         .unwrap();
+        let snapshot = with_test_identity(snapshot);
         let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("mock"));
         app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
         app
@@ -9548,7 +9830,10 @@ pub(crate) mod tests {
     #[test]
     fn repository_group_follows_the_active_tab() {
         use settings::Category;
-        assert_eq!(Category::REPOSITORY, [Category::Gitflow]);
+        assert_eq!(
+            Category::REPOSITORY,
+            [Category::Identity, Category::Gitflow]
+        );
         assert!(Category::Gitflow.is_repository());
         assert!(!Category::GLOBAL.iter().any(|c| c.is_repository()));
 
@@ -9711,6 +9996,215 @@ pub(crate) mod tests {
         let _ = app.update(Message::IdentitySetDefault(0));
         assert!(!app.identity_writing);
         assert!(app.global_identity_block().is_some());
+    }
+
+    fn local_value(value: &str) -> Option<git_core::ConfigValue> {
+        Some(git_core::ConfigValue {
+            value: value.into(),
+            origin: git_core::ConfigOrigin::Local,
+        })
+    }
+
+    #[test]
+    fn identity_menu_entries() {
+        let saved = vec![
+            settings::SavedIdentity {
+                name: "Ana".into(),
+                email: "ana@x.org".into(),
+            },
+            settings::SavedIdentity {
+                name: "Work".into(),
+                email: "work@x.org".into(),
+            },
+        ];
+        let labels = |options: &[IdentityOption]| -> Vec<String> {
+            options.iter().map(|o| o.label.clone()).collect()
+        };
+        // The global identity, saved: check on it, nothing to save.
+        let global = with_test_identity(ready_snapshot()).identity;
+        let mut saved_global = saved.clone();
+        saved_global.push(settings::SavedIdentity {
+            name: "Test Author".into(),
+            email: "author@example.com".into(),
+        });
+        let options = identity_options(&global, &saved_global);
+        assert_eq!(
+            labels(&options),
+            [
+                "Ana <ana@x.org>",
+                "Work <work@x.org>",
+                "Test Author <author@example.com>",
+                "Manage identities…"
+            ]
+        );
+        assert!(options[2].current && !options[0].current);
+        // Own values in the repository, not saved: use global and save.
+        let local_identity = git_core::ResolvedIdentity {
+            name: local_value("Work"),
+            email: local_value("work@other.org"),
+            inherited: global.identity(),
+        };
+        let options = identity_options(&local_identity, &saved);
+        assert_eq!(
+            labels(&options)[2..],
+            [
+                "Use global identity (Test Author)",
+                "Save as identity (Work <work@other.org>)",
+                "Manage identities…"
+            ]
+        );
+        // None: add one.
+        let options = identity_options(&git_core::ResolvedIdentity::default(), &saved);
+        assert_eq!(
+            labels(&options)[2..],
+            ["Add identity…", "Manage identities…"]
+        );
+    }
+
+    /// Staging app with a staged file and a summary; with or without an
+    /// identity, one saved identity (UI checks, M8-04).
+    pub(crate) fn identity_commit_app(identity: bool) -> App {
+        let mut app = staging_app(&["notes.txt"], &["src/main.rs"]);
+        let _ = app.update(Message::WipSelected);
+        let _ = app.update(Message::SummaryChanged("Add the identity line".into()));
+        app.settings.identities.list.push(settings::SavedIdentity {
+            name: "Ana Lyst".into(),
+            email: "ana@work.example".into(),
+        });
+        if !identity {
+            set_identity(&mut app, git_core::ResolvedIdentity::default());
+        }
+        app
+    }
+
+    /// Snapshot of `ready_app(&["c"])` (for identity tests).
+    fn ready_snapshot() -> RepoSnapshot {
+        (*ready_app(&["c"]).tabs[0].view().unwrap().snapshot).clone()
+    }
+
+    fn set_identity(app: &mut App, identity: git_core::ResolvedIdentity) {
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.identity = identity;
+        view.snapshot = Arc::new(snapshot);
+    }
+
+    #[test]
+    fn without_identity_commit_amend_and_continue_are_blocked() {
+        let mut app = staging_app(&[], &["a"]);
+        let _ = app.update(Message::SummaryChanged("Message".into()));
+        assert_eq!(commit_blocker(app.tabs[0].view().unwrap(), false), None);
+        set_identity(&mut app, git_core::ResolvedIdentity::default());
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(commit_blocker(view, false).as_deref(), Some(NO_IDENTITY));
+        assert_eq!(commit_blocker(view, true).as_deref(), Some(NO_IDENTITY));
+        let _ = app.update(Message::CommitRequested);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert_eq!(app.status, NO_IDENTITY);
+        let _ = app.update(Message::AmendToggled(true));
+        assert_eq!(
+            commit_blocker(app.tabs[0].view().unwrap(), false).as_deref(),
+            Some(NO_IDENTITY)
+        );
+        let _ = app.update(Message::ContinueOperation);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn choosing_an_identity_writes_the_repository_config() {
+        let mut app = staging_app(&["a"], &[]);
+        app.settings.identities.list.push(settings::SavedIdentity {
+            name: "Work".into(),
+            email: "work@x.org".into(),
+        });
+        // The menu opens at the line with the entries.
+        let _ = app.update(Message::IdentityMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(
+            menu.select(0),
+            Some(Message::IdentityChosen(IdentityChoice::Saved(0)))
+        ));
+        let _ = app.update(Message::IdentityChosen(IdentityChoice::Saved(0)));
+        assert_eq!(running_args(&app), ["Use identity Work"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Use identity Work".into(),
+            result: Ok(None),
+        });
+        assert_eq!(app.status, "Committing as Work in mock");
+
+        // Own values: "Use global identity" removes them.
+        set_identity(
+            &mut app,
+            git_core::ResolvedIdentity {
+                name: local_value("Work"),
+                email: local_value("work@x.org"),
+                inherited: git_core::Identity::new("Test Author", "author@example.com").ok(),
+            },
+        );
+        let _ = app.update(Message::IdentityChosen(IdentityChoice::UseGlobal));
+        assert_eq!(running_args(&app), ["Use global identity"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Use global identity".into(),
+            result: Err("boom".into()),
+        });
+        assert_ne!(
+            app.status, "Committing as Test Author in mock",
+            "not on failure"
+        );
+        let _ = app.update(Message::ModalClosed);
+    }
+
+    #[test]
+    fn saving_and_adding_identities_from_the_menu() {
+        let mut app = staging_app(&["a"], &[]);
+        // The test identity is not saved yet: "Save as identity".
+        let _ = app.update(Message::IdentityChosen(IdentityChoice::SaveCurrent));
+        assert_eq!(app.settings.identities.list.len(), 1);
+        assert_eq!(
+            app.status,
+            "Saved identity Test Author <author@example.com>"
+        );
+
+        // Without an identity: "Add identity…" adds and uses it.
+        set_identity(&mut app, git_core::ResolvedIdentity::default());
+        let _ = app.update(Message::IdentityChosen(IdentityChoice::Add));
+        form_input(&mut app, 0, "New");
+        form_input(&mut app, 1, "new@x.org");
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(app.settings.identities.list.len(), 2);
+        assert_eq!(running_args(&app), ["Use identity New"]);
+
+        // Manage opens the Preferences.
+        let _ = app.update(Message::IdentityChosen(IdentityChoice::Manage));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::Identities
+        );
+    }
+
+    #[test]
+    fn palette_lists_the_identity_choices() {
+        let mut app = staging_app(&["a"], &[]);
+        app.settings.identities.list.push(settings::SavedIdentity {
+            name: "Test Author".into(),
+            email: "author@example.com".into(),
+        });
+        let _ = app.update(checked(Shortcut::ChooseIdentity, false));
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.mode, palette::Mode::ChooseIdentity);
+        let entries: Vec<&palette::Entry> = palette.shown().collect();
+        let labels: Vec<&str> = entries.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["Test Author <author@example.com>", "Manage identities…"]
+        );
+        assert_eq!(entries[0].disabled.as_deref(), Some("In use"));
+        // Without a repository the action is disabled.
+        let (start, _) = App::new(Vec::new(), None);
+        assert!(start.action_block(Shortcut::ChooseIdentity).is_some());
     }
 
     #[test]
@@ -11088,6 +11582,7 @@ pub(crate) mod tests {
             WorkingTree::default(),
         )
         .unwrap();
+        let snapshot = with_test_identity(snapshot);
         app.tabs[0]
             .view_mut()
             .unwrap()
@@ -13017,6 +13512,7 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
+        let snapshot = with_test_identity(snapshot);
         let (mut app, _) = App::new(Vec::new(), None);
         let _ = app.update(loaded(Session::default()));
         let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("/repo"));

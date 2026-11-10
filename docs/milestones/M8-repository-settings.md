@@ -117,7 +117,7 @@ Acceptance: unit tests for validation, settings migration and import; app tests:
 
 Note (2026-11-10): done. `settings.identities` (`list`, `default` index, `sync_global`); an out-of-range default is dropped on load. Import: after Git is detected and while the list is empty, `git_core::global_identity` (runs `git config --global` outside any repository) feeds `GlobalIdentityRead`; so an emptied list imports again at the next start (the planned rule, not a one-time flag). Global writes (`git_core::write_global_identity`) run off the UI thread with `App::identity_writing` as busy flag; while Git is missing or a write runs, "Set as default" and "Edit" of the default are disabled with the reason (only while sync is on). Decisions: turning the sync option on writes the current default once ("keep updated"); removing the default asks for confirmation and leaves the global config untouched. The form validates while typing (after both fields have text) and again on submit. Snapshot `ui_check_identities` (both themes and the Add dialog) checked by eye.
 
-### [ ] M8-04 Identity per repository
+### [x] M8-04 Identity per repository
 
 - Commit panel line "Committing as …" with origin tooltip and menu (decisions table); no-identity state with disabled Commit, Amend and Continue.
 - Palette "Choose identity…" sub-list with the same entries.
@@ -125,6 +125,8 @@ Note (2026-11-10): done. `settings.identities` (`list`, `default` index, `sync_g
 - Status bar confirmation after a change.
 
 Acceptance: integration test: choose an identity → commit → author and committer of `HEAD` match; "Use global identity" removes both local keys; without an identity Commit, Amend and Continue are disabled with the reason; a change in a terminal updates the line without restart; snapshots of the commit panel with and without identity in both themes.
+
+Note (2026-11-10): done. One option list (`app::identity_options`) feeds the commit panel menu (context menu at the click, the current entry disabled with "current" on the right), the palette list "Choose identity…" (`palette::Mode::ChooseIdentity`, current entry disabled "In use") and Preferences → Repository → Identity (values with origin, the same entries as buttons). `ResolvedIdentity::inherited` (identity without the repository config) names "Use global identity (<name>)" ("(none set)" when nothing is inherited). "Add identity…" (no identity) adds the identity and uses it in the repository. Writes go through `run_write` (no undo entry); `RepoView::after_write_status` shows "Committing as <name> in <repository>" only on success. `commit_blocker` refuses without an identity, which covers Commit, Amend, Continue (panel and banner) and Stage all and commit; test snapshots now resolve a test identity (`with_test_identity`), like a configured Git. A terminal change refreshes via the config part of the snapshot (M8-02). Tests: `tests/git_identity.rs` (commit author and committer), app tests for the menu entries, the block, choosing, saving, adding and the palette; `ui_check_commit_identity` checked by eye.
 
 ### [ ] M8-05 SSH key model (git-core)
 

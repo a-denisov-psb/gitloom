@@ -68,6 +68,8 @@ pub enum ActionId {
     FileHistory,
     /// Palette list of branches to check out.
     CheckoutBranch,
+    /// Palette list of identities for the repository (M8-04).
+    ChooseIdentity,
     OpenTerminal,
     OpenFileManager,
     ExternalDiff,
@@ -504,6 +506,13 @@ fn table() -> Vec<Action> {
         Global,
         &[],
     );
+    add(
+        A::ChooseIdentity,
+        "Choose identity…",
+        RepoActions,
+        Global,
+        &[],
+    );
     add(A::Pull, "Pull", RepoActions, Global, &[]);
     add(A::Push, "Push", RepoActions, Global, &[]);
     add(A::Stash, "Stash", RepoActions, Global, &[]);
@@ -831,6 +840,7 @@ fn table() -> Vec<Action> {
                 | A::Redo
                 | A::FocusFilter
                 | A::CheckoutBranch
+                | A::ChooseIdentity
                 | A::Pull
                 | A::Push
                 | A::Stash
