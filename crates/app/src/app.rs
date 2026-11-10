@@ -3437,12 +3437,22 @@ impl App {
                 }
             }
         }
+        // The repository categories of the Preferences follow the active tab.
+        let follow = self.settings_follow_tab();
         // The active tab may have changed or finished loading; details load lazily.
         let details = self.load_details();
         let scroll = self.restore_scroll();
         let timer = self.schedule_auto_fetch();
         let avatars = self.request_avatars();
-        Task::batch([task, details, scroll, self.persist(), timer, avatars])
+        Task::batch([
+            task,
+            follow,
+            details,
+            scroll,
+            self.persist(),
+            timer,
+            avatars,
+        ])
     }
 
     /// Asks for the avatars of the authors on screen: visible graph rows,
@@ -3996,6 +4006,40 @@ impl App {
         )
     }
 
+    /// Tab and repository of the active tab once it is loaded.
+    fn active_repo_path(&self) -> Option<(TabId, std::path::PathBuf)> {
+        let tab = self.active_tab()?;
+        tab.view()
+            .map(|view| (tab.id, view.backend.path().to_path_buf()))
+    }
+
+    /// Reloads a repository category of the open Preferences when the
+    /// active tab shows another repository; without one the view returns
+    /// to General (M8-01).
+    fn settings_follow_tab(&mut self) -> Task<Message> {
+        let Some(page) = &self.settings_page else {
+            return Task::none();
+        };
+        if !page.category.is_repository() {
+            return Task::none();
+        }
+        let repo = self.active_repo_path();
+        if repo == page.repo {
+            return Task::none();
+        }
+        match repo {
+            Some(_) => self.handle(Message::SettingsCategory(page.category)),
+            None => {
+                if let Some(page) = &mut self.settings_page {
+                    page.category = settings::Category::General;
+                    page.flow = None;
+                    page.repo = None;
+                }
+                Task::none()
+            }
+        }
+    }
+
     fn open_settings(&mut self) -> Task<Message> {
         self.context_menu = None;
         self.settings_page = Some(settings::Page::new(&self.settings));
@@ -4321,8 +4365,17 @@ impl App {
                         git_core::FlowConfig::defaults(&local)
                     })
                 });
+                // Repository categories need an open repository (the list
+                // shows them disabled otherwise).
+                let repo = self.active_repo_path();
+                if category.is_repository() && repo.is_none() {
+                    return Task::none();
+                }
                 if let Some(page) = &mut self.settings_page {
                     page.category = category;
+                    if category.is_repository() {
+                        page.repo = repo;
+                    }
                     if category == settings::Category::Gitflow {
                         page.flow = flow.as_ref().map(settings::FlowForm::new);
                     }
@@ -9280,6 +9333,80 @@ pub(crate) mod tests {
         assert_eq!(open_diff(&app).scroll.offset, 63.0 * height, "last change");
         let _ = app.update(Message::DiffJumpChange { next: false });
         assert_eq!(open_diff(&app).scroll.offset, 56.0 * height);
+    }
+
+    /// Adds a second ready tab (a copy of the first, other backend name)
+    /// and makes it active.
+    fn second_repo_tab(app: &mut App, flow: bool) -> TabId {
+        let mut snapshot = (*app.tabs[0].view().unwrap().snapshot).clone();
+        snapshot.flow = flow.then(|| git_core::FlowConfig::defaults(&["main"]));
+        let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("other"));
+        let id = app.add_tab(TabState::Ready(Box::new(RepoView::new(
+            backend,
+            Arc::new(snapshot),
+        ))));
+        let _ = app.update(Message::TabSelected(id));
+        id
+    }
+
+    #[test]
+    fn repository_group_follows_the_active_tab() {
+        use settings::Category;
+        assert_eq!(Category::REPOSITORY, [Category::Gitflow]);
+        assert!(Category::Gitflow.is_repository());
+        assert!(!Category::GLOBAL.iter().any(|c| c.is_repository()));
+
+        // Start screen: the repository categories cannot be chosen.
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let _ = app.update(checked(Shortcut::Settings, false));
+        let _ = app.update(Message::SettingsCategory(Category::Gitflow));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            Category::General
+        );
+
+        // With a repository the Gitflow form is built for it.
+        let mut app = flow_app();
+        let first = app.tabs[0].id;
+        let _ = app.update(Message::SettingsOpenedAt(Category::Gitflow));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, Category::Gitflow);
+        assert_eq!(page.repo.as_ref().map(|(tab, _)| *tab), Some(first));
+        assert!(page.flow.is_some());
+        let _ = app.update(Message::FlowFieldChanged(0, "changed-but-not-saved".into()));
+
+        // Another repository tab: the form reloads from that repository.
+        let second = second_repo_tab(&mut app, false);
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, Category::Gitflow);
+        assert_eq!(page.repo.as_ref().map(|(tab, _)| *tab), Some(second));
+        assert_eq!(flow_page(&app).unwrap().values[0], "main");
+
+        // Back to the first one, then to a start tab: General.
+        let _ = app.update(Message::TabSelected(first));
+        assert_eq!(
+            app.settings_page
+                .as_ref()
+                .unwrap()
+                .repo
+                .as_ref()
+                .map(|(tab, _)| *tab),
+            Some(first)
+        );
+        let _ = app.update(Message::TabOpened);
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, Category::General);
+        assert!(page.flow.is_none() && page.repo.is_none());
+    }
+
+    #[test]
+    fn repository_group_header_names_the_repository() {
+        use crate::ui::settings::repository_label;
+        assert_eq!(repository_label(None), "Repository");
+        assert_eq!(repository_label(Some("gitloom")), "Repository · gitloom");
+        let long = repository_label(Some("a-repository-with-a-really-long-name"));
+        assert!(long.ends_with('…') && long.chars().count() < 40, "{long}");
     }
 
     fn flow_page(app: &App) -> Option<&settings::FlowForm> {

@@ -10,6 +10,8 @@
 | Appearance | **Theme**: Dark, Light or System (follows the operating system; Dark if it reports nothing). **Zoom** 70–200 %. **Load avatars from Gravatar** (off by default). |
 | External tools | **Diff tool** and **merge tool**: Git's configuration (`diff.tool`, `merge.tool`) or a tool Git knows. **Terminal command** for Alt+T, with `{path}` for the repository folder; empty means the first terminal found. |
 
+Below the global categories, the group **Repository · <name>** holds the settings of the active tab's repository: **Gitflow** (see [Git flow](git-flow.md)). The group follows the active tab; on the start screen its categories are disabled ("Open a repository first").
+
 ![About dialog](../screenshots/m6-about-dark.png)
 
 At the bottom of the categories, **About Gitloom** shows the version, commit, license and third-party components.

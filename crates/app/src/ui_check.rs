@@ -571,4 +571,28 @@ mod tests {
             }
         }
     }
+
+    /// Preferences with the repository group (M8-01): "Repository · <name>"
+    /// with a repository, disabled "Repository" group on the start screen.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_preferences_repository_group() {
+        let mut app = crate::app::tests::flow_app();
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Gitflow,
+        ));
+        let (mut start, _) = App::new(Vec::new(), None);
+        let _ = start.update(checked(Shortcut::Settings, false));
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let choice = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            app.settings.appearance.theme = choice;
+            start.settings.appearance.theme = choice;
+            snapshot(&app, &format!("preferences-repository-{theme}"));
+            snapshot(&start, &format!("preferences-start-{theme}"));
+        }
+    }
 }

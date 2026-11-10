@@ -262,9 +262,16 @@ pub fn list_item(selected: bool) -> impl Fn(&Theme, button::Status) -> button::S
             (false, button::Status::Hovered | button::Status::Pressed) => Some(p.bg_hover),
             _ => None,
         };
+        // Disabled entries (e.g. repository categories without a
+        // repository, M8-01) are muted.
+        let text = if status == button::Status::Disabled {
+            p.text_muted
+        } else {
+            p.text
+        };
         button::Style {
             border: Border::default(),
-            ..button_style(background, p.text)
+            ..button_style(background, text)
         }
     }
 }

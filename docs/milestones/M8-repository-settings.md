@@ -82,7 +82,7 @@ Answer what you can in GitKraken before or during M8. Claude Code decides the re
 
 ## Tasks
 
-### [ ] M8-01 Repository group in the Preferences
+### [x] M8-01 Repository group in the Preferences
 
 - `settings::Category` distinguishes global and repository categories; the category list renders the group header "Repository · <name>" (truncated with tooltip) above the repository categories.
 - Gitflow moves into the group unchanged (form, validation, live refresh); "Initialize Gitflow" in the palette still opens it.
@@ -91,6 +91,8 @@ Answer what you can in GitKraken before or during M8. Claude Code decides the re
 - Identity and SSH key are added by M8-04 and M8-06; this task ships only the group with Gitflow.
 
 Acceptance: app tests for the group with and without a repository, a tab switch and the palette entry; `iced_test` snapshot of the category list in both themes.
+
+Note (2026-11-10): done. `Category::GLOBAL` / `Category::REPOSITORY` (Identities is added to the global list by M8-03); the group header is a muted section label like the left panel's, names longer than 22 characters end in "…" with the full name as tooltip. `Page::repo` remembers the tab and repository a repository form was built for; the central `App::update` reloads the form when the active tab shows another repository and returns to General when it shows none (also covers tabs that finish loading or close). `SettingsCategory` ignores repository categories without a repository; disabled list items are now drawn muted (`theme::list_item`). The Gitflow form title stays "Gitflow · <name>" (unchanged). Snapshot `ui_check_preferences_repository_group` checked by eye in both themes.
 
 ### [ ] M8-02 Git identity model (git-core)
 
