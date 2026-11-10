@@ -503,4 +503,26 @@ mod tests {
         let app = ready_app(&["e", "d", "c", "b", "a"]);
         snapshot(&app, "graph-rows");
     }
+
+    /// GITFLOW sits between LOCAL and REMOTE (M7-15); the widget order is
+    /// also the keyboard focus order. Layout only, part of every test run.
+    #[test]
+    fn gitflow_section_between_local_and_remote() {
+        let app = crate::app::tests::flow_app();
+        let mut sim = simulator(&app);
+        let mut top = |label: &str| {
+            let found = sim.find(label).unwrap_or_else(|e| panic!("{label}: {e}"));
+            iced_test::selector::Bounded::bounds(&found).y
+        };
+        let order = [
+            "LOCAL",
+            "GITFLOW",
+            "REMOTE",
+            "TAGS",
+            "STASHES",
+            "SUBMODULES",
+        ]
+        .map(&mut top);
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    }
 }
