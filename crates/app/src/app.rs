@@ -454,6 +454,9 @@ pub enum Message {
     OpenFileManager,
     /// Terminal command template typed in Preferences → External tools.
     TerminalCommandInput(String),
+    /// Preferences → External tools → External editor (M8-07).
+    EditorPresetChosen(settings::EditorPreset),
+    EditorCommandInput(String),
     /// Open the conflicted file in the merge tool.
     OpenMergeTool(String),
     ExternalToolFinished {
@@ -4821,6 +4824,23 @@ impl App {
             }
             Message::TerminalCommandInput(command) => {
                 self.settings.tools.terminal_command = command;
+                return self.save_settings();
+            }
+            Message::EditorPresetChosen(preset) => {
+                if let Some(template) = preset.template() {
+                    if let Some(page) = &mut self.settings_page {
+                        page.editor_custom = false;
+                    }
+                    self.settings.tools.editor_command = template.to_owned();
+                    return self.save_settings();
+                }
+                // Custom keeps the text for editing; from a preset it stays.
+                if let Some(page) = &mut self.settings_page {
+                    page.editor_custom = true;
+                }
+            }
+            Message::EditorCommandInput(command) => {
+                self.settings.tools.editor_command = command;
                 return self.save_settings();
             }
             Message::OpenMergeTool(path) => return self.open_merge_tool(path),

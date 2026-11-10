@@ -745,6 +745,37 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
                 .into(),
             "Command for Alt+T and the toolbar's Terminal button; {path} is the repository folder. Empty: the first terminal found.",
         ))
+        .push(field("External editor", editor_control(settings, page), EDITOR_NOTE))
+        .into()
+}
+
+const EDITOR_NOTE: &str = "Opens the repository (Alt+E, toolbar, palette) and files (file \
+     context menus); {path} is the folder or file, without {path} it is added at the end.";
+
+/// Preset list and command template of the external editor (M8-07).
+fn editor_control<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
+    let template = &settings.tools.editor_command;
+    let preset = if page.editor_custom {
+        crate::settings::EditorPreset::Custom
+    } else {
+        crate::settings::EditorPreset::of(template)
+    };
+    let picker = iced::widget::pick_list(
+        crate::settings::EditorPreset::ALL,
+        Some(preset),
+        Message::EditorPresetChosen,
+    )
+    .width(Length::Fixed(180.0));
+    let mut command = text_input("No editor", template)
+        .padding(6)
+        .style(theme::input)
+        .width(Length::Fixed(320.0));
+    if preset != crate::settings::EditorPreset::None {
+        command = command.on_input(Message::EditorCommandInput);
+    }
+    row![picker, command]
+        .spacing(8)
+        .align_y(iced::Center)
         .into()
 }
 
