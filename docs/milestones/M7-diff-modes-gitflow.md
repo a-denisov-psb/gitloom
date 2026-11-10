@@ -257,7 +257,7 @@ Acceptance: snapshot `ui_check_gitflow_section` and the left panel snapshots upd
 
 Note (2026-11-10): done. The sidebar column is built LOCAL, GITFLOW (when initialized), REMOTE, TAGS, STASHES, SUBMODULES; widget order is the focus order, so keyboard focus follows. `gitflow_section_between_local_and_remote` checks the header positions (layout, runs always); `ui_check_gitflow_section` re-rendered and checked by eye; the other left panel snapshots have no Git flow and are unchanged. `docs/user/git-flow.md` does not name the position.
 
-### [ ] M7-16 Horizontal scrolling in the diff view
+### [x] M7-16 Horizontal scrolling in the diff view
 
 Finding of the maintainer (2026-11-10): long lines cannot be scrolled horizontally in any diff mode.
 
@@ -268,6 +268,8 @@ Finding of the maintainer (2026-11-10): long lines cannot be scrolled horizontal
 - The conflict view gets the same behavior if it shares the line rendering; otherwise note it in the task note.
 
 Acceptance: unit tests for width, clamping and the wheel mapping (Shift+vertical → horizontal); app test: selection at a scrolled offset; `iced_test` snapshots of a scrolled Hunk and Split diff; the 2 MB scroll measurement of `docs/PERFORMANCE.md` still meets the 50 ms target.
+
+Note (2026-11-10): done. `DiffView` keeps `h_offset` (kept across reloads, a new file gets a new view), the measured `text_width` of the longest line (one monospace measurement per load, `diff_hscroll::text_width`) and the range the scrollbar last reported. The code text of each line sits in a `pin` moved left by the offset and clipped to its room; numbers, markers, hunk headers and block bars are not moved; Split uses one offset for both halves. iced's vertical scrollable drops horizontal wheel input, so a small `wheel_observer` widget around it reports horizontal deltas without capturing the event (Shift+wheel, tilt wheel, touchpad x); the horizontal scrollbar under the text (a horizontal scrollable whose range is the largest offset, computed per layout pass from the width via `responsive`) reports drags and follows wheel scrolling through `scroll_to`. The conflict view has its own line rendering and is unchanged (backlog candidate). Measured (release, 2 MB, scrolled 120 px to the right): frame max 9–19 ms, open 49–58 ms (`docs/PERFORMANCE.md`).
 
 ### [ ] M7-17 UTF-16 text files
 

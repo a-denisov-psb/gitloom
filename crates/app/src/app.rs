@@ -218,6 +218,13 @@ pub enum Message {
         offset: f32,
         height: f32,
     },
+    /// Wheel or touchpad scrolled the diff text horizontally by pixels (M7-16).
+    DiffWheel(f32),
+    /// The horizontal scrollbar of the diff moved: offset and largest offset.
+    DiffHScrolled {
+        offset: f32,
+        max: f32,
+    },
     /// Click on a diff line (display row index).
     DiffLineClicked(usize),
     /// Stage or unstage hunk `index` of the shown diff.
@@ -6168,6 +6175,26 @@ impl App {
                     diff.scroll = crate::repo_view::Scroll { offset, height };
                 }
             }
+            Message::DiffWheel(delta) => {
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    if diff.scroll_horizontally(delta) {
+                        // The scrollbar follows (it reports back the same offset).
+                        return iced::widget::operation::scroll_to(
+                            diff.hscroll_id.clone(),
+                            iced::widget::operation::AbsoluteOffset {
+                                x: Some(diff.h_offset),
+                                y: None,
+                            },
+                        );
+                    }
+                }
+            }
+            Message::DiffHScrolled { offset, max } => {
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    diff.h_max = Some(max);
+                    diff.h_offset = offset.clamp(0.0, max.max(0.0));
+                }
+            }
             Message::GraphScrolled { offset, height } => {
                 if let Some(view) = self.active_view_mut() {
                     view.scroll = crate::repo_view::Scroll { offset, height };
@@ -8946,6 +8973,94 @@ pub(crate) mod tests {
         });
         let _ = app.update(Message::DiffLineClicked(7));
         app
+    }
+
+    /// Diff of "a" in `mode` whose changed lines are far longer than the
+    /// view (M7-16): line 60 changed, line 70 removed, of 80.
+    pub(crate) fn wide_diff_app(mode: settings::DiffMode) -> App {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "a".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old: String = (1..=80).map(|i| format!("line {i}\n")).collect();
+        let wide = format!("changed 60 {}\n", "wide ".repeat(80));
+        let new = old.replace("line 60\n", &wide).replace("line 70\n", "");
+        let text = git_core::text_diff_with(old.as_bytes(), new.as_bytes(), mode.context());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("a".into()),
+                new_path: Some("a".into()),
+                binary: false,
+                too_large: false,
+                hunks: text.hunks,
+            }),
+        });
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+        });
+        app
+    }
+
+    #[test]
+    fn diff_scrolls_horizontally_and_keeps_selection_working() {
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let width = open_diff(&app).text_width;
+        assert!(width > 2000.0, "{width}");
+        // Shift+wheel before the scrollbar reported its range: clamped to
+        // the text width.
+        let _ = app.update(Message::DiffWheel(-60.0));
+        assert_eq!(open_diff(&app).h_offset, 0.0);
+        let _ = app.update(Message::DiffWheel(120.0));
+        assert_eq!(open_diff(&app).h_offset, 120.0);
+        // The scrollbar reports its range; the offset stays inside.
+        let _ = app.update(Message::DiffHScrolled {
+            offset: 120.0,
+            max: 300.0,
+        });
+        let _ = app.update(Message::DiffWheel(1000.0));
+        assert_eq!(open_diff(&app).h_offset, 300.0);
+        let _ = app.update(Message::DiffHScrolled {
+            offset: 40.0,
+            max: 300.0,
+        });
+        assert_eq!(open_diff(&app).h_offset, 40.0);
+
+        // Line selection and block actions at the scrolled offset.
+        let row = open_diff(&app).block_rows[0] + 1;
+        let _ = app.update(Message::DiffLineClicked(row));
+        assert_eq!(open_diff(&app).selection.len(), 1);
+        let _ = app.update(Message::ApplySelectedLines);
+        assert_eq!(running_args(&app), ["Stage lines of a"]);
+        assert_eq!(open_diff(&app).h_offset, 40.0);
+    }
+
+    #[test]
+    fn horizontal_offset_survives_reloads_but_not_another_file() {
+        let mut app = wide_diff_app(settings::DiffMode::Split);
+        let _ = app.update(Message::DiffWheel(90.0));
+        assert_eq!(open_diff(&app).h_offset, 90.0);
+        // Reload after staging or a mode switch: same view, same offset.
+        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
+        assert_eq!(open_diff(&app).h_offset, 90.0);
+        // Another file starts at the left edge.
+        let _ = app.update(Message::DiffOpened(DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "b".into(),
+            old_path: None,
+        }));
+        assert_eq!(open_diff(&app).h_offset, 0.0);
     }
 
     #[test]

@@ -681,3 +681,163 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for ReleaseArea<'_, Messag
         )
     }
 }
+
+/// Wraps `content` and reports mouse wheel and touchpad scrolling with a
+/// horizontal component (M7-16) without capturing the event, so the
+/// vertical scrollable inside still scrolls. `on_wheel` gets the delta and
+/// whether Shift is held and returns `None` for purely vertical scrolling.
+pub fn wheel_observer<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_wheel: impl Fn(mouse::ScrollDelta, bool) -> Option<Message> + 'a,
+) -> Element<'a, Message> {
+    Element::new(WheelObserver {
+        content: content.into(),
+        on_wheel: Box::new(on_wheel),
+    })
+}
+
+struct WheelObserver<'a, Message> {
+    content: Element<'a, Message>,
+    on_wheel: Box<dyn Fn(mouse::ScrollDelta, bool) -> Option<Message> + 'a>,
+}
+
+/// Keyboard modifiers last seen (Shift turns the wheel horizontal).
+#[derive(Default)]
+struct Modifiers(iced::keyboard::Modifiers);
+
+impl<Message> Widget<Message, Theme, Renderer> for WheelObserver<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Modifiers>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Modifiers::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        match event {
+            Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                tree.state.downcast_mut::<Modifiers>().0 = *modifiers;
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(layout.bounds()) =>
+            {
+                let shift = tree.state.downcast_ref::<Modifiers>().0.shift();
+                if let Some(message) = (self.on_wheel)(*delta, shift) {
+                    shell.publish(message);
+                }
+            }
+            _ => {}
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}

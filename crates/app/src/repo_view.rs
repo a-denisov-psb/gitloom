@@ -82,6 +82,15 @@ pub struct DiffView {
     pub fetching: bool,
     /// Objects already fetched for this diff (each is tried once).
     pub fetched: Vec<String>,
+    /// Horizontal offset of the code text (M7-16); one for both halves of
+    /// a Split diff. Kept when the diff reloads, reset for another file.
+    pub h_offset: f32,
+    /// Largest offset, as the horizontal scrollbar last reported it
+    /// (`None` until it did).
+    pub h_max: Option<f32>,
+    /// Width of the longest line, measured when the diff loaded.
+    pub text_width: f32,
+    pub hscroll_id: iced::widget::Id,
 }
 
 /// A branch being dragged: its name and kind, and the branch under the
@@ -191,7 +200,21 @@ impl DiffView {
             anchor: None,
             fetching: false,
             fetched: Vec::new(),
+            h_offset: 0.0,
+            h_max: None,
+            text_width: 0.0,
+            hscroll_id: iced::widget::Id::unique(),
         }
+    }
+
+    /// Moves the code text by `delta` pixels (wheel or touchpad), within
+    /// the range the scrollbar reported (or the text width before that).
+    pub fn scroll_horizontally(&mut self, delta: f32) -> bool {
+        let max = self.h_max.unwrap_or(self.text_width);
+        let offset = crate::diff_hscroll::scrolled(self.h_offset, delta, max);
+        let changed = offset != self.h_offset;
+        self.h_offset = offset;
+        changed
     }
 
     /// Whether lines of this diff can be staged (`Some(false)`) or unstaged (`Some(true)`).
@@ -309,6 +332,7 @@ impl DiffView {
         self.anchor = None;
         match diff {
             Ok(diff) => {
+                self.text_width = crate::diff_hscroll::text_width(&diff);
                 if self.layout.has_blocks() {
                     self.blocks = crate::diff_blocks::blocks(&diff);
                 }

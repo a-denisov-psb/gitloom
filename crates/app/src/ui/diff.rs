@@ -10,11 +10,12 @@ use crate::settings::DiffMode;
 use crate::theme;
 use crate::ui::muted;
 
+use crate::diff_hscroll::{self, MARKER_WIDTH, NUMBER_WIDTH, TEXT_SIZE};
+
 const LINE_HEIGHT: f32 = 20.0;
-const NUMBER_WIDTH: f32 = 52.0;
-const MARKER_WIDTH: f32 = 16.0;
 const OVERSCAN: usize = 20;
-const TEXT_SIZE: f32 = 12.0;
+/// Height of the horizontal scrollbar strip below the diff (M7-16).
+const HBAR_HEIGHT: f32 = 10.0;
 
 pub fn view<'a>(repo: &'a RepoView, diff: &'a DiffView, mode: DiffMode) -> Element<'a, Message> {
     view_with(repo, diff, mode, true)
@@ -202,6 +203,58 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
         }));
     }
 
+    // The horizontal range depends on the width: decided per layout pass.
+    iced::widget::responsive(move |size| {
+        let max = diff_hscroll::max_offset(diff.layout, diff.text_width, size.width);
+        let offset = diff.h_offset.min(max);
+        let list = crate::ui::context_area::wheel_observer(
+            rows(repo, diff, file, offset),
+            |delta, shift| {
+                diff_hscroll::wheel_to_horizontal(delta, shift, cfg!(target_os = "macos"))
+                    .map(Message::DiffWheel)
+            },
+        );
+        if max <= 0.0 {
+            return list;
+        }
+        column![list, horizontal_bar(diff, size.width, max)].into()
+    })
+    .into()
+}
+
+/// Horizontal scrollbar under the code text (M7-16): its range is the
+/// largest offset; it reports moves and follows wheel scrolling.
+fn horizontal_bar<'a>(diff: &'a DiffView, width: f32, max: f32) -> Element<'a, Message> {
+    let gutter = diff_hscroll::gutter(diff.layout);
+    let bar_width = (width - gutter - diff_hscroll::SCROLLBAR_ROOM).max(1.0);
+    let bar = scrollable(
+        space::horizontal()
+            .width(bar_width + max)
+            .height(HBAR_HEIGHT),
+    )
+    .direction(scrollable::Direction::Horizontal(
+        scrollable::Scrollbar::new(),
+    ))
+    .id(diff.hscroll_id.clone())
+    .on_scroll(|viewport| Message::DiffHScrolled {
+        offset: viewport.absolute_offset().x,
+        max: viewport.content_bounds().width - viewport.bounds().width,
+    })
+    .width(bar_width)
+    .height(HBAR_HEIGHT);
+    container(bar)
+        .padding(iced::Padding::default().left(gutter))
+        .width(Fill)
+        .into()
+}
+
+/// The visible rows of `file` with the code text moved left by `offset`.
+fn rows<'a>(
+    repo: &'a RepoView,
+    diff: &'a DiffView,
+    file: &'a FileDiff,
+    offset: f32,
+) -> Element<'a, Message> {
     // Only visible lines are built; spacers keep the scrollbar exact.
     let total = diff.rows.len();
     let (first, last) = crate::ui::rows_in_view(
@@ -214,8 +267,8 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
     let mut rows = Column::with_capacity(last - first + 2)
         .push(space::vertical().height(first as f32 * LINE_HEIGHT));
     let staged = diff.staged();
-    for (offset, &row) in diff.rows[first..last].iter().enumerate() {
-        let row_index = first + offset;
+    for (index, &row) in diff.rows[first..last].iter().enumerate() {
+        let row_index = first + index;
         let (h, l) = match row {
             DiffRow::Header(h) => {
                 if let Some(hunk) = file.hunks.get(h as usize) {
@@ -251,6 +304,7 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
                         row_index,
                         staged.is_some(),
                         note,
+                        offset,
                     )
                 };
                 rows = rows.push(row![
@@ -270,7 +324,7 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
             match hunk.lines.get(l as usize) {
                 Some(line) => {
                     let selected = diff.selection.contains(&(h, l));
-                    let element = diff_line(line, selected);
+                    let element = diff_line(line, selected, offset);
                     if staged.is_some() && line.kind != DiffLineKind::Context {
                         mouse_area(element)
                             .on_press(Message::DiffLineClicked(row_index))
@@ -413,6 +467,7 @@ fn split_cell<'a>(
     row: usize,
     selectable: bool,
     note: Option<&'static str>,
+    offset: f32,
 ) -> Element<'a, Message> {
     let Some((l, line)) = line.and_then(|l| hunk.lines.get(l as usize).map(|line| (l, line)))
     else {
@@ -438,7 +493,7 @@ fn split_cell<'a>(
     };
     let mut content = line.content.clone();
     if line.missing_newline {
-        content.push_str("  (no newline at end of file)");
+        content.push_str(diff_hscroll::NO_NEWLINE);
     }
     let cell: Element<'a, Message> = container(
         row![
@@ -455,10 +510,7 @@ fn split_cell<'a>(
                 .font(Font::MONOSPACE)
                 .size(TEXT_SIZE)
                 .width(MARKER_WIDTH),
-            text(content)
-                .font(Font::MONOSPACE)
-                .size(TEXT_SIZE)
-                .wrapping(text::Wrapping::None),
+            code_text(content, offset),
         ]
         .align_y(iced::Center),
     )
@@ -478,7 +530,7 @@ fn split_cell<'a>(
     }
 }
 
-fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
+fn diff_line(line: &DiffLine, selected: bool, offset: f32) -> Element<'_, Message> {
     let number = |n: Option<u32>| {
         container(
             text(n.map_or_else(String::new, |n| n.to_string()))
@@ -497,7 +549,7 @@ fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
     };
     let mut content = line.content.clone();
     if line.missing_newline {
-        content.push_str("  (no newline at end of file)");
+        content.push_str(diff_hscroll::NO_NEWLINE);
     }
 
     container(
@@ -508,10 +560,7 @@ fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
                 .font(Font::MONOSPACE)
                 .size(TEXT_SIZE)
                 .width(MARKER_WIDTH),
-            text(content)
-                .font(Font::MONOSPACE)
-                .size(TEXT_SIZE)
-                .wrapping(text::Wrapping::None),
+            code_text(content, offset),
         ]
         .align_y(iced::Center),
     )
@@ -520,6 +569,27 @@ fn diff_line(line: &DiffLine, selected: bool) -> Element<'_, Message> {
     .clip(true)
     .align_y(alignment::Vertical::Center)
     .style(theme::diff_line(line.kind, selected))
+    .into()
+}
+
+/// Code text of a line, moved left by `offset` and clipped to its room;
+/// line numbers and markers stay in place (M7-16).
+fn code_text<'a>(content: String, offset: f32) -> Element<'a, Message> {
+    let text = text(content)
+        .font(Font::MONOSPACE)
+        .size(TEXT_SIZE)
+        .wrapping(text::Wrapping::None);
+    if offset <= 0.0 {
+        return text.into();
+    }
+    iced::widget::pin(
+        container(text)
+            .height(LINE_HEIGHT)
+            .align_y(alignment::Vertical::Center),
+    )
+    .x(-offset)
+    .width(Fill)
+    .height(LINE_HEIGHT)
     .into()
 }
 
