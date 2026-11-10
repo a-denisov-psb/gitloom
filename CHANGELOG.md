@@ -12,6 +12,8 @@ Third release candidate of Gitloom 1.0: fixes for context menus, remotes, file l
 
 - Context menus are as wide as their longest entry (up to a maximum; longer entries end in "…" with the full text as tooltip), so long branch names no longer stick out of the menu.
 - Empty `[remote "…"]` sections in the Git configuration no longer show up as remotes that cannot be removed.
+- Windows: "Open file location" selects the file in Explorer, also in folders with spaces in their names.
+- "Copy file path" copies the full path of the file.
 
 ## [1.0.0-rc.2] - 2026-11-09
 
