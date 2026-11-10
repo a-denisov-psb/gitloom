@@ -55,10 +55,12 @@ pub enum Icon {
     FolderOpen,
     /// Checked-out branch in the left panel.
     CheckSquare,
+    /// External editor (M8-08).
+    Editor,
 }
 
 impl Icon {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -99,6 +101,7 @@ impl Icon {
         Self::Folder,
         Self::FolderOpen,
         Self::CheckSquare,
+        Self::Editor,
     ];
 
     /// SVG source of the icon.
@@ -149,6 +152,7 @@ impl Icon {
             Self::Folder => lucide!("folder"),
             Self::FolderOpen => lucide!("folder-open"),
             Self::CheckSquare => lucide!("square-check"),
+            Self::Editor => lucide!("code-xml"),
         }
     }
 

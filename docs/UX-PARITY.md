@@ -45,7 +45,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Commit identity | Profiles (Preferences → Profiles) hold author name and email; the active profile commits | done (M8-03, M8-04): Preferences → Identities; per repository "Committing as …" in the commit panel (menu), the palette ("Choose identity…") and Preferences → Repository → Identity, written to the repository config (see deviations) |
 | Repo-specific preferences | Group of categories for the open repository (Encoding, Gitflow, Git Hooks, LFS, Commit, Submodules, …) | M8: group "Repository · <name>" with Identity, SSH key, Gitflow; done (M8-01, M8-04, M8-06): group with Identity, SSH key and Gitflow |
 | SSH key | Preferences → SSH: one key pair or the local SSH agent | done (M8-05, M8-06): per repository via `core.sshCommand` in Preferences → Repository → SSH key, system default otherwise (see deviations) |
-| External editor | Preferences → External tools: VS Code, Sublime, IntelliJ or a custom path | M8: presets fill a command template with `{path}`; repository via palette, Alt+E and toolbar; files via their context menus |
+| External editor | Preferences → External tools: VS Code, Sublime, IntelliJ or a custom path | done (M8-07, M8-08): presets fill a command template with `{path}`; repository via palette, Alt+E and toolbar; files via their context menus (unstaged, staged, commit files, file history) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
@@ -108,7 +108,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Pull, Push, Stash, Pop stash | Command palette | done (M6-07; the toolbar actions are palette entries) |
 | Open repo in terminal | Alt+T | done (M5-13; the system terminal, see deviations) |
 | Open repo in file manager | Alt+O | done (M5-13) |
-| Open repo in external editor | Alt+E | M8 (Gitloom shortcut next to Alt+T/Alt+O; GitKraken check open) |
+| Open repo in external editor | Alt+E | done (M8-08; Gitloom shortcut next to Alt+T/Alt+O; GitKraken check open) |
 | Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts) |
 | Close current repo | Ctrl+W | done (M1) |
 

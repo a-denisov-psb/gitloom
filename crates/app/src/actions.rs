@@ -71,6 +71,8 @@ pub enum ActionId {
     /// Palette list of identities for the repository (M8-04).
     ChooseIdentity,
     OpenTerminal,
+    /// Alt+E: the repository in the external editor (M8-08).
+    OpenEditor,
     OpenFileManager,
     ExternalDiff,
     Fullscreen,
@@ -673,6 +675,13 @@ fn table() -> Vec<Action> {
         &[ch('t').alt()],
     );
     add(
+        A::OpenEditor,
+        "Open repository in editor",
+        PaletteAndSearch,
+        Global,
+        &[ch('e').alt()],
+    );
+    add(
         A::OpenFileManager,
         "Open repository in file manager",
         PaletteAndSearch,
@@ -849,6 +858,7 @@ fn table() -> Vec<Action> {
                 | A::SearchCommits
                 | A::FileHistory
                 | A::OpenTerminal
+                | A::OpenEditor
                 | A::OpenFileManager
                 | A::ExternalDiff
                 | A::InitializeGitflow

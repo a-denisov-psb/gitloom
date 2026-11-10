@@ -160,12 +160,14 @@ Acceptance: unit tests for template expansion (spaces, quotes, missing `{path}`)
 
 Note (2026-11-10): done. `ExternalTools::editor_command`, `settings::EditorPreset` (the preset shown is derived from the template; "Custom" keeps the text editable), a preset list and the template field under External tools. `launch::editor` uses the terminal's template rules; `Lookup::resolve` finds `code` → `code.cmd` through `PATHEXT` on Windows and `Launch::no_window` starts batch launchers with `CREATE_NO_WINDOW`. Deviation from the M5-13 rule: on Windows a backslash in a template is a path separator, not an escape (`split_words_for`), so `"C:\Program Files\…\ed.exe"` works; this applies to the terminal template too (it could not hold such a path before). The status message "Could not start the editor: …" is shown by the entry points (M8-08). Merged together with M8-08, which uses the launcher.
 
-### [ ] M8-08 Editor entry points
+### [x] M8-08 Editor entry points
 
 - Action "Open repository in editor" (Alt+E, palette, shortcut list); toolbar button "Editor" right of "Terminal" while an editor is set (icon vendored like the M5 icons, license kept).
 - "Open in external editor" in the file context menus (unstaged, staged, commit file list, file history) with the disabled reasons from the decisions table.
 
 Acceptance: app tests for every entry point with a recording launcher, including the disabled states; toolbar snapshot with and without an editor.
+
+Note (2026-11-10): done. Action `OpenEditor` (Alt+E, palette, shortcut list; disabled with "Set an external editor in Preferences → External tools"), toolbar button "Editor" (vendored Lucide `code-xml`, ISC like the other icons) after Terminal while a template is set, `Message::OpenInEditor` with `App::editor_request` (template and target, the testable part instead of a recording launcher; the start itself runs off the UI thread). File menus: unstaged, staged and commit file lists (`FileContextMenu`) and the file history entry menu (the history's path) get "Open in external editor". Decision: whether a file exists in the working tree is only known without I/O for deleted entries (disabled with "The file does not exist in the working tree"); otherwise the background start checks it and shows the same text in the status bar, as does a failed start ("Could not start the editor: …"). Snapshot `ui_check_toolbar_editor` checked by eye.
 
 ### [ ] M8-09 Documentation and walkthrough
 
