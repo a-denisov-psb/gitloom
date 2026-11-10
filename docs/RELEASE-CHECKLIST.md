@@ -66,6 +66,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Privacy: with avatars and update check off, Gitloom opens no network connection besides Git's (auto-fetch).
 - [ ] Context menus with long branch names (create a branch with a 60+ character name, drag it onto another branch, right click it in the left panel and in the graph) are as wide as their longest entry; entries cut with "…" show the full text as tooltip.
 - [ ] The empty remote `github-fc` (empty `[remote "github-fc"]` section in `.git/config`) is no longer listed; afterwards remove the section with `git config --remove-section remote.github-fc`.
+- [ ] In a repository whose path contains a space: "Open file location" on a file in a subfolder selects it in Explorer; "Copy file path" copies the full Windows path.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 

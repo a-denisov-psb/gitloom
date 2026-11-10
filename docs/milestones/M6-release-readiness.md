@@ -66,7 +66,7 @@ Out of scope (later):
 - [x] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
 - [x] Context menus are as wide as their longest entry (M6-19).
 - [x] Empty `[remote "…"]` sections are not shown as remotes (M6-20).
-- [ ] "Open file location" selects the file in Explorer/Finder for every path, "Copy file path" copies the absolute path (M6-21).
+- [x] "Open file location" selects the file in Explorer/Finder for every path, "Copy file path" copies the absolute path (M6-21).
 - [ ] No scrollbar covers content (M6-22); the graph has no gaps between rows at any scale (M6-23).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
 - [ ] License GPL-3.0-or-later in the repository and all packages; `cargo-deny` green; third-party notices shipped.
@@ -347,7 +347,7 @@ Acceptance: integration tests: an empty section in the local and in the global c
 
 Note (2026-11-10): done. `GixBackend::remotes` and `external_remotes` share `configured_remote_names`: gix's trusted remote names, kept only if some `remote.<name>` section has a key. Gitloom's own writes were already safe: add, edit URL, rename and remove use `git remote …`, upstreams use `git branch --set-upstream-to/--unset-upstream`; there is no push-URL edit in 1.0. Tests: `tests/empty_remote_section.rs` (the empty section is written directly, since Git 2.43 removes it itself on `--unset` of the last key) and `tests/empty_global_remote.rs` (own binary for `GIT_CONFIG_GLOBAL`); both fail without the fix.
 
-### [ ] M6-21 Open file location and Copy file path
+### [x] M6-21 Open file location and Copy file path
 
 Finding of the maintainer (2026-11-10, Windows, repository "git test"): "Open file location" opens Explorer in "Documents" instead of selecting the file; "Copy file path" copies the path relative to the repository. Causes found in planning: the absolute path is built with `root.join(<repo-relative path with "/">)` (mixed separators), and Rust quotes `/select,<path>` as one argument, which Explorer does not parse when the path contains spaces.
 
@@ -357,6 +357,8 @@ Finding of the maintainer (2026-11-10, Windows, repository "git test"): "Open fi
 - `docs/RELEASE-CHECKLIST.md` section 7: see below.
 
 Acceptance: unit tests for the helper (subfolder, spaces, umlauts, `#`, `&`, `,`) and for the Windows command line of the reveal launch (built, not executed); Windows CI green.
+
+Note (2026-11-10): done. `launch::repo_file_path` (string core `native_join`, testable for every platform) builds the path; `reveal_file` takes an `exists` check, starts in the nearest existing folder on every platform (a deleted folder cannot be the working directory) and on Windows passes `/select,"<path>"` as `Launch::raw_arg` (`CommandExt::raw_arg`), or opens the nearest existing folder for a deleted file. In 1.0 the file entries exist only in the file context menu (staging lists including conflicts, commit file list); the file history and the conflict view have no file-path entries on this line. The crash report "Open report folder" uses the same reveal.
 
 ### [ ] M6-22 Scrollbars cover content
 
