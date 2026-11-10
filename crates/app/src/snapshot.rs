@@ -54,6 +54,8 @@ pub struct RepoSnapshot {
     pub external_remotes: Vec<(String, git_core::ConfigScope)>,
     /// Git flow configuration, if initialized (M7-06).
     pub flow: Option<git_core::FlowConfig>,
+    /// What `user.name` / `user.email` resolve to, with their origin (M8-02).
+    pub identity: git_core::ResolvedIdentity,
     /// A Git flow finish that has not completed yet (M7-10).
     pub flow_finish: Option<git_core::flow_finish::FinishPlan>,
     /// Prepared message (`MERGE_MSG`) of an operation a commit concludes.
@@ -75,6 +77,8 @@ pub struct Remotes {
     pub external: Vec<(String, git_core::ConfigScope)>,
     /// Git flow configuration (also only in the config).
     pub flow: Option<git_core::FlowConfig>,
+    /// Git identity (only in the config, M8-02).
+    pub identity: git_core::ResolvedIdentity,
 }
 
 impl Remotes {
@@ -89,11 +93,13 @@ impl Remotes {
         }
         let external = backend.external_remotes().map_err(|e| e.to_string())?;
         let flow = backend.flow_config().map_err(|e| e.to_string())?;
+        let identity = backend.identity().map_err(|e| e.to_string())?;
         Ok(Self {
             names,
             urls,
             external,
             flow,
+            identity,
         })
     }
 
@@ -104,6 +110,7 @@ impl Remotes {
             urls: snapshot.remote_urls.clone(),
             external: snapshot.external_remotes.clone(),
             flow: snapshot.flow.clone(),
+            identity: snapshot.identity.clone(),
         }
     }
 }
@@ -131,6 +138,7 @@ impl RepoSnapshot {
         snapshot.remote_urls = remotes.urls;
         snapshot.external_remotes = remotes.external;
         snapshot.flow = remotes.flow;
+        snapshot.identity = remotes.identity;
         snapshot.flow_finish = backend.flow_finish().map_err(|e| e.to_string())?;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
@@ -248,6 +256,7 @@ impl RepoSnapshot {
             remote_urls: Vec::new(),
             external_remotes: Vec::new(),
             flow: None,
+            identity: git_core::ResolvedIdentity::default(),
             flow_finish: None,
             merge_message: None,
             commit_template: None,
@@ -326,6 +335,7 @@ impl RepoSnapshot {
         filtered.remote_urls = base.remote_urls.clone();
         filtered.external_remotes = base.external_remotes.clone();
         filtered.flow = base.flow.clone();
+        filtered.identity = base.identity.clone();
         filtered.flow_finish = base.flow_finish.clone();
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
@@ -966,6 +976,17 @@ mod tests {
         let all = dirty_hidden.with_filter(&filter(&[], &[])).unwrap();
         assert!(all.has_wip);
         assert_eq!(all.layout.len(), all.commits.len() + 1);
+    }
+
+    #[test]
+    fn filtering_keeps_the_identity() {
+        let mut full = branches();
+        full.identity.email = Some(git_core::ConfigValue {
+            value: "ana@x.org".into(),
+            origin: git_core::ConfigOrigin::Local,
+        });
+        let hidden = full.with_filter(&filter(&["topic"], &[])).unwrap();
+        assert_eq!(hidden.identity, full.identity);
     }
 }
 
