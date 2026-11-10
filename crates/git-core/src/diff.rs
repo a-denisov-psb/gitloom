@@ -35,9 +35,10 @@ pub fn decode_utf16(data: &[u8]) -> Option<(Vec<u8>, TextEncoding)> {
         [0xFE, 0xFF, rest @ ..] => (TextEncoding::Utf16Be, rest),
         _ => return None,
     };
-    let units = body.chunks_exact(2).map(|pair| match encoding {
-        TextEncoding::Utf16Le => u16::from_le_bytes([pair[0], pair[1]]),
-        TextEncoding::Utf16Be => u16::from_be_bytes([pair[0], pair[1]]),
+    let (pairs, _odd) = body.as_chunks::<2>();
+    let units = pairs.iter().map(|&pair| match encoding {
+        TextEncoding::Utf16Le => u16::from_le_bytes(pair),
+        TextEncoding::Utf16Be => u16::from_be_bytes(pair),
     });
     let mut text: String = char::decode_utf16(units)
         .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
