@@ -27,6 +27,9 @@ impl Platform {
 pub trait Lookup {
     fn has_program(&self, name: &str) -> bool;
     fn env(&self, key: &str) -> Option<String>;
+    /// Full path of `name` on `PATH`; on Windows with the extensions of
+    /// `PATHEXT` (`code` → `code.cmd`, M8-07).
+    fn resolve(&self, name: &str) -> Option<PathBuf>;
 }
 
 /// The real system.
@@ -52,6 +55,35 @@ impl Lookup for SystemLookup {
     fn env(&self, key: &str) -> Option<String> {
         std::env::var(key).ok().filter(|v| !v.trim().is_empty())
     }
+
+    fn resolve(&self, name: &str) -> Option<PathBuf> {
+        let paths = std::env::var_os("PATH")?;
+        let extensions = path_extensions(Platform::current(), self.env("PATHEXT").as_deref());
+        std::env::split_paths(&paths).find_map(|dir| {
+            extensions
+                .iter()
+                .map(|ext| dir.join(format!("{name}{ext}")))
+                .find(|candidate| candidate.is_file())
+        })
+    }
+}
+
+/// Extensions tried after a program name: on Windows `""` and those of
+/// `PATHEXT` (default `.COM;.EXE;.BAT;.CMD`), elsewhere just `""`.
+pub fn path_extensions(platform: Platform, pathext: Option<&str>) -> Vec<String> {
+    match platform {
+        Platform::Windows => {
+            let list = pathext.unwrap_or(".COM;.EXE;.BAT;.CMD");
+            std::iter::once(String::new())
+                .chain(
+                    list.split(';')
+                        .filter(|ext| !ext.trim().is_empty())
+                        .map(|ext| ext.trim().to_lowercase()),
+                )
+                .collect()
+        }
+        Platform::MacOs | Platform::Linux => vec![String::new()],
+    }
 }
 
 /// A program to start.
@@ -63,6 +95,9 @@ pub struct Launch {
     pub dir: PathBuf,
     /// Windows: the program needs its own console window.
     pub new_console: bool,
+    /// Windows: start without a console window (batch launchers such as
+    /// `code.cmd`, M8-07).
+    pub no_window: bool,
     /// Windows: appended to the command line verbatim, after `args`
     /// (Explorer parses `/select,"<path>"` itself, so Rust's quoting of the
     /// whole argument would break paths with spaces).
@@ -76,6 +111,7 @@ impl Launch {
             args,
             dir: dir.to_path_buf(),
             new_console: false,
+            no_window: false,
             raw_arg: None,
         }
     }
@@ -91,7 +127,7 @@ pub fn terminal(
 ) -> Result<Launch, String> {
     let path = dir.to_string_lossy().into_owned();
     if !template.trim().is_empty() {
-        let mut words = split_words(template)?.into_iter();
+        let mut words = split_words_for(platform, template)?.into_iter();
         let program = words.next().ok_or("The terminal command is empty")?;
         let args = words.map(|w| w.replace("{path}", &path)).collect();
         return Ok(Launch::new(&program.replace("{path}", &path), args, dir));
@@ -160,6 +196,57 @@ pub fn terminal(
         .ok_or_else(|| {
             "No terminal found. Set a terminal command in Preferences → External tools.".to_owned()
         })
+}
+
+/// Why no editor can be opened: none is set.
+pub const NO_EDITOR: &str = "Set an external editor in Preferences → External tools";
+
+/// External editor for `target` (M8-07): the command template from the
+/// settings with the terminal's rules ([`split_words`], `{path}`); without
+/// `{path}` the path is appended. On Windows a bare program name is
+/// resolved through `PATHEXT` and batch launchers start without a console
+/// window.
+pub fn editor(
+    platform: Platform,
+    lookup: &dyn Lookup,
+    template: &str,
+    target: &Path,
+) -> Result<Launch, String> {
+    if template.trim().is_empty() {
+        return Err(NO_EDITOR.to_owned());
+    }
+    let path = target.to_string_lossy().into_owned();
+    let mut words = split_words_for(platform, template)
+        .map_err(|e| e.replace("terminal command", "editor command"))?
+        .into_iter();
+    let program = words
+        .next()
+        .ok_or("The editor command is empty")?
+        .replace("{path}", &path);
+    let mut args: Vec<String> = words.map(|w| w.replace("{path}", &path)).collect();
+    if !template.contains("{path}") {
+        args.push(path);
+    }
+    let dir = if target.is_dir() {
+        target.to_path_buf()
+    } else {
+        target.parent().unwrap_or(target).to_path_buf()
+    };
+    let mut launch = Launch::new(&program, args, &dir);
+    if platform == Platform::Windows {
+        let bare = !program.contains(['/', '\\']) && Path::new(&program).extension().is_none();
+        if bare {
+            if let Some(found) = lookup.resolve(&program) {
+                launch.program = found.to_string_lossy().into_owned();
+            }
+        }
+        let batch = Path::new(&launch.program)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
+        launch.no_window = batch;
+    }
+    Ok(launch)
 }
 
 /// File manager showing `dir`.
@@ -261,8 +348,23 @@ pub fn reveal_file(platform: Platform, file: &Path, exists: &dyn Fn(&Path) -> bo
 
 /// Splits a command template into words: whitespace separates, single and
 /// double quotes group (and are removed), a backslash escapes the next
-/// character outside single quotes.
+/// character outside single quotes, except on Windows, where it is a path
+/// separator, so `"C:\Program Files\Editor\ed.exe"` keeps its
+/// backslashes (M8-07).
+pub fn split_words_for(platform: Platform, template: &str) -> Result<Vec<String>, String> {
+    match platform {
+        Platform::Windows => split(template, false),
+        Platform::MacOs | Platform::Linux => split(template, true),
+    }
+}
+
+/// [`split_words_for`] with the Unix rules.
+#[cfg(test)]
 pub fn split_words(template: &str) -> Result<Vec<String>, String> {
+    split(template, true)
+}
+
+fn split(template: &str, escapes: bool) -> Result<Vec<String>, String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut in_word = false;
@@ -271,7 +373,7 @@ pub fn split_words(template: &str) -> Result<Vec<String>, String> {
     while let Some(c) = chars.next() {
         match (quote, c) {
             (Some(q), c) if c == q => quote = None,
-            (Some('"') | None, '\\') => {
+            (Some('"') | None, '\\') if escapes => {
                 if let Some(next) = chars.next() {
                     current.push(next);
                     in_word = true;
@@ -316,8 +418,11 @@ pub fn spawn(launch: &Launch) -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt as _;
         const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         if launch.new_console {
             command.creation_flags(CREATE_NEW_CONSOLE);
+        } else if launch.no_window {
+            command.creation_flags(CREATE_NO_WINDOW);
         }
         if let Some(raw) = &launch.raw_arg {
             command.raw_arg(raw);
@@ -359,6 +464,13 @@ mod tests {
 
         fn env(&self, key: &str) -> Option<String> {
             (key == "TERMINAL").then(|| self.terminal.map(str::to_owned))?
+        }
+
+        fn resolve(&self, name: &str) -> Option<PathBuf> {
+            self.programs
+                .iter()
+                .find(|p| p.strip_suffix(".cmd").or(Some(p)) == Some(name) || **p == name)
+                .map(|p| PathBuf::from(format!(r"C:\Tools\{p}")))
         }
     }
 
@@ -562,5 +674,78 @@ mod tests {
         assert_eq!(command(&launch), ["explorer", "/r"]);
         assert_eq!(launch.dir, Path::new("/r"));
         assert_eq!(launch.raw_arg, None);
+    }
+
+    #[test]
+    fn editor_templates() {
+        let lookup = fake(&[], None);
+        let file = Path::new("/r/my repo/src/a b.rs");
+        let launch = |template: &str| editor(Platform::Linux, &lookup, template, file);
+        assert_eq!(
+            command(&launch("code {path}").unwrap()),
+            ["code", "/r/my repo/src/a b.rs"]
+        );
+        // Without {path} the path is the last argument.
+        assert_eq!(
+            command(&launch("subl -n").unwrap()),
+            ["subl", "-n", "/r/my repo/src/a b.rs"]
+        );
+        // Quotes group words; {path} inside a word.
+        assert_eq!(
+            command(&launch(r#""/opt/My Editor/bin/edit" --goto={path} -w"#).unwrap()),
+            [
+                "/opt/My Editor/bin/edit",
+                "--goto=/r/my repo/src/a b.rs",
+                "-w"
+            ]
+        );
+        assert_eq!(launch("  ").unwrap_err(), NO_EDITOR);
+        assert!(launch("code 'open").unwrap_err().contains("editor command"));
+        // The working directory is the file's folder.
+        assert_eq!(launch("code").unwrap().dir, Path::new("/r/my repo/src"));
+    }
+
+    #[test]
+    fn windows_editor_launchers_resolve_through_pathext() {
+        let lookup = fake(&["code.cmd", "idea64.exe"], None);
+        let file = Path::new(r"C:\repo\a.rs");
+        let launch = editor(Platform::Windows, &lookup, "code {path}", file).unwrap();
+        assert_eq!(launch.program, r"C:\Tools\code.cmd");
+        assert!(launch.no_window, "batch launcher without a console window");
+        // A path or an extension is used as given.
+        let launch = editor(Platform::Windows, &lookup, r#""C:\Ed\ed.exe" {path}"#, file).unwrap();
+        assert_eq!(launch.program, r"C:\Ed\ed.exe");
+        assert!(!launch.no_window);
+        // Not found: the name stays (the start then fails with a message).
+        let launch = editor(Platform::Windows, &lookup, "zed", file).unwrap();
+        assert_eq!(launch.program, "zed");
+        assert_eq!(
+            path_extensions(Platform::Windows, Some(".COM;.EXE;.BAT;.CMD")),
+            ["", ".com", ".exe", ".bat", ".cmd"]
+        );
+        assert_eq!(path_extensions(Platform::Windows, None).len(), 5);
+        assert_eq!(path_extensions(Platform::Linux, Some(".EXE")), [""]);
+        // Elsewhere nothing is resolved.
+        let launch = editor(Platform::Linux, &lookup, "code {path}", file).unwrap();
+        assert_eq!(launch.program, "code");
+        assert!(!launch.no_window);
+    }
+
+    #[test]
+    fn windows_templates_keep_backslashes() {
+        let words = split_words_for(
+            Platform::Windows,
+            r#""C:\Program Files\Ed\ed.exe" --wait C:\x\{path}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            words,
+            [r"C:\Program Files\Ed\ed.exe", "--wait", r"C:\x\{path}"]
+        );
+        // Elsewhere a backslash still escapes (M5-13 rule).
+        assert_eq!(
+            split_words_for(Platform::Linux, r#"a\ b "c\"d""#).unwrap(),
+            ["a b", "c\"d"]
+        );
     }
 }

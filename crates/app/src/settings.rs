@@ -238,6 +238,75 @@ pub struct ExternalTools {
     pub merge_tool: ToolChoice,
     /// Command template with `{path}`; empty means auto-detection.
     pub terminal_command: String,
+    /// External editor command template with `{path}`; empty means none
+    /// (M8-07).
+    pub editor_command: String,
+}
+
+/// Presets of the external editor (M8-07); a preset fills the editable
+/// command template.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPreset {
+    None,
+    VsCode,
+    VsCodium,
+    SublimeText,
+    IntellijIdea,
+    Zed,
+    Custom,
+}
+
+impl EditorPreset {
+    pub const ALL: [Self; 7] = [
+        Self::None,
+        Self::VsCode,
+        Self::VsCodium,
+        Self::SublimeText,
+        Self::IntellijIdea,
+        Self::Zed,
+        Self::Custom,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::VsCode => "VS Code",
+            Self::VsCodium => "VSCodium",
+            Self::SublimeText => "Sublime Text",
+            Self::IntellijIdea => "IntelliJ IDEA",
+            Self::Zed => "Zed",
+            Self::Custom => "Custom",
+        }
+    }
+
+    /// Template a preset puts into the command field (`None` for Custom,
+    /// which keeps the current text).
+    pub fn template(self) -> Option<&'static str> {
+        match self {
+            Self::None => Some(""),
+            Self::VsCode => Some("code {path}"),
+            Self::VsCodium => Some("codium {path}"),
+            Self::SublimeText => Some("subl {path}"),
+            Self::IntellijIdea => Some("idea {path}"),
+            Self::Zed => Some("zed {path}"),
+            Self::Custom => None,
+        }
+    }
+
+    /// The preset a stored template matches (Custom for anything else).
+    pub fn of(template: &str) -> Self {
+        let template = template.trim();
+        Self::ALL
+            .into_iter()
+            .find(|preset| preset.template() == Some(template))
+            .unwrap_or(Self::Custom)
+    }
+}
+
+impl std::fmt::Display for EditorPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 /// Category of the settings view (list on the left).
@@ -305,6 +374,9 @@ pub struct Page {
     pub ssh_keys: Option<Vec<std::path::PathBuf>>,
     pub ssh_path: String,
     pub ssh_replace: bool,
+    /// "Custom" was picked for the editor while the template still matches
+    /// a preset (M8-07).
+    pub editor_custom: bool,
     /// Repository the repository category's form was built for; the form
     /// follows the active tab (M8-01).
     pub repo: Option<(crate::app::TabId, std::path::PathBuf)>,
@@ -364,6 +436,7 @@ impl Page {
             ssh_keys: None,
             ssh_path: String::new(),
             ssh_replace: false,
+            editor_custom: false,
             repo: None,
         }
     }
@@ -538,6 +611,25 @@ pub fn parse_auto_fetch(input: &str) -> Result<u32, String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn editor_presets_and_older_files() {
+        // Files written before M8-07 have no editor: none.
+        let old = parse(r#"{"tools": {"terminal_command": "wt"}}"#).unwrap();
+        assert_eq!(old.tools.editor_command, "");
+        assert_eq!(old.tools.terminal_command, "wt");
+        assert_eq!(EditorPreset::of(""), EditorPreset::None);
+        assert_eq!(EditorPreset::of(" code {path} "), EditorPreset::VsCode);
+        assert_eq!(EditorPreset::of("code -n {path}"), EditorPreset::Custom);
+        for preset in EditorPreset::ALL {
+            if let Some(template) = preset.template() {
+                assert_eq!(EditorPreset::of(template), preset, "{template}");
+            }
+        }
+        let mut settings = Settings::default();
+        settings.tools.editor_command = "zed {path}".into();
+        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
+    }
 
     #[test]
     fn identities_load_from_older_files_and_round_trip() {

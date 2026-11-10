@@ -150,13 +150,15 @@ Acceptance: app tests: choosing a key writes the config, "System default" unsets
 
 Note (2026-11-10): done. Category `SshKey` between Identity and Gitflow. Keys are looked up off the UI thread when the category opens (`directories::BaseDirs` home, `find_keys`); "Browse…" uses the `rfd` file dialog, the path input next to it is the fallback (as on the start screen). With an inherited value the first choice reads "Inherited (from the … config)" instead of "System default", since removing the local value brings that one back. A local custom command shows read-only with "Replace…"; the confirmation enables the choices until the category is opened again, and `choose_ssh_key` refuses without it. A path with `"` is refused with the message of `ssh_command`. `auth_hint_with_key` appends "Uses SSH key <path> (Preferences → Repository → SSH key)." to the hint of write and pull errors while a key from the repository config is set. Selected list entries keep the normal text color when disabled (`theme::list_item`). Snapshot `ui_check_ssh_key` checked by eye; `inherited_ssh_command_shows_its_origin` checks the texts.
 
-### [ ] M8-07 External editor setting and launcher
+### [x] M8-07 External editor setting and launcher
 
 - `ExternalTools` gains `editor_command` (empty = none); preset choice and template field in Preferences → External tools.
 - `launch::editor(template, path)` reuses the template rules of the terminal (`split_words`, `{path}`); without `{path}` the path is appended.
 - Windows: resolve the program through `PATHEXT` (`code` → `code.cmd`), start `.cmd`/`.bat` without a console window; a failed start shows "Could not start the editor: …" in the status bar.
 
 Acceptance: unit tests for template expansion (spaces, quotes, missing `{path}`) and Windows resolution with a fake lookup (like the terminal tests); settings migration test.
+
+Note (2026-11-10): done. `ExternalTools::editor_command`, `settings::EditorPreset` (the preset shown is derived from the template; "Custom" keeps the text editable), a preset list and the template field under External tools. `launch::editor` uses the terminal's template rules; `Lookup::resolve` finds `code` → `code.cmd` through `PATHEXT` on Windows and `Launch::no_window` starts batch launchers with `CREATE_NO_WINDOW`. Deviation from the M5-13 rule: on Windows a backslash in a template is a path separator, not an escape (`split_words_for`), so `"C:\Program Files\…\ed.exe"` works; this applies to the terminal template too (it could not hold such a path before). The status message "Could not start the editor: …" is shown by the entry points (M8-08). Merged together with M8-08, which uses the launcher.
 
 ### [ ] M8-08 Editor entry points
 
