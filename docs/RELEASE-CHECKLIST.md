@@ -64,6 +64,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Update check: off by default (no request; check with a firewall log or Resource Monitor if in doubt). Turned on in an `rc.1` build after `rc.2` is published: the status bar shows "Gitloom 1.0.0-rc.2 is available", Release notes opens the release page, Dismiss hides it until the next version.
 - [ ] Crash report: not triggerable in release builds; if a crash happens during the checks, the next start shows the notice, Copy report and Open report folder work.
 - [ ] Privacy: with avatars and update check off, Gitloom opens no network connection besides Git's (auto-fetch).
+- [ ] Context menus with long branch names (create a branch with a 60+ character name, drag it onto another branch, right click it in the left panel and in the graph) are as wide as their longest entry; entries cut with "…" show the full text as tooltip.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
