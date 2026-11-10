@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-11-10
+
+Third release candidate of Gitloom 1.0: fixes for context menus, remotes, file locations, scrollbars and the graph.
+
+### Fixed
+
+- Context menus are as wide as their longest entry (up to a maximum; longer entries end in "…" with the full text as tooltip), so long branch names no longer stick out of the menu.
+
 ## [1.0.0-rc.2] - 2026-11-09
 
 Second release candidate of Gitloom 1.0: no console window on Windows, working repository and branch pickers, and remotes that stay in sync with the Git configuration.
