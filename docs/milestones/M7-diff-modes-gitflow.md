@@ -40,7 +40,7 @@ Out of scope (later):
 | Change navigation | In Inline and Split, "Previous change" / "Next change" buttons in the diff header scroll to the previous/next block (GitKraken's arrows). No shortcut (GitKraken has none). |
 | Git flow engine | Native, no `git-flow` CLI: every step uses existing `GitWriter` operations (checkout, branch, merge, rebase, tag). The configuration uses git-flow's keys in the repository's `.git/config`: `gitflow.branch.master`, `gitflow.branch.develop`, `gitflow.prefix.feature`, `gitflow.prefix.release`, `gitflow.prefix.hotfix`, `gitflow.prefix.versiontag`. Other `gitflow.*` keys (bugfix, support, AVH options) are read, kept and ignored. "Initialized" = both `gitflow.branch.*` keys set (same check as the CLI). ADR-037. |
 | Initialization | Preferences → new category "Gitflow" (applies to the repository of the active tab; disabled with a hint on the start screen). Fields: production branch (default `main` if it exists, otherwise `master`), development branch (`develop`), prefixes `feature/`, `release/`, `hotfix/`, version tag prefix (empty). "Initialize Gitflow" writes the config and creates missing branches locally (development from the production tip; production from HEAD if missing). Once initialized: fields editable, "Save", and "Remove Gitflow" (removes the `gitflow` section only, never branches). |
-| Left panel | A "GITFLOW" section, shown only when Git flow is initialized, below "STASHES" (above "SUBMODULES"); groups Features / Releases / Hotfixes with the names without prefix, counts, filter applies. A green "+" in the section header opens: Start feature, Start release, Start hotfix. Git flow branches stay in "LOCAL" as well. Click, double click and context menu behave like the same branch in "LOCAL". |
+| Left panel | A "GITFLOW" section, shown only when Git flow is initialized, between "LOCAL" and "REMOTE" (maintainer decision 2026-11-10, M7-15); groups Features / Releases / Hotfixes with the names without prefix, counts, filter applies. A green "+" in the section header opens: Start feature, Start release, Start hotfix. Git flow branches stay in "LOCAL" as well. Click, double click and context menu behave like the same branch in "LOCAL". |
 | Start | Dialog with one name field ("Feature name" / "Release version" / "Hotfix version"), validated like Ctrl+B. Feature and release start from the local development branch, hotfix from the local production branch; the new branch is checked out. Entry points: "+" in the GITFLOW section, branch menu of the development branch (Start feature, Start release) and the production branch (Start hotfix), command palette. |
 | Finish | Branch menu of a Git flow branch (left panel and graph pill) "Finish feature <name>" / "Finish release <version>" / "Finish hotfix <version>", also the palette ("Finish current Gitflow branch" when one is checked out). Dialog options: feature: "Rebase on <develop> before finishing" (off), "Delete branch" (on); release/hotfix: tag name (`<versiontag><version>`, editable), tag message (prefilled "Release <version>" / "Hotfix <version>"), "Delete branch" (on). Steps: feature → (rebase) → checkout develop → `merge --no-ff` → delete. Release/hotfix → checkout production → `merge --no-ff` → annotated tag → checkout develop → `merge --no-ff` (the branch) → delete. Merge messages are Git's defaults. No push. |
 | Finish preconditions | Clean working tree (otherwise "Commit or stash your changes first"), no operation in progress, production/development exist locally. If the local production or development branch is behind its upstream, the dialog shows a warning (not blocking). |
@@ -75,6 +75,7 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 - [x] A finish that hits a conflict can be resolved and continues automatically, also after a restart; Abort leaves a consistent state and says what was done.
 - [x] Start and finish are undoable and redoable.
 - [x] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
+- [ ] Follow-ups after the first review (M7-15 … M7-18): GITFLOW between LOCAL and REMOTE; diffs scroll horizontally in all modes; UTF-16 text files with a BOM are shown as text; graph lines drawn like GitKraken's.
 - [ ] Released as `v1.1.0`.
 
 ## Task overview
@@ -94,6 +95,10 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 | M7-10 | Finish UI, conflicts and resume | M7-08, M7-09 |
 | M7-11 | Undo/redo for finish | M7-09, M7-10 |
 | M7-12 | Documentation and walkthrough | M7-01 … M7-11, M7-14 |
+| M7-15 | GITFLOW section between LOCAL and REMOTE | M7-08 |
+| M7-16 | Horizontal scrolling in the diff view | M7-05 |
+| M7-17 | UTF-16 text files | M7-02 |
+| M7-18 | Graph line style like GitKraken | – |
 | M7-13 | Release v1.1.0 | all |
 
 ---
@@ -240,6 +245,50 @@ Note (2026-11-09): done. The finish plan stores the values of every touched ref 
 Acceptance: docs reviewed against the implemented behavior; checklist section present.
 
 Note (2026-11-09): done. New user guide page `docs/user/git-flow.md`; diff views, block staging and the folder tree in "Daily workflow"; "Getting started" and "Coming from GitKraken" updated; UX-PARITY rows for diff modes and Gitflow set to done (GitKraken checks still open, listed there); CHANGELOG complete; `docs/RELEASE-CHECKLIST.md` section 7a holds the Windows checks of M7 for the maintainer. The Linux walkthrough of the acceptance items is covered by the automated tests (git-core integration tests against real repositories, app tests of every entry point, `iced_test` snapshots checked by eye); there is no display in the cloud session for a hand run.
+
+### [x] M7-15 GITFLOW section between LOCAL and REMOTE
+
+Maintainer decision (2026-11-10): the GITFLOW section moves from below STASHES to between LOCAL and REMOTE.
+
+- Order: LOCAL, GITFLOW (when initialized), REMOTE, TAGS, STASHES, SUBMODULES. Collapse state, filter, counts and the green "+" unchanged.
+- `docs/UX-PARITY.md`: left panel row and a new deviation row (see below); user guide `git-flow.md` if it names the position.
+
+Acceptance: snapshot `ui_check_gitflow_section` and the left panel snapshots updated; keyboard focus order follows the new order.
+
+Note (2026-11-10): done. The sidebar column is built LOCAL, GITFLOW (when initialized), REMOTE, TAGS, STASHES, SUBMODULES; widget order is the focus order, so keyboard focus follows. `gitflow_section_between_local_and_remote` checks the header positions (layout, runs always); `ui_check_gitflow_section` re-rendered and checked by eye; the other left panel snapshots have no Git flow and are unchanged. `docs/user/git-flow.md` does not name the position.
+
+### [ ] M7-16 Horizontal scrolling in the diff view
+
+Finding of the maintainer (2026-11-10): long lines cannot be scrolled horizontally in any diff mode.
+
+- Hunk, Inline and Split, in every diff view (working copy, commit, stash, file history): Shift+mouse wheel, horizontal wheel/tilt and touchpad scroll horizontally; a horizontal scrollbar appears at the bottom of the diff while the content is wider than the view.
+- Line numbers, markers, hunk headers and block bars stay in place; only the code text moves. Split: one shared horizontal offset for both halves, so paired lines stay aligned; each half clips its own text.
+- Content width = the longest line of the loaded diff in the monospace font, computed once per loaded diff (not per frame); the offset is clamped, reset when another file opens and kept when the diff reloads after staging or a mode switch.
+- Line selection (click, Shift+click, Ctrl+click) and block actions work unchanged at any offset.
+- The conflict view gets the same behavior if it shares the line rendering; otherwise note it in the task note.
+
+Acceptance: unit tests for width, clamping and the wheel mapping (Shift+vertical → horizontal); app test: selection at a scrolled offset; `iced_test` snapshots of a scrolled Hunk and Split diff; the 2 MB scroll measurement of `docs/PERFORMANCE.md` still meets the 50 ms target.
+
+### [ ] M7-17 UTF-16 text files
+
+Finding of the maintainer (2026-11-10, Windows): a text file created with `echo test > file` (PowerShell 5 writes UTF-16 LE with BOM) is shown as "Binary file not shown". Binary detection looks for NUL bytes like Git, and UTF-16 text contains them.
+
+- Before the binary check, a side that starts with a UTF-16 BOM (`FF FE` little endian, `FE FF` big endian) is decoded to text (invalid sequences replaced) and diffed as text in all modes; the diff header shows the encoding ("UTF-16 LE" / "UTF-16 BE"). Files without BOM stay binary (Git's behavior).
+- Staging, unstaging and discarding by hunk, block or line are disabled for such files with "Line staging is not available for UTF-16 files; stage the whole file" (`git apply` treats them as binary); file-level actions work.
+- The size limit applies to the file size in bytes. Files with a `working-tree-encoding` attribute: check what the existing filter pipeline (ADR-018) produces and note it in the task note.
+- CHANGELOG and user guide (`known-limitations.md`: line staging for UTF-16).
+
+Acceptance: unit tests (LE, BE, BOM only on one side, odd byte count, mixed newlines); app test: the line actions are disabled with the hint, staging the whole file works; snapshot of a UTF-16 diff.
+
+### [ ] M7-18 Graph line style like GitKraken
+
+Maintainer wish (2026-11-10), reference: GitKraken screenshot from the maintainer at the same display scaling.
+
+- Edges: straight vertical lines in their lane and 90° turns with a rounded corner instead of Bézier curves, where a branch leaves or joins a node; corner radius, line width (thinner than today's 2 px) and the dash pattern of dashed lines (WIP, stash) taken from the reference; node shapes and colors unchanged unless the reference clearly differs.
+- Keep the per-row segment model of `docs/ARCHITECTURE.md` (virtualized rows); corners must join seamlessly across rows, including M6-23's gap fix.
+- Style values as named constants (later style tokens of M9); `docs/ARCHITECTURE.md` graph rendering section updated.
+
+Acceptance: `iced_test` graph snapshots (merges, branch-offs, a stash, WIP; dark/light; 100 % and 200 %) compared side by side with the reference; the task note lists the chosen values.
 
 ### [ ] M7-13 Release v1.1.0
 

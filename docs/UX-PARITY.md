@@ -12,7 +12,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 |---|---|---|
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it); M6-17 pickers open the palette lists (see deviations); M8 external editor button next to Terminal |
-| Left panel | Local, Remote (grouped by remote), Tags, Stashes, Gitflow (when initialized), Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; folders, icons, highlight and counter M7-14 (folders before branches, tags flat, no folder menu: GitKraken check open); GITFLOW section M7-08 (groups only when they have branches) |
+| Left panel | Local, Gitflow (when initialized), Remote (grouped by remote), Tags, Stashes, Submodules; collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden | done (M0), real data M1; folders, icons, highlight and counter M7-14 (folders before branches, tags flat, no folder menu: GitKraken check open); GITFLOW section M7-08 (groups only when they have branches), between LOCAL and REMOTE since M7-15 (maintainer decision) |
 | Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top; resizable columns and a column menu | done (M1); resizable columns and column menu M9 |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
 | Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); inline and split M7 (ADR-038) |
@@ -153,4 +153,5 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | "About Gitloom" is in the command palette and at the bottom of the Preferences categories instead of a Help menu | Gitloom has no menu bar and its gear button opens the Preferences directly (M6-03) |
 | Focused text fields get a 2 px accent border; Esc closes a dialog or menu even while one of its fields has focus | Accessibility pass (M6-07): visible focus and one Esc per overlay |
 | Screen readers are not supported | iced 0.14 exposes no accessibility tree (M6 plan); documented as a known limitation |
+| The GITFLOW section sits between LOCAL and REMOTE | Maintainer decision (2026-11-10, M7-15); GitKraken's position not verified |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |

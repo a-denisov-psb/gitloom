@@ -75,15 +75,21 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .collect();
 
     let hide_active = repo.ref_filter.is_active();
-    let sections = column![
-        section(
-            repo,
-            Section::Local,
-            "LOCAL",
-            groups.local_count.label(hide_active),
-            local
-        ),
-        section_with_action(
+    let local = section(
+        repo,
+        Section::Local,
+        "LOCAL",
+        groups.local_count.label(hide_active),
+        local,
+    );
+    // GITFLOW between LOCAL and REMOTE, only when initialized (maintainer
+    // decision, M7-15).
+    let sections = match &repo.snapshot.flow {
+        Some(config) => column![local, gitflow(repo, config, &needle)],
+        None => column![local],
+    };
+    let sections = sections
+        .push(section_with_action(
             repo,
             Section::Remote,
             "REMOTE",
@@ -92,25 +98,25 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             Some((
                 Icon::Plus,
                 "Add remote",
-                HeaderAction::Press(Box::new(Message::AddRemoteStart))
+                HeaderAction::Press(Box::new(Message::AddRemoteStart)),
             )),
-        ),
-        section(repo, Section::Tags, "TAGS", tags.len().to_string(), tags),
-        section(
+        ))
+        .push(section(
+            repo,
+            Section::Tags,
+            "TAGS",
+            tags.len().to_string(),
+            tags,
+        ))
+        .push(section(
             repo,
             Section::Stashes,
             "STASHES",
             stashes.len().to_string(),
-            stashes
-        ),
-    ]
-    .spacing(6);
-    // GITFLOW between STASHES and SUBMODULES, only when initialized.
-    let sections = match &repo.snapshot.flow {
-        Some(config) => sections.push(gitflow(repo, config, &needle)),
-        None => sections,
-    }
-    .push(submodules());
+            stashes,
+        ))
+        .push(submodules())
+        .spacing(6);
 
     let filter = text_input("Filter", &repo.filter)
         .id(crate::app::FILTER_INPUT)
