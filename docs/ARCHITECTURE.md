@@ -145,7 +145,7 @@ pub enum Segment {
 
 ### Rendering
 
-Each visible row draws its own segments into a canvas cell of the row height: upper half from the row top to the node center, lower half from the node center to the row bottom. Lane changes use cubic Bézier curves. Because every row is self-contained, virtualization needs no global canvas.
+Each visible row draws its own segments into a canvas cell of the row height: upper half from the row top to the node center, lower half from the node center to the row bottom. Edges are straight like GitKraken's (M7-18): vertical in their lane, and where an edge joins or leaves a node from another lane it runs horizontally at the node's height and turns 90° with a rounded corner (`into_node`, `from_node` in `ui/graph.rs`; style constants `LINE_WIDTH` 1.5 px, `CORNER_RADIUS` 6 px, dotted `DASH` 2/2 px for WIP and stash edges, later M9 style tokens). Vertical parts run `EDGE_OVERLAP` past the row edges and are clipped there, and dashed lines start at the global dash phase, so rows join without gaps at fractional scale factors (M6-23); row backgrounds snap to physical pixels. Because every row is self-contained, virtualization needs no global canvas.
 
 ## Graph list virtualization _(M1)_
 

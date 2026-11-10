@@ -8256,6 +8256,75 @@ pub(crate) mod tests {
         app
     }
 
+    /// Graph with a merge, a branch-off, a stash and the WIP row (M7-18).
+    pub(crate) fn graph_app() -> App {
+        use git_core::{Commit, Head, Log, WorkingTree};
+
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let history: [(&str, &[&str], &str); 7] = [
+            ("m", &["a", "f"], "Merge branch 'feature'"),
+            ("f", &["e"], "Feature work"),
+            ("a", &["b"], "Main work"),
+            ("e", &["b"], "Start feature"),
+            ("b", &["c", "x"], "Merge branch 'old'"),
+            ("x", &["c"], "Old branch"),
+            ("c", &[], "Initial commit"),
+        ];
+        let commits = history
+            .iter()
+            .enumerate()
+            .map(|(i, (id, parents, summary))| Commit {
+                id: (*id).into(),
+                parents: parents.iter().map(|p| (*p).into()).collect(),
+                summary: (*summary).into(),
+                body: String::new(),
+                author: if i % 2 == 0 { "Ana Lyst" } else { "Bo Dev" }.into(),
+                email: String::new(),
+                author_time: 100 - i as i64,
+                commit_time: 100 - i as i64,
+            })
+            .collect();
+        let reference = |name: &str, target: &str, is_head| git_core::Reference {
+            name: name.into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: target.into(),
+            is_head,
+            upstream: None,
+            ahead_behind: None,
+        };
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits,
+                truncated: false,
+            },
+            Head::Branch {
+                name: "main".into(),
+                target: "m".into(),
+            },
+            vec![
+                reference("main", "m", true),
+                reference("feature", "f", false),
+            ],
+            vec![git_core::Stash {
+                index: 0,
+                message: "WIP on main: work in progress".into(),
+                id: "s".into(),
+                base: Some("a".into()),
+                time: 99,
+                author: "Ana Lyst".into(),
+            }],
+            WorkingTree {
+                unstaged: vec![file("notes.txt")],
+                staged: Vec::new(),
+            },
+        )
+        .unwrap();
+        let backend: Arc<dyn GitBackend> = Arc::new(git_core::MockBackend::new("mock"));
+        app.tabs[0].state = TabState::Ready(Box::new(RepoView::new(backend, Arc::new(snapshot))));
+        app
+    }
+
     /// App with one ready tab showing commits `ids` (linear, newest first).
     pub(crate) fn ready_app(ids: &[&str]) -> App {
         use git_core::{Commit, Head, Log, WorkingTree};
