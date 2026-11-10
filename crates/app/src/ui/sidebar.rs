@@ -1,7 +1,7 @@
 //! Left sidebar: local/remote branches, tags, stashes, submodules.
 
 use git_core::{RefKind, Reference};
-use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
+use iced::widget::{button, column, container, row, space, text, text_input};
 use iced::{Element, Fill};
 
 use crate::app::Message;
@@ -126,7 +126,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     }
     let content = content
         .push(container(filter).padding(8))
-        .push(scrollable(container(sections).padding([0, 4])).height(Fill));
+        .push(crate::ui::vscroll(container(sections).padding([0, 4])).height(Fill));
 
     container(content)
         .width(Fill)

@@ -64,6 +64,11 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Update check: off by default (no request; check with a firewall log or Resource Monitor if in doubt). Turned on in an `rc.1` build after `rc.2` is published: the status bar shows "Gitloom 1.0.0-rc.2 is available", Release notes opens the release page, Dismiss hides it until the next version.
 - [ ] Crash report: not triggerable in release builds; if a crash happens during the checks, the next start shows the notice, Copy report and Open report folder work.
 - [ ] Privacy: with avatars and update check off, Gitloom opens no network connection besides Git's (auto-fetch).
+- [ ] Context menus with long branch names (create a branch with a 60+ character name, drag it onto another branch, right click it in the left panel and in the graph) are as wide as their longest entry; entries cut with "…" show the full text as tooltip.
+- [ ] The empty remote `github-fc` (empty `[remote "github-fc"]` section in `.git/config`) is no longer listed; afterwards remove the section with `git config --remove-section remote.github-fc`.
+- [ ] In a repository whose path contains a space: "Open file location" on a file in a subfolder selects it in Explorer; "Copy file path" copies the full Windows path.
+- [ ] Left panel with more branches than fit: the scrollbar does not cover the counts.
+- [ ] Graph at 125 % Windows scaling and zoom 110 %/120 %: no gaps between rows in lines or row backgrounds.
 
 ## 7a. New in 1.1 (M7; Windows required, Linux checked in CI)
 
@@ -73,7 +78,6 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Git flow: initialize in Preferences on a repository without `develop`; start a feature from the green "+", finish it with "Delete branch"; start and finish a release (tag created, merged into main and develop); Ctrl+Z undoes the finish, Ctrl+Y redoes it.
 - [ ] Release finish with a conflict in the merge into develop: resolve in the conflict view, Continue, the finish completes by itself; close Gitloom while the conflict is open, reopen, "Continue finishing" completes it.
 - [ ] A repository initialized with the `git-flow` CLI (Git for Windows ships it) shows the GITFLOW section; one initialized by Gitloom works with `git flow feature start` in a terminal.
-- [ ] Context menus with long branch names (drag one long-named branch onto another) are as wide as their longest entry.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 

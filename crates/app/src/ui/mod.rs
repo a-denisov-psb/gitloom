@@ -352,6 +352,19 @@ fn centered<'a>(content: iced::widget::Column<'a, Message>) -> Element<'a, Messa
         .into()
 }
 
+/// Room between the content of a [`vscroll`] and its scrollbar.
+pub const SCROLLBAR_GAP: f32 = 2.0;
+
+/// Vertical scrollable whose scrollbar gets its own room (M6-22): while the
+/// bar is shown, the content is narrower by its width, so counts and
+/// buttons on the right are never drawn below it. Without overflow the
+/// content keeps the full width.
+pub fn vscroll<'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> iced::widget::Scrollable<'a, Message> {
+    iced::widget::scrollable(content).spacing(SCROLLBAR_GAP)
+}
+
 /// Rows `first..last` of a fixed-height list intersecting the viewport,
 /// extended by `overscan` rows on both sides.
 pub fn rows_in_view(

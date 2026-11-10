@@ -499,9 +499,7 @@ impl GitBackend for GixBackend {
     }
 
     fn remotes(&self) -> Result<Vec<String>> {
-        Ok(self
-            .local()
-            .remote_names()
+        Ok(configured_remote_names(&self.local())
             .into_iter()
             .map(|name| name.to_string())
             .collect())
@@ -511,7 +509,7 @@ impl GitBackend for GixBackend {
         use gix::config::Source;
 
         let repo = self.local();
-        let names = repo.remote_names();
+        let names = configured_remote_names(&repo);
         let config = repo.config_snapshot();
         let Some(sections) = config.plumbing().sections_by_name("remote") else {
             return Ok(Vec::new());
@@ -724,6 +722,29 @@ impl GitBackend for GixBackend {
 
 /// Local branches, remote branches (without symbolic `*/HEAD`) and tags with
 /// the commit they point to. Tags pointing to non-commits are skipped.
+/// Remotes as Git sees them: a `remote.<name>` section counts only if it has
+/// at least one key in some configuration file. Empty sections are left
+/// behind by `git config --unset` of the last key; `git remote` ignores them
+/// (M6-20). gix lists every trusted section, so filter its names.
+fn configured_remote_names(repo: &gix::Repository) -> gix::remote::Names {
+    let mut names = repo.remote_names();
+    let config = repo.config_snapshot();
+    let Some(sections) = config.plumbing().sections_by_name("remote") else {
+        return gix::remote::Names::new();
+    };
+    let mut with_keys = gix::remote::Names::new();
+    for section in sections {
+        if section.body().num_values() == 0 {
+            continue;
+        }
+        if let Some(name) = section.header().subsection_name() {
+            with_keys.insert(name.to_owned());
+        }
+    }
+    names.retain(|name| with_keys.contains(name));
+    names
+}
+
 fn ref_targets(repo: &gix::Repository) -> Result<Vec<(RefKind, gix::refs::FullName, ObjectId)>> {
     let platform = repo.references().map_err(backend)?;
     let groups = [

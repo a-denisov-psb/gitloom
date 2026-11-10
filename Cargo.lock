@@ -1534,7 +1534,7 @@ dependencies = [
 
 [[package]]
 name = "git-core"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "gix",
  "serde",
@@ -1544,14 +1544,14 @@ dependencies = [
 
 [[package]]
 name = "git-graph"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "criterion",
 ]
 
 [[package]]
 name = "gitloom"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "directories",
  "git-core",

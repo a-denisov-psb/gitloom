@@ -2,7 +2,7 @@
 //! preferences; categories on the left, the form of the selected one on the
 //! right. Changes apply immediately.
 
-use iced::widget::{button, column, container, row, scrollable, space, text, text_input, Column};
+use iced::widget::{button, column, container, row, space, text, text_input, Column};
 use iced::{Element, Fill, Length};
 
 use crate::app::{App, Message};
@@ -55,7 +55,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
 
     let body = row![
         container(categories).height(Fill).style(theme::chrome),
-        scrollable(
+        crate::ui::vscroll(
             column![text(category_title(app, page.category)).size(16), form]
                 .spacing(16)
                 .padding(20)

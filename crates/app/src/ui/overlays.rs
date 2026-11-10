@@ -184,7 +184,7 @@ pub fn shortcut_list(filter: &str) -> Element<'_, Message> {
             .on_input(Message::ShortcutFilterChanged)
             .padding(6)
             .style(theme::input),
-        scrollable(rows.padding(Padding::default().right(12))).height(Fill),
+        crate::ui::vscroll(rows).height(Fill),
     ]
     .spacing(12);
     let dialog = container(content)
@@ -267,7 +267,7 @@ pub fn about() -> Element<'static, Message> {
         .spacing(8)
         .wrap(),
         text(format!("Third-party components ({})", components.len())).size(13),
-        container(scrollable(list.padding(Padding::default().right(12))).height(220))
+        container(crate::ui::vscroll(list).height(220))
             .padding(8)
             .width(Fill)
             .style(theme::dialog_details),
@@ -333,7 +333,7 @@ pub fn palette(palette: &crate::palette::Palette) -> Element<'_, Message> {
                 }),
         );
     }
-    let list = scrollable(rows).height(Length::Shrink);
+    let list = crate::ui::vscroll(rows).height(Length::Shrink);
     let content = column![
         text_input(palette.mode.placeholder(), &palette.query)
             .id(crate::app::PALETTE_INPUT)

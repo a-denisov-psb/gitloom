@@ -4087,6 +4087,7 @@ impl App {
                         crate::launch::spawn(&crate::launch::reveal_file(
                             crate::launch::Platform::current(),
                             &file,
+                            &|p| p.exists(),
                         ))
                     }),
                     |result| Message::StatusText(result.err().unwrap_or_default()),
@@ -4779,9 +4780,16 @@ impl App {
                         Message::OpenFileLocation(file.path.clone()),
                     ));
                 }
+                // The absolute path with native separators (M6-21).
+                let path = match self.active_tab().and_then(Tab::path) {
+                    Some(root) => crate::launch::repo_file_path(root, &file.path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    None => file.path,
+                };
                 entries.push(MenuEntry::item(
                     "Copy file path",
-                    Message::CopyToClipboard(file.path),
+                    Message::CopyToClipboard(path),
                 ));
                 self.context_menu = Some(ContextMenu::new(position, entries));
             }
@@ -5818,7 +5826,8 @@ impl App {
                         blocking(move || {
                             crate::launch::spawn(&crate::launch::reveal_file(
                                 crate::launch::Platform::current(),
-                                &root.join(&path),
+                                &crate::launch::repo_file_path(&root, &path),
+                                &|p| p.exists(),
                             ))
                         }),
                         |result| Message::StatusText(result.err().unwrap_or_default()),
@@ -8182,6 +8191,25 @@ pub(crate) mod tests {
         let details = app.tabs[0].view().unwrap().details.as_ref().unwrap();
         assert_eq!(details.id, "c1");
         assert_eq!(details.changes, Loadable::Loading);
+    }
+
+    /// Ready app whose left panel needs to scroll: 57 local branches.
+    pub(crate) fn crowded_app() -> App {
+        let mut app = ready_app(&["c"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for i in 0..57 {
+            snapshot.refs.push(git_core::Reference {
+                name: format!("feature/branch-{i:02}"),
+                kind: git_core::RefKind::LocalBranch,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = Arc::new(snapshot);
+        app
     }
 
     /// App with one ready tab showing commits `ids` (linear, newest first).
@@ -11081,6 +11109,36 @@ pub(crate) mod tests {
                 "Copy file path"
             ]
         );
+        // The copied path is absolute, with native separators (M6-21).
+        let root = app.tabs[0].path().unwrap().to_path_buf();
+        let copy = menu.select(6);
+        let expected = crate::launch::repo_file_path(&root, "a")
+            .to_string_lossy()
+            .into_owned();
+        assert!(matches!(copy, Some(Message::CopyToClipboard(t)) if t == expected));
+    }
+
+    #[test]
+    fn copied_paths_of_nested_files_are_absolute() {
+        let mut app = staging_app(&[], &["src/dir with space/a.rs"]);
+        let _ = app.update(Message::FileContextMenu {
+            file: file("src/dir with space/a.rs"),
+            area: FileArea::Staged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        let root = app.tabs[0].path().unwrap().to_path_buf();
+        let last = menu.entries.len() - 1;
+        let Some(Message::CopyToClipboard(text)) = menu.select(last) else {
+            panic!("last entry is not Copy file path");
+        };
+        assert_eq!(
+            std::path::PathBuf::from(&text),
+            root.join("src").join("dir with space").join("a.rs")
+        );
+        if cfg!(windows) {
+            assert!(!text.contains('/'), "{text}");
+        }
     }
 
     #[test]
