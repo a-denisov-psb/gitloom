@@ -349,6 +349,25 @@ pub struct DiffRequest {
     pub old_path: Option<String>,
 }
 
+/// Text encoding of a diff side that is not UTF-8 compatible (M7-17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextEncoding {
+    /// UTF-16 little endian with a byte order mark (`FF FE`).
+    Utf16Le,
+    /// UTF-16 big endian with a byte order mark (`FE FF`).
+    Utf16Be,
+}
+
+impl TextEncoding {
+    /// Name for the diff header.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Utf16Le => "UTF-16 LE",
+            Self::Utf16Be => "UTF-16 BE",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiff {
     /// Path on the old side, `None` if the file was added.
@@ -359,6 +378,9 @@ pub struct FileDiff {
     pub binary: bool,
     /// At least one side exceeds 2 MB; `hunks` is empty.
     pub too_large: bool,
+    /// A side was UTF-16 with a byte order mark and was decoded for the
+    /// diff; patches built from its lines would not apply (M7-17).
+    pub encoding: Option<TextEncoding>,
     pub hunks: Vec<DiffHunk>,
 }
 

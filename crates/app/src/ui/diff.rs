@@ -98,8 +98,9 @@ fn view_with<'a>(
         row![
             text(title).wrapping(text::Wrapping::None),
             muted(source).size(12),
-            space::horizontal(),
         ]
+        .push(encoding_label(diff))
+        .push(space::horizontal())
         .push(selection_action)
         .push(if standalone {
             row![
@@ -139,6 +140,15 @@ fn view_with<'a>(
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// "UTF-16 LE" / "UTF-16 BE" for a decoded UTF-16 file (M7-17).
+fn encoding_label<'a>(diff: &DiffView) -> Option<Element<'a, Message>> {
+    let Loadable::Ready(file) = &diff.diff else {
+        return None;
+    };
+    file.encoding
+        .map(|encoding| muted(encoding.label()).size(12).into())
 }
 
 /// "Open in external diff tool" (M5-12; Ctrl+D).
@@ -267,17 +277,19 @@ fn rows<'a>(
     let mut rows = Column::with_capacity(last - first + 2)
         .push(space::vertical().height(first as f32 * LINE_HEIGHT));
     let staged = diff.staged();
+    let blocked = diff.line_staging_block();
+    let selectable = staged.is_some() && blocked.is_none();
     for (index, &row) in diff.rows[first..last].iter().enumerate() {
         let row_index = first + index;
         let (h, l) = match row {
             DiffRow::Header(h) => {
                 if let Some(hunk) = file.hunks.get(h as usize) {
-                    rows = rows.push(hunk_header(repo, hunk, h as usize, staged));
+                    rows = rows.push(hunk_header(repo, hunk, h as usize, staged, blocked));
                 }
                 continue;
             }
             DiffRow::Block(b) => {
-                rows = rows.push(block_bar(repo, b as usize, staged));
+                rows = rows.push(block_bar(repo, b as usize, staged, blocked));
                 continue;
             }
             DiffRow::Line(h, l) => (h, l),
@@ -296,15 +308,7 @@ fn rows<'a>(
                 let cell = |side: Option<u32>, right: bool| {
                     let note = note.filter(|(r, _)| *r == right).map(|(_, t)| t);
                     split_cell(
-                        diff,
-                        hunk,
-                        h,
-                        side,
-                        right,
-                        row_index,
-                        staged.is_some(),
-                        note,
-                        offset,
+                        diff, hunk, h, side, right, row_index, selectable, note, offset,
                     )
                 };
                 rows = rows.push(row![
@@ -325,7 +329,7 @@ fn rows<'a>(
                 Some(line) => {
                     let selected = diff.selection.contains(&(h, l));
                     let element = diff_line(line, selected, offset);
-                    if staged.is_some() && line.kind != DiffLineKind::Context {
+                    if selectable && line.kind != DiffLineKind::Context {
                         mouse_area(element)
                             .on_press(Message::DiffLineClicked(row_index))
                             .interaction(iced::mouse::Interaction::Pointer)
@@ -355,6 +359,7 @@ fn hunk_header<'a>(
     hunk: &'a DiffHunk,
     index: usize,
     staged: Option<bool>,
+    blocked: Option<&'static str>,
 ) -> Element<'a, Message> {
     let mut content = row![text(&hunk.header)
         .font(Font::MONOSPACE)
@@ -369,8 +374,9 @@ fn hunk_header<'a>(
                 .padding([0, 8])
                 .style(button::danger);
             content = content
-                .push(write_action(
+                .push(line_action(
                     repo,
+                    blocked,
                     discard,
                     Message::Discard(DiscardTarget::Hunk(index)),
                 ))
@@ -380,7 +386,12 @@ fn hunk_header<'a>(
         let button = button(text(label).size(11))
             .padding([0, 8])
             .style(button::secondary);
-        content = content.push(write_action(repo, button, Message::ApplyHunk(index)));
+        content = content.push(line_action(
+            repo,
+            blocked,
+            button,
+            Message::ApplyHunk(index),
+        ));
     }
     container(content)
         .padding([0, 12])
@@ -393,7 +404,12 @@ fn hunk_header<'a>(
 
 /// Slim bar above a change block (Inline view, M7-03): the block's
 /// stage/unstage/discard actions; read-only diffs show just the bar.
-fn block_bar<'a>(repo: &'a RepoView, index: usize, staged: Option<bool>) -> Element<'a, Message> {
+fn block_bar<'a>(
+    repo: &'a RepoView,
+    index: usize,
+    staged: Option<bool>,
+    blocked: Option<&'static str>,
+) -> Element<'a, Message> {
     let mut content = row![space::horizontal()].align_y(iced::Center);
     if let Some(staged) = staged {
         if !staged {
@@ -401,8 +417,9 @@ fn block_bar<'a>(repo: &'a RepoView, index: usize, staged: Option<bool>) -> Elem
                 .padding([0, 8])
                 .style(button::danger);
             content = content
-                .push(write_action(
+                .push(line_action(
                     repo,
+                    blocked,
                     discard,
                     Message::Discard(DiscardTarget::Block(index)),
                 ))
@@ -416,7 +433,12 @@ fn block_bar<'a>(repo: &'a RepoView, index: usize, staged: Option<bool>) -> Elem
         let button = button(text(label).size(11))
             .padding([0, 8])
             .style(button::secondary);
-        content = content.push(write_action(repo, button, Message::ApplyBlock(index)));
+        content = content.push(line_action(
+            repo,
+            blocked,
+            button,
+            Message::ApplyBlock(index),
+        ));
     }
     container(content)
         .padding([0, 12])
@@ -605,6 +627,20 @@ fn write_action<'a>(
     button
         .on_press_maybe(repo.busy.is_none().then_some(message))
         .into()
+}
+
+/// Hunk, block or line action: disabled with `blocked` as tooltip for
+/// UTF-16 files (M7-17), else like [`write_action`].
+fn line_action<'a>(
+    repo: &RepoView,
+    blocked: Option<&'static str>,
+    button: iced::widget::Button<'a, Message>,
+    message: Message,
+) -> Element<'a, Message> {
+    match blocked {
+        Some(reason) => crate::ui::panel::with_tooltip_text(button.into(), reason.to_owned()),
+        None => write_action(repo, button, message),
+    }
 }
 
 /// Hunk / Inline / Split; the active one is highlighted.

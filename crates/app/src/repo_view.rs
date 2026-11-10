@@ -181,6 +181,10 @@ pub enum DiffRow {
     Split(u32, Option<u32>, Option<u32>),
 }
 
+/// Reason shown for line, block and hunk actions of a UTF-16 file (M7-17).
+pub const UTF16_LINE_HINT: &str =
+    "Line staging is not available for UTF-16 files; stage the whole file";
+
 /// Rows kept above a change when jumping to it.
 pub const JUMP_MARGIN: usize = 3;
 
@@ -204,6 +208,15 @@ impl DiffView {
             h_max: None,
             text_width: 0.0,
             hscroll_id: iced::widget::Id::unique(),
+        }
+    }
+
+    /// Why hunks, blocks and lines of this diff cannot be staged, unstaged
+    /// or discarded: `git apply` treats UTF-16 files as binary (M7-17).
+    pub fn line_staging_block(&self) -> Option<&'static str> {
+        match &self.diff {
+            Loadable::Ready(file) if file.encoding.is_some() => Some(UTF16_LINE_HINT),
+            _ => None,
         }
     }
 
@@ -259,8 +272,8 @@ impl DiffView {
     /// Click on one side of a Split row (`right`: new side) or on an
     /// Inline/Hunk row (`None`).
     pub fn click_side(&mut self, row: usize, right: Option<bool>, mode: ClickMode) {
-        // Commit diffs are read-only.
-        if self.staged().is_none() {
+        // Commit diffs are read-only; UTF-16 lines cannot be staged.
+        if self.staged().is_none() || self.line_staging_block().is_some() {
             return;
         }
         let key = match (self.rows.get(row), right) {
@@ -1114,6 +1127,7 @@ mod tests {
             new_path: Some("f".into()),
             binary: false,
             too_large: false,
+            encoding: None,
             hunks: vec![DiffHunk {
                 header: "@@".into(),
                 old_start: 1,
@@ -1173,6 +1187,7 @@ mod tests {
             new_path: Some("f".into()),
             binary: false,
             too_large: false,
+            encoding: None,
             hunks: text.hunks,
         }));
         view

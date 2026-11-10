@@ -541,4 +541,16 @@ mod tests {
             snapshot(&app, &format!("diff-hscroll-{name}-1"));
         }
     }
+
+    /// A UTF-16 file shown as text with its encoding; line actions are
+    /// disabled (M7-17).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_utf16_diff() {
+        use crate::settings::DiffMode;
+        for (mode, name) in [(DiffMode::Hunk, "hunk"), (DiffMode::Inline, "inline")] {
+            let app = crate::app::tests::utf16_diff_app(mode);
+            snapshot(&app, &format!("utf16-diff-{name}"));
+        }
+    }
 }

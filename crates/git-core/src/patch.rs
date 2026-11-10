@@ -177,6 +177,7 @@ mod tests {
             new_path: Some("f.txt".into()),
             binary: false,
             too_large: false,
+            encoding: None,
             hunks: text.hunks,
         }
     }

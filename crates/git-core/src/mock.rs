@@ -238,6 +238,7 @@ impl MockBackend {
             new_path: Some(request.path.clone()),
             binary: text.binary,
             too_large: text.too_large,
+            encoding: None,
             hunks: text.hunks,
         }
     }

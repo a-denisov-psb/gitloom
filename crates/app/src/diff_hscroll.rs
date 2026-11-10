@@ -122,6 +122,7 @@ mod tests {
             new_path: Some("a".into()),
             binary: false,
             too_large: false,
+            encoding: None,
             hunks: vec![DiffHunk {
                 header: "@@ -1 +1 @@".into(),
                 old_start: 1,
