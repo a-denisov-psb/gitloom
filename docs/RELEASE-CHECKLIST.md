@@ -81,6 +81,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Diff with a line longer than the view: Shift+wheel and the horizontal scrollbar scroll it in Hunk, Inline and Split; line selection still works after scrolling.
 - [ ] A file created in PowerShell 5 with `echo test > utf16.txt` shows its text; line staging is disabled with the hint, staging the whole file works.
 - [ ] GITFLOW sits between LOCAL and REMOTE.
+- [ ] Graph lines at 125 % Windows scaling look like GitKraken's (corners, width, dashes) and have no gaps.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 

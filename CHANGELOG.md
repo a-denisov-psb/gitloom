@@ -17,6 +17,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Changed
 
 - The GITFLOW section sits between LOCAL and REMOTE.
+- Graph lines are thinner and turn with rounded 90° corners like GitKraken's instead of curves; WIP and stash edges are dotted.
 
 ### Fixed
 

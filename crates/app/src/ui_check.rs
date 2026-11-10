@@ -553,4 +553,22 @@ mod tests {
             snapshot(&app, &format!("utf16-diff-{name}"));
         }
     }
+
+    /// Graph lines (M7-18): merges, branch-offs, a stash and WIP, both
+    /// themes at 100 % and 200 %.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_graph_lines() {
+        let mut app = crate::app::tests::graph_app();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for (zoom, size) in [(100, SIZE), (200, (SIZE.0 / 2.0, SIZE.1 / 2.0))] {
+                snapshot_sized(&app, &format!("graph-lines-{theme}-{zoom}"), size);
+            }
+        }
+    }
 }

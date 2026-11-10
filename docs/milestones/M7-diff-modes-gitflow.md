@@ -284,7 +284,7 @@ Acceptance: unit tests (LE, BE, BOM only on one side, odd byte count, mixed newl
 
 Note (2026-11-10): done. `git_core::diff::decode_utf16` runs before the binary check in `text_diff_with` (after the size check on the raw bytes); `FileDiff`/`TextDiff` carry `encoding`, shown in the diff header. `DiffView::line_staging_block` disables the hunk and block buttons (tooltip with the hint), line selection, and guards Apply/Discard of hunks, blocks and lines (status bar shows the hint). `working-tree-encoding` (checked in `tests/gix_diff.rs`): with `UTF-16` gix's filter pipeline converts the working tree file, so the diff is plain UTF-8 text and line staging stays available; Git's own name `UTF-16LE-BOM` is unknown to gix's encoding filter, the diff then reports "Filtered file – diff not available" as before (known limitation in the user guide). Blame and the conflict view still treat UTF-16 as binary (outside this task).
 
-### [ ] M7-18 Graph line style like GitKraken
+### [x] M7-18 Graph line style like GitKraken
 
 Maintainer wish (2026-11-10), reference: GitKraken screenshot from the maintainer at the same display scaling.
 
@@ -293,6 +293,8 @@ Maintainer wish (2026-11-10), reference: GitKraken screenshot from the maintaine
 - Style values as named constants (later style tokens of M9); `docs/ARCHITECTURE.md` graph rendering section updated.
 
 Acceptance: `iced_test` graph snapshots (merges, branch-offs, a stash, WIP; dark/light; 100 % and 200 %) compared side by side with the reference; the task note lists the chosen values.
+
+Note (2026-11-10): done. Values from the maintainer's two reference screenshots (dark theme): `LINE_WIDTH` 1.5 px (was 2 px), `CORNER_RADIUS` 6 px (limited to the lane distance), `DASH` 2 px dash / 2 px gap (dotted, was 4/3) for WIP and stash edges. Edges into or out of a node from another lane run horizontally at the node's height and turn 90° with a rounded corner (quadratic curve through the corner point) instead of an S-curve; vertical parts keep M6-23's overlap past the row edges and the global dash phase, so corners and lines join across rows. Nodes unchanged: the reference shows the same shapes (avatar or initials circle, small merge dot, dashed WIP circle); GitKraken's row tint in the lane color and the branch-label connector lines are not part of this task. Snapshots `ui_check_graph_lines` (new `graph_app` with merges, a branch-off, a stash and WIP; dark/light, 100 %/200 %) compared by eye with the reference; geometry tested in `edges_turn_with_rounded_corners`.
 
 ### [ ] M7-13 Release v1.1.0
 

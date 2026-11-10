@@ -33,7 +33,13 @@ const MIN_LANES: u16 = 2;
 const MAX_LANES: u16 = 12;
 const NODE_RADIUS: f32 = 9.0;
 const MERGE_RADIUS: f32 = 4.5;
-const DASH: [f32; 2] = [4.0, 3.0];
+/// Graph line style like GitKraken's (M7-18, measured against a
+/// reference screenshot; style tokens in M9): line width, the radius of
+/// the rounded 90° turn where an edge leaves or joins a node, and the
+/// dotted pattern of WIP and stash edges.
+const LINE_WIDTH: f32 = 1.5;
+const CORNER_RADIUS: f32 = 6.0;
+const DASH: [f32; 2] = [2.0, 2.0];
 /// Lines run this far past the top and bottom edge of their row. The canvas
 /// clips them at the row edge, which the renderer snaps to physical pixels
 /// the same way for both neighbours, so rows join without a gap at any
@@ -709,16 +715,18 @@ impl canvas::Program<Message> for GraphCell {
         let node = Point::new(lane_x(self.row.lane), mid);
 
         for segment in &self.row.segments {
-            let (path, color, dashed) = match *segment {
+            let (ops, color, dashed) = match *segment {
                 Segment::Through {
                     lane,
                     color,
                     dashed,
                 } => {
                     let x = lane_x(lane);
-                    let top = line_top(self.index, dashed);
                     (
-                        Path::line(Point::new(x, top), Point::new(x, height + EDGE_OVERLAP)),
+                        vec![
+                            Op::Move(Point::new(x, line_top(self.index, dashed))),
+                            Op::Line(Point::new(x, height + EDGE_OVERLAP)),
+                        ],
                         color,
                         dashed,
                     )
@@ -727,25 +735,16 @@ impl canvas::Program<Message> for GraphCell {
                     from,
                     color,
                     dashed,
-                } => {
-                    let x = lane_x(from);
-                    let lead_in = Point::new(x, line_top(self.index, dashed));
-                    (
-                        curve(&[lead_in], Point::new(x, 0.0), node, &[]),
-                        color,
-                        dashed,
-                    )
-                }
+                } => (
+                    into_node(lane_x(from), line_top(self.index, dashed), node),
+                    color,
+                    dashed,
+                ),
                 Segment::FromNode { to, color, dashed } => {
-                    let x = lane_x(to);
-                    let lead_out = Point::new(x, height + EDGE_OVERLAP);
-                    (
-                        curve(&[], node, Point::new(x, height), &[lead_out]),
-                        color,
-                        dashed,
-                    )
+                    (from_node(node, lane_x(to), height), color, dashed)
                 }
             };
+            let path = to_path(&ops);
             frame.stroke(&path, line(theme::lane_color(p, color.0), dashed));
         }
 
@@ -809,33 +808,78 @@ fn line_top(index: usize, dashed: bool) -> f32 {
     (-phase - period) as f32
 }
 
-/// Straight line for vertical connections, smooth S-curve for lane changes;
-/// `before` and `after` are straight extensions past the row edges.
-fn curve(before: &[Point], from: Point, to: Point, after: &[Point]) -> Path {
+/// One step of an edge path (kept as data so the geometry is testable).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Op {
+    Move(Point),
+    Line(Point),
+    /// Rounded corner: quadratic curve through the corner point.
+    Corner {
+        corner: Point,
+        to: Point,
+    },
+}
+
+fn to_path(ops: &[Op]) -> Path {
     Path::new(|builder| {
-        let start = before.first().copied().unwrap_or(from);
-        builder.move_to(start);
-        if !before.is_empty() {
-            builder.line_to(from);
-        }
-        if (from.x - to.x).abs() < f32::EPSILON {
-            builder.line_to(to);
-        } else {
-            let bend = (to.y - from.y) / 2.0;
-            builder.bezier_curve_to(
-                Point::new(from.x, from.y + bend),
-                Point::new(to.x, to.y - bend),
-                to,
-            );
-        }
-        for point in after {
-            builder.line_to(*point);
+        for op in ops {
+            match *op {
+                Op::Move(point) => builder.move_to(point),
+                Op::Line(point) => builder.line_to(point),
+                Op::Corner { corner, to } => builder.quadratic_curve_to(corner, to),
+            }
         }
     })
 }
 
+/// Edge from above in the lane at `x` into `node`: straight down from
+/// `top` (past the row edge); in another lane it turns 90° with a rounded
+/// corner at the node's height and runs straight into the node.
+fn into_node(x: f32, top: f32, node: Point) -> Vec<Op> {
+    let mut ops = vec![Op::Move(Point::new(x, top))];
+    if (x - node.x).abs() < f32::EPSILON {
+        ops.push(Op::Line(node));
+        return ops;
+    }
+    let toward = (node.x - x).signum();
+    let radius = corner_radius(x, node);
+    ops.push(Op::Line(Point::new(x, node.y - radius)));
+    ops.push(Op::Corner {
+        corner: Point::new(x, node.y),
+        to: Point::new(x + toward * radius, node.y),
+    });
+    ops.push(Op::Line(node));
+    ops
+}
+
+/// Edge from `node` to the lane at `x` and down past the bottom edge of a
+/// row `height` high: straight in the node's lane, else straight out of the
+/// node to the lane and a rounded 90° turn down.
+fn from_node(node: Point, x: f32, height: f32) -> Vec<Op> {
+    let bottom = Point::new(x, height + EDGE_OVERLAP);
+    let mut ops = vec![Op::Move(node)];
+    if (x - node.x).abs() < f32::EPSILON {
+        ops.push(Op::Line(bottom));
+        return ops;
+    }
+    let toward = (x - node.x).signum();
+    let radius = corner_radius(x, node);
+    ops.push(Op::Line(Point::new(x - toward * radius, node.y)));
+    ops.push(Op::Corner {
+        corner: Point::new(x, node.y),
+        to: Point::new(x, node.y + radius),
+    });
+    ops.push(Op::Line(bottom));
+    ops
+}
+
+/// [`CORNER_RADIUS`], smaller when the lanes are closer than that.
+fn corner_radius(x: f32, node: Point) -> f32 {
+    CORNER_RADIUS.min((x - node.x).abs())
+}
+
 fn line(color: Color, dashed: bool) -> Stroke<'static> {
-    let stroke = Stroke::default().with_color(color).with_width(2.0);
+    let stroke = Stroke::default().with_color(color).with_width(LINE_WIDTH);
     if dashed {
         Stroke {
             line_dash: LineDash {
@@ -959,6 +1003,60 @@ mod tests {
             }
         }
         assert!(naive_gap, "lines ending at the row edges leave gaps");
+    }
+
+    #[test]
+    fn edges_turn_with_rounded_corners() {
+        let node = Point::new(lane_x(0), ROW_HEIGHT / 2.0);
+        let x = lane_x(2);
+        // Joining a node from another lane: down, corner, straight in.
+        let ops = into_node(x, -EDGE_OVERLAP, node);
+        assert_eq!(
+            ops,
+            [
+                Op::Move(Point::new(x, -EDGE_OVERLAP)),
+                Op::Line(Point::new(x, node.y - CORNER_RADIUS)),
+                Op::Corner {
+                    corner: Point::new(x, node.y),
+                    to: Point::new(x - CORNER_RADIUS, node.y),
+                },
+                Op::Line(node),
+            ]
+        );
+        // Leaving a node to another lane: straight out, corner, down past
+        // the bottom edge (M6-23).
+        let ops = from_node(node, x, ROW_HEIGHT);
+        assert_eq!(
+            ops,
+            [
+                Op::Move(node),
+                Op::Line(Point::new(x - CORNER_RADIUS, node.y)),
+                Op::Corner {
+                    corner: Point::new(x, node.y),
+                    to: Point::new(x, node.y + CORNER_RADIUS),
+                },
+                Op::Line(Point::new(x, ROW_HEIGHT + EDGE_OVERLAP)),
+            ]
+        );
+        // To the left the corner mirrors.
+        let right = Point::new(lane_x(3), node.y);
+        assert!(matches!(
+            from_node(right, lane_x(1), ROW_HEIGHT)[1],
+            Op::Line(p) if p.x == lane_x(1) + CORNER_RADIUS
+        ));
+        // The same lane stays straight.
+        assert_eq!(
+            from_node(node, node.x, ROW_HEIGHT),
+            [
+                Op::Move(node),
+                Op::Line(Point::new(node.x, ROW_HEIGHT + EDGE_OVERLAP))
+            ]
+        );
+        assert_eq!(into_node(node.x, -9.0, node).len(), 2);
+        // The radius fits between lanes and above the node.
+        const { assert!(CORNER_RADIUS <= LANE_WIDTH && CORNER_RADIUS < ROW_HEIGHT / 2.0) };
+        // Thinner than the 2 px before M7-18.
+        const { assert!(LINE_WIDTH < 2.0) };
     }
 
     #[test]
