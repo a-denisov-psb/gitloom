@@ -7522,6 +7522,25 @@ pub(crate) mod tests {
         assert_eq!(details.changes, Loadable::Loading);
     }
 
+    /// Ready app whose left panel needs to scroll: 57 local branches.
+    pub(crate) fn crowded_app() -> App {
+        let mut app = ready_app(&["c"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        for i in 0..57 {
+            snapshot.refs.push(git_core::Reference {
+                name: format!("feature/branch-{i:02}"),
+                kind: git_core::RefKind::LocalBranch,
+                target: "c".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
     /// App with one ready tab showing commits `ids` (linear, newest first).
     pub(crate) fn ready_app(ids: &[&str]) -> App {
         use git_core::{Commit, Head, Log, WorkingTree};

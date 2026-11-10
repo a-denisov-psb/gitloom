@@ -271,4 +271,41 @@ mod tests {
         });
         snapshot(&app, "context-menu-wide");
     }
+
+    /// The section counts of a scrolling left panel end left of its
+    /// scrollbar (M6-22). Layout only, so part of every test run.
+    #[test]
+    fn left_panel_counts_stay_clear_of_the_scrollbar() {
+        let app = crate::app::tests::crowded_app();
+        let mut sim = simulator(&app);
+        let count = sim.find("57").unwrap_or_else(|e| panic!("no count: {e}"));
+        let count = iced_test::selector::Bounded::bounds(&count);
+        // The filter input sits 8 px inside the panel on both sides.
+        let filter = sim
+            .find(iced::widget::Id::new(crate::app::FILTER_INPUT))
+            .unwrap_or_else(|e| panic!("no filter: {e}"));
+        let filter = iced_test::selector::Bounded::bounds(&filter);
+        let panel_right = filter.x + filter.width + 8.0;
+        // Default scrollbar width of iced.
+        let scrollbar_left = panel_right - 10.0;
+        assert!(
+            count.x + count.width + crate::ui::SCROLLBAR_GAP <= scrollbar_left,
+            "count ends at {} but the scrollbar starts at {scrollbar_left}",
+            count.x + count.width
+        );
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_left_panel_scrollbar_both_themes() {
+        let mut app = crate::app::tests::crowded_app();
+        for (light, name) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("left-panel-scrollbar-{name}"));
+        }
+    }
 }

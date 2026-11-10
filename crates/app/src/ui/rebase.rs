@@ -3,9 +3,7 @@
 //! for rewords and squash chains, drag or Alt+↑/↓ to reorder.
 
 use git_core::TodoAction;
-use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, space, text, text_editor, Column,
-};
+use iced::widget::{button, column, container, mouse_area, row, space, text, text_editor, Column};
 use iced::{Element, Fill, Font};
 
 use crate::app::Message;
@@ -45,7 +43,7 @@ pub fn view<'a>(repo: &'a RepoView, panel: &'a RebasePanel) -> Element<'a, Messa
                 rows = rows.push(entry_row(panel, index));
             }
             // Releasing the mouse anywhere over the list ends a drag.
-            mouse_area(scrollable(rows).height(Fill).width(Fill))
+            mouse_area(crate::ui::vscroll(rows).height(Fill).width(Fill))
                 .on_release(Message::RebaseDragEnd)
                 .into()
         }
