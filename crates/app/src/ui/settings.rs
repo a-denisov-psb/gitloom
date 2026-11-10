@@ -56,6 +56,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let form = match page.category {
         Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
+        Category::Identities => identities(app),
         Category::ExternalTools => external_tools(&app.settings, page),
         Category::Gitflow => gitflow(app, page),
     };
@@ -210,6 +211,96 @@ fn field<'a>(
         content = content.push(muted(note).size(12));
     }
     content.into()
+}
+
+/// Preferences → Identities (M8-03): saved identities, the default and the
+/// global sync option.
+fn identities(app: &App) -> Element<'_, Message> {
+    let identities = &app.settings.identities;
+    // Setting or editing the default writes the global config while sync
+    // is on: blocked while Git is missing or a write runs.
+    let global_block = identities
+        .sync_global
+        .then(|| app.global_identity_block())
+        .flatten();
+    let action = |label: &'static str, message: Message, block: Option<&String>| {
+        let button = button(text(label).size(12))
+            .padding([2, 10])
+            .style(button::secondary);
+        match block {
+            Some(reason) => crate::ui::panel::with_tooltip_text(button.into(), reason.clone()),
+            None => button.on_press(message).into(),
+        }
+    };
+    let mut list = Column::new().spacing(6);
+    if identities.list.is_empty() {
+        list = list.push(muted("No identities yet."));
+    }
+    for (index, saved) in identities.list.iter().enumerate() {
+        let default = identities.default == Some(index);
+        let mut line = row![column![text(&saved.name), muted(&saved.email).size(12)].spacing(2)]
+            .spacing(8)
+            .align_y(iced::Center);
+        if default {
+            line = line.push(
+                container(text("Default").size(11))
+                    .padding([1, 6])
+                    .style(theme::ref_pill(git_core::RefKind::LocalBranch, true)),
+            );
+        }
+        line = line.push(space::horizontal());
+        if !default {
+            line = line.push(action(
+                "Set as default",
+                Message::IdentitySetDefault(index),
+                global_block.as_ref(),
+            ));
+        }
+        line = line
+            .push(action(
+                "Edit",
+                Message::IdentityEditStart(index),
+                if default { global_block.as_ref() } else { None },
+            ))
+            .push(action(
+                "Remove",
+                Message::IdentityRemove {
+                    index,
+                    confirmed: false,
+                },
+                None,
+            ));
+        list = list.push(
+            container(line)
+                .padding([6, 10])
+                .width(Fill)
+                .style(theme::dialog_details),
+        );
+    }
+    let add = button(text("Add identity"))
+        .on_press(Message::IdentityAddStart)
+        .padding([5, 14])
+        .style(button::primary);
+    let sync = iced::widget::checkbox(identities.sync_global)
+        .label("Keep the global Git config updated with the default identity")
+        .on_toggle(Message::IdentitySyncToggled);
+    column![
+        muted(
+            "Name and email for commits. A repository uses the identity chosen in its \
+             commit panel, otherwise Git's global identity."
+        )
+        .size(12),
+        list,
+        add,
+        field(
+            "Default identity",
+            sync.into(),
+            "While on, setting or editing the default writes user.name and user.email to the \
+             global Git config. Off: the global config is never changed.",
+        ),
+    ]
+    .spacing(16)
+    .into()
 }
 
 fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {

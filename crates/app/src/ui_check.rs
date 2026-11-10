@@ -595,4 +595,40 @@ mod tests {
             snapshot(&start, &format!("preferences-start-{theme}"));
         }
     }
+
+    /// Preferences → Identities with a default (M8-03), both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_identities() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Identities,
+        ));
+        for (name, email) in [
+            ("Ana Lyst", "ana@example.com"),
+            ("Ana Lyst", "ana@work.example"),
+        ] {
+            app.settings
+                .identities
+                .list
+                .push(crate::settings::SavedIdentity {
+                    name: name.into(),
+                    email: email.into(),
+                });
+        }
+        app.settings.identities.default = Some(0);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("identities-{theme}"));
+        }
+        let _ = app.update(Message::IdentityAddStart);
+        snapshot(&app, "identities-add");
+    }
 }

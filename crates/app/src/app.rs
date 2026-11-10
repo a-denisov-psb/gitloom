@@ -402,6 +402,20 @@ pub enum Message {
     SettingsOpened,
     SettingsClosed,
     SettingsCategory(settings::Category),
+    /// Preferences → Identities (M8-03): add, edit, remove (after
+    /// confirmation), set as default, global sync.
+    IdentityAddStart,
+    IdentityEditStart(usize),
+    IdentityRemove {
+        index: usize,
+        confirmed: bool,
+    },
+    IdentitySetDefault(usize),
+    IdentitySyncToggled(bool),
+    /// The global identity was read at start (import on first use).
+    GlobalIdentityRead(Result<Option<git_core::Identity>, String>),
+    /// Writing the default identity to the global config finished.
+    GlobalIdentityWritten(Result<git_core::Identity, String>),
     /// Typed auto-fetch interval (minutes).
     AutoFetchInput(String),
     SettingsSaveDue(u64),
@@ -790,6 +804,8 @@ pub struct App {
     pub system_theme: iced::theme::Mode,
     /// Result of looking for `git`; `None` until detected.
     pub git: Option<git_core::GitAvailability>,
+    /// The default identity is being written to the global config (M8-03).
+    pub identity_writing: bool,
     /// App-wide one-time notice (e.g. Git missing), dismissible.
     pub notice: Option<String>,
     /// Open modal dialog; blocks the rest of the window.
@@ -872,6 +888,7 @@ impl App {
             settings_save_seq: 0,
             system_theme: iced::theme::Mode::None,
             git: None,
+            identity_writing: false,
             notice: None,
             modal: None,
             message_dialog: None,
@@ -1698,6 +1715,34 @@ impl App {
                     git.set_upstream(&local, &upstream)
                 })
             }
+            FormAction::Identity { index } => {
+                let (name, email) = (form.value(0).to_owned(), form.value(1).to_owned());
+                if let Some(problem) = self.settings.identities.problem(&name, &email, index) {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                self.form = None;
+                let saved = settings::SavedIdentity { name, email };
+                let identities = &mut self.settings.identities;
+                let edits_default = match index {
+                    Some(index) => match identities.list.get_mut(index) {
+                        Some(entry) => {
+                            *entry = saved;
+                            identities.default == Some(index)
+                        }
+                        None => return Task::none(),
+                    },
+                    None => {
+                        identities.list.push(saved);
+                        false
+                    }
+                };
+                let save = self.save_settings();
+                if edits_default {
+                    return Task::batch([save, self.sync_global_identity()]);
+                }
+                save
+            }
             FormAction::AddRemote { tab } => {
                 let (name, url) = (form.value(0).to_owned(), form.value(1).to_owned());
                 if let Some(problem) = remote_name_problem(&name, &remotes) {
@@ -2442,6 +2487,9 @@ impl App {
             }
             Shortcut::Settings => return self.open_settings(),
             Shortcut::About => return self.update(Message::AboutOpened),
+            Shortcut::ManageIdentities => {
+                return self.update(Message::SettingsOpenedAt(settings::Category::Identities))
+            }
             Shortcut::DiffView(mode) => return self.update(Message::DiffModeChanged(mode)),
             Shortcut::FlowStart(kind) => return self.update(Message::FlowStartRequested(kind)),
             Shortcut::FlowFinish => {
@@ -4040,6 +4088,63 @@ impl App {
         }
     }
 
+    /// Form dialog to add (`None`) or edit identity `index` (M8-03).
+    fn identity_form(&mut self, index: Option<usize>) -> Task<Message> {
+        let (name, email) = match index {
+            Some(index) => match self.settings.identities.list.get(index) {
+                Some(saved) => (saved.name.clone(), saved.email.clone()),
+                None => return Task::none(),
+            },
+            None => (String::new(), String::new()),
+        };
+        let (title, submit) = match index {
+            Some(_) => ("Edit identity", "Save"),
+            None => ("Add identity", "Add identity"),
+        };
+        self.form = Some(Form {
+            title: title.into(),
+            text: "Name and email as they appear in commits.".into(),
+            fields: vec![
+                FormField::text("Name", &name),
+                FormField::text("Email", &email),
+            ],
+            submit: submit.into(),
+            action: FormAction::Identity { index },
+            error: None,
+        });
+        iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
+    }
+
+    /// Why the default identity cannot be written to the global config now
+    /// (Git missing, a write running); `None` if it can.
+    pub fn global_identity_block(&self) -> Option<String> {
+        if self.identity_writing {
+            return Some("Updating the global Git identity…".into());
+        }
+        self.write_block()
+    }
+
+    /// Writes the default identity to the global config while "Keep the
+    /// global Git config updated" is on (M8-03); never otherwise.
+    fn sync_global_identity(&mut self) -> Task<Message> {
+        let identities = &self.settings.identities;
+        if !identities.sync_global || self.global_identity_block().is_some() {
+            return Task::none();
+        }
+        let Some(identity) = identities.default_identity().map(|s| s.identity()) else {
+            return Task::none();
+        };
+        self.identity_writing = true;
+        Task::perform(
+            blocking(move || {
+                git_core::write_global_identity(&identity)
+                    .map(|()| identity)
+                    .map_err(|e| e.to_string())
+            }),
+            Message::GlobalIdentityWritten,
+        )
+    }
+
     fn open_settings(&mut self) -> Task<Message> {
         self.context_menu = None;
         self.settings_page = Some(settings::Page::new(&self.settings));
@@ -4101,7 +4206,88 @@ impl App {
             Message::SessionLoaded(loaded) => return self.restore(loaded),
             Message::GitDetected(git) => {
                 self.notice = git.reason();
+                let available = git.reason().is_none();
                 self.git = Some(git);
+                // First use: the global identity becomes the first saved
+                // identity and the default (M8-03).
+                if available && self.settings.identities.list.is_empty() {
+                    return Task::perform(
+                        blocking(|| git_core::global_identity().map_err(|e| e.to_string())),
+                        Message::GlobalIdentityRead,
+                    );
+                }
+            }
+            Message::GlobalIdentityRead(result) => {
+                if let Ok(Some(global)) = result {
+                    if self.settings.identities.import(&global) {
+                        return self.save_settings();
+                    }
+                }
+            }
+            Message::GlobalIdentityWritten(result) => {
+                self.identity_writing = false;
+                match result {
+                    Ok(identity) => {
+                        self.status = format!("Global Git identity: {}", identity.label());
+                    }
+                    Err(error) => {
+                        self.modal = Some(Modal::error(
+                            "Could not update the global Git identity",
+                            error,
+                        ));
+                    }
+                }
+            }
+            Message::IdentityAddStart => return self.identity_form(None),
+            Message::IdentityEditStart(index) => return self.identity_form(Some(index)),
+            Message::IdentityRemove {
+                index,
+                confirmed: false,
+            } => {
+                let Some(saved) = self.settings.identities.list.get(index) else {
+                    return Task::none();
+                };
+                let default = self.settings.identities.default == Some(index);
+                let text = if default {
+                    format!(
+                        "Remove {} from the identities? It is the default; the global Git \
+                         config stays as it is.",
+                        saved.label()
+                    )
+                } else {
+                    format!("Remove {} from the identities?", saved.label())
+                };
+                self.modal = Some(Modal::confirm(
+                    "Remove identity",
+                    text,
+                    "Remove",
+                    true,
+                    Message::IdentityRemove {
+                        index,
+                        confirmed: true,
+                    },
+                ));
+            }
+            Message::IdentityRemove {
+                index,
+                confirmed: true,
+            } => {
+                self.settings.identities.remove(index);
+                return self.save_settings();
+            }
+            Message::IdentitySetDefault(index) => {
+                if index >= self.settings.identities.list.len() {
+                    return Task::none();
+                }
+                self.settings.identities.default = Some(index);
+                let save = self.save_settings();
+                return Task::batch([save, self.sync_global_identity()]);
+            }
+            Message::IdentitySyncToggled(on) => {
+                self.settings.identities.sync_global = on;
+                let save = self.save_settings();
+                // Turning it on brings the global config up to date.
+                return Task::batch([save, self.sync_global_identity()]);
             }
             Message::DismissNotice => self.notice = None,
             Message::StatusText(text) => self.status = text,
@@ -5658,6 +5844,16 @@ impl App {
             Message::FormInput { field, value } => {
                 if let Some(field) = self.form.as_mut().and_then(|f| f.fields.get_mut(field)) {
                     field.value = value;
+                }
+                // Identities validate while typing (M8-03).
+                if let Some(form) = self.form.as_mut() {
+                    if let FormAction::Identity { index } = form.action {
+                        form.error = self
+                            .settings
+                            .identities
+                            .problem(form.value(0), form.value(1), index)
+                            .filter(|_| !form.value(0).is_empty() && !form.value(1).is_empty());
+                    }
                 }
             }
             Message::FormClosed => self.form = None,
@@ -9398,6 +9594,133 @@ pub(crate) mod tests {
         let page = app.settings_page.as_ref().unwrap();
         assert_eq!(page.category, Category::General);
         assert!(page.flow.is_none() && page.repo.is_none());
+    }
+
+    fn identities_app() -> App {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(git_available());
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Identities));
+        app
+    }
+
+    fn add_identity(app: &mut App, name: &str, email: &str) {
+        let _ = app.update(Message::IdentityAddStart);
+        form_input(app, 0, name);
+        form_input(app, 1, email);
+        let _ = app.update(Message::FormSubmit);
+    }
+
+    #[test]
+    fn identities_are_added_edited_and_removed() {
+        let mut app = identities_app();
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::Identities
+        );
+        // Import on first use (GitDetected read the global identity).
+        let ana = git_core::Identity::new("Ana", "ana@x.org").unwrap();
+        let _ = app.update(Message::GlobalIdentityRead(Ok(Some(ana.clone()))));
+        assert_eq!(app.settings.identities.list.len(), 1);
+        assert_eq!(app.settings.identities.default, Some(0));
+        let _ = app.update(Message::GlobalIdentityRead(Ok(Some(
+            git_core::Identity::new("Other", "o@x.org").unwrap(),
+        ))));
+        assert_eq!(app.settings.identities.list.len(), 1, "only when empty");
+
+        // Live validation, then a valid entry.
+        let _ = app.update(Message::IdentityAddStart);
+        form_input(&mut app, 0, "Work");
+        form_input(&mut app, 1, "work");
+        assert_eq!(
+            app.form.as_ref().unwrap().error.as_deref(),
+            Some("The email address needs an @")
+        );
+        form_input(&mut app, 1, "work@x.org");
+        assert_eq!(app.form.as_ref().unwrap().error, None);
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(app.settings.identities.list[1].label(), "Work <work@x.org>");
+        // The same identity twice is refused.
+        add_identity(&mut app, "Work", "work@x.org");
+        assert_eq!(
+            app.form.as_ref().unwrap().error.as_deref(),
+            Some("This identity exists already")
+        );
+        let _ = app.update(Message::FormClosed);
+
+        // Edit, then remove after confirmation.
+        let _ = app.update(Message::IdentityEditStart(1));
+        assert_eq!(app.form.as_ref().unwrap().fields[0].value, "Work");
+        form_input(&mut app, 0, "Work Name");
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(app.settings.identities.list[1].name, "Work Name");
+        let _ = app.update(Message::IdentityRemove {
+            index: 1,
+            confirmed: false,
+        });
+        assert_eq!(app.modal.as_ref().unwrap().title, "Remove identity");
+        assert_eq!(app.settings.identities.list.len(), 2, "not yet");
+        let _ = app.update(Message::ModalAction(1));
+        assert_eq!(app.settings.identities.list.len(), 1);
+    }
+
+    #[test]
+    fn the_default_writes_the_global_config_only_while_sync_is_on() {
+        let mut app = identities_app();
+        add_identity(&mut app, "Ana", "ana@x.org");
+        add_identity(&mut app, "Work", "work@x.org");
+        assert!(!app.identity_writing, "adding writes nothing");
+
+        // Sync on (default): setting the default starts a global write.
+        assert!(app.settings.identities.sync_global);
+        let _ = app.update(Message::IdentitySetDefault(1));
+        assert_eq!(app.settings.identities.default, Some(1));
+        assert!(app.identity_writing);
+        // While it runs, default actions are blocked with the reason.
+        assert!(app.global_identity_block().is_some());
+        let work = app.settings.identities.list[1].identity();
+        let _ = app.update(Message::GlobalIdentityWritten(Ok(work)));
+        assert!(!app.identity_writing);
+        assert_eq!(app.status, "Global Git identity: Work <work@x.org>");
+        // Editing the default writes it again.
+        let _ = app.update(Message::IdentityEditStart(1));
+        form_input(&mut app, 1, "work@new.org");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.identity_writing);
+        let _ = app.update(Message::GlobalIdentityWritten(Err("locked".into())));
+        assert_eq!(
+            app.modal.as_ref().unwrap().title,
+            "Could not update the global Git identity"
+        );
+        let _ = app.update(Message::ModalClosed);
+
+        // Sync off: nothing is written, not even for a new default.
+        let _ = app.update(Message::IdentitySyncToggled(false));
+        assert!(!app.identity_writing);
+        let _ = app.update(Message::IdentitySetDefault(0));
+        assert_eq!(app.settings.identities.default, Some(0));
+        assert!(!app.identity_writing);
+        // Turning it on again brings the global config up to date.
+        let _ = app.update(Message::IdentitySyncToggled(true));
+        assert!(app.identity_writing);
+
+        // Without Git the default cannot be written.
+        let mut app = identities_app();
+        add_identity(&mut app, "Ana", "ana@x.org");
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Missing));
+        let _ = app.update(Message::IdentitySetDefault(0));
+        assert!(!app.identity_writing);
+        assert!(app.global_identity_block().is_some());
+    }
+
+    #[test]
+    fn palette_opens_the_identities() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(checked(Shortcut::ManageIdentities, false));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::Identities
+        );
     }
 
     #[test]

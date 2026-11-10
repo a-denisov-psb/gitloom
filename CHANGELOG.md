@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- Preferences → Identities: saved commit identities (name and email) with a default that can keep the global Git config up to date; on first use the global identity is imported. "Manage identities" in the command palette.
+
 ### Changed
 
 - Preferences: the settings of the active tab's repository sit in a group "Repository · <name>" below the global categories (Gitflow for now); on the start screen the group is disabled.
