@@ -65,7 +65,7 @@ Out of scope (later):
 - [x] No toolbar control shows "Not available yet" (M6-17).
 - [x] The left panel lists exactly the remotes Git knows, also after the configuration changed outside Gitloom (M6-18).
 - [x] Context menus are as wide as their longest entry (M6-19).
-- [ ] Empty `[remote "…"]` sections are not shown as remotes (M6-20).
+- [x] Empty `[remote "…"]` sections are not shown as remotes (M6-20).
 - [ ] "Open file location" selects the file in Explorer/Finder for every path, "Copy file path" copies the absolute path (M6-21).
 - [ ] No scrollbar covers content (M6-22); the graph has no gaps between rows at any scale (M6-23).
 - [ ] The project carries one consistent identity everywhere (binary, window title, packages, config dirs, docs); name-dependent values come from `git_core::identity`.
@@ -335,7 +335,7 @@ Acceptance: CI green; the maintainer checks a long-named branch on rc.3 (release
 
 Note (2026-11-10): done. Cherry-picked with `-x`; the conflicts were test-only. The app test runs on a `menu_app` (checkout app plus `develop`) without the Gitflow start menu; `ui_check_wide_context_menu` uses it too. `context_menu_labels_stay_inside_the_menu` fails with the old fixed width of 260 px (checked).
 
-### [ ] M6-20 Remotes without configuration keys
+### [x] M6-20 Remotes without configuration keys
 
 Finding of the maintainer (2026-11-10, rc.2): the remote `github-fc` is still listed and cannot be removed ("Remote github-fc no longer exists"). Root cause found in planning: the repository's `.git/config` contains an empty section `[remote "github-fc"]` without any key. Git does not treat it as a remote (`git remote` does not list it, `git remote remove` answers "No such remote"); `GixBackend::remotes` lists every `remote.<name>` section. Empty sections are left behind when all keys of a section are removed one by one with `git config --unset`.
 
@@ -344,6 +344,8 @@ Finding of the maintainer (2026-11-10, rc.2): the remote `github-fc` is still li
 - CHANGELOG `[1.0.0-rc.3]` → Fixed (see below).
 
 Acceptance: integration tests: an empty section in the local and in the global configuration is not listed; a section with one key is listed; after each of Gitloom's remote operations no empty `remote` section is left. The maintainer confirms that `github-fc` is gone on rc.3.
+
+Note (2026-11-10): done. `GixBackend::remotes` and `external_remotes` share `configured_remote_names`: gix's trusted remote names, kept only if some `remote.<name>` section has a key. Gitloom's own writes were already safe: add, edit URL, rename and remove use `git remote …`, upstreams use `git branch --set-upstream-to/--unset-upstream`; there is no push-URL edit in 1.0. Tests: `tests/empty_remote_section.rs` (the empty section is written directly, since Git 2.43 removes it itself on `--unset` of the last key) and `tests/empty_global_remote.rs` (own binary for `GIT_CONFIG_GLOBAL`); both fail without the fix.
 
 ### [ ] M6-21 Open file location and Copy file path
 
