@@ -8,7 +8,7 @@ A fast, open-source Git client with the workflow GitKraken users already know. N
 
 **[User guide](docs/user/README.md)** · [Releases](https://github.com/a-denisov-psb/gitloom/releases) · [Keyboard shortcuts](docs/UX-PARITY.md#keyboard-shortcuts)
 
-Status: release candidate 1.0.0-rc.3; version 1.0 follows after testing. See the [roadmap](docs/ROADMAP.md).
+Status: release candidate 1.0.0-rc.4; version 1.0 follows after testing. See the [roadmap](docs/ROADMAP.md).
 
 ## Features
 
