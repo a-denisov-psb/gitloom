@@ -554,6 +554,26 @@ impl GitBackend for GixBackend {
         Ok(resolved_identity(config.plumbing()))
     }
 
+    fn ssh_config(&self) -> Result<crate::SshConfig> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        let mut last: Option<(String, crate::ConfigOrigin)> = None;
+        if let Some(sections) = config.plumbing().sections_by_name("core") {
+            for section in sections {
+                if section.header().subsection_name().is_some() {
+                    continue;
+                }
+                if let Some(value) = section.value("sshCommand") {
+                    last = Some((value.to_string(), config_origin(section.meta().source)));
+                }
+            }
+        }
+        Ok(crate::SshConfig::from_value(
+            last.as_ref()
+                .map(|(value, origin)| (value.as_str(), *origin)),
+        ))
+    }
+
     fn flow_config(&self) -> Result<Option<crate::FlowConfig>> {
         let repo = self.local();
         let config = repo.config_snapshot();
@@ -729,12 +749,21 @@ impl GitBackend for GixBackend {
 
 /// Local branches, remote branches (without symbolic `*/HEAD`) and tags with
 /// the commit they point to. Tags pointing to non-commits are skipped.
+/// Configuration file kind of a gix config source.
+fn config_origin(source: gix::config::Source) -> crate::ConfigOrigin {
+    use gix::config::Source;
+    match source {
+        Source::Local | Source::Worktree => crate::ConfigOrigin::Local,
+        Source::User | Source::Git => crate::ConfigOrigin::Global,
+        Source::System | Source::GitInstallation => crate::ConfigOrigin::System,
+        _ => crate::ConfigOrigin::Other,
+    }
+}
+
 /// `user.name` and `user.email` as Git resolves them: the last value in
 /// the files gix read in order (system, global, local), with its file. An
 /// empty value counts as unset (Git refuses an empty identity).
 fn resolved_identity(config: &gix::config::File) -> crate::ResolvedIdentity {
-    use gix::config::Source;
-
     let mut resolved = crate::ResolvedIdentity::default();
     // The same without the repository config ("Use global identity").
     let mut inherited = crate::ResolvedIdentity::default();
@@ -745,12 +774,7 @@ fn resolved_identity(config: &gix::config::File) -> crate::ResolvedIdentity {
         if section.header().subsection_name().is_some() {
             continue;
         }
-        let origin = match section.meta().source {
-            Source::Local | Source::Worktree => crate::ConfigOrigin::Local,
-            Source::User | Source::Git => crate::ConfigOrigin::Global,
-            Source::System | Source::GitInstallation => crate::ConfigOrigin::System,
-            _ => crate::ConfigOrigin::Other,
-        };
+        let origin = config_origin(section.meta().source);
         for (key, slot, inherited_slot) in [
             ("name", &mut resolved.name, &mut inherited.name),
             ("email", &mut resolved.email, &mut inherited.email),

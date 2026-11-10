@@ -10707,6 +10707,11 @@ pub(crate) mod tests {
         assert_eq!(remotes, crate::snapshot::Remotes::of(snapshot));
         remotes.flow = Some(git_core::FlowConfig::defaults(&[]));
         assert_ne!(remotes, crate::snapshot::Remotes::of(snapshot));
+        // So does a changed SSH command (M8-05).
+        let mut remotes = crate::snapshot::Remotes::of(snapshot);
+        remotes.ssh =
+            git_core::SshConfig::from_value(Some(("ssh -v", git_core::ConfigOrigin::Local)));
+        assert_ne!(remotes, crate::snapshot::Remotes::of(snapshot));
         // So does a changed identity (M8-02).
         let mut remotes = crate::snapshot::Remotes::of(snapshot);
         remotes.identity.name = Some(git_core::ConfigValue {

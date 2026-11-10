@@ -128,7 +128,7 @@ Acceptance: integration test: choose an identity → commit → author and commi
 
 Note (2026-11-10): done. One option list (`app::identity_options`) feeds the commit panel menu (context menu at the click, the current entry disabled with "current" on the right), the palette list "Choose identity…" (`palette::Mode::ChooseIdentity`, current entry disabled "In use") and Preferences → Repository → Identity (values with origin, the same entries as buttons). `ResolvedIdentity::inherited` (identity without the repository config) names "Use global identity (<name>)" ("(none set)" when nothing is inherited). "Add identity…" (no identity) adds the identity and uses it in the repository. Writes go through `run_write` (no undo entry); `RepoView::after_write_status` shows "Committing as <name> in <repository>" only on success. `commit_blocker` refuses without an identity, which covers Commit, Amend, Continue (panel and banner) and Stage all and commit; test snapshots now resolve a test identity (`with_test_identity`), like a configured Git. A terminal change refreshes via the config part of the snapshot (M8-02). Tests: `tests/git_identity.rs` (commit author and committer), app tests for the menu entries, the block, choosing, saving, adding and the palette; `ui_check_commit_identity` checked by eye.
 
-### [ ] M8-05 SSH key model (git-core)
+### [x] M8-05 SSH key model (git-core)
 
 - `SshSetting`: `SystemDefault`, `Key(path)` (the form Gitloom writes), `Custom(command)`, each with the origin of `core.sshCommand`.
 - `ssh_command(path)`: forward slashes, double quotes, refuses `"`; parse and format round-trip.
@@ -137,6 +137,8 @@ Note (2026-11-10): done. One option list (`app::identity_options`) feeds the com
 - `CliBackend` sets neither `GIT_SSH` nor `GIT_SSH_COMMAND`, so the configuration applies to every network operation.
 
 Acceptance: unit tests for parse/format (Windows paths, spaces, custom commands) and key discovery in a temporary directory; integration test on Linux and macOS: a fake `ssh` in `PATH` records its arguments, a fetch through Gitloom's network path against `ssh://example.invalid/repo` sees `-i <key>` and `IdentitiesOnly=yes` with a key set and neither with the system default (Windows: release checklist).
+
+Note (2026-11-10): done. `git_core::ssh`: `SshSetting`/`SshConfig` (`GitBackend::ssh_config`, the last `core.sshCommand` value gix read, with its origin), `ssh_command`/`parse_ssh_command` (exactly the written form is a key, everything else custom), `find_keys`, `set_ssh_key`, `unset_ssh_command` (exit code 5 ignored), `is_ssh_url`/`has_ssh_remotes` (also `ssh+git://`; Windows drive paths are not scp-like URLs). The setting is part of the config part of the snapshot (refresh after outside changes). `CliBackend` sets neither `GIT_SSH` nor `GIT_SSH_COMMAND` (checked); a `GIT_SSH_COMMAND` in the user's environment still overrides `core.sshCommand`, as in Git (noted for the user guide, M8-09). `tests/ssh_key.rs` (Unix only, own binary) sets `GIT_SSH_VARIANT=ssh` so Git does not probe the fake ssh with `-G`.
 
 ### [ ] M8-06 SSH key per repository (UI)
 
