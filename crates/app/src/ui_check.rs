@@ -308,4 +308,12 @@ mod tests {
             snapshot(&app, &format!("left-panel-scrollbar-{name}"));
         }
     }
+
+    /// Graph rows with dashed and solid lines across rows (M6-23).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_graph_rows() {
+        let app = ready_app(&["e", "d", "c", "b", "a"]);
+        snapshot(&app, "graph-rows");
+    }
 }

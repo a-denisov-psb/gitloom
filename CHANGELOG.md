@@ -15,6 +15,7 @@ Third release candidate of Gitloom 1.0: fixes for context menus, remotes, file l
 - Windows: "Open file location" selects the file in Explorer, also in folders with spaces in their names.
 - "Copy file path" copies the full path of the file.
 - Scrollbars no longer cover counts and buttons in the left panel and other lists.
+- No more thin gaps between the rows of the commit graph at display scales like 125 %.
 
 ## [1.0.0-rc.2] - 2026-11-09
 
