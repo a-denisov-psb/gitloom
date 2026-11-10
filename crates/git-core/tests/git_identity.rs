@@ -9,7 +9,7 @@ mod support;
 
 use git_core::{
     global_identity, set_identity, unset_local_identity, write_global_identity, CliBackend,
-    ConfigOrigin, GitBackend, GixBackend, Identity, IdentityScope,
+    ConfigOrigin, GitBackend, GitWriter, GixBackend, Identity, IdentityScope,
 };
 use support::TestRepo;
 
@@ -71,10 +71,21 @@ fn identity_resolves_local_over_global_and_writes_cleanly() {
     );
     assert_eq!(resolved.name.as_ref().unwrap().origin, ConfigOrigin::Local);
     assert!(resolved.has_local());
+    assert_eq!(resolved.inherited, Some(identity("Ana Lyst", "ana@x.org")));
     repo.git(&["config", "--local", "--unset", "user.name"]);
     let mixed = backend.identity().unwrap();
     assert_eq!(mixed.identity(), Some(identity("Ana Lyst", "ana@work.org")));
     assert_eq!(mixed.origin(), Some(ConfigOrigin::Local));
+
+    // The next commit uses it as author and committer (M8-04).
+    std::fs::write(repo.path().join("b.txt"), "b\n").unwrap();
+    repo.git(&["add", "b.txt"]);
+    cli.commit("With the repository identity", false).unwrap();
+    // (name from the global config, email from the repository config)
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%an <%ae> / %cn <%ce>"]),
+        "Ana Lyst <ana@work.org> / Ana Lyst <ana@work.org>"
+    );
 
     // Unset local: back to global, no empty [user] section, and a second
     // unset (keys missing) is fine.
@@ -92,6 +103,13 @@ fn identity_resolves_local_over_global_and_writes_cleanly() {
     assert_eq!(
         backend.identity().unwrap().identity(),
         Some(identity("Terminal", "t@x.org"))
+    );
+    std::fs::write(repo.path().join("c.txt"), "c\n").unwrap();
+    repo.git(&["add", "c.txt"]);
+    cli.commit("With a chosen identity", false).unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%an <%ae> / %cn <%ce>"]),
+        "Terminal <t@x.org> / Terminal <t@x.org>"
     );
     // Other keys of the section stay when the identity is unset.
     repo.git(&["config", "--local", "user.signingkey", "ABC"]);

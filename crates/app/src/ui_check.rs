@@ -631,4 +631,31 @@ mod tests {
         let _ = app.update(Message::IdentityAddStart);
         snapshot(&app, "identities-add");
     }
+
+    /// Commit panel with and without an identity, and Preferences →
+    /// Repository → Identity (M8-04), both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_commit_identity() {
+        let mut app = crate::app::tests::identity_commit_app(true);
+        let mut none = crate::app::tests::identity_commit_app(false);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let choice = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            app.settings.appearance.theme = choice;
+            none.settings.appearance.theme = choice;
+            snapshot(&app, &format!("commit-identity-{theme}"));
+            snapshot(&none, &format!("commit-no-identity-{theme}"));
+        }
+        let _ = app.update(Message::IdentityMenu(iced::Point::new(1150.0, 640.0)));
+        snapshot(&app, "commit-identity-menu");
+        app.context_menu = None;
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Identity,
+        ));
+        snapshot(&app, "preferences-repository-identity");
+    }
 }

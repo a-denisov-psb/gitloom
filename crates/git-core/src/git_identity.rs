@@ -92,6 +92,9 @@ pub struct ConfigValue {
 pub struct ResolvedIdentity {
     pub name: Option<ConfigValue>,
     pub email: Option<ConfigValue>,
+    /// The identity without the repository config (global or system), what
+    /// "Use global identity" would give (M8-04).
+    pub inherited: Option<Identity>,
 }
 
 impl ResolvedIdentity {
@@ -233,6 +236,7 @@ mod tests {
         let global = ResolvedIdentity {
             name: value("Ana", ConfigOrigin::Global),
             email: value("ana@x.org", ConfigOrigin::Global),
+            inherited: None,
         };
         assert_eq!(global.identity().unwrap().label(), "Ana <ana@x.org>");
         assert!(!global.has_local());
@@ -246,6 +250,7 @@ mod tests {
         let half = ResolvedIdentity {
             name: value("Ana", ConfigOrigin::System),
             email: None,
+            inherited: None,
         };
         assert_eq!(half.identity(), None);
         assert_eq!(ConfigOrigin::System.description(), "from the system config");

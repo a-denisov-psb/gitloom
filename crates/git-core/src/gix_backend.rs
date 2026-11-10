@@ -736,6 +736,8 @@ fn resolved_identity(config: &gix::config::File) -> crate::ResolvedIdentity {
     use gix::config::Source;
 
     let mut resolved = crate::ResolvedIdentity::default();
+    // The same without the repository config ("Use global identity").
+    let mut inherited = crate::ResolvedIdentity::default();
     let Some(sections) = config.sections_by_name("user") else {
         return resolved;
     };
@@ -749,16 +751,24 @@ fn resolved_identity(config: &gix::config::File) -> crate::ResolvedIdentity {
             Source::System | Source::GitInstallation => crate::ConfigOrigin::System,
             _ => crate::ConfigOrigin::Other,
         };
-        for (key, slot) in [("name", &mut resolved.name), ("email", &mut resolved.email)] {
+        for (key, slot, inherited_slot) in [
+            ("name", &mut resolved.name, &mut inherited.name),
+            ("email", &mut resolved.email, &mut inherited.email),
+        ] {
             if let Some(value) = section.value(key) {
                 let value = value.to_string();
-                *slot = (!value.trim().is_empty()).then(|| crate::ConfigValue {
+                let value = (!value.trim().is_empty()).then(|| crate::ConfigValue {
                     value: value.trim().to_owned(),
                     origin,
                 });
+                if origin != crate::ConfigOrigin::Local {
+                    inherited_slot.clone_from(&value);
+                }
+                *slot = value;
             }
         }
     }
+    resolved.inherited = inherited.identity();
     resolved
 }
 

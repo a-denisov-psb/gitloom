@@ -15,6 +15,8 @@ pub enum Mode {
     Actions,
     OpenRepository,
     CheckoutBranch,
+    /// Identities for the active repository (M8-04).
+    ChooseIdentity,
     /// Tracked files at HEAD, for the file history.
     Files,
 }
@@ -25,6 +27,7 @@ impl Mode {
             Self::Actions => "Type a command",
             Self::OpenRepository => "Open repository: type a name or path",
             Self::CheckoutBranch => "Checkout branch: type a branch name",
+            Self::ChooseIdentity => "Choose identity: type a name or email",
             Self::Files => "File history: type a file path",
         }
     }
@@ -41,6 +44,8 @@ pub enum Target {
     Browse,
     Checkout(CheckoutTarget),
     File(String),
+    /// An identity menu entry (M8-04).
+    Identity(crate::app::IdentityChoice),
 }
 
 #[derive(Debug, Clone, PartialEq)]

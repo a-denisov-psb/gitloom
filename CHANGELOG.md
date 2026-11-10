@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Added
 
 - Preferences → Identities: saved commit identities (name and email) with a default that can keep the global Git config up to date; on first use the global identity is imported. "Manage identities" in the command palette.
+- Commit panel: "Committing as <name> <email>" shows the identity the next commit uses; a click (or "Choose identity…" in the palette, or Preferences → Repository → Identity) uses a saved identity in the repository, returns to the global one or saves the current one. Without an identity, Commit, Amend and Continue are disabled with "Choose an identity first".
 
 ### Changed
 

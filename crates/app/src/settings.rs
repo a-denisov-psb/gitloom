@@ -248,6 +248,8 @@ pub enum Category {
     /// Saved commit identities and the default (M8-03).
     Identities,
     ExternalTools,
+    /// Identity of the active tab's repository (M8-04).
+    Identity,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
 }
@@ -263,7 +265,7 @@ impl Category {
     /// Categories of the active tab's repository, below the group header
     /// "Repository · <name>" (M8-01, like GitKraken's repo-specific
     /// preferences).
-    pub const REPOSITORY: [Self; 1] = [Self::Gitflow];
+    pub const REPOSITORY: [Self; 2] = [Self::Identity, Self::Gitflow];
 
     /// The category belongs to the repository group.
     pub fn is_repository(self) -> bool {
@@ -275,6 +277,7 @@ impl Category {
             Self::General => "General",
             Self::Appearance => "Appearance",
             Self::Identities => "Identities",
+            Self::Identity => "Identity",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
         }
