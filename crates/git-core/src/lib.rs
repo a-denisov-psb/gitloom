@@ -36,8 +36,9 @@ mod watch;
 
 pub use blame::{blame, parse_porcelain, Blame, BlameCommit, BlameGroup, UNCOMMITTED};
 pub use cli_backend::{
-    branch_not_merged, checkout_blocked, detect_git, missing_remote, CliBackend, GitAvailability,
-    GitOutput, GitVersion, GitWriter, RunOptions, MIN_GIT_VERSION,
+    branch_not_merged, checkout_blocked, detect_git, global_identity, missing_remote,
+    write_global_identity, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter,
+    RunOptions, MIN_GIT_VERSION,
 };
 pub use conflict::{
     with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,

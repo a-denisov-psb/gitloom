@@ -105,7 +105,7 @@ Acceptance: integration tests: local over global, unset local falls back to glob
 
 Note (2026-11-10): done. `git_core::git_identity`: `Identity` with `identity_problem` (also refuses `<`/`>` in the name, which Git would reject), `ConfigOrigin`, `ResolvedIdentity` (`GitBackend::identity`, read by `GixBackend` from the `user` sections in load order, the last non-empty value wins, empty values count as unset), `set_identity` (local/global) and `unset_local_identity` (`--unset-all`, exit code 5 ignored, `--remove-section user` only when no `user.*` key is left, so e.g. `user.signingkey` stays). The identity is part of the config part of the snapshot (`snapshot::Remotes`), so the refs/config check refreshes the tab after an outside `git config` change. Tests: `tests/git_identity.rs` (own binary, temporary `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`), unit tests in the module, `a_changed_gitflow_config_counts_as_changed_refs` extended.
 
-### [ ] M8-03 Identities in the Preferences
+### [x] M8-03 Identities in the Preferences
 
 - `settings.json` gains `identities` (list of name and email, default, `sync_global` = true); older files load unchanged (missing = empty list, sync on), settings version unchanged.
 - Import of the global identity on first use (decisions table).
@@ -114,6 +114,8 @@ Note (2026-11-10): done. `git_core::git_identity`: `Identity` with `identity_pro
 - Palette: "Manage identities" opens the category.
 
 Acceptance: unit tests for validation, settings migration and import; app tests: setting the default writes the global config while sync is on and writes nothing while it is off; snapshot of the category in both themes.
+
+Note (2026-11-10): done. `settings.identities` (`list`, `default` index, `sync_global`); an out-of-range default is dropped on load. Import: after Git is detected and while the list is empty, `git_core::global_identity` (runs `git config --global` outside any repository) feeds `GlobalIdentityRead`; so an emptied list imports again at the next start (the planned rule, not a one-time flag). Global writes (`git_core::write_global_identity`) run off the UI thread with `App::identity_writing` as busy flag; while Git is missing or a write runs, "Set as default" and "Edit" of the default are disabled with the reason (only while sync is on). Decisions: turning the sync option on writes the current default once ("keep updated"); removing the default asks for confirmation and leaves the global config untouched. The form validates while typing (after both fields have text) and again on submit. Snapshot `ui_check_identities` (both themes and the Add dialog) checked by eye.
 
 ### [ ] M8-04 Identity per repository
 

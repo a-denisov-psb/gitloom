@@ -78,6 +78,8 @@ pub enum ActionId {
     Settings,
     /// About dialog (palette and Preferences).
     About,
+    /// Opens Preferences → Identities (M8-03).
+    ManageIdentities,
     /// Toolbar actions in the palette (M6-07: every action by keyboard).
     Pull,
     Push,
@@ -770,6 +772,13 @@ fn table() -> Vec<Action> {
     add(
         A::About,
         &format!("About {}", git_core::identity::DISPLAY_NAME),
+        Interface,
+        Global,
+        &[],
+    );
+    add(
+        A::ManageIdentities,
+        "Manage identities",
         Interface,
         Global,
         &[],

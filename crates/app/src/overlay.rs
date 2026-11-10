@@ -239,6 +239,8 @@ pub enum FormAction {
     },
     /// Add a remote (name, URL).
     AddRemote { tab: crate::app::TabId },
+    /// Add (`None`) or edit a saved identity (name, email; M8-03).
+    Identity { index: Option<usize> },
     /// Finish Git flow branch `branch` (options; M7-10).
     FinishFlow {
         tab: crate::app::TabId,

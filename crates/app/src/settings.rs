@@ -23,6 +23,103 @@ pub struct Settings {
     pub appearance: Appearance,
     pub tools: ExternalTools,
     pub diff: DiffSettings,
+    /// Commit identities (M8-03, ADR-041): only name and email are kept
+    /// here; repositories store their choice in their own Git config.
+    pub identities: Identities,
+}
+
+/// A saved identity (name and email).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedIdentity {
+    pub name: String,
+    pub email: String,
+}
+
+impl SavedIdentity {
+    pub fn identity(&self) -> git_core::Identity {
+        git_core::Identity {
+            name: self.name.clone(),
+            email: self.email.clone(),
+        }
+    }
+
+    pub fn label(&self) -> String {
+        self.identity().label()
+    }
+}
+
+impl From<&git_core::Identity> for SavedIdentity {
+    fn from(identity: &git_core::Identity) -> Self {
+        Self {
+            name: identity.name.clone(),
+            email: identity.email.clone(),
+        }
+    }
+}
+
+/// Preferences → Identities (M8-03).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Identities {
+    pub list: Vec<SavedIdentity>,
+    /// Index of the default identity in `list`.
+    pub default: Option<usize>,
+    /// "Keep the global Git config updated with the default identity".
+    pub sync_global: bool,
+}
+
+impl Default for Identities {
+    fn default() -> Self {
+        Self {
+            list: Vec::new(),
+            default: None,
+            sync_global: true,
+        }
+    }
+}
+
+impl Identities {
+    /// The default identity, if any.
+    pub fn default_identity(&self) -> Option<&SavedIdentity> {
+        self.default.and_then(|index| self.list.get(index))
+    }
+
+    /// Why `name`/`email` cannot be saved (as entry `editing`, if given):
+    /// invalid, or the same name and email exist already.
+    pub fn problem(&self, name: &str, email: &str, editing: Option<usize>) -> Option<String> {
+        if let Some(problem) = git_core::identity_problem(name, email) {
+            return Some(problem.to_owned());
+        }
+        let duplicate = self.list.iter().enumerate().any(|(index, saved)| {
+            Some(index) != editing && saved.name == name.trim() && saved.email == email.trim()
+        });
+        duplicate.then(|| "This identity exists already".to_owned())
+    }
+
+    /// Removes entry `index`; the default follows its entry (none when the
+    /// default itself is removed).
+    pub fn remove(&mut self, index: usize) {
+        if index >= self.list.len() {
+            return;
+        }
+        self.list.remove(index);
+        self.default = match self.default {
+            Some(d) if d == index => None,
+            Some(d) if d > index => Some(d - 1),
+            other => other,
+        };
+    }
+
+    /// Imports the global identity when the list is empty (first use):
+    /// it becomes the first entry and the default. Returns whether it did.
+    pub fn import(&mut self, global: &git_core::Identity) -> bool {
+        if !self.list.is_empty() {
+            return false;
+        }
+        self.list.push(SavedIdentity::from(global));
+        self.default = Some(0);
+        true
+    }
 }
 
 /// Diff view mode (M7-01, ADR-038): one global setting.
@@ -69,6 +166,7 @@ impl Default for Settings {
             appearance: Appearance::default(),
             tools: ExternalTools::default(),
             diff: DiffSettings::default(),
+            identities: Identities::default(),
         }
     }
 }
@@ -147,6 +245,8 @@ pub struct ExternalTools {
 pub enum Category {
     General,
     Appearance,
+    /// Saved commit identities and the default (M8-03).
+    Identities,
     ExternalTools,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
@@ -154,7 +254,12 @@ pub enum Category {
 
 impl Category {
     /// Categories that apply everywhere, at the top of the list.
-    pub const GLOBAL: [Self; 3] = [Self::General, Self::Appearance, Self::ExternalTools];
+    pub const GLOBAL: [Self; 4] = [
+        Self::General,
+        Self::Appearance,
+        Self::Identities,
+        Self::ExternalTools,
+    ];
     /// Categories of the active tab's repository, below the group header
     /// "Repository · <name>" (M8-01, like GitKraken's repo-specific
     /// preferences).
@@ -169,6 +274,7 @@ impl Category {
         match self {
             Self::General => "General",
             Self::Appearance => "Appearance",
+            Self::Identities => "Identities",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
         }
@@ -282,6 +388,14 @@ pub fn parse(text: &str) -> Result<Settings, ParseError> {
         .auto_fetch_minutes
         .min(MAX_AUTO_FETCH_MINUTES);
     settings.appearance.zoom_percent = clamp_zoom(settings.appearance.zoom_percent);
+    // A default that points nowhere (edited file) is dropped.
+    let identities = &mut settings.identities;
+    if identities
+        .default
+        .is_some_and(|d| d >= identities.list.len())
+    {
+        identities.default = None;
+    }
     Ok(settings)
 }
 
@@ -409,6 +523,69 @@ pub fn parse_auto_fetch(input: &str) -> Result<u32, String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn identities_load_from_older_files_and_round_trip() {
+        // Files written before M8-03 have no "identities": empty, sync on.
+        let old = parse(r#"{"version": 1, "general": {"auto_fetch_minutes": 7}}"#).unwrap();
+        assert_eq!(old.identities, Identities::default());
+        assert!(old.identities.sync_global);
+        assert_eq!(old.version, VERSION, "version unchanged");
+
+        let mut settings = Settings::default();
+        settings.identities.list.push(SavedIdentity {
+            name: "Ana".into(),
+            email: "ana@x.org".into(),
+        });
+        settings.identities.default = Some(0);
+        settings.identities.sync_global = false;
+        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
+
+        // A default pointing nowhere is dropped.
+        let broken = parse(r#"{"identities": {"list": [], "default": 3}}"#).unwrap();
+        assert_eq!(broken.identities.default, None);
+    }
+
+    #[test]
+    fn identity_list_rules() {
+        let ana = git_core::Identity::new("Ana", "ana@x.org").unwrap();
+        let mut identities = Identities::default();
+        // First use: the global identity becomes the first one and default.
+        assert!(identities.import(&ana));
+        assert_eq!(
+            identities.default_identity().unwrap().label(),
+            "Ana <ana@x.org>"
+        );
+        assert!(!identities.import(&ana), "only into an empty list");
+
+        identities.list.push(SavedIdentity {
+            name: "Work".into(),
+            email: "work@x.org".into(),
+        });
+        assert_eq!(
+            identities.problem(" Ana ", "ana@x.org", None).as_deref(),
+            Some("This identity exists already")
+        );
+        assert_eq!(
+            identities.problem("Ana", "ana@x.org", Some(0)),
+            None,
+            "itself"
+        );
+        assert_eq!(
+            identities.problem("Ana", "no-at", None).as_deref(),
+            Some("The email address needs an @")
+        );
+        assert_eq!(identities.problem("Bo", "bo@x.org", None), None);
+
+        // Removing shifts the default; removing the default clears it.
+        identities.default = Some(1);
+        identities.remove(0);
+        assert_eq!(identities.default, Some(0));
+        identities.remove(0);
+        assert_eq!(identities.default, None);
+        identities.remove(5);
+        assert!(identities.list.is_empty());
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir =

@@ -8,8 +8,8 @@
 mod support;
 
 use git_core::{
-    set_identity, unset_local_identity, CliBackend, ConfigOrigin, GitBackend, GixBackend, Identity,
-    IdentityScope,
+    global_identity, set_identity, unset_local_identity, write_global_identity, CliBackend,
+    ConfigOrigin, GitBackend, GixBackend, Identity, IdentityScope,
 };
 use support::TestRepo;
 
@@ -32,6 +32,14 @@ fn identity_resolves_local_over_global_and_writes_cleanly() {
     let resolved = backend.identity().unwrap();
     assert_eq!(resolved.identity(), None);
     assert_eq!(resolved.origin(), None);
+    assert_eq!(global_identity().unwrap(), None);
+
+    // Global read and write outside any repository (M8-03).
+    write_global_identity(&identity("First Name", "first@x.org")).unwrap();
+    assert_eq!(
+        global_identity().unwrap(),
+        Some(identity("First Name", "first@x.org"))
+    );
 
     // Global write.
     set_identity(
