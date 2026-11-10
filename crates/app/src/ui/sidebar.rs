@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use git_core::{RefKind, Reference};
-use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
+use iced::widget::{button, column, container, row, space, text, text_input};
 use iced::{Element, Fill};
 
 use crate::app::Message;
@@ -105,7 +105,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
 
     let content = column![
         container(filter).padding(8),
-        scrollable(container(sections).padding([0, 4])).height(Fill),
+        crate::ui::vscroll(container(sections).padding([0, 4])).height(Fill),
     ];
 
     container(content)

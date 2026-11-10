@@ -2,8 +2,8 @@
 
 use git_core::{Commit, DiffKind, DiffRequest, FileChange};
 use iced::widget::{
-    button, checkbox, column, container, hover, row, scrollable, space, text, text_editor,
-    text_input, tooltip, Column,
+    button, checkbox, column, container, hover, row, space, text, text_editor, text_input, tooltip,
+    Column,
 };
 use iced::{Element, Fill, FillPortion};
 
@@ -81,7 +81,7 @@ fn multi_selection(view: &RepoView) -> Element<'_, Message> {
     let content = column![
         text(format!("{count} commits selected")).size(16),
         actions,
-        scrollable(commits).height(Fill),
+        crate::ui::vscroll(commits).height(Fill),
     ]
     .spacing(12)
     .padding(12);
@@ -336,7 +336,7 @@ fn details<'a>(
         .spacing(8)
         .padding(12);
 
-    scrollable(content).height(Fill).into()
+    crate::ui::vscroll(content).height(Fill).into()
 }
 
 /// "email · authored date", without the separator when the email is empty.
@@ -401,7 +401,7 @@ fn file_section<'a>(
 
     column![
         header,
-        scrollable(Column::with_children(files)).height(Fill)
+        crate::ui::vscroll(Column::with_children(files)).height(Fill)
     ]
     .height(FillPortion(1))
     .into()

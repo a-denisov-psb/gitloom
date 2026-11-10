@@ -360,13 +360,15 @@ Acceptance: unit tests for the helper (subfolder, spaces, umlauts, `#`, `&`, `,`
 
 Note (2026-11-10): done. `launch::repo_file_path` (string core `native_join`, testable for every platform) builds the path; `reveal_file` takes an `exists` check, starts in the nearest existing folder on every platform (a deleted folder cannot be the working directory) and on Windows passes `/select,"<path>"` as `Launch::raw_arg` (`CommandExt::raw_arg`), or opens the nearest existing folder for a deleted file. In 1.0 the file entries exist only in the file context menu (staging lists including conflicts, commit file list); the file history and the conflict view have no file-path entries on this line. The crash report "Open report folder" uses the same reveal.
 
-### [ ] M6-22 Scrollbars cover content
+### [x] M6-22 Scrollbars cover content
 
 Finding of the maintainer (2026-11-10): when the left panel scrolls, its scrollbar covers the section counts.
 
 - Every vertical scrollable whose rows have right-aligned content (left panel, staging lists, commit file list, Preferences, palette lists and the other lists with counts or buttons on the right) reserves room for its scrollbar, so content is never drawn below it (embedded scrollbar or a matching right padding).
 
 Acceptance: `iced_test` snapshot of the left panel with enough branches to scroll, counts fully visible, both themes; existing snapshots otherwise unchanged except for the reserved space.
+
+Note (2026-11-10): done. `ui::vscroll` is a scrollable with an embedded scrollbar (`Scrollable::spacing`, gap 2 px): iced narrows the content by the bar's width only while the bar is shown, so lists that do not scroll keep their layout. Used by the left panel, the staging lists, the commit details with the file list, the multi-commit list, Preferences, the palette lists, the shortcut list and the third-party list in About (both had a fixed right padding of 12 px before), the file history list and the interactive rebase list. Not changed: the graph (its header row is outside the scrollable and the columns must stay aligned; the SHA column is not right-aligned) and the diff, blame and conflict code views (left-aligned text). Tests: `left_panel_counts_stay_clear_of_the_scrollbar` (layout, runs always; without the fix the count ends exactly at the scrollbar's left edge, the test asks for the 2 px gap) and `ui_check_left_panel_scrollbar_both_themes` (rendered with tiny-skia and checked by eye).
 
 ### [ ] M6-23 Gaps between graph rows
 
