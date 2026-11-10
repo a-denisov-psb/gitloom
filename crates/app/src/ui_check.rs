@@ -658,4 +658,56 @@ mod tests {
         ));
         snapshot(&app, "preferences-repository-identity");
     }
+
+    /// Preferences → Repository → SSH key with a chosen key (M8-06), both
+    /// themes, and a custom command waiting for "Replace…".
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_ssh_key() {
+        let mut app = crate::app::tests::ssh_app();
+        crate::app::tests::set_ssh(
+            &mut app,
+            git_core::SshConfig {
+                setting: git_core::SshSetting::Key("/home/me/.ssh/id_work".into()),
+                origin: Some(git_core::ConfigOrigin::Local),
+            },
+        );
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("ssh-key-{theme}"));
+        }
+        crate::app::tests::set_ssh(
+            &mut app,
+            git_core::SshConfig {
+                setting: git_core::SshSetting::Custom("ssh -F ~/.ssh/work".into()),
+                origin: Some(git_core::ConfigOrigin::Local),
+            },
+        );
+        snapshot(&app, "ssh-key-custom");
+    }
+
+    /// An inherited core.sshCommand is shown with its origin (M8-06).
+    #[test]
+    fn inherited_ssh_command_shows_its_origin() {
+        let mut app = crate::app::tests::ssh_app();
+        crate::app::tests::set_ssh(
+            &mut app,
+            git_core::SshConfig {
+                setting: git_core::SshSetting::Custom("ssh -v".into()),
+                origin: Some(git_core::ConfigOrigin::Global),
+            },
+        );
+        let mut sim = simulator(&app);
+        let text = "Inherited from the global config: custom command ssh -v. Choosing a key \
+                    overrides it for this repository.";
+        assert!(sim.find(text).is_ok());
+        assert!(sim
+            .find("Inherited (from the global config) · current")
+            .is_ok());
+        assert!(sim.find("This repository has no SSH remotes").is_ok());
+    }
 }

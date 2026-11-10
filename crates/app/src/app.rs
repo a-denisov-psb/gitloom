@@ -489,6 +489,17 @@ pub enum Message {
     },
     IdentitySetDefault(usize),
     IdentitySyncToggled(bool),
+    /// Preferences → Repository → SSH key (M8-06): keys found in `~/.ssh`,
+    /// a choice (`None`: system default), the file dialog and the path
+    /// input, replacing a custom command after confirmation.
+    SshKeysLoaded(Vec<PathBuf>),
+    SshKeyChosen(Option<PathBuf>),
+    SshBrowse,
+    SshPathInput(String),
+    SshPathSubmit,
+    SshReplace {
+        confirmed: bool,
+    },
     /// Commit panel: "Committing as …" opens the identity menu (M8-04).
     IdentityMenu(iced::Point),
     /// An identity menu entry was chosen for the active repository.
@@ -4244,6 +4255,58 @@ impl App {
         task
     }
 
+    /// Writes the SSH key (or the system default) of the active repository
+    /// (M8-06). A custom `core.sshCommand` in the repository config is only
+    /// replaced after "Replace…" was confirmed.
+    fn choose_ssh_key(&mut self, key: Option<PathBuf>) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some((custom, name)) = self.tab_mut(tab).and_then(|t| t.view()).map(|view| {
+            let ssh = &view.snapshot.ssh;
+            (
+                matches!(ssh.setting, git_core::SshSetting::Custom(_))
+                    && ssh.origin == Some(git_core::ConfigOrigin::Local),
+                view.name().to_owned(),
+            )
+        }) else {
+            return Task::none();
+        };
+        let confirmed = self.settings_page.as_ref().is_some_and(|p| p.ssh_replace);
+        if custom && !confirmed {
+            return self.update(Message::SshReplace { confirmed: false });
+        }
+        let (status, task) = match key {
+            Some(key) => {
+                if let Err(error) = git_core::ssh::ssh_command(&key) {
+                    self.status = error.to_string();
+                    return Task::none();
+                }
+                let file = key.file_name().map_or_else(
+                    || key.display().to_string(),
+                    |f| f.to_string_lossy().into_owned(),
+                );
+                let status = format!("SSH key for {name}: {file}");
+                let task = self.run_write(tab, "Set SSH key", move |git| {
+                    git_core::ssh::set_ssh_key(git, &key)
+                });
+                (status, task)
+            }
+            None => {
+                let status = format!("SSH key for {name}: system default");
+                let task = self.run_write(tab, "Use the system SSH default", |git| {
+                    git_core::ssh::unset_ssh_command(git)
+                });
+                (status, task)
+            }
+        };
+        self.set_after_write_status(tab, status);
+        if let Some(page) = &mut self.settings_page {
+            page.ssh_path.clear();
+        }
+        task
+    }
+
     /// Shows `status` when the write just started in `tab` succeeds.
     fn set_after_write_status(&mut self, tab: TabId, status: String) {
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
@@ -4403,6 +4466,56 @@ impl App {
                     }
                 }
             }
+            Message::SshKeysLoaded(keys) => {
+                if let Some(page) = &mut self.settings_page {
+                    page.ssh_keys = Some(keys);
+                }
+            }
+            Message::SshBrowse => {
+                return Task::perform(
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Choose an SSH key")
+                        .pick_file(),
+                    |file| match file {
+                        Some(file) => Message::SshKeyChosen(Some(file.path().to_path_buf())),
+                        None => Message::StatusText(String::new()),
+                    },
+                );
+            }
+            Message::SshPathInput(path) => {
+                if let Some(page) = &mut self.settings_page {
+                    page.ssh_path = path;
+                }
+            }
+            Message::SshPathSubmit => {
+                let path = self
+                    .settings_page
+                    .as_ref()
+                    .map(|p| p.ssh_path.trim().to_owned())
+                    .unwrap_or_default();
+                if !path.is_empty() {
+                    return self.update(Message::SshKeyChosen(Some(PathBuf::from(path))));
+                }
+            }
+            Message::SshReplace { confirmed: false } => {
+                self.modal = Some(Modal::confirm(
+                    "Replace the SSH command",
+                    format!(
+                        "This repository has its own core.sshCommand that {} did not write. \
+                         Replace it with a key or the system default?",
+                        git_core::identity::DISPLAY_NAME
+                    ),
+                    "Replace…",
+                    true,
+                    Message::SshReplace { confirmed: true },
+                ));
+            }
+            Message::SshReplace { confirmed: true } => {
+                if let Some(page) = &mut self.settings_page {
+                    page.ssh_replace = true;
+                }
+            }
+            Message::SshKeyChosen(key) => return self.choose_ssh_key(key),
             Message::IdentityMenu(position) => {
                 let Some(view) = self.active_tab().and_then(Tab::view) else {
                     return Task::none();
@@ -4811,6 +4924,26 @@ impl App {
                     page.category = category;
                     if category.is_repository() {
                         page.repo = repo;
+                    }
+                    if category == settings::Category::SshKey {
+                        page.ssh_replace = false;
+                        page.ssh_path.clear();
+                        if page.ssh_keys.is_none() {
+                            return Task::perform(
+                                blocking(|| {
+                                    Ok::<_, String>(
+                                        directories::BaseDirs::new()
+                                            .map(|dirs| {
+                                                git_core::ssh::find_keys(
+                                                    &dirs.home_dir().join(".ssh"),
+                                                )
+                                            })
+                                            .unwrap_or_default(),
+                                    )
+                                }),
+                                |keys| Message::SshKeysLoaded(keys.unwrap_or_default()),
+                            );
+                        }
                     }
                     if category == settings::Category::Gitflow {
                         page.flow = flow.as_ref().map(settings::FlowForm::new);
@@ -5507,9 +5640,14 @@ impl App {
                         }
                     }
                     Err(error) => {
+                        let ssh = self
+                            .tab_mut(tab)
+                            .and_then(|t| t.view())
+                            .map(|v| v.snapshot.ssh.clone())
+                            .unwrap_or_default();
                         self.modal = Some(match git_core::locked_file(&error) {
                             Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
-                            None => match auth_hint(&error) {
+                            None => match auth_hint_with_key(&error, &ssh) {
                                 Some(hint) => {
                                     Modal::error(format!("{label} failed"), error).with_text(hint)
                                 }
@@ -7308,10 +7446,13 @@ impl App {
                         }
                     }
                     reload = view.reload_diff;
-                    pull_failure = view
-                        .pull_failure
-                        .take()
-                        .map(|error| (error, view.snapshot.state.clone()));
+                    pull_failure = view.pull_failure.take().map(|error| {
+                        (
+                            error,
+                            view.snapshot.state.clone(),
+                            view.snapshot.ssh.clone(),
+                        )
+                    });
                     // The operation ended outside Gitloom: its entry is gone.
                     if view.busy.is_none() && view.snapshot.state.is_clean() {
                         view.pending_history = None;
@@ -7320,8 +7461,8 @@ impl App {
                         empty_pick = view.empty_pick().then(|| empty_pick_dialog(&view.snapshot));
                     }
                 }
-                if let Some((error, state)) = pull_failure {
-                    self.modal = Some(pull_failed_dialog(error, &state));
+                if let Some((error, state, ssh)) = pull_failure {
+                    self.modal = Some(pull_failed_dialog(error, &state, &ssh));
                 }
                 if let Some(dialog) = empty_pick.flatten() {
                     self.modal = Some(dialog);
@@ -8001,12 +8142,16 @@ fn pull_blocker(snapshot: &RepoSnapshot) -> Option<&'static str> {
 
 /// Dialog after a failed pull: a conflict left a merge or rebase behind
 /// (resolution comes with M4, abort is offered), or a plain error.
-fn pull_failed_dialog(error: String, state: &git_core::RepoState) -> Modal {
+fn pull_failed_dialog(
+    error: String,
+    state: &git_core::RepoState,
+    ssh: &git_core::SshConfig,
+) -> Modal {
     let operation = match state {
         git_core::RepoState::Merging { .. } => "merge",
         git_core::RepoState::Rebasing { .. } => "rebase",
         _ => {
-            return match auth_hint(&error) {
+            return match auth_hint_with_key(&error, ssh) {
                 Some(hint) => Modal::error("Pull failed", error).with_text(hint),
                 None => Modal::error("Pull failed", error),
             }
@@ -8077,6 +8222,19 @@ fn auto_fetch_state(view: &RepoView) -> crate::fetch::TabState {
 }
 
 /// Hint for authentication failures in Git's output (ADR-019).
+/// [`auth_hint`], plus which key the repository uses when Gitloom set one
+/// (M8-06).
+fn auth_hint_with_key(error: &str, ssh: &git_core::SshConfig) -> Option<String> {
+    let hint = auth_hint(error)?;
+    match (&ssh.setting, ssh.origin) {
+        (git_core::SshSetting::Key(key), Some(git_core::ConfigOrigin::Local)) => Some(format!(
+            "{hint} Uses SSH key {} (Preferences → Repository → SSH key).",
+            key.display()
+        )),
+        _ => Some(hint),
+    }
+}
+
 fn auth_hint(error: &str) -> Option<String> {
     let name = git_core::identity::DISPLAY_NAME;
     let lower = error.to_lowercase();
@@ -9832,7 +9990,7 @@ pub(crate) mod tests {
         use settings::Category;
         assert_eq!(
             Category::REPOSITORY,
-            [Category::Identity, Category::Gitflow]
+            [Category::Identity, Category::SshKey, Category::Gitflow]
         );
         assert!(Category::Gitflow.is_repository());
         assert!(!Category::GLOBAL.iter().any(|c| c.is_repository()));
@@ -10205,6 +10363,132 @@ pub(crate) mod tests {
         // Without a repository the action is disabled.
         let (start, _) = App::new(Vec::new(), None);
         assert!(start.action_block(Shortcut::ChooseIdentity).is_some());
+    }
+
+    pub(crate) fn set_ssh(app: &mut App, ssh: git_core::SshConfig) {
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.ssh = ssh;
+        view.snapshot = Arc::new(snapshot);
+    }
+
+    pub(crate) fn ssh_app() -> App {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::SshKey));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, settings::Category::SshKey);
+        assert_eq!(page.ssh_keys, None, "loading");
+        let _ = app.update(Message::SshKeysLoaded(vec![PathBuf::from(
+            "/home/me/.ssh/id_work",
+        )]));
+        app
+    }
+
+    #[test]
+    fn choosing_an_ssh_key_writes_the_repository_config() {
+        let mut app = ssh_app();
+        assert_eq!(
+            app.settings_page
+                .as_ref()
+                .unwrap()
+                .ssh_keys
+                .as_ref()
+                .unwrap()
+                .len(),
+            1
+        );
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SshKeyChosen(Some(PathBuf::from(
+            "/home/me/.ssh/id_work",
+        ))));
+        assert_eq!(running_args(&app), ["Set SSH key"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Set SSH key".into(),
+            result: Ok(None),
+        });
+        assert_eq!(app.status, "SSH key for mock: id_work");
+
+        // The system default removes it.
+        set_ssh(
+            &mut app,
+            git_core::SshConfig {
+                setting: git_core::SshSetting::Key("/home/me/.ssh/id_work".into()),
+                origin: Some(git_core::ConfigOrigin::Local),
+            },
+        );
+        let _ = app.update(Message::SshKeyChosen(None));
+        assert_eq!(running_args(&app), ["Use the system SSH default"]);
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Use the system SSH default".into(),
+            result: Ok(None),
+        });
+        assert_eq!(app.status, "SSH key for mock: system default");
+
+        // A typed path; one with a double quote is refused.
+        let _ = app.update(Message::SshPathInput("/keys/a\"b".into()));
+        let _ = app.update(Message::SshPathSubmit);
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        assert!(app.status.contains("double quote"), "{}", app.status);
+        let _ = app.update(Message::SshPathInput("/keys/other".into()));
+        let _ = app.update(Message::SshPathSubmit);
+        assert_eq!(running_args(&app), ["Set SSH key"]);
+    }
+
+    #[test]
+    fn a_custom_ssh_command_is_replaced_only_after_confirmation() {
+        let mut app = ssh_app();
+        set_ssh(
+            &mut app,
+            git_core::SshConfig {
+                setting: git_core::SshSetting::Custom("ssh -F ~/.ssh/work_config".into()),
+                origin: Some(git_core::ConfigOrigin::Local),
+            },
+        );
+        let _ = app.update(Message::SshKeyChosen(None));
+        assert!(app.tabs[0].view().unwrap().busy.is_none(), "not replaced");
+        assert_eq!(app.modal.as_ref().unwrap().title, "Replace the SSH command");
+        let _ = app.update(Message::ModalAction(1));
+        assert!(app.settings_page.as_ref().unwrap().ssh_replace);
+        let _ = app.update(Message::SshKeyChosen(Some(PathBuf::from(
+            "/home/me/.ssh/id_work",
+        ))));
+        assert_eq!(running_args(&app), ["Set SSH key"]);
+
+        // An inherited value (global config) is overridden without asking.
+        let mut app = ssh_app();
+        set_ssh(
+            &mut app,
+            git_core::SshConfig {
+                setting: git_core::SshSetting::Custom("ssh -v".into()),
+                origin: Some(git_core::ConfigOrigin::Global),
+            },
+        );
+        let _ = app.update(Message::SshKeyChosen(Some(PathBuf::from("/k"))));
+        assert!(app.modal.is_none());
+        assert_eq!(running_args(&app), ["Set SSH key"]);
+    }
+
+    #[test]
+    fn auth_errors_name_the_chosen_key() {
+        let error = "git@github.com: Permission denied (publickey).";
+        let none = git_core::SshConfig::default();
+        assert!(!auth_hint_with_key(error, &none)
+            .unwrap()
+            .contains("Uses SSH key"));
+        let key = git_core::SshConfig {
+            setting: git_core::SshSetting::Key("/home/me/.ssh/id_work".into()),
+            origin: Some(git_core::ConfigOrigin::Local),
+        };
+        let hint = auth_hint_with_key(error, &key).unwrap();
+        assert!(
+            hint.ends_with(
+                "Uses SSH key /home/me/.ssh/id_work (Preferences → Repository → SSH key)."
+            ),
+            "{hint}"
+        );
+        assert_eq!(auth_hint_with_key("fatal: other", &key), None);
     }
 
     #[test]
