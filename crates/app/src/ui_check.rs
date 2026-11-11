@@ -1130,6 +1130,55 @@ mod tests {
         assert!((header - row).abs() < 0.5, "{header} vs {row}");
     }
 
+    /// Panel toggles (M11-14): a click on a toolbar toggle hides the panel
+    /// and the button's state follows; not on the start screen. Layout only.
+    #[test]
+    fn panel_toggles_in_the_toolbar() {
+        let mut app = crate::app::tests::graph_app();
+        let mut sim = simulator(&app);
+        assert!(sim.find("Branch").is_ok(), "repository toolbar");
+        drop(sim);
+        // Press the left toggle: it is the second to last widget of the
+        // toolbar; find it by its position at the right end.
+        let size = SIZE;
+        let mut sim = simulator(&app);
+        let settings = sim.find("Settings").unwrap_or_else(|e| panic!("{e}"));
+        let settings = iced_test::selector::Bounded::bounds(&settings);
+        // Right of "Settings": 8 px gap, then the left and the right toggle.
+        let left = iced::Point::new(
+            settings.x + settings.width + 8.0 + 15.0,
+            settings.center_y(),
+        );
+        assert!(left.x < size.0);
+        sim.point_at(left);
+        let _ = sim.simulate(iced_test::simulator::click());
+        for message in sim.into_messages().collect::<Vec<_>>() {
+            let _ = app.update(message);
+        }
+        assert!(!app.panes.sidebar_visible);
+        // The start screen has no toolbar and no toggles.
+        let (start, _) = App::new(Vec::new(), None);
+        let mut sim = simulator(&start);
+        assert!(sim.find("Branch").is_err());
+    }
+
+    /// Toolbar with both panels shown and hidden (M11-14).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_panel_toggles() {
+        let mut app = crate::app::tests::graph_app();
+        snapshot(&app, "panels-shown");
+        let _ = app.update(crate::app::tests::checked(
+            crate::shortcuts::Shortcut::ToggleSidebar,
+            false,
+        ));
+        let _ = app.update(crate::app::tests::checked(
+            crate::shortcuts::Shortcut::TogglePanel,
+            false,
+        ));
+        snapshot(&app, "panels-hidden");
+    }
+
     /// Preferences modal (M11-13): a click on the backdrop does not close it,
     /// and the app behind is out of reach for focus and Tab. Layout only.
     #[test]

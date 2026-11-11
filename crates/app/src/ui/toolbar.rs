@@ -112,6 +112,7 @@ pub fn view(
     pull_mode: git_core::PullMode,
     compact: bool,
     blocks: Pickers,
+    panels: Panels,
 ) -> Element<'_, Message> {
     let pickers = row![
         picker(
@@ -156,10 +157,64 @@ pub fn view(
             .then(|| action(view, compact, ToolbarAction::Editor)),
     )
     .push(settings_button(compact))
+    .push(space::horizontal().width(8))
+    .push(panel_toggle(PanelToggle::Left, panels.left))
+    .push(panel_toggle(PanelToggle::Right, panels.right))
     .padding([4, 12])
     .align_y(iced::Center);
 
     container(content).width(Fill).style(theme::chrome).into()
+}
+
+/// Which side panels are shown (M11-14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Panels {
+    pub left: bool,
+    pub right: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelToggle {
+    Left,
+    Right,
+}
+
+/// Tooltip of a panel toggle: what a click does, with its shortcut.
+pub fn panel_tooltip(toggle: PanelToggle, shown: bool) -> String {
+    let (name, action) = match toggle {
+        PanelToggle::Left => ("left panel", crate::actions::ActionId::ToggleSidebar),
+        PanelToggle::Right => ("commit panel", crate::actions::ActionId::TogglePanel),
+    };
+    let verb = if shown { "Hide" } else { "Show" };
+    match action.shortcut_text() {
+        Some(keys) => format!("{verb} {name} ({keys})"),
+        None => format!("{verb} {name}"),
+    }
+}
+
+/// Toggle of the left or the commit panel at the right end of the toolbar,
+/// like VS Code; highlighted while the panel is shown (M11-14).
+fn panel_toggle<'a>(toggle: PanelToggle, shown: bool) -> Element<'a, Message> {
+    let (icon, shortcut) = match toggle {
+        PanelToggle::Left => (Icon::PanelLeft, Shortcut::ToggleSidebar),
+        PanelToggle::Right => (Icon::PanelRight, Shortcut::TogglePanel),
+    };
+    with_tooltip_text(
+        button(icons::icon(icon, 16.0))
+            // Like the shortcut, without asking which widget has the focus.
+            .on_press(Message::ShortcutChecked {
+                shortcut,
+                text_input_focused: false,
+            })
+            .padding([5, 6])
+            .style(if shown {
+                theme::mode_active
+            } else {
+                theme::flat
+            })
+            .into(),
+        panel_tooltip(toggle, shown),
+    )
 }
 
 /// Gear button: opens the settings view (Ctrl+,).

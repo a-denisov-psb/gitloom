@@ -62,10 +62,13 @@ pub enum Icon {
     CheckSquare,
     /// External editor (M8-08).
     Editor,
+    /// Toolbar toggles of the left and the commit panel (M11-14).
+    PanelLeft,
+    PanelRight,
 }
 
 impl Icon {
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 43] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -107,6 +110,8 @@ impl Icon {
         Self::FolderOpen,
         Self::CheckSquare,
         Self::Editor,
+        Self::PanelLeft,
+        Self::PanelRight,
     ];
 
     /// SVG source of the icon.
@@ -158,6 +163,8 @@ impl Icon {
             Self::FolderOpen => lucide!("folder-open"),
             Self::CheckSquare => lucide!("square-check"),
             Self::Editor => lucide!("code-xml"),
+            Self::PanelLeft => lucide!("panel-left"),
+            Self::PanelRight => lucide!("panel-right"),
         }
     }
 
