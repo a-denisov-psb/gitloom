@@ -812,6 +812,20 @@ fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
             "Fetches all remotes of open repositories in the background. 0 turns auto-fetch off.",
         ),
         field(
+            "Prune remote branches on fetch",
+            iced::widget::toggler(settings.general.prune_on_fetch)
+                .on_toggle(Message::PruneToggled)
+                .label(if settings.general.prune_on_fetch {
+                    "On"
+                } else {
+                    "Off"
+                })
+                .into(),
+            "Fetch, auto-fetch and pull remove remote branches that were deleted on the remote. \
+             Off: Git's fetch.prune setting applies.",
+        ),
+        long_paths(page),
+        field(
             "Default branch name",
             default_branch.into(),
             "Used when creating new repositories (init.defaultBranch in the global Git config); \
@@ -829,6 +843,23 @@ fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
     ]
     .spacing(18)
     .into()
+}
+
+/// "Support long paths" (`core.longpaths`, global; Windows only, M10-08).
+fn long_paths(page: &Page) -> Element<'_, Message> {
+    if !cfg!(windows) {
+        return space::vertical().height(0).into();
+    }
+    let on = page.long_paths.unwrap_or(false);
+    let mut toggle = iced::widget::toggler(on).label(if on { "On" } else { "Off" });
+    if page.long_paths.is_some() {
+        toggle = toggle.on_toggle(Message::LongPathsToggled);
+    }
+    field(
+        "Support long paths",
+        toggle.into(),
+        "Lets Git use paths longer than 260 characters (core.longpaths in the global Git config).",
+    )
 }
 
 /// Segmented control: one button per option, the chosen one highlighted.
@@ -884,6 +915,18 @@ fn appearance(app: &App) -> Element<'_, Message> {
                 .label(if appearance.avatars { "On" } else { "Off" })
                 .into(),
             "Sends a hash of each author's email address to gravatar.com",
+        ),
+        field(
+            "Show toolbar labels",
+            iced::widget::toggler(appearance.toolbar_labels)
+                .on_toggle(Message::ToolbarLabelsToggled)
+                .label(if appearance.toolbar_labels {
+                    "On"
+                } else {
+                    "Off"
+                })
+                .into(),
+            "Off: icons only, the names are in the tooltips.",
         ),
     ]
     .spacing(18)
@@ -1030,6 +1073,15 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
             "Command for Alt+T and the toolbar's Terminal button; {path} is the repository folder. Empty: the first terminal found.",
         ))
         .push(field("External editor", editor_control(settings, page), EDITOR_NOTE))
+        .push(field(
+            "Delete .orig files after merging",
+            iced::widget::toggler(tools.delete_orig)
+                .on_toggle(Message::DeleteOrigToggled)
+                .label(if tools.delete_orig { "On" } else { "Off" })
+                .into(),
+            "The merge tool leaves no .orig backup next to the resolved file \
+             (mergetool.keepBackup=false).",
+        ))
         .into()
 }
 

@@ -702,6 +702,15 @@ mod tests {
         snapshot(&app, "preferences-templates");
     }
 
+    /// Toolbar without labels (M10-08).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_toolbar_without_labels() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::ToolbarLabelsToggled(false));
+        snapshot(&app, "toolbar-without-labels");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

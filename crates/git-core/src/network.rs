@@ -120,8 +120,15 @@ pub fn fast_forward_args(remote: &str, remote_branch: &str, local: &str) -> Vec<
 }
 
 /// Arguments to fetch one remote (remote context menu "Fetch").
-pub fn fetch_remote_args(remote: &str) -> Vec<String> {
-    ["fetch", "--progress", remote].map(str::to_owned).to_vec()
+/// `prune`: also delete remote-tracking branches gone on the remote
+/// (Preferences → General, M10-08).
+pub fn fetch_remote_args(remote: &str, prune: bool) -> Vec<String> {
+    let mut args: Vec<String> = ["fetch", "--progress"].map(str::to_owned).to_vec();
+    if prune {
+        args.push("--prune".into());
+    }
+    args.push(remote.to_owned());
+    args
 }
 
 /// Arguments to push tag `name` to `remote`.

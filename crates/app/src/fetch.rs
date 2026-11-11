@@ -11,22 +11,31 @@ pub const DEFAULT_INTERVAL_MINUTES: u32 = 5;
 /// (busy tab, merge in progress).
 pub const RETRY: Duration = Duration::from_secs(60);
 
-/// `git fetch --all` (pruning follows the user's `fetch.prune` setting).
-pub fn fetch_all(background: bool) -> NetworkRequest {
+/// `git fetch --all`; `prune` adds `--prune` (Preferences → General,
+/// M10-08), otherwise the user's `fetch.prune` setting applies.
+pub fn fetch_all(background: bool, prune: bool) -> NetworkRequest {
+    let mut args: Vec<String> = vec!["fetch".into(), "--all".into(), "--progress".into()];
+    if prune {
+        args.push("--prune".into());
+    }
     NetworkRequest {
         label: if background { "Auto-fetch" } else { "Fetch" }.into(),
         kind: NetworkKind::Fetch,
-        args: vec!["fetch".into(), "--all".into(), "--progress".into()],
+        args,
         background,
     }
 }
 
-/// `git pull` in `mode`.
-pub fn pull(mode: git_core::PullMode) -> NetworkRequest {
+/// `git pull` in `mode`; `prune` adds `--prune` for its fetch.
+pub fn pull(mode: git_core::PullMode, prune: bool) -> NetworkRequest {
+    let mut args: Vec<String> = mode.args().iter().map(|s| s.to_string()).collect();
+    if prune {
+        args.push("--prune".into());
+    }
     NetworkRequest {
         label: "Pull".into(),
         kind: NetworkKind::Pull,
-        args: mode.args().iter().map(|s| s.to_string()).collect(),
+        args,
         background: false,
     }
 }
@@ -143,8 +152,23 @@ mod tests {
 
     #[test]
     fn fetch_request_is_background_only_for_auto_fetch() {
-        assert!(fetch_all(true).background);
-        assert_eq!(fetch_all(false).label, "Fetch");
-        assert_eq!(fetch_all(false).args, ["fetch", "--all", "--progress"]);
+        assert!(fetch_all(true, false).background);
+        assert_eq!(fetch_all(false, false).label, "Fetch");
+        assert_eq!(
+            fetch_all(false, false).args,
+            ["fetch", "--all", "--progress"]
+        );
+        assert_eq!(
+            fetch_all(true, true).args,
+            ["fetch", "--all", "--progress", "--prune"]
+        );
+        assert_eq!(
+            pull(git_core::PullMode::Rebase, true).args,
+            ["pull", "--rebase", "--progress", "--prune"]
+        );
+        assert_eq!(
+            pull(git_core::PullMode::FastForwardOnly, false).args,
+            ["pull", "--ff-only", "--progress"]
+        );
     }
 }

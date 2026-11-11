@@ -89,7 +89,7 @@ fn mergetool_resolves_the_conflict() {
     repo.commit("c.txt", "ours\n", "main");
     assert!(!repo.try_git(&["merge", "side"]));
     let cli = CliBackend::new(repo.path());
-    run_mergetool(&cli, Some("fakemerge"), "c.txt").unwrap();
+    run_mergetool(&cli, Some("fakemerge"), "c.txt", false).unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("c.txt")).unwrap(),
         "theirs\n"

@@ -156,7 +156,9 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
         }
         TabState::Ready(view) => {
             // Labelled toolbar buttons need about 1 100 logical pixels.
-            let compact = app.window_size().width < 1100.0;
+            // Icons only when the window is narrow or labels are off (M10-08).
+            let compact =
+                app.window_size().width < 1100.0 || !app.settings.appearance.toolbar_labels;
             let pickers = toolbar::Pickers {
                 repository: app.action_block(crate::shortcuts::Shortcut::OpenRepoPalette),
                 branch: app.action_block(crate::shortcuts::Shortcut::CheckoutBranch),

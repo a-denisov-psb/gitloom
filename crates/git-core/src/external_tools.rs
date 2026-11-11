@@ -128,8 +128,14 @@ pub fn difftool_args(
     args
 }
 
-pub fn mergetool_args(tool: Option<&str>, path: &str) -> Vec<String> {
-    let mut args = vec!["mergetool".to_owned(), "--no-prompt".to_owned()];
+/// `delete_orig`: no `.orig` backup is left after merging
+/// (`mergetool.keepBackup=false`, M10-08).
+pub fn mergetool_args(tool: Option<&str>, path: &str, delete_orig: bool) -> Vec<String> {
+    let mut args = Vec::new();
+    if delete_orig {
+        args.extend(["-c".to_owned(), "mergetool.keepBackup=false".to_owned()]);
+    }
+    args.extend(["mergetool".to_owned(), "--no-prompt".to_owned()]);
     if let Some(tool) = tool {
         args.push(format!("--tool={tool}"));
     }
@@ -155,8 +161,13 @@ pub fn run_difftool(
 }
 
 /// Opens the conflicted `path` in the merge tool and waits until it exits.
-pub fn run_mergetool(git: &dyn GitWriter, tool: Option<&str>, path: &str) -> Result<()> {
-    let args = mergetool_args(tool, path);
+pub fn run_mergetool(
+    git: &dyn GitWriter,
+    tool: Option<&str>,
+    path: &str,
+    delete_orig: bool,
+) -> Result<()> {
+    let args = mergetool_args(tool, path, delete_orig);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     git.run(&args, RunOptions::default()).map(|_| ())
 }
@@ -246,8 +257,19 @@ mod tests {
             ]
         );
         assert_eq!(
-            mergetool_args(Some("kdiff3"), "c.txt"),
+            mergetool_args(Some("kdiff3"), "c.txt", false),
             ["mergetool", "--no-prompt", "--tool=kdiff3", "--", "c.txt"]
+        );
+        assert_eq!(
+            mergetool_args(None, "c.txt", true),
+            [
+                "-c",
+                "mergetool.keepBackup=false",
+                "mergetool",
+                "--no-prompt",
+                "--",
+                "c.txt"
+            ]
         );
     }
 }
