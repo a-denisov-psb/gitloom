@@ -60,7 +60,7 @@ Answer what you can in GitKraken before or during M8. Claude Code decides the re
 - [x] A key chosen for a repository is used by fetch, pull and push of that repository (scripted test with a fake `ssh`); "System default" restores the previous behavior; a foreign `core.sshCommand` is never replaced without confirmation.
 - [x] The repository and single files open in the configured editor from every entry point, also with `code.cmd` on Windows.
 - [x] Changes to `user.*` or `core.sshCommand` made outside Gitloom appear without a restart.
-- [ ] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
+- [x] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
 - [ ] Released as `v1.2.0` after `v1.1.0`.
 
 ## Task overview
