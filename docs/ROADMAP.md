@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M9 – Fixes and consistency** → [`milestones/M9-fixes-and-consistency.md`](milestones/M9-fixes-and-consistency.md)
+**M10 – Clone, init and Git settings** → [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md)
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M13 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -25,8 +25,8 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M6 | 1.0.0 | Release readiness | Done except M6-10 (SignPath), M6-13 (checklist run) and M6-15 (release) |
 | M7 | 1.0.0 | Left panel tree, diff view modes and Git flow | Done |
 | M8 | 1.0.0 | Repository settings and tools | Done |
-| M9 | 1.0.0 | Fixes and consistency | Current |
-| M10 | 1.0.0 | Clone, init and Git settings | Planned |
+| M9 | 1.0.0 | Fixes and consistency | Done |
+| M10 | 1.0.0 | Clone, init and Git settings | Current |
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Planned |
 | M12 | 1.0.0 | Workflow polish | Planned |
 | M13 | 1.0.0 | Git flow graph layout | Planned |
@@ -69,11 +69,11 @@ Branch folders, icons, highlighted checked-out branch and hidden-branch counter 
 
 Preferences group "Repository · <name>" (Identity, SSH key, Gitflow); identities with a default kept in the global Git config; "Committing as …" in the commit panel; SSH key per repository via `core.sshCommand`; external editor for the repository and single files. Ships with 1.0.0 (ADR-042). Details: [`milestones/M8-repository-settings.md`](milestones/M8-repository-settings.md).
 
-### M9 – Fixes and consistency (current)
+### M9 – Fixes and consistency (done)
 
 Stash pop/apply that stops in conflicts becomes a normal conflict with a banner, "Drop stash" and Undo back to the exact state before; discard and reset work while files are conflicted; reset on the HEAD commit; sharp icons at fractional zoom; left panel order and GITFLOW content like GitKraken; character counter inside the summary field. Details: [`milestones/M9-fixes-and-consistency.md`](milestones/M9-fixes-and-consistency.md).
 
-### M10 – Clone, init and Git settings (planned)
+### M10 – Clone, init and Git settings (current)
 
 - Start screen like GitKraken's New Tab: Open a repo, Clone a repo, Start a local repo; recent repositories with name and path; Customize (Preferences, Manage identities); Resources (user guide, report an issue; links open the browser). No hosted-repo creation, no boards.
 - Clone: URL, parent folder, name, full path preview, progress and cancel, askpass, submodules recursive; opens in a tab.

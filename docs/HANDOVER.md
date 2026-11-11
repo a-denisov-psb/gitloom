@@ -20,9 +20,11 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (single release line to 1.0.0, ADR-042; M9 current, 2026-11-11)
+## Current state (single release line to 1.0.0, ADR-042; M9 done, M10 current, 2026-11-11)
 
-- 2026-11-11 (ADR-042): no releases until 1.0.0. M7 and M8 ship with 1.0.0; `release/1.1.0` merged into `develop` and deleted; `master` stays at `v1.0.0-rc.4`. M9 … M13 run on `develop` one after another; 1.0.0 (M6-15) only when the maintainer asks, after the full release-checklist run. New principles: undo everything local (ADR-043), no dead ends (ADR-044).
+- M9 (2026-11-11, on `develop`): done. Stash pop/apply that conflicts is a normal conflict with a banner, Undo back to the exact state before and Drop/Keep stash (M9-01, M9-02; also undo/redo of clean pops and applies); conflicted files can be discarded, undoably (M9-03); reset on the HEAD commit, resets record unmerged index entries (M9-04); icons snap to whole physical pixels (M9-05); left panel order and GITFLOW tree like GitKraken (M9-06); summary counter inside the field (M9-07); docs and release checklist section 7c (M9-08). Also: the fetch-cancel test counts zombie helpers as stopped (containers whose PID 1 does not reap). Windows checks of M9 are in section 7c.
+
+- 2026-11-11 (ADR-042): no releases until 1.0.0. M7 and M8 ship with 1.0.0; `release/1.1.0` merged into `develop` (deleting the remote branch is a maintainer to-do: the session gets HTTP 403); `master` stays at `v1.0.0-rc.4`. M9 … M13 run on `develop` one after another; 1.0.0 (M6-15) only when the maintainer asks, after the full release-checklist run. New principles: undo everything local (ADR-043), no dead ends (ADR-044).
 
 M6 status (details in the task notes of `docs/milestones/M6-release-readiness.md`):
 
