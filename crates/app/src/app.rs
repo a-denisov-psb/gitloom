@@ -696,6 +696,10 @@ pub enum Message {
     UnstageAll,
     CopyToClipboard(String),
     WindowResized(iced::Size),
+    /// The main window opened: ask for its scale factor (M9-05).
+    WindowOpened(window::Id),
+    /// The operating system's scale factor of the window (M9-05).
+    SystemScaleChanged(f32),
     GitDetected(git_core::GitAvailability),
     DismissNotice,
     /// A write operation finished (success or Git error).
@@ -947,6 +951,8 @@ pub struct App {
     window_size: iced::Size,
     /// Scale factor when `window_size` was reported.
     window_scale: f32,
+    /// Scale factor of the window from the operating system (M9-05).
+    system_scale: f32,
     /// Number of the last flashed status message.
     status_seq: u64,
     /// Mode of the toolbar Pull button (persisted in the session).
@@ -1014,6 +1020,7 @@ impl App {
             recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
             window_scale: 1.0,
+            system_scale: 1.0,
             status_seq: 0,
             pull_mode: git_core::PullMode::default(),
             auto_fetch_at: None,
@@ -4254,6 +4261,12 @@ impl App {
         self.settings.appearance.zoom_percent as f32 / 100.0
     }
 
+    /// Physical pixels per logical pixel: zoom × the operating system's
+    /// scale factor; icons snap to it (M9-05).
+    pub fn physical_scale(&self) -> f32 {
+        self.scale_factor() * self.system_scale
+    }
+
     /// Window size in the current zoom's logical pixels (menus are kept
     /// inside it).
     pub fn window_size(&self) -> iced::Size {
@@ -5619,6 +5632,14 @@ impl App {
             Message::WindowResized(size) => {
                 self.window_size = size;
                 self.window_scale = self.scale_factor();
+            }
+            Message::WindowOpened(id) => {
+                return window::scale_factor(id).map(Message::SystemScaleChanged);
+            }
+            Message::SystemScaleChanged(scale) => {
+                if scale.is_finite() && scale > 0.0 {
+                    self.system_scale = scale;
+                }
             }
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
             Message::DiffLineClicked(row) => {
@@ -8671,8 +8692,10 @@ impl iced::advanced::widget::Operation<bool> for AnyFocused {
 }
 
 /// Maps window events and keyboard shortcuts no widget handled.
-fn global_event(event: Event, status: event::Status, _window: window::Id) -> Option<Message> {
+fn global_event(event: Event, status: event::Status, window: window::Id) -> Option<Message> {
     match event {
+        Event::Window(window::Event::Opened { .. }) => Some(Message::WindowOpened(window)),
+        Event::Window(window::Event::Rescaled(scale)) => Some(Message::SystemScaleChanged(scale)),
         Event::Window(window::Event::Focused) => Some(Message::WindowFocused),
         Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
