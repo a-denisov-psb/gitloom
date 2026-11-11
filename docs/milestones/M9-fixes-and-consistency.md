@@ -147,11 +147,13 @@ Acceptance: layout test for the header order; tree tests (mixed order, prefixes 
 
 Note (2026-11-11): done. `sidebar::section_order` (unit test) builds the column; `left_panel_sections_are_ordered_like_gitkraken` (renamed from M7-15's layout test) checks the header positions. Pure tree `branch_tree::gitflow` (tests: mixed order, custom prefix such as `feat-`, missing main branches, collapsed folder, filter). The remainder after the prefix stays one label (`feature/ui/toolbar` → "feature" › "ui/toolbar"), not further split: only the prefix is a folder, as planned. Collapse keys `gitflow:<type>` kept from M7-08. `ui_check_gitflow_section` re-rendered and checked (develop, feature, main, release like the GitKraken screenshot). LOCAL/REMOTE keep folders first (open verification item). UX-PARITY updated, deviation removed.
 
-### [ ] M9-07 Summary counter inside the field
+### [x] M9-07 Summary counter inside the field
 
 - Counter inside the field per the decisions table.
 
 Acceptance: snapshots of the commit panel with 69, 5 and −3 characters left in both themes; long summaries never overlap the counter.
+
+Note (2026-11-11): done. The counter is a layer over the summary field (`stack`), right aligned with 8 px margin; the field has 40 px right padding, enough for "-999" at 11 px. Levels in `counter_level` (unit test). Summary and description have the same width now. Snapshots `ui_check_summary_counter` (69, 5, −3; dark/light) checked: text is clipped before the counter.
 
 ### [ ] M9-08 Documentation
 
