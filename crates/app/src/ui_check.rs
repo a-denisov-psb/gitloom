@@ -1187,6 +1187,99 @@ mod tests {
         assert!((header - row).abs() < 0.5, "{header} vs {row}");
     }
 
+    /// Performance of highlighting and word wrap (M11-10): highlighting a
+    /// 1 MB Rust file, the plain fallback of a 2 MB file, and frames of a
+    /// wrapped 2 MB diff at several scroll positions (layout of the whole
+    /// window). Run in release:
+    /// `cargo test -p gitloom --release perf_highlight_and_wrap -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "performance measurement"]
+    fn perf_highlight_and_wrap() {
+        use std::time::Instant;
+        let line = |i: usize| {
+            format!(
+                "    let value_{i} = compute(\"text {i}\", {i}); // comment {i} with some words\n"
+            )
+        };
+        let mut one_mb = String::from("fn main() {\n");
+        while one_mb.len() < 1000 * 1024 - 200 {
+            one_mb.push_str(&line(one_mb.len()));
+        }
+        one_mb.push_str("}\n");
+        let lines = one_mb.lines().count();
+        let start = Instant::now();
+        let outcome =
+            crate::highlight::highlight("big.rs", &one_mb, crate::highlight::CodeTheme::Dark);
+        eprintln!(
+            "PERF highlight 1 MB ({lines} lines): {:?} ({})",
+            start.elapsed(),
+            matches!(outcome, crate::highlight::Outcome::Highlighted(_))
+        );
+        let two_mb = one_mb.repeat(2);
+        let start = Instant::now();
+        let outcome =
+            crate::highlight::highlight("big.rs", &two_mb, crate::highlight::CodeTheme::Dark);
+        eprintln!(
+            "PERF highlight 2 MB (plain): {:?} ({outcome:?})",
+            start.elapsed()
+        );
+
+        // A wrapped 2 MB diff: every line changed.
+        let mut app = crate::app::tests::staging_app(&["big.rs"], &[]);
+        let _ = app.update(Message::DiffModeChanged(crate::settings::DiffMode::Inline));
+        let _ = app.update(Message::EditorWordWrapToggled(true));
+        let request = git_core::DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "big.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let new = two_mb.replace("comment", "remark");
+        let start = Instant::now();
+        let text = git_core::text_diff_with(
+            two_mb.as_bytes(),
+            new.as_bytes(),
+            git_core::DiffContext::Full,
+        );
+        eprintln!("PERF diff of 2 MB: {:?}", start.elapsed());
+        let tab = app.tabs[0].id;
+        let start = Instant::now();
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: git_core::DiffContext::Full,
+            result: Ok(git_core::FileDiff {
+                old_path: Some("big.rs".into()),
+                new_path: Some("big.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        eprintln!(
+            "PERF load wrapped diff ({} rows): {:?}",
+            crate::app::tests::open_diff(&app).rows.len(),
+            start.elapsed()
+        );
+        let rows = crate::app::tests::open_diff(&app).rows.len() as f32;
+        let mut worst = std::time::Duration::ZERO;
+        for step in 0..20 {
+            let offset = step as f32 / 19.0 * rows * 20.0;
+            let _ = app.update(Message::DiffScrolled {
+                offset,
+                height: 800.0,
+                width: 1000.0,
+            });
+            let start = Instant::now();
+            // View, layout and one update of the whole window.
+            let mut sim = simulator(&app);
+            let _ = sim.find("big.rs");
+            worst = worst.max(start.elapsed());
+        }
+        eprintln!("PERF wrapped frame (view + layout), worst of 20 positions: {worst:?}");
+    }
+
     /// README screenshot (M11-15): a scripted fixture repository with
     /// fictional authors (branches in folders, a merge, tags, a stash, Git
     /// flow, a dirty working tree), Dark, 1600 × 900 at 100 %.

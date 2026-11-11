@@ -117,6 +117,19 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] External editor per repository: set one in Repository → External editor; Alt+E, the toolbar button and "Open in external editor" use it; "Use global setting" goes back.
 - [ ] Support long paths on: `git config --global core.longpaths` is true; a file in a path over 260 characters can be staged. Prune on: a branch deleted on the remote disappears after Fetch. Delete .orig files: the merge tool leaves no `.orig`. Toolbar labels off: icons with tooltips.
 
+## 7e. New in M11 (Windows required, Linux checked in CI)
+
+- [ ] Classic Dark: rows tinted in the lane color, filled branch and tag labels joined to their commit by a line, ringed nodes, header separators, panel shadows; selected and hovered rows stay readable.
+- [ ] Columns: resize every column incl. Commit message; only that column changes; a double click fits it (Commit message: back to filling); a horizontal scrollbar appears when the table is wider than the window, Shift+wheel and a horizontal touchpad gesture scroll it and the header moves along; the gear menu hides Author/Date/SHA and resets the widths; widths survive a restart.
+- [ ] Stashes: dashed square with the stash icon, "WIP on <branch>" in the graph, STASHES and the details; "Stash" without a template writes Git's default message.
+- [ ] Preferences → Editor: Consolas (and Cascadia Mono if installed) in the font list and applied to diffs, blame, file history and the conflict view; font size, tab size, line numbers, word wrap and syntax highlighting take effect at once.
+- [ ] Syntax highlighting in Hunk, Inline and Split, blame, file history and the conflict view (both columns and the editable output); a multi-line comment is right across hunks; a file over 1 MB shows "Too large for syntax highlighting"; scrolling a wrapped 2 MB diff stays fluid.
+- [ ] Left panel: branches before folders in LOCAL, REMOTE, GITFLOW and TAGS; tag folders collapse; the checked-out branch has a check next to its branch icon, also inside a folder.
+- [ ] Start screen: the three buttons have one size and the accent color in all themes, the "Ctrl+O" line is readable.
+- [ ] Preferences open as a centered window over the dimmed app; × and Esc close it, a click beside it does not, Tab stays inside; a small window shows them full size.
+- [ ] Toolbar toggles hide and show the left and the commit panel, in step with Ctrl+J / Ctrl+K.
+- [ ] The README screenshot matches the app.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
