@@ -162,11 +162,13 @@ Acceptance: unit tests for the builder (order of parts, template present/absent,
 
 Note (2026-11-11): done. Builder in git-core `prompt` (`gather` runs `git` in the background, `build` is pure); the diff of a file is taken whole or omitted, so a cut never falls inside a hunk. The template in the prompt follows "Remove comments" of M10-06. Preferences → Templates (new global category after Signing, planning update 2026-11-11) holds the instruction with "Reset to default"; the stash message section follows in M10-10. Entry points: context menu of the Staged Files header (new, with "Unstage all changes"), staged file menu, palette action "Copy commit message prompt…" (disabled with "Stage changes first"). Ctrl+C copies while the dialog is open (only when no widget handled the key). Tests: unit tests in `prompt.rs`, `crates/git-core/tests/prompt.rs`, app `copy_commit_prompt_needs_staged_changes`, `prompt_dialog_copies_and_closes`, `prompt_instruction_is_edited_and_reset`, settings migration test; snapshots `ui_check_commit_prompt` checked.
 
-### [ ] M10-08 Small options
+### [x] M10-08 Small options
 
 - Auto-prune, `.orig` files, long paths (Windows only), toolbar labels per the decisions table.
 
 Acceptance: unit tests for the fetch and mergetool arguments; settings migration test; toolbar snapshot without labels.
+
+Note (2026-11-11): done. `fetch_all`, `pull` and `fetch_remote_args` take the prune flag (also the remote's context menu fetch); `mergetool_args`/`run_mergetool` take `delete_orig` (`-c mergetool.keepBackup=false` before the subcommand). "Show toolbar labels" off uses the existing compact toolbar (icons with the names as tooltips). "Support long paths" is shown on Windows only and reads/writes the global `core.longpaths` in the background (unset when off). Tests: `fetch::tests`, `external_tools` unit test, settings migration `small_options_load_from_older_files`, app `small_options_are_saved`; snapshot `ui_check_toolbar_without_labels` checked.
 
 ### [ ] M10-09 Documentation
 
