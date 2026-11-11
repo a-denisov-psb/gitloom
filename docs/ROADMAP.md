@@ -27,7 +27,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M8 | 1.0.0 | Repository settings and tools | Done |
 | M9 | 1.0.0 | Fixes and consistency | Current |
 | M10 | 1.0.0 | Clone, init and Git settings | Planned |
-| M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Outline |
+| M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Planned |
 | M12 | 1.0.0 | Workflow polish | Outline |
 | M13 | 1.0.0 | Git flow graph layout | Outline |
 
@@ -84,13 +84,15 @@ Stash pop/apply that stops in conflicts becomes a normal conflict with a banner,
 
 Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md).
 
-### M11 – Graph columns, themes and syntax highlighting (outline)
+### M11 – Graph columns, themes and syntax highlighting (planned)
 
 - Graph columns: drag column borders, double click for optimal width, column menu (gear in the header) to show/hide branch/tag, graph, message, author, date, SHA; replaces the automatic hiding of columns.
 - Theme "Classic Dark": the palette gains style tokens (row tint in the lane color, filled ref pills with a line to the node, header bands, column separators, panel depth); Dark and Light keep their current look through token values.
 - Stash node like GitKraken: dashed square with a stash icon in its own lane right of the base commit, dotted connector; an empty stash message shows as "WIP on <branch>" (graph and STASHES section).
 - Syntax highlighting in diffs, blame, file history and the conflict view: syntect with the `two-face` syntax set; whole old/new files highlighted in the background and mapped to diff lines, cached per blob, size limit, colors per theme.
 - Preferences → Editor like GitKraken: font, font size, tab size, line numbers, word wrap, syntax highlighting on/off.
+
+Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-themes-highlighting.md).
 
 ### M12 – Workflow polish (outline)
 
