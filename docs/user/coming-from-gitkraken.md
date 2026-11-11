@@ -49,5 +49,9 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
 - **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.
 - **SSH key per repository** (Preferences → Repository → SSH key) instead of one global key; it is Git's own `core.sshCommand`.
+- **Signing** is Preferences → Signing (GPG or SSH) instead of GitKraken's GPG page; there is no key generator.
+- **Commit template** lives in Preferences → Repository → Commit; the **commit message prompt** and the **stash message template** are on a global Templates page (Gitloom extensions).
+- **External editor** can be set per repository in addition to the global one.
+- The start screen has no hosted repositories, boards or account features.
 - **Editor** button and Alt+E open the external editor, next to Terminal (Alt+T).
 - Git flow needs no `git-flow` tool; a hotfix finished while a release branch exists is merged into the development branch (see [Git flow](git-flow.md)).

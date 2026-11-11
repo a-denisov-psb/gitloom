@@ -103,6 +103,20 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Left panel order: GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES; GITFLOW is a tree (develop, feature, master, release) like GitKraken.
 - [ ] Commit summary counter inside the field at the right edge; yellow at 10 left, red below 0; a long summary never runs under it.
 
+## 7d. New in M10 (Windows required, Linux checked in CI)
+
+- [ ] Start screen: Open a repo, a recent repository, Preferences, Manage identities and the three Resources links work.
+- [ ] Clone over HTTPS with credentials (the askpass prompt appears, nothing is stored) and over SSH with a key and passphrase; progress shows; Cancel during "Receiving objects" leaves no folder; a non-empty target is refused; the clone opens in the tab.
+- [ ] Start a local repo with README and the VisualStudio `.gitignore`: "Initial commit" exists on the chosen branch; with an empty global identity the files stay uncommitted with the notice.
+- [ ] Preferences → General → Default branch name writes `init.defaultBranch`; a new repository uses it.
+- [ ] GPG signing with Gpg4win: the secret key is listed, "Sign commits by default" on, a commit asks for the passphrase through pinentry and shows "Signed by …" in the details (or "unverified trust"); a wrong GPG program shows "Signing failed" with the hint.
+- [ ] SSH signing with a key in the agent: commit, the details show a signature badge ("key not available" until `gpg.ssh.allowedSignersFile` is set).
+- [ ] Commit template: save in Repository → Commit, the next empty commit message is prefilled (summary and description), comments are removed; a global `commit.template` asks before it is changed.
+- [ ] Copy commit message prompt from the Staged Files header: preview, size, Copy pastes the whole text.
+- [ ] Stash with every stash message preset and a custom template; `git stash list` shows the rendered text; off gives Git's default.
+- [ ] External editor per repository: set one in Repository → External editor; Alt+E, the toolbar button and "Open in external editor" use it; "Use global setting" goes back.
+- [ ] Support long paths on: `git config --global core.longpaths` is true; a file in a path over 260 characters can be staged. Prune on: a branch deleted on the remote disappears after Fetch. Delete .orig files: the merge tool leaves no `.orig`. Toolbar labels off: icons with tooltips.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

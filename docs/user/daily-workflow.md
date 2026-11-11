@@ -42,7 +42,9 @@ Select the **WIP** row at the top of the graph. The right panel lists unstaged, 
 
 ## Committing
 
-Write a summary (the counter inside the field shows the remaining characters of 72; it turns yellow at 10 and red below 0, committing still works) and an optional description, then **Commit** or Ctrl+Enter; Ctrl+Shift+Enter stages everything first. Ctrl+Shift+M jumps to the summary. Hooks run as usual; if one fails, its output is shown and your message is kept. `commit.template` prefills the description.
+Write a summary (the counter inside the field shows the remaining characters of 72; it turns yellow at 10 and red below 0, committing still works) and an optional description, then **Commit** or Ctrl+Enter; Ctrl+Shift+Enter stages everything first. Ctrl+Shift+M jumps to the summary. Hooks run as usual; if one fails, its output is shown and your message is kept. An empty message is prefilled from the commit template (Preferences → Repository → Commit): its first line becomes the summary, the rest the description; comment lines are removed when that option is on, also from the message you commit. A commit that fails to sign says "Signing failed" and points to Preferences → Signing; signed commits show their status after the author in the commit details.
+
+**Copy commit message prompt…** (right click the Staged Files header or a staged file, or the command palette) builds a prompt for a tool of your choice: the instruction from Preferences → Templates, the commit template, the branch, the last 10 commit summaries, the staged files with their added/removed lines and the staged diff (up to 60,000 characters; binary files and files over 256 KB are listed without their diff). The dialog shows the size and what was left out; **Copy** (or Ctrl+C) puts it on the clipboard. Check the diff for secrets before you share it. Gitloom itself sends nothing anywhere.
 
 **Amend previous commit** fills the message from the last commit; you can amend only the message. Gitloom warns when that commit is already pushed.
 
@@ -52,7 +54,7 @@ With a detached HEAD, the commit panel reminds you to create a branch.
 
 ## Stashing
 
-**Stash** in the toolbar stashes all changes including untracked files; **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop** and **Delete**. Selecting a stash shows its staged, unstaged and untracked files. Pop and Apply can be undone; if they conflict, see [Stash conflicts](merge-rebase-conflicts.md#stash-conflicts).
+**Stash** in the toolbar stashes all changes including untracked files (with the stash message template of Preferences → Templates when it is on); **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop** and **Delete**. Selecting a stash shows its staged, unstaged and untracked files. Pop and Apply can be undone; if they conflict, see [Stash conflicts](merge-rebase-conflicts.md#stash-conflicts).
 
 ## File history and blame
 

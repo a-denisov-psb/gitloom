@@ -22,4 +22,5 @@ Nothing is undone if the repository changed in the meantime (for example HEAD or
 | Stash (push) and deleting a stash | Not yet; planned (M12). A deleted stash's commit stays in the repository for a while and can be recovered with `git fsck --lost-found`. |
 | Stage, unstage, "Save and mark resolved" | Not yet; planned (M12). Staging or unstaging again reverses the first two. |
 | Adding, removing, renaming remotes; setting the upstream | Not yet; planned (M12). Change them back in the left panel. |
-| Settings in the Preferences and the Git config (identity, SSH key, Gitflow and others) | They are settings, not changes to your work: change them back in the Preferences. |
+| Clone and "Start a local repo" | They create a new folder; delete it yourself if you no longer need it. |
+| Settings in the Preferences and the Git config (identity, SSH key, Gitflow, signing, commit template, default branch name, external editor, prune, long paths and others) | They are settings, not changes to your work: change them back in the Preferences. |

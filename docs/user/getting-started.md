@@ -18,6 +18,16 @@ Download the package for your system from the [releases page](https://github.com
 
 Gitloom remembers the open tabs, the active tab and the pane sizes and restores them on the next start. The start screen lists up to 20 recent repositories; a missing one can be removed from the list.
 
+## Clone a repository
+
+Start screen → **Clone a repo**: paste the URL (HTTPS, SSH or a local path), choose **Where to clone to** (Browse… or type a folder; it starts with the folder of your most recent repository) and check the **Name** (taken from the URL, editable); **Full path** shows the result. **Clone submodules** is on by default. **Clone** shows Git's progress in the dialog; **Cancel** (or Esc) stops it. Credentials are asked like for fetch and never stored. The target must not exist or must be an empty folder; a failed or cancelled clone leaves no new folder behind. The clone opens in the same tab and appears in the recent list.
+
+## Start a local repository
+
+Start screen → **Start a local repo**: **Name**, **Initialize in** (the parent folder), **Default branch** (from `init.defaultBranch`, else `main`), **Create README.md** and a **.gitignore template** (C++, Go, Java, JetBrains, macOS, Node, Python, Rust, VisualStudio, Windows from github/gitignore). The chosen files are committed as "Initial commit" when a Git identity is set; without one they stay uncommitted and the status bar says why. The new repository opens in the tab.
+
+Clone and init cannot be undone with Ctrl+Z: delete the folder if you no longer need it (see [Undo](undo.md)).
+
 ## The main window
 
 ![Main window](../screenshots/m5-main-dark-100.png)
