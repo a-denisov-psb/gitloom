@@ -626,6 +626,28 @@ mod tests {
         snapshot(&app, "signing-ssh");
     }
 
+    /// Commit details with a good and a bad signature (M10-05).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_signature_badge() {
+        use git_core::signature::{Signature, SignatureState};
+        for (state, name) in [(SignatureState::Good, "good"), (SignatureState::Bad, "bad")] {
+            let mut app = ready_app(&["c", "b"]);
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("b".into()));
+            let _ = app.update(Message::SignatureLoaded {
+                tab,
+                id: "b".into(),
+                result: Ok(Some(Signature {
+                    state,
+                    signer: "Ana Lyst <ana@example.com>".into(),
+                    key: "AAAABBBBCCCCDDDD".into(),
+                })),
+            });
+            snapshot(&app, &format!("signature-{name}"));
+        }
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

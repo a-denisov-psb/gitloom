@@ -571,6 +571,10 @@ pub struct RepoView {
     /// multi-selection panel.
     pub multi: crate::selection::MultiSelection,
     pub details: Option<CommitDetails>,
+    /// Signature status per commit, requested once when a commit is
+    /// selected (M10-05).
+    pub signatures:
+        std::collections::HashMap<String, Loadable<Option<git_core::signature::Signature>>>,
     /// Open commit search bar above the graph (M5-07).
     pub search: Option<crate::search::SearchState>,
     /// Hidden and soloed branches (M5-08); the snapshot is filtered by it.
@@ -867,6 +871,7 @@ impl RepoView {
             reopen_conflict: None,
             multi: crate::selection::MultiSelection::default(),
             details: None,
+            signatures: std::collections::HashMap::new(),
             center: CenterView::Graph,
             filter: String::new(),
             collapsed: HashSet::from([Section::Submodules]),

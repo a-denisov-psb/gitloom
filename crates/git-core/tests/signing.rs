@@ -35,6 +35,24 @@ fn signing_settings_round_trip_and_ssh_signing() {
     assert!(!global_signing().unwrap().sign_tags);
     assert!(set_global_signing("user.name", Some("x")).is_err());
 
+    // An unsigned commit has no badge.
+    let unsigned = TestRepo::new();
+    unsigned.write("u.txt", "u\n");
+    unsigned.git(&["add", "u.txt"]);
+    unsigned.git(&[
+        "-c",
+        "commit.gpgSign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "Unsigned",
+    ]);
+    let cli = git_core::CliBackend::new(unsigned.path());
+    assert_eq!(
+        git_core::signature::signature(&cli, &unsigned.head()).unwrap(),
+        None
+    );
+
     // A repository value overrides the global one and is reported.
     let repo = TestRepo::new();
     repo.git(&["config", "commit.gpgSign", "false"]);
@@ -69,5 +87,35 @@ fn signing_settings_round_trip_and_ssh_signing() {
     assert!(
         commit.contains("gpgsig -----BEGIN SSH SIGNATURE-----"),
         "{commit}"
+    );
+    // The details badge reads it as signed with the key not available (M10-05).
+    let cli = git_core::CliBackend::new(repo.path());
+    let head = repo.head();
+    let status = git_core::signature::signature(&cli, &head)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        status.state,
+        git_core::signature::SignatureState::KeyMissing
+    );
+    // An allowed signers file makes it verifiable.
+    let allowed = dir.path().join("allowed_signers");
+    let public = std::fs::read_to_string(&key).unwrap();
+    std::fs::write(&allowed, format!("author@example.com {public}")).unwrap();
+    repo.git(&[
+        "config",
+        "gpg.ssh.allowedSignersFile",
+        allowed.to_str().unwrap(),
+    ]);
+    let status = git_core::signature::signature(&cli, &head)
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            status.state,
+            git_core::signature::SignatureState::Good
+                | git_core::signature::SignatureState::Untrusted
+        ),
+        "{status:?}"
     );
 }
