@@ -540,10 +540,32 @@ mod tests {
         assert!(matches!(one("User guide"), Message::OpenLink(u) if u == user_guide_url()));
         assert!(matches!(one("Report an issue"), Message::OpenLink(u) if u == new_issue_url()));
         assert!(matches!(one("Release notes"), Message::OpenLink(u) if u == release_notes_url()));
-        assert!(clicked(&app, "Clone a repo").is_empty());
+        assert!(matches!(one("Clone a repo"), Message::CloneStart));
         assert!(clicked(&app, "Start a local repo").is_empty());
         assert!(user_guide_url().starts_with(git_core::identity::REPOSITORY_URL));
         assert!(new_issue_url().ends_with("/issues/new"));
+    }
+
+    /// Clone dialog (M10-02): filled in, and running with progress.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_clone_dialog() {
+        let mut app = start_app();
+        let _ = app.update(Message::CloneStart);
+        let _ = app.update(Message::CloneUrlChanged(
+            "https://github.com/owner/tool.git".into(),
+        ));
+        snapshot(&app, "clone-dialog-0");
+        if let Some(dialog) = app.clone_dialog.as_mut() {
+            dialog.running = Some(crate::clone_dialog::CloneRun {
+                cancel: git_core::CancelToken::new(),
+                progress: Some(git_core::Progress {
+                    phase: "Receiving objects".into(),
+                    percent: Some(45),
+                }),
+            });
+        }
+        snapshot(&app, "clone-dialog-1-running");
     }
 
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.

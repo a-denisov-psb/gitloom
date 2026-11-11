@@ -693,6 +693,8 @@ pub struct CliBackend {
     askpass: Option<PathBuf>,
     /// Program acting as Git editor for [`GitWriter::run_editing`] (ADR-021).
     editor: Option<PathBuf>,
+    /// `key=value` passed as `git -c` to every command.
+    config: Vec<String>,
 }
 
 impl CliBackend {
@@ -703,7 +705,15 @@ impl CliBackend {
             root: root.into(),
             askpass: None,
             editor: None,
+            config: Vec::new(),
         }
+    }
+
+    /// Passes `key=value` as `git -c` to every command (e.g. a setting a
+    /// single command needs without writing it to a config file).
+    pub fn with_config(mut self, key: &str, value: &str) -> Self {
+        self.config.push(format!("{key}={value}"));
+        self
     }
 
     /// Prompts for credentials (when no credential helper or ssh-agent can
@@ -837,6 +847,9 @@ impl CliBackend {
     /// `git` command with the fixed environment and the askpass program.
     fn command(&self) -> Command {
         let mut cmd = command(&self.git);
+        for entry in &self.config {
+            cmd.arg("-c").arg(entry);
+        }
         if let Some(askpass) = &self.askpass {
             cmd.env("GIT_ASKPASS", askpass)
                 .env("SSH_ASKPASS", askpass)

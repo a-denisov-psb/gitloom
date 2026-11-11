@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Clone a repository from the start screen: URL, where to clone to, folder name (derived from the URL), full path preview and "Clone submodules"; progress and Cancel in the dialog, credentials asked like for fetch; the clone opens in the tab. A failed or cancelled clone leaves no new folder behind.
 - The left panel groups local and remote branches into folders at `/` like GitKraken: folders and remotes collapse with a click (remembered per repository), branch rows show a branch icon and the last name segment (full name in the tooltip), the checked-out branch is highlighted.
 - Diff header: Hunk / Inline / Split toggle, also in the command palette; the choice is remembered.
 - Inline diff view: the whole file with each change block marked by a bar with "Stage block" / "Unstage block" / "Discard block"; line selection works as in the Hunk view; "Previous change" / "Next change" arrows in the header, and opening a file shows its first change.

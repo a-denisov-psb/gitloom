@@ -35,7 +35,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
             Some(Message::OpenRepository),
         ),
         path_input(app),
-        big_button(Icon::Pull, "Clone a repo", String::new(), None),
+        big_button(
+            Icon::Pull,
+            "Clone a repo",
+            String::new(),
+            Some(Message::CloneStart),
+        ),
         big_button(Icon::Plus, "Start a local repo", String::new(), None),
     ]
     .spacing(10)

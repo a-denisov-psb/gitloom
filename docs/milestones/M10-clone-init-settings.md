@@ -101,12 +101,14 @@ Acceptance: app tests for every entry (open, recent, remove missing, links, Pref
 
 Note (2026-11-11): done. `ui/start.rs` rebuilt: big buttons with icon and shortcut line, the path input (ADR-010) under "Open a repo", Clone/Start disabled with "Not available yet"; right column Recent repositories (name in the link color, path muted), Customize, Resources. Links: `<repo>/blob/master/docs/user/README.md`, `<repo>/issues/new`, `<repo>/blob/master/CHANGELOG.md` (`master` = the released docs). "Remove missing" is unchanged (a recent repository that fails to open offers "Remove from recent"). `start_screen_entries` clicks every entry in the simulator (part of every run); snapshots `ui_check_start_screen` (dark/light, 100/125 %) checked.
 
-### [ ] M10-02 Clone
+### [x] M10-02 Clone
 
 - git-core: clone through the network path (progress parsing, cancel, askpass), name derivation from URLs (HTTPS, SSH scp-like, `ssh://`, local paths, trailing `.git` and `/`), target validation, cleanup rule.
 - App: dialog, progress, cancel, open in the tab, recent list.
 
 Acceptance: integration tests: clone from a local bare repository (also with a submodule and `--recurse-submodules`), cancel removes the new folder, an existing non-empty target is refused; unit tests for name derivation; app tests for validation and the flow; snapshot of the dialog.
+
+Note (2026-11-11): done. git-core `clone` module: `repo_name` (HTTPS, scp-like, `ssh://`, `file://`, local and Windows paths; a bare host gives no name), `target_problem`, `clone` through `run_network`; on failure or cancel a folder that did not exist before is removed. New `CliBackend::with_config` passes `git -c` settings (used by the tests: `protocol.file.allow` for the local submodule, `protocol.ext.allow` for a remote that never answers to test Cancel). App: `clone_dialog.rs` (pure state and validation; the target folder is checked by the clone in the background, no I/O on the UI thread), dialog in `overlays.rs`, progress stream like network operations, Esc cancels a running clone. The default folder is the parent of the most recent repository, else the home folder (the last clone becomes the most recent repository, so this covers "last clone" without extra state). Integration tests use a local non-bare source (the clone behaves the same; a bare source adds nothing). Tests: `crates/git-core/tests/clone.rs`, unit tests in `clone.rs` and `clone_dialog.rs`, app `clone_dialog_flow`, `failed_clone_shows_gits_error_in_the_dialog`; snapshots `ui_check_clone_dialog` checked.
 
 ### [ ] M10-03 Init and default branch name
 
