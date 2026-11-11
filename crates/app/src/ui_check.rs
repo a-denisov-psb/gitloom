@@ -471,6 +471,33 @@ mod tests {
         }
     }
 
+    /// Summary counter inside the field (M9-07): 69, 5 and −3 characters
+    /// left, both themes; a long summary never runs under the counter.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_summary_counter() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::staging_app(&[], &["a.txt"]);
+            let _ = app.update(Message::WipSelected);
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for (left, summary) in [
+                (69, "Fix".to_owned()),
+                (5, "W".repeat(67)),
+                (
+                    -3,
+                    "Summary that is far too long for one line ".repeat(2)[..75].to_owned(),
+                ),
+            ] {
+                let _ = app.update(Message::SummaryChanged(summary));
+                snapshot(&app, &format!("summary-counter-{left}-{theme}"));
+            }
+        }
+    }
+
     /// Menu items must stay inside their menu (the layout iced computes,
     /// with the fonts of this machine): long labels widen the menu, too
     /// long ones end in "…". Runs without a renderer, so it is part of

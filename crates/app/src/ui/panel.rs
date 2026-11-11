@@ -169,22 +169,31 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 fn commit_box(view: &RepoView) -> Element<'_, Message> {
     let writable = view.write_block.is_none();
     let remaining = SUMMARY_LIMIT as i64 - view.summary.chars().count() as i64;
+    // The counter sits inside the field at the right edge like GitKraken
+    // (M9-07); the right padding keeps the text clear of it.
     let mut summary = text_input("Summary", &view.summary)
         .id(crate::app::COMMIT_SUMMARY_INPUT)
-        .padding(6)
+        .padding(iced::Padding::new(6.0).right(COUNTER_ROOM))
         .style(theme::input);
     if writable {
         summary = summary.on_input(Message::SummaryChanged);
     }
-    let counter = muted(remaining.to_string())
+    let counter = text(remaining.to_string())
         .size(11)
-        .width(28)
-        .align_x(iced::Right)
-        .style(if remaining < 0 {
-            theme::text_danger
-        } else {
-            theme::text_muted
+        .style(match counter_level(remaining) {
+            CounterLevel::Normal => theme::text_muted,
+            CounterLevel::Warning => theme::text_warning,
+            CounterLevel::Over => theme::text_danger,
         });
+    let summary = iced::widget::stack![
+        summary,
+        container(counter)
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::Right)
+            .align_y(iced::Center)
+            .padding(iced::Padding::ZERO.right(8)),
+    ];
 
     let mut description = text_editor(&view.description)
         .placeholder("Description")
@@ -248,7 +257,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     let mut content = column![
         row![muted("Commit"), space::horizontal(), amend].align_y(iced::Center),
         identity_line(view),
-        row![summary, counter].spacing(6).align_y(iced::Center),
+        summary,
         description,
         commit,
     ]
@@ -320,6 +329,26 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
 
 /// GitKraken counts down from 72 characters for the summary.
 const SUMMARY_LIMIT: usize = 72;
+
+/// Right padding of the summary field that holds the counter (M9-07).
+const COUNTER_ROOM: f32 = 40.0;
+
+/// Color of the summary counter: muted, warning at 10 or fewer characters
+/// left, error below 0 (the commit is not blocked).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CounterLevel {
+    Normal,
+    Warning,
+    Over,
+}
+
+fn counter_level(remaining: i64) -> CounterLevel {
+    match remaining {
+        r if r < 0 => CounterLevel::Over,
+        r if r <= 10 => CounterLevel::Warning,
+        _ => CounterLevel::Normal,
+    }
+}
 
 fn details<'a>(
     view: &'a RepoView,
@@ -579,4 +608,18 @@ pub(crate) fn with_tooltip_text(
         tooltip::Position::Bottom,
     )
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counter_warns_at_ten_and_turns_red_below_zero() {
+        assert_eq!(counter_level(72), CounterLevel::Normal);
+        assert_eq!(counter_level(11), CounterLevel::Normal);
+        assert_eq!(counter_level(10), CounterLevel::Warning);
+        assert_eq!(counter_level(0), CounterLevel::Warning);
+        assert_eq!(counter_level(-1), CounterLevel::Over);
+    }
 }
