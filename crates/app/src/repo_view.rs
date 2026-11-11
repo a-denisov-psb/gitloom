@@ -127,6 +127,45 @@ pub enum Guarded {
     Checkout,
 }
 
+/// A stash pop or apply that stopped in conflicts (M9-01).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashConflict {
+    /// Commit of the stash entry (Git kept it).
+    pub id: String,
+    /// The stash's label as the STASHES section shows it.
+    pub label: String,
+}
+
+/// Banner for conflicted files that no Git operation explains (M9-01).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictBanner {
+    /// "Stash '<label>' applied with conflicts. The stash was kept."
+    /// `undo`: the pop/apply is the newest undo entry.
+    StashConflicts {
+        id: String,
+        label: String,
+        undo: bool,
+    },
+    /// "Conflicts resolved. The stash '<label>' is still in the list."
+    StashResolved { id: String, label: String },
+    /// Conflicted files without a running operation (e.g. after a restart).
+    Orphaned,
+}
+
+impl ConflictBanner {
+    pub fn text(&self) -> String {
+        match self {
+            Self::StashConflicts { label, .. } => {
+                format!("Stash '{label}' applied with conflicts. The stash was kept.")
+            }
+            Self::StashResolved { label, .. } => {
+                format!("Conflicts resolved. The stash '{label}' is still in the list.")
+            }
+            Self::Orphaned => "Conflicted files without a running operation".into(),
+        }
+    }
+}
+
 /// How a line click changes the selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClickMode {
@@ -616,6 +655,9 @@ pub struct RepoView {
     /// Undo entry of an operation that stopped (conflicts); pushed once it
     /// completes, dropped when it is aborted (M4-12).
     pub pending_history: Option<crate::undo::UndoAction>,
+    /// A stash pop or apply that stopped in conflicts (M9-01); in memory
+    /// only, the banner offers Drop stash once the conflicts are resolved.
+    pub stash_conflict: Option<StashConflict>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -683,6 +725,12 @@ impl RepoView {
     /// Committing concludes a merge, cherry-pick or revert and stays allowed.
     pub fn state_block(&self, action: Guarded) -> Option<String> {
         let state = &self.snapshot.state;
+        // Git cannot stash or apply a stash while the index has conflicts.
+        if action == Guarded::Stash && state.is_clean() && !self.conflicted_files().is_empty() {
+            return Some(
+                "Cannot stash while files are conflicted: resolve or discard them first".into(),
+            );
+        }
         let operation = state.operation()?;
         let blocked = match action {
             // Committing continues the operation (M4-03).
@@ -720,6 +768,36 @@ impl RepoView {
                 .unstaged
                 .iter()
                 .all(|f| f.kind == git_core::ChangeKind::Untracked)
+    }
+
+    /// What the banner for a stash conflict or for conflicted files
+    /// without a running operation shows (M9-01, ADR-044); `None` while Git
+    /// runs an operation (its own banner) or nothing is conflicted.
+    pub fn conflict_banner(&self) -> Option<ConflictBanner> {
+        if !self.snapshot.state.is_clean() || self.snapshot.flow_finish.is_some() {
+            return None;
+        }
+        let conflicted = !self.conflicted_files().is_empty();
+        let stash = self
+            .stash_conflict
+            .as_ref()
+            .filter(|s| self.snapshot.stashes.iter().any(|listed| listed.id == s.id));
+        match stash {
+            Some(stash) if conflicted => Some(ConflictBanner::StashConflicts {
+                id: stash.id.clone(),
+                label: stash.label.clone(),
+                undo: self.undo.last().is_some_and(|action| {
+                    matches!(action, crate::undo::UndoAction::Stash(record)
+                        if record.stash == stash.id)
+                }),
+            }),
+            Some(stash) => Some(ConflictBanner::StashResolved {
+                id: stash.id.clone(),
+                label: stash.label.clone(),
+            }),
+            None if conflicted => Some(ConflictBanner::Orphaned),
+            None => None,
+        }
     }
 
     /// Paths with unresolved conflicts, sorted.
@@ -823,6 +901,7 @@ impl RepoView {
             check_empty: false,
             drag: None,
             pending_history: None,
+            stash_conflict: None,
             pull_failure: None,
             network: None,
             queued: None,

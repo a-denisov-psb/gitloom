@@ -168,6 +168,9 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
                 (None, Some(plan)) => content = content.push(finish_banner(view, plan)),
                 (None, None) => {}
             }
+            if let Some(banner) = view.conflict_banner() {
+                content = content.push(conflict_banner(view, banner));
+            }
             if let Some(error) = &view.error {
                 content = content.push(banner(error, tab.id));
             }
@@ -312,6 +315,62 @@ fn state_banner(view: &RepoView, state: String, finishing: bool) -> Element<'_, 
         row![
             crate::icons::tinted(crate::icons::Icon::Merge, 15.0, |p| p.accent),
             text(state).style(theme::text_normal),
+            muted(hint).size(12),
+            space::horizontal(),
+            actions,
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([6, 12])
+    .width(Fill)
+    .style(theme::state_banner)
+    .into()
+}
+
+/// Conflicted files that no Git operation explains: a stash pop/apply that
+/// stopped in conflicts, or leftovers (M9-01, ADR-044).
+fn conflict_banner(
+    view: &RepoView,
+    banner: crate::repo_view::ConflictBanner,
+) -> Element<'_, Message> {
+    use crate::repo_view::ConflictBanner;
+    let idle = view.write_block.is_none() && view.busy.is_none();
+    let action = |label: &'static str, style: fn(&iced::Theme, button::Status) -> button::Style| {
+        button(text(label).size(12)).padding([3, 10]).style(style)
+    };
+    let mut actions = row![].spacing(6);
+    let hint = match &banner {
+        ConflictBanner::StashConflicts { undo, .. } => {
+            if *undo {
+                actions = actions.push(
+                    action("Undo", button::secondary).on_press_maybe(idle.then_some(Message::Undo)),
+                );
+            }
+            let drop = action("Drop stash", button::secondary);
+            actions = actions.push(panel::with_tooltip_text(
+                drop.into(),
+                "Resolve the conflicts first".into(),
+            ));
+            "Resolve the conflicts and stage them."
+        }
+        ConflictBanner::StashResolved { id, .. } => {
+            actions = actions
+                .push(
+                    action("Drop stash", button::primary)
+                        .on_press_maybe(idle.then(|| Message::StashDropConfirmed(id.clone()))),
+                )
+                .push(action("Keep stash", button::secondary).on_press(Message::KeepStash));
+            "Drop the stash if you no longer need it."
+        }
+        ConflictBanner::Orphaned => {
+            "Resolve them in the conflict view (click a conflicted file), or discard them."
+        }
+    };
+    container(
+        row![
+            crate::icons::tinted(crate::icons::Icon::Alert, 15.0, |p| p.warning),
+            text(banner.text()).style(theme::text_normal),
             muted(hint).size(12),
             space::horizontal(),
             actions,

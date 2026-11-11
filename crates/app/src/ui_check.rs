@@ -381,6 +381,32 @@ mod tests {
         snapshot(&app, "gitflow-finish-2-banner");
     }
 
+    /// Banner of a stash pop that stopped in conflicts, after resolving
+    /// and for conflicted files without an operation (M9-01), both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_stash_conflict_banner() {
+        use crate::app::tests::{pop_stash, resolve_all, staging_app, stash_app, with_conflicts};
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let choice = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let mut app = stash_app();
+            app.settings.appearance.theme = choice;
+            pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+            with_conflicts(&mut app, &["a.txt"]);
+            snapshot(&app, &format!("stash-conflict-0-{theme}"));
+            resolve_all(&mut app);
+            snapshot(&app, &format!("stash-conflict-1-resolved-{theme}"));
+            let mut orphaned = staging_app(&[], &[]);
+            orphaned.settings.appearance.theme = choice;
+            with_conflicts(&mut orphaned, &["a.txt"]);
+            snapshot(&orphaned, &format!("stash-conflict-2-orphaned-{theme}"));
+        }
+    }
+
     /// Menu items must stay inside their menu (the layout iced computes,
     /// with the fonts of this machine): long labels widen the menu, too
     /// long ones end in "…". Runs without a renderer, so it is part of
