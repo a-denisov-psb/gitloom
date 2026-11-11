@@ -676,6 +676,17 @@ pub enum Message {
         id: String,
         result: Result<Option<git_core::signature::Signature>, String>,
     },
+    /// "Copy commit message prompt…" (M10-07).
+    CopyPromptRequested,
+    PromptReady(Result<git_core::prompt::Prompt, String>),
+    PromptCopy,
+    PromptClosed,
+    /// Ctrl+C that no widget handled (copies the open prompt).
+    CopyPressed,
+    PromptInstructionEdited(iced::widget::text_editor::Action),
+    PromptInstructionReset,
+    /// Context menu of the "Staged Files" header.
+    StagedHeaderMenu(iced::Point),
     /// Preferences → Repository → Commit (M10-06).
     TemplateLoaded(Result<git_core::commit_template::TemplateSettings, String>),
     TemplateSummaryInput(String),
@@ -1006,6 +1017,10 @@ pub struct App {
     pub init_dialog: Option<crate::clone_dialog::InitDialog>,
     /// Description of the commit template being edited (M10-06).
     pub template_description: iced::widget::text_editor::Content,
+    /// Instruction of the commit message prompt being edited (M10-07).
+    pub prompt_instruction: iced::widget::text_editor::Content,
+    /// The commit message prompt dialog (M10-07).
+    pub prompt_dialog: Option<git_core::prompt::Prompt>,
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
@@ -1089,6 +1104,8 @@ impl App {
             clone_dialog: None,
             init_dialog: None,
             template_description: iced::widget::text_editor::Content::new(),
+            prompt_instruction: iced::widget::text_editor::Content::new(),
+            prompt_dialog: None,
             form: None,
             context_menu: None,
             shortcut_list: None,
@@ -2534,6 +2551,7 @@ impl App {
             || self.message_dialog.is_some()
             || self.clone_dialog.is_some()
             || self.init_dialog.is_some()
+            || self.prompt_dialog.is_some()
             || self.shortcut_list.is_some()
             || self.about
             || self.settings_page.is_some();
@@ -2558,6 +2576,7 @@ impl App {
         }
         let count = self.tabs.len();
         match shortcut {
+            Shortcut::CopyCommitPrompt => return self.update(Message::CopyPromptRequested),
             Shortcut::NewTab => {
                 self.add_tab(TabState::Start);
             }
@@ -2810,6 +2829,7 @@ impl App {
             || self.form.take().is_some()
             || self.message_dialog.take().is_some()
             || self.close_clone_dialog()
+            || self.prompt_dialog.take().is_some()
             || self.init_dialog.take_if(|d| !d.running).is_some()
             || self.settings_page.take().is_some()
             || self
@@ -3977,6 +3997,12 @@ impl App {
                 .is_some_and(|head| config.classify(head).is_some());
             if id == Shortcut::FlowFinish && !on_flow_branch {
                 return Some("Check out a feature, release or hotfix branch".to_owned());
+            }
+        }
+        if id == Shortcut::CopyCommitPrompt {
+            let view = self.active_tab().and_then(Tab::view)?;
+            if view.snapshot.working_tree.staged.is_empty() {
+                return Some("Stage changes first".to_owned());
             }
         }
         if id == Shortcut::OpenEditor && self.settings.tools.editor_command.trim().is_empty() {
@@ -5309,6 +5335,11 @@ impl App {
                     if category == settings::Category::Commit {
                         return self.load_template();
                     }
+                    if category == settings::Category::Templates {
+                        self.prompt_instruction = iced::widget::text_editor::Content::with_text(
+                            &self.settings.templates.commit_prompt,
+                        );
+                    }
                     if category == settings::Category::SshKey {
                         page.ssh_replace = false;
                         page.ssh_path.clear();
@@ -5774,6 +5805,13 @@ impl App {
                             Some("U"),
                             Message::Unstage(file.clone()),
                         ));
+                        entries.push(MenuEntry::Item {
+                            hint: None,
+                            label: "Copy commit message prompt…".into(),
+                            shortcut: None,
+                            enabled: true,
+                            message: Box::new(Message::CopyPromptRequested),
+                        });
                         entries.push(MenuEntry::Separator);
                     }
                     FileArea::Commit => {}
@@ -7918,6 +7956,92 @@ impl App {
                     self.init_dialog = None;
                 }
             }
+            Message::CopyPromptRequested => {
+                if let Some(reason) = self.action_block(Shortcut::CopyCommitPrompt) {
+                    self.status = reason;
+                    return Task::none();
+                }
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let writer = Arc::clone(&view.writer);
+                let instruction = self.settings.templates.commit_prompt.clone();
+                let options = &view.snapshot.template_options;
+                let template = view.snapshot.commit_template.as_ref().map(|t| {
+                    if options.remove_comments {
+                        git_core::commit_template::strip_comment_lines(t, &options.comment_char)
+                    } else {
+                        t.clone()
+                    }
+                });
+                return Task::perform(
+                    blocking(move || {
+                        git_core::prompt::gather(writer.as_ref())
+                            .map(|input| {
+                                git_core::prompt::build(&instruction, template.as_deref(), &input)
+                            })
+                            .map_err(|e| e.to_string())
+                    }),
+                    Message::PromptReady,
+                );
+            }
+            Message::PromptReady(Ok(prompt)) => self.prompt_dialog = Some(prompt),
+            Message::PromptReady(Err(error)) => {
+                self.modal = Some(Modal::error("Could not build the prompt", error));
+            }
+            Message::PromptCopy => {
+                if let Some(prompt) = self.prompt_dialog.take() {
+                    self.status = "Commit message prompt copied".into();
+                    return iced::clipboard::write(prompt.text);
+                }
+            }
+            Message::PromptClosed => self.prompt_dialog = None,
+            Message::CopyPressed => {
+                if self.prompt_dialog.is_some() {
+                    return self.update(Message::PromptCopy);
+                }
+            }
+            Message::PromptInstructionEdited(action) => {
+                let edit = action.is_edit();
+                self.prompt_instruction.perform(action);
+                if edit {
+                    self.settings.templates.commit_prompt = self.prompt_instruction.text();
+                    return self.save_settings();
+                }
+            }
+            Message::PromptInstructionReset => {
+                git_core::prompt::DEFAULT_INSTRUCTION
+                    .clone_into(&mut self.settings.templates.commit_prompt);
+                self.prompt_instruction = iced::widget::text_editor::Content::with_text(
+                    git_core::prompt::DEFAULT_INSTRUCTION,
+                );
+                return self.save_settings();
+            }
+            Message::StagedHeaderMenu(position) => {
+                let writable = self.write_block().is_none();
+                let staged = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| !v.snapshot.working_tree.staged.is_empty());
+                let prompt_block = self.action_block(Shortcut::CopyCommitPrompt);
+                let entries = vec![
+                    MenuEntry::Item {
+                        hint: prompt_block.clone(),
+                        label: "Copy commit message prompt…".into(),
+                        shortcut: None,
+                        enabled: prompt_block.is_none(),
+                        message: Box::new(Message::CopyPromptRequested),
+                    },
+                    MenuEntry::Item {
+                        hint: None,
+                        label: "Unstage all changes".into(),
+                        shortcut: None,
+                        enabled: writable && staged,
+                        message: Box::new(Message::UnstageAll),
+                    },
+                ];
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
             Message::TemplateLoaded(result) => {
                 if let Some(page) = self.settings_page.as_mut() {
                     if let Ok(settings) = &result {
@@ -9397,6 +9521,17 @@ fn global_event(event: Event, status: event::Status, window: window::Id) -> Opti
             })
         }
         Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(c),
+            modifiers,
+            ..
+        }) if status == event::Status::Ignored
+            && modifiers.command()
+            && !modifiers.shift()
+            && c.as_str().eq_ignore_ascii_case("c") =>
+        {
+            Some(Message::CopyPressed)
+        }
+        Event::Keyboard(keyboard::Event::KeyPressed {
             key,
             modified_key,
             modifiers,
@@ -10151,6 +10286,8 @@ pub(crate) mod tests {
             .filter(|a| !matches!(a.id, Shortcut::FlowStart(_) | Shortcut::FlowFinish))
             // The external editor needs one in the settings (M8-08).
             .filter(|a| a.id != Shortcut::OpenEditor)
+            // The commit message prompt needs staged changes (M10-07).
+            .filter(|a| a.id != Shortcut::CopyCommitPrompt)
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
@@ -12993,6 +13130,93 @@ pub(crate) mod tests {
             "not requested again"
         );
         assert!(matches!(view.signatures.get("a"), Some(Loadable::Loading)));
+    }
+
+    fn prompt() -> git_core::prompt::Prompt {
+        git_core::prompt::Prompt {
+            text: "Write a commit message.\n\nBranch: main\n".into(),
+            notes: vec!["1 diff omitted (binary)".into()],
+        }
+    }
+
+    #[test]
+    fn copy_commit_prompt_needs_staged_changes() {
+        let mut app = staging_app(&["a"], &[]);
+        assert_eq!(
+            app.action_block(Shortcut::CopyCommitPrompt).as_deref(),
+            Some("Stage changes first")
+        );
+        let _ = app.update(Message::CopyPromptRequested);
+        assert_eq!(app.status, "Stage changes first");
+        assert!(app.prompt_dialog.is_none());
+        let _ = app.update(Message::StagedHeaderMenu(iced::Point::ORIGIN));
+        assert_eq!(
+            menu_item_enabled(&app, "Copy commit message prompt…"),
+            Some(false)
+        );
+
+        let mut app = staging_app(&[], &["a"]);
+        assert_eq!(app.action_block(Shortcut::CopyCommitPrompt), None);
+        let _ = app.update(Message::StagedHeaderMenu(iced::Point::ORIGIN));
+        assert_eq!(
+            menu_item_enabled(&app, "Copy commit message prompt…"),
+            Some(true)
+        );
+        // The staged file menu offers it as well.
+        app.context_menu = None;
+        let file = app.tabs[0].view().unwrap().snapshot.working_tree.staged[0].clone();
+        let _ = app.update(Message::FileContextMenu {
+            file,
+            area: FileArea::Staged,
+            position: iced::Point::ORIGIN,
+        });
+        assert_eq!(
+            menu_item_enabled(&app, "Copy commit message prompt…"),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn prompt_dialog_copies_and_closes() {
+        let mut app = staging_app(&[], &["a"]);
+        let _ = app.update(Message::PromptReady(Ok(prompt())));
+        assert!(app.prompt_dialog.is_some());
+        // Ctrl+C that no widget took copies the prompt.
+        let _ = app.update(Message::CopyPressed);
+        assert!(app.prompt_dialog.is_none());
+        assert_eq!(app.status, "Commit message prompt copied");
+        // Without the dialog Ctrl+C does nothing.
+        app.status.clear();
+        let _ = app.update(Message::CopyPressed);
+        assert_eq!(app.status, "");
+        // Esc closes it.
+        let _ = app.update(Message::PromptReady(Ok(prompt())));
+        let _ = app.update(checked(Shortcut::Close, false));
+        assert!(app.prompt_dialog.is_none());
+    }
+
+    #[test]
+    fn prompt_instruction_is_edited_and_reset() {
+        let mut app = staging_app(&[], &["a"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Templates));
+        assert_eq!(
+            app.prompt_instruction.text().trim(),
+            git_core::prompt::DEFAULT_INSTRUCTION
+        );
+        let _ = app.update(Message::PromptInstructionEdited(
+            iced::widget::text_editor::Action::Move(
+                iced::widget::text_editor::Motion::DocumentStart,
+            ),
+        ));
+        let _ = app.update(Message::PromptInstructionEdited(
+            iced::widget::text_editor::Action::Edit(iced::widget::text_editor::Edit::Insert('X')),
+        ));
+        assert!(app.settings.templates.commit_prompt.starts_with("XWrite"));
+        let _ = app.update(Message::PromptInstructionReset);
+        assert_eq!(
+            app.settings.templates.commit_prompt,
+            git_core::prompt::DEFAULT_INSTRUCTION
+        );
     }
 
     #[test]

@@ -152,13 +152,15 @@ Acceptance: integration tests: save without `commit.template` creates the file a
 
 Note (2026-11-11): done. git-core `commit_template` module (`read_template` with the scope from `git config --show-scope`, `save_template`, `set_template_option`, `split_template`, `strip_comment_lines`); `GitBackend::commit_template_options` (gix) feeds the snapshot. Decision: both options default to on when the keys are unset, which keeps the earlier behavior (the template was always prefilled, comments removed). Change: the template's first line now prefills the summary (file format summary line, blank line, description); before, the whole template went into the description. "Remove comments" also strips comment lines from the description when committing, with `core.commentChar` (`auto` counts as `#`). Prefill only for an empty message, never while amending; operation messages keep their own prefill. A template in a shared (non-repository) config asks "This template is used by all repositories. Change it?". Saving refreshes the tab so the prefill follows. Tests: `crates/git-core/tests/commit_template.rs`, unit tests, app `template_prefills_summary_and_description`, `comments_are_removed_from_the_commit_message`, `commit_template_page_loads_saves_and_confirms_shared_files`; snapshot `ui_check_commit_template` checked.
 
-### [ ] M10-07 Copy commit message prompt
+### [x] M10-07 Copy commit message prompt
 
 Note (planning update 2026-11-11): the "Commit message prompt" section lives on the global Preferences → Templates page (M10-10); build it there directly instead of on Repository → Commit.
 
 - Prompt builder in git-core or a pure app module (no I/O in the view), the message prompt section on the same page, entry points, modal, clipboard.
 
 Acceptance: unit tests for the builder (order of parts, template present/absent, limits, binary and large files, truncation notes); app tests for the entry points and the disabled state; snapshot of the modal.
+
+Note (2026-11-11): done. Builder in git-core `prompt` (`gather` runs `git` in the background, `build` is pure); the diff of a file is taken whole or omitted, so a cut never falls inside a hunk. The template in the prompt follows "Remove comments" of M10-06. Preferences → Templates (new global category after Signing, planning update 2026-11-11) holds the instruction with "Reset to default"; the stash message section follows in M10-10. Entry points: context menu of the Staged Files header (new, with "Unstage all changes"), staged file menu, palette action "Copy commit message prompt…" (disabled with "Stage changes first"). Ctrl+C copies while the dialog is open (only when no widget handled the key). Tests: unit tests in `prompt.rs`, `crates/git-core/tests/prompt.rs`, app `copy_commit_prompt_needs_staged_changes`, `prompt_dialog_copies_and_closes`, `prompt_instruction_is_edited_and_reset`, settings migration test; snapshots `ui_check_commit_prompt` checked.
 
 ### [ ] M10-08 Small options
 

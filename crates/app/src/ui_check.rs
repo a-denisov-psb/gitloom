@@ -664,6 +664,44 @@ mod tests {
         snapshot(&app, "commit-template");
     }
 
+    /// Commit message prompt dialog and Preferences → Templates (M10-07).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_commit_prompt() {
+        let mut app = ready_app(&["c"]);
+        let input = git_core::prompt::PromptInput {
+            branch: "feature/login".into(),
+            recent: vec!["Add login form".into(), "Set up the project".into()],
+            files: vec![
+                git_core::prompt::PromptFile::new(
+                    "M",
+                    "src/login.rs",
+                    Some((3, 1)),
+                    Ok("diff --git a/src/login.rs b/src/login.rs\n@@ -1,2 +1,4 @@\n-old\n+new\n+more\n+lines\n"
+                        .into()),
+                ),
+                git_core::prompt::PromptFile::new(
+                    "A",
+                    "assets/logo.png",
+                    None,
+                    Err(git_core::prompt::Omitted::Binary),
+                ),
+            ],
+        };
+        let prompt = git_core::prompt::build(
+            git_core::prompt::DEFAULT_INSTRUCTION,
+            Some("feat: \n\nWhy:"),
+            &input,
+        );
+        let _ = app.update(Message::PromptReady(Ok(prompt)));
+        snapshot(&app, "commit-prompt");
+        let _ = app.update(Message::PromptClosed);
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Templates,
+        ));
+        snapshot(&app, "preferences-templates");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

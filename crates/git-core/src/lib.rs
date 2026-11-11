@@ -29,6 +29,7 @@ mod mock;
 mod network;
 mod patch;
 mod pick;
+pub mod prompt;
 mod refname;
 mod reset;
 mod resolve;

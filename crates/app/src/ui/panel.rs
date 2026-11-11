@@ -143,7 +143,7 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
         }),
     );
 
-    let staged = file_section(
+    let staged = file_section_with_menu(
         format!("Staged Files ({})", tree.staged.len()),
         all_button(
             view,
@@ -155,6 +155,7 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
         tree.staged
             .iter()
             .map(|file| file_row(view, file, DiffKind::Staged)),
+        Some(Message::StagedHeaderMenu),
     );
 
     column![container(text(header)).padding([10, 12])]
@@ -507,15 +508,31 @@ fn file_section<'a>(
     action: Element<'a, Message>,
     files: impl Iterator<Item = Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    file_section_with_menu(title, action, files, None)
+}
+
+/// [`file_section`] whose header opens a context menu (Staged Files, M10-07).
+fn file_section_with_menu<'a>(
+    title: String,
+    action: Element<'a, Message>,
+    files: impl Iterator<Item = Element<'a, Message>>,
+    menu: Option<fn(iced::Point) -> Message>,
+) -> Element<'a, Message> {
     // The buttons move below the title when the panel is narrow.
-    let header = container(
+    let header: Element<'a, Message> = container(
         row![text(title).wrapping(text::Wrapping::None), action]
             .spacing(8)
             .align_y(iced::Center)
             .wrap()
             .vertical_spacing(4),
     )
-    .padding([6, 12]);
+    .padding([6, 12])
+    .width(Fill)
+    .into();
+    let header = match menu {
+        Some(menu) => crate::ui::context_area::context_area(header, menu),
+        None => header,
+    };
 
     column![
         header,
