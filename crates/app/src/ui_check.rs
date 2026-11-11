@@ -498,6 +498,73 @@ mod tests {
         }
     }
 
+    /// Start screen with one recent repository (M10-01).
+    fn start_app() -> App {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let mut session = crate::session::Session::default();
+        session.touch_recent(std::path::Path::new("/home/ana/projects/gitloom"), 0);
+        session.touch_recent(std::path::Path::new("/home/ana/projects/website"), 1);
+        let _ = app.update(crate::app::tests::loaded(session));
+        app
+    }
+
+    /// Messages a click on the widget showing `label` produces (the
+    /// window-wide drag end of every mouse release left out).
+    fn clicked(app: &App, label: &str) -> Vec<Message> {
+        let mut sim = simulator(app);
+        sim.click(label)
+            .unwrap_or_else(|e| panic!("no clickable {label:?}: {e}"));
+        sim.into_messages()
+            .filter(|m| !matches!(m, Message::BranchDragEnd))
+            .collect()
+    }
+
+    /// Every entry of the start screen sends its message; Clone and Start
+    /// stay disabled until M10-02/M10-03. Layout only, part of every run.
+    #[test]
+    fn start_screen_entries() {
+        use crate::ui::start::{new_issue_url, release_notes_url, user_guide_url};
+        let app = start_app();
+        let one = |label: &str| {
+            let messages = clicked(&app, label);
+            assert_eq!(messages.len(), 1, "{label}: {messages:?}");
+            messages.into_iter().next().unwrap()
+        };
+        assert!(matches!(one("Open a repo"), Message::OpenRepository));
+        assert!(matches!(one("website"), Message::OpenRecent(p) if p.ends_with("website")));
+        assert!(matches!(one("Preferences"), Message::SettingsOpened));
+        assert!(matches!(
+            one("Manage identities"),
+            Message::SettingsOpenedAt(crate::settings::Category::Identities)
+        ));
+        assert!(matches!(one("User guide"), Message::OpenLink(u) if u == user_guide_url()));
+        assert!(matches!(one("Report an issue"), Message::OpenLink(u) if u == new_issue_url()));
+        assert!(matches!(one("Release notes"), Message::OpenLink(u) if u == release_notes_url()));
+        assert!(clicked(&app, "Clone a repo").is_empty());
+        assert!(clicked(&app, "Start a local repo").is_empty());
+        assert!(user_guide_url().starts_with(git_core::identity::REPOSITORY_URL));
+        assert!(new_issue_url().ends_with("/issues/new"));
+    }
+
+    /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_start_screen() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = start_app();
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for percent in [100_u32, 125] {
+                let scale = percent as f32 / 100.0;
+                let _ = app.update(Message::SystemScaleChanged(scale));
+                snapshot_scaled(&app, &format!("start-screen-{percent}-{theme}"), scale);
+            }
+        }
+    }
+
     /// Menu items must stay inside their menu (the layout iced computes,
     /// with the fonts of this machine): long labels widen the menu, too
     /// long ones end in "…". Runs without a renderer, so it is part of

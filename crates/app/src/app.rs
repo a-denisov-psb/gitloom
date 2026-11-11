@@ -9102,7 +9102,7 @@ pub(crate) mod tests {
         );
     }
 
-    fn loaded(session: Session) -> Message {
+    pub(crate) fn loaded(session: Session) -> Message {
         Message::SessionLoaded(session::Loaded {
             session,
             notice: None,
