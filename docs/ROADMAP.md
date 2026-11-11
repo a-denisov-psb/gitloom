@@ -26,7 +26,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M7 | 1.0.0 | Left panel tree, diff view modes and Git flow | Done |
 | M8 | 1.0.0 | Repository settings and tools | Done |
 | M9 | 1.0.0 | Fixes and consistency | Current |
-| M10 | 1.0.0 | Clone, init and Git settings | Outline |
+| M10 | 1.0.0 | Clone, init and Git settings | Planned |
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Outline |
 | M12 | 1.0.0 | Workflow polish | Outline |
 | M13 | 1.0.0 | Git flow graph layout | Outline |
@@ -73,7 +73,7 @@ Preferences group "Repository · <name>" (Identity, SSH key, Gitflow); identitie
 
 Stash pop/apply that stops in conflicts becomes a normal conflict with a banner, "Drop stash" and Undo back to the exact state before; discard and reset work while files are conflicted; reset on the HEAD commit; sharp icons at fractional zoom; left panel order and GITFLOW content like GitKraken; character counter inside the summary field. Details: [`milestones/M9-fixes-and-consistency.md`](milestones/M9-fixes-and-consistency.md).
 
-### M10 – Clone, init and Git settings (outline)
+### M10 – Clone, init and Git settings (planned)
 
 - Start screen like GitKraken's New Tab: Open a repo, Clone a repo, Start a local repo; recent repositories with name and path; Customize (Preferences, Manage identities); Resources (user guide, report an issue; links open the browser). No hosted-repo creation, no boards.
 - Clone: URL, parent folder, name, full path preview, progress and cancel, askpass, submodules recursive; opens in a tab.
@@ -81,6 +81,8 @@ Stash pop/apply that stops in conflicts becomes a normal conflict with a banner,
 - Commit signing (GPG and SSH): Preferences → Signing with key choice, format, GPG program, "Sign commits/tags by default" (Git config); signature status in the commit details. No key generator.
 - Preferences → Repository → Commit: commit template (prefills summary and description, respects and writes `commit.template`, "Remove comments") and the message prompt template. "Copy commit message prompt…" (staged area context menu, palette): modal with preview, size, truncation note and Copy; content: instruction, commit template, branch, last 5–10 summaries, file list with +/−, staged diff with a size limit. No AI inside Gitloom.
 - Small options: auto-prune on fetch, delete `.orig` files after merging (`mergetool.keepBackup`), `core.longpaths` (Windows), toolbar labels on/off.
+
+Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md).
 
 ### M11 – Graph columns, themes and syntax highlighting (outline)
 

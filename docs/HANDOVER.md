@@ -78,6 +78,7 @@ Tasks only the maintainer can do. Claude Code adds new items here and ticks them
 - [x] M6-11: repository content approved; history rewritten to the GitHub noreply address (2026-11-06).
 - [x] M6-14: repository public and private vulnerability reporting enabled (2026-11-06, by Claude Code on request).
 - [x] M6-14: check and publish the draft pre-release `v1.0.0-rc.1` (Releases page). (obsolete: rc.4 published)
+- [ ] ADR-042: delete the remote branch `release/1.1.0` (already merged into `develop`; the Claude Code session gets HTTP 403 on branch deletion): `git push origin --delete release/1.1.0`.
 - [ ] M6-10: apply at SignPath Foundation once the repository is public; create the project and signing policy, connect GitHub, and set the repository variable `SIGNPATH_ORGANIZATION_ID` (the release workflow has the step prepared).
 - [ ] ADR-033 (name kept): optional trademark/domain check for "Gitloom"; decide before the repository goes public (M6-11) whether it stays under `a-denisov-psb` or moves to an own organization (then update `git_core::identity` and the remote).
 - [x] GitHub Actions: jobs are not started ("recent account payments have failed or your spending limit needs to be increased", run 40330435175 for `develop` e048618, 2026-10-26). Please check Billing & plans; afterwards re-run the job (`gh run rerun 40330435175`) and check the CI of `master` v0.5.0. Resolved: CI runs again since 2026-11-04.
