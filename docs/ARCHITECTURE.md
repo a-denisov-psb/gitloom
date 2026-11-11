@@ -157,6 +157,20 @@ Each visible row draws its own segments into a canvas cell of the row height: up
 
 `<config dir>/gitloom/session.json`, written atomically. Contains version, recent repositories, open tabs, active tab, pane ratios. See M1-09.
 
+## Remote backend readiness (ADR-053)
+
+A later WSL mode and SSH remote run `git-core` in an agent next to the repository while the UI stays local. Until then:
+
+- `git-core` is the only crate that touches a repository; its public API takes and returns plain owned data (no iced or `gix` types, no borrowed handles kept by the app across calls), so it can later be served over a byte stream (serde).
+- Every process started for a repository goes through the launch helpers: `git_core::CliBackend` (Git, its askpass and editor hooks, process-tree kill) and `crates/app/src/launch.rs` (editor, terminal, file manager, external tools). No other `Command::new` outside tests and `build.rs`.
+- Paths under `\\wsl$\<distro>\…` / `\\wsl.localhost\<distro>\…` are recognized by `wsl_location` (M12-14).
+
+Existing exceptions, to be removed when the code is touched:
+
+- Progress is reported through callbacks (`&mut dyn FnMut(Progress)` in `clone` and the network operations), not channels of plain messages.
+- Cancellation uses the shared `CancelToken` (`Arc<AtomicBool>`) passed by reference.
+- The app keeps an `Arc<dyn GitBackend>` per tab; a remote location would replace it with a proxy that implements the same trait.
+
 ## Error handling
 
 - `git_core::Error` is the only error type crossing the crate boundary; it carries a readable message and the source.

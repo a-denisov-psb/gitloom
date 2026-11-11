@@ -52,6 +52,7 @@ Out of scope:
 | Preferences modal | Preferences open as a centered modal over the window instead of a full view: width min(80 % of the window, 960 px), height min(85 %, 680 px); below 720 × 520 logical px it fills the window. Category list left, content scrolls, close button "×" and Esc close it; a click on the backdrop does not close. Focus stays inside the modal (Tab order), the app behind is dimmed. Entry points unchanged; changes apply immediately as today. API `open_preferences(page)` for later deep links (M12-12). UX-PARITY deviation "GitKraken shows Preferences as a full view" (maintainer decision 2026-11-11). |
 | Panel toggles | Two icon toggle buttons at the right end of the toolbar, like VS Code: left panel (Lucide `panel-left`) and commit panel (`panel-right`), vendored like the other icons. Active state highlighted, tooltip "Hide left panel (Ctrl+J)" / "Show left panel (Ctrl+J)", likewise for Ctrl+K. Only in repository tabs. Maintainer request 2026-11-11 (toggling was only possible by shortcut). |
 | README screenshot | A scripted fixture repository with fictional authors and neutral names (several branches with folders, a merge, tags, a stash, Git flow initialized, a dirty working tree) is rendered headless with `iced_test` at 1600 × 900, 100 %, Dark theme, into `docs/screenshots/main-dark.png` (`scripts/screenshot.sh`, test ignored by default). The README uses it; the old `m5-main-dark-100.png` is removed. `.claude/commands/next-task.md` step 4 (milestone close) gets "run `scripts/screenshot.sh` and commit the updated screenshot". |
+| Column widths and horizontal scrolling | Every column of the graph table has its own width and a drag handle on its right border, including Commit message and the last visible column. Dragging changes only that column; neighbors never move. The table width is the sum of the widths: wider than the viewport → a horizontal scrollbar below the table (the header scrolls with the rows; the vertical scrollbar stays at the right edge of the viewport, room reserved as in M6-22; Shift+wheel and horizontal wheel scroll like the diffs, M7-16); narrower → the Commit message column grows to fill, so no gap appears (effective width = max(set width, remaining space)). Double click on a handle: optimal width as in M11-02; on the Commit message handle: back to "fill" (set width = its minimum 120 px). Widths persist globally as today; "Reset column widths" also resets the message width. Replaces the M11-02 rule "the message fills the rest and the borders of Author/Date/SHA narrow it" (maintainer 2026-11-11: resizing felt odd and the message had no handle). UX-PARITY deviation: "graph table scrolls horizontally instead of fitting the window". |
 
 ## Maintainer answers and GitKraken verification items
 
@@ -70,6 +71,7 @@ Open:
 
 - [ ] Dark and Light look exactly as before (snapshot comparison); Classic Dark has row tint, filled pills with connector, header band, separators and panel depth.
 - [ ] Columns can be resized, set to optimal width by double click, shown/hidden from the gear menu and Preferences; settings survive a restart; no automatic hiding.
+- [ ] Every column, Commit message included, has its own handle; a table wider than the window scrolls horizontally with its header, a narrower one lets the message fill (M11-16).
 - [ ] Stashes show as dashed squares with an icon and "WIP on <branch>"; a new stash without message gets Git's default message.
 - [ ] Preferences → Editor settings apply to diffs, blame, file history and the conflict view.
 - [ ] Syntax highlighting in all diff modes, blame, file history and the conflict view, correct across multi-line constructs; large files fall back to plain with a note; no frame over 50 ms while scrolling a 2 MB file (`docs/PERFORMANCE.md`).
@@ -95,12 +97,13 @@ No release (ADR-042): when all tasks are done, continue with M12.
 | M11-07 | Word wrap in diff views | M11-06 |
 | M11-08 | Highlighting engine | – |
 | M11-09 | Highlighting in all views | M11-06, M11-08 |
-| M11-10 | Documentation and performance | M11-01 … M11-09, M11-11 … M11-15 |
+| M11-10 | Documentation and performance | M11-01 … M11-09, M11-11 … M11-16 |
 | M11-11 | Tree order, tag folders, checked-out marker | – |
 | M11-12 | Start screen buttons | M11-01 |
 | M11-13 | Preferences in a modal | M11-06 |
 | M11-14 | Panel toggles in the toolbar | – |
 | M11-15 | README screenshot from a fixture | M11-04, M11-11 … M11-14 |
+| M11-16 | Column widths and horizontal scrolling | M11-03 |
 
 ---
 
@@ -121,7 +124,7 @@ Note (2026-11-11): done. `ThemePalette` tokens `row_tint_alpha`, `ref_pill` (`Pi
 
 Acceptance: unit tests for the width model (drag, minimums, optimal width per column, message fill); app tests for drag messages and restore after restart; snapshots with a narrow Graph column.
 
-Note: a border belongs to the column on its left; for Author, Date and SHA (right of the message, which fills) dragging right also widens them and narrows the message. The Graph column follows the lanes (2 … 12) until it is first resized (`graph: null` in `settings.json`). The fade goes to the row background (graph background or the selected row's tint); canvas initials of a node cut off by the column are hidden, since canvas text ignores the clip. The automatic hiding stays until M11-03; it uses the current widths. Persistence: global, as planned (open item answered by the plan).
+Note: superseded in part by M11-16 (every column its own width, horizontal scrolling, a handle on Commit message). A border belongs to the column on its left; for Author, Date and SHA (right of the message, which fills) dragging right also widens them and narrows the message. The Graph column follows the lanes (2 … 12) until it is first resized (`graph: null` in `settings.json`). The fade goes to the row background (graph background or the selected row's tint); canvas initials of a node cut off by the column are hidden, since canvas text ignores the clip. The automatic hiding stays until M11-03; it uses the current widths. Persistence: global, as planned (open item answered by the plan).
 
 ### [x] M11-03 Column menu and visibility
 
@@ -172,10 +175,10 @@ Acceptance: app tests: a diff gets spans after the background result, switching 
 ### [ ] M11-10 Documentation and performance
 
 - `docs/PERFORMANCE.md`: highlighting and wrap measurements (2 MB file, scrolling, first paint).
-- User guide `settings.md` (Appearance, Editor, columns), `daily-workflow.md` (columns, stashes), `coming-from-gitkraken.md`.
-- UX-PARITY rows and the deviation "no End of Line Character setting (no in-app file editor)".
+- User guide `settings.md` (Appearance, Editor, columns), `daily-workflow.md` (columns incl. widths and horizontal scrolling, M11-16; stashes), `coming-from-gitkraken.md`.
+- UX-PARITY rows and the deviations "no End of Line Character setting (no in-app file editor)" and "graph table scrolls horizontally instead of fitting the window" (M11-16).
 - User guide: left panel order and tag folders, Preferences modal, panel toggles; `coming-from-gitkraken.md`.
-- `docs/RELEASE-CHECKLIST.md` section "7e. New in M11" (Classic Dark, columns, stash look, editor settings, highlighting on Windows fonts such as Consolas, tree order, tag folders, check plus branch icon, start screen colors, Preferences modal, panel toggles).
+- `docs/RELEASE-CHECKLIST.md` section "7e. New in M11" (Classic Dark, columns (resize every column incl. Commit message; horizontal scrollbar appears when wider than the window), stash look, editor settings, highlighting on Windows fonts such as Consolas, tree order, tag folders, check plus branch icon, start screen colors, Preferences modal, panel toggles).
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed; measurements recorded.
@@ -210,3 +213,9 @@ Acceptance: app tests (click and shortcut give the same state, tooltips follow t
 - Fixture script, ignored snapshot test, `scripts/screenshot.sh`, README, `next-task.md` step 4.
 
 Acceptance: the script produces the PNG on Linux CI tooling without a display; README renders it; no real names or e-mail addresses in the fixture.
+
+### [ ] M11-16 Column widths and horizontal scrolling
+
+- Width model, handles on every column, horizontal scrolling with synchronized header, fill rule for the message, double click and reset per the decisions table. M11-02 note points here.
+
+Acceptance: unit tests for the width model (drag changes one column only, sum wider than the viewport → scroll extent, narrower → message fills, double click on the message handle → fill, reset); app tests: drag on every handle including Commit message and SHA, Shift+wheel scrolls rows and header together, vertical scrollbar stays visible while scrolled horizontally; snapshots: table wider than the window scrolled to the middle, table narrower than the window (message fills), both themes.
