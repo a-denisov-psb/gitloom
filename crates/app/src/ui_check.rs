@@ -596,10 +596,11 @@ mod tests {
         snapshot(&app, "graph-rows");
     }
 
-    /// GITFLOW sits between LOCAL and REMOTE (M7-15); the widget order is
-    /// also the keyboard focus order. Layout only, part of every test run.
+    /// Sections like GitKraken: GITFLOW, LOCAL, REMOTE, STASHES, TAGS,
+    /// SUBMODULES (M9-06); the widget order is also the keyboard focus
+    /// order. Layout only, part of every test run.
     #[test]
-    fn gitflow_section_between_local_and_remote() {
+    fn left_panel_sections_are_ordered_like_gitkraken() {
         let app = crate::app::tests::flow_app();
         let mut sim = simulator(&app);
         let mut top = |label: &str| {
@@ -607,11 +608,11 @@ mod tests {
             iced_test::selector::Bounded::bounds(&found).y
         };
         let order = [
-            "LOCAL",
             "GITFLOW",
+            "LOCAL",
             "REMOTE",
-            "TAGS",
             "STASHES",
+            "TAGS",
             "SUBMODULES",
         ]
         .map(&mut top);

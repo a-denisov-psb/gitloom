@@ -81,7 +81,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] A repository initialized with the `git-flow` CLI (Git for Windows ships it) shows the GITFLOW section; one initialized by Gitloom works with `git flow feature start` in a terminal.
 - [ ] Diff with a line longer than the view: Shift+wheel and the horizontal scrollbar scroll it in Hunk, Inline and Split; line selection still works after scrolling.
 - [ ] A file created in PowerShell 5 with `echo test > utf16.txt` shows its text; line staging is disabled with the hint, staging the whole file works.
-- [ ] GITFLOW sits between LOCAL and REMOTE.
+- [ ] Left panel order: GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES; GITFLOW is a tree (develop, feature, master, release) (M9-06).
 - [ ] Graph lines at 125 % Windows scaling look like GitKraken's (corners, width, dashes) and have no gaps.
 
 ## 7b. New in 1.2 (M8; Windows required, Linux checked in CI)

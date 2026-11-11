@@ -138,12 +138,14 @@ Acceptance: `iced_test` snapshots of the left panel headers (incl. the "+" of RE
 
 Note (2026-11-11): done. Every helper in `icons.rs` returns the wrapper widget `Sharp`: the size is rounded by `snap_size` (whole physical pixels), and `draw` translates the SVG by `snap_offset` of its bounds. The scale is zoom × the window's scale factor from the operating system (`window::scale_factor` when the window opens, `window::Event::Rescaled` afterwards), set by `ui::view` before each frame. No call site needed changes; no other SVG is drawn outside the helpers. The `iced_test` simulator always renders at scale 2, so `ui_check::snapshot_scaled` renders the real view with the tiny-skia renderer at 1.0/1.1/1.25/1.5 (`ui_check_sharp_icons`, flow app with GITFLOW "+", REMOTE "+", toolbar and a conflicted file, both themes); compared by eye with unsnapped renders (temporary switch, not committed). tiny-skia draws SVGs as vectors, so the difference there is small; the blur the maintainer saw comes from wgpu rasterizing an SVG at a fractional size and sampling it at a fractional position, which snapping removes. To confirm on Windows at 110/125 % (release checklist, M9-08).
 
-### [ ] M9-06 Left panel order and GITFLOW content
+### [x] M9-06 Left panel order and GITFLOW content
 
 - Section order and GITFLOW tree per the decisions table; keyboard focus follows the new order.
 - UX-PARITY: left panel row updated, deviation "The GITFLOW section sits between LOCAL and REMOTE" removed; M7-08/M7-15 notes point to M9-06.
 
 Acceptance: layout test for the header order; tree tests (mixed order, prefixes as folders, missing branches, filter); snapshot `ui_check_gitflow_section` updated.
+
+Note (2026-11-11): done. `sidebar::section_order` (unit test) builds the column; `left_panel_sections_are_ordered_like_gitkraken` (renamed from M7-15's layout test) checks the header positions. Pure tree `branch_tree::gitflow` (tests: mixed order, custom prefix such as `feat-`, missing main branches, collapsed folder, filter). The remainder after the prefix stays one label (`feature/ui/toolbar` → "feature" › "ui/toolbar"), not further split: only the prefix is a folder, as planned. Collapse keys `gitflow:<type>` kept from M7-08. `ui_check_gitflow_section` re-rendered and checked (develop, feature, main, release like the GitKraken screenshot). LOCAL/REMOTE keep folders first (open verification item). UX-PARITY updated, deviation removed.
 
 ### [ ] M9-07 Summary counter inside the field
 
