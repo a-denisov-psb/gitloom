@@ -101,8 +101,8 @@ pub use resolve::{
 pub use rewrite::{reword_commit, squash_commits};
 pub use ssh::{SshConfig, SshSetting};
 pub use stash::{
-    apply_stash, apply_stash_recorded, redo_stash, stash_changed_since, undo_stash, unmerged_paths,
-    StashOutcome, StashRecord,
+    apply_stash, apply_stash_recorded, redo_stash, stash_changed_since, stash_label, undo_stash,
+    unmerged_paths, StashOutcome, StashRecord,
 };
 pub use state::{locked_file, Operation, RepoState};
 pub use todo::{

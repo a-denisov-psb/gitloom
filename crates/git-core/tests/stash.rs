@@ -45,6 +45,21 @@ fn push_includes_untracked_files() {
 }
 
 #[test]
+fn empty_message_gives_gits_default_message() {
+    let repo = isolated();
+    let cli = CliBackend::new(repo.path());
+    repo.write("a.txt", "changed\n");
+    cli.stash_push(Some("  ")).unwrap();
+    let message = backend(&repo).stashes().unwrap()[0].message.clone();
+    assert!(message.starts_with("WIP on main: "), "{message}");
+    assert_eq!(git_core::stash_label(&message), "WIP on main");
+    repo.write("a.txt", "again\n");
+    cli.stash_push(Some("try it")).unwrap();
+    let message = backend(&repo).stashes().unwrap()[0].message.clone();
+    assert_eq!(git_core::stash_label(&message), "try it");
+}
+
+#[test]
 fn pop_apply_and_drop_by_commit_id() {
     let repo = isolated();
     let cli = CliBackend::new(repo.path());

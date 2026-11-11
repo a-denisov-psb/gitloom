@@ -806,6 +806,25 @@ mod tests {
             .unwrap());
     }
 
+    /// Stash node and label (M11-05): dashed square with the archive icon,
+    /// "WIP on main" in the graph, STASHES and the details title; all three
+    /// themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_stash_node() {
+        use crate::settings::ThemeChoice;
+        let mut app = crate::app::tests::graph_app();
+        let _ = app.update(Message::CommitSelected("s".into()));
+        for (choice, name) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
+            app.settings.appearance.theme = choice;
+            snapshot(&app, &format!("stash-node-{name}"));
+        }
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

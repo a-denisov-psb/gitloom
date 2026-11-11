@@ -175,7 +175,7 @@ impl RepoSnapshot {
             log.commits.push(Commit {
                 id: stash.id.clone(),
                 parents: stash.base.iter().cloned().collect(),
-                summary: stash.message.clone(),
+                summary: git_core::stash_label(&stash.message),
                 body: String::new(),
                 author: stash.author.clone(),
                 email: String::new(),

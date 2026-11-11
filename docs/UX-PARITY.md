@@ -60,6 +60,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | External editor | Preferences → External tools: VS Code, Sublime, IntelliJ or a custom path | done (M8-07, M8-08): presets fill a command template with `{path}`; repository via palette, Alt+E and toolbar; files via their context menus (unstaged, staged, commit files, file history) |
 | Stage file | Selection moves to the next unstaged file and shows its diff | done (M2; unstaging moves within the staged list the same way) |
 | Stash (toolbar) | Stashes all changes including untracked files | done (M2) |
+| Stash in the graph | Dashed square with a stash icon, labelled "WIP on <branch>" (or the message given) | done (M11-05): same label in STASHES and the details title; a stash without a message gets Git's default message |
 | Stash in graph | Stash shown as node attached to its base commit | done (M2, square node, dashed edge) |
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
 | Right click remote | Fetch, Edit URL, Rename, Remove | done (M3); M6-18 remotes defined outside the repository config cannot be removed, renamed or edited |
