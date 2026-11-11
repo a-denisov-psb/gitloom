@@ -113,12 +113,14 @@ Acceptance: integration tests in git-core, each comparing working tree bytes, `g
 
 Note (2026-11-11): done (see M9-01). Only the paths the stash touches are recorded (its working tree, index and untracked changes against its base), which covers everything a pop or apply can change; other local changes are left alone. A successful pop of an older entry is restored at its old position (newer entries dropped and stored again in order), so `git stash list` matches exactly. Created folders are removed again. Ctrl+Z, the toolbar and the banner all send `Message::Undo`; for a stash entry the app first checks in the background whether touched files changed and then asks. ADR-014 extended. Tests: `crates/git-core/tests/stash_conflicts.rs` (13), app tests `stash_*`/`undo_of_a_stash_pop_*`.
 
-### [ ] M9-03 Discard conflicted files
+### [x] M9-03 Discard conflicted files
 
 - Discard (context menu of a conflicted file) and "Discard all" handle unmerged paths per the decisions table, with confirmation; generic banner action "Discard conflicted files…".
 - Undo restores content and unmerged entries.
 
 Acceptance: integration tests: discard of a conflicted file (in HEAD and not in HEAD), discard all with conflicted and normal changes, undo restores stages 1–3 and content. App test for the confirmation.
+
+Note (2026-11-11): done. `DiscardSnapshot` index entries carry unmerged stages; undo/redo write them with `git update-index --index-info` after removing the path. A path not in HEAD is removed with `git rm --cached --force` and deleted. Discard of a conflicted file closes its conflict view. The banner action discards every conflicted file after naming them ("Discard 2 conflicted files (a.txt, c.txt)? …"). Discarding conflicted files during a merge leaves the merge running (Abort stays the way out). Tests `crates/git-core/tests/discard_conflicted.rs`, app tests `discarding_a_conflicted_file_*`, `banner_discards_*`; snapshot `stash-conflict-2-orphaned` checked.
 
 ### [ ] M9-04 Reset on the HEAD commit
 
