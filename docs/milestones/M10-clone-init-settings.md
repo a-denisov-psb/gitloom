@@ -128,11 +128,13 @@ Acceptance: unit tests for the colon parser (fixtures with several keys, expired
 
 Note (2026-11-11): done. git-core `signing` module (settings of the global config, `set_global_signing` limited to the five signing keys, `local_signing_overrides`, colon parser and `list_gpg_keys`, `signing_failed`). Deviation in the SSH test: without `gpg.ssh.allowedSignersFile` Git cannot verify SSH signatures and `%G?` reads `N` (with an error on stderr), so the test checks the `gpgsig` header instead; M10-05 must treat that case as "Signed (key not available)". The SSH part runs on Unix only (Windows OpenSSH refuses keys whose ACLs it finds too open). The GPG key picker selects by the configured id's suffix (short or long ids). Preferences → Signing sits between Identities and External tools; every change is written right away and the category reloads. A commit (or any write) whose error is a signing error shows "Signing failed" with the hint and Git's output as details. Tests: `signing.rs` unit tests, `crates/git-core/tests/signing.rs`, app `signing_preferences_and_failure_hint`; snapshots `ui_check_signing` checked.
 
-### [ ] M10-05 Signature status in the commit details
+### [x] M10-05 Signature status in the commit details
 
 - Background lookup and cache, badge per the decisions table.
 
 Acceptance: parser tests for every `%G?` value; app test: selecting a commit requests the status once; snapshot with a good and a bad signature.
+
+Note (2026-11-11): done. git-core `signature` module: `parse_signature` and `signature`; Git reports an SSH signature it cannot verify (no allowed signers file) as `N`, so a commit with a `gpgsig` header and `N` becomes "Signed (key not available)" as planned. The status is cached per commit in the tab (`RepoView::signatures`), requested with the changed files; stashes are skipped. Badge: check icon (alert icon for a bad signature), success/danger/muted color, key id as tooltip. Integration coverage in `crates/git-core/tests/signing.rs` (unsigned, SSH without and with allowed signers). Snapshots `ui_check_signature_badge` checked.
 
 ### [ ] M10-06 Commit template
 
