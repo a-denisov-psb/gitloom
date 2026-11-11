@@ -30,7 +30,7 @@ mod sidebar;
 pub(crate) mod start;
 pub(crate) mod statusbar;
 mod tabs;
-mod toolbar;
+pub(crate) mod toolbar;
 
 pub use graph::reveal_offset;
 pub use graph::visible_range as graph_visible_range;
@@ -175,8 +175,17 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
                 branch: app.action_block(crate::shortcuts::Shortcut::CheckoutBranch),
                 editor: !app.editor_command().is_empty(),
             };
-            let mut content =
-                column![toolbar::view(view, app.pull_mode, compact, pickers)].spacing(1);
+            let mut content = column![toolbar::view(
+                view,
+                app.pull_mode,
+                compact,
+                pickers,
+                toolbar::Panels {
+                    left: app.panes.sidebar_visible,
+                    right: app.panes.panel_visible,
+                },
+            )]
+            .spacing(1);
             let finish = view.snapshot.flow_finish.as_ref();
             match (view.snapshot.state_banner(), finish) {
                 // A Git flow finish stopped in a merge: "Finishing … · Merging …".

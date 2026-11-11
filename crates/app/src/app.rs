@@ -12160,6 +12160,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn panel_toggles_follow_the_shortcuts() {
+        use crate::ui::toolbar::{panel_tooltip, PanelToggle};
+        let mut app = ready_app(&["c"]);
+        assert!(app.panes.sidebar_visible && app.panes.panel_visible);
+        assert_eq!(
+            panel_tooltip(PanelToggle::Left, true),
+            "Hide left panel (Ctrl+J)"
+        );
+        assert_eq!(
+            panel_tooltip(PanelToggle::Right, true),
+            "Hide commit panel (Ctrl+K)"
+        );
+        // The buttons send what the shortcuts send.
+        let _ = app.update(Message::ShortcutChecked {
+            shortcut: Shortcut::ToggleSidebar,
+            text_input_focused: false,
+        });
+        assert!(!app.panes.sidebar_visible);
+        assert_eq!(
+            panel_tooltip(PanelToggle::Left, app.panes.sidebar_visible),
+            "Show left panel (Ctrl+J)"
+        );
+        let _ = app.update(checked(Shortcut::ToggleSidebar, false));
+        assert!(app.panes.sidebar_visible);
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        assert!(!app.panes.panel_visible);
+        assert_eq!(
+            panel_tooltip(PanelToggle::Right, app.panes.panel_visible),
+            "Show commit panel (Ctrl+K)"
+        );
+    }
+
+    #[test]
     fn preferences_size_rule() {
         use crate::ui::preferences_size;
         use iced::Size;

@@ -218,11 +218,13 @@ Acceptance: app tests: open from every entry point, Esc and "×" close, backdrop
 
 Note: the Preferences are the first layer above the app (other dialogs, e.g. confirmations or About, open above them). The app behind sits in `ui::inert`: always in the tree (no state loss), while the modal is open it gets no events and widget operations skip it, so Tab and focus stay in the modal (layout test `preferences_modal_keeps_clicks_and_focus_inside`). `ui::preferences_size` holds the size rule (unit test). "Close" became an "×" icon with the tooltip "Close (Esc)". `App::open_preferences(category)` is the deep-link API. All existing Preferences snapshots re-rendered (both themes) and checked.
 
-### [ ] M11-14 Panel toggles in the toolbar
+### [x] M11-14 Panel toggles in the toolbar
 
 - Two toggle buttons per the decisions table, synchronized with Ctrl+J/Ctrl+K and the palette.
 
 Acceptance: app tests (click and shortcut give the same state, tooltips follow the state, not on the start screen); toolbar snapshots with both panels shown and hidden.
+
+Note: Lucide `panel-left` / `panel-right` (v1.55.0, vendored). The buttons send the same `ShortcutChecked` as the shortcuts (without the focus query), so palette, shortcut and click share one path; "active" uses the mode-button highlight. They sit after Settings with an 8 px gap, icon only (also without compact mode). Layout test `panel_toggles_in_the_toolbar` clicks the left toggle; snapshots `ui_check_panel_toggles` checked.
 
 ### [ ] M11-15 README screenshot from a fixture
 
