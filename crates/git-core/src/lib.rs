@@ -7,6 +7,7 @@
 
 mod blame;
 mod cli_backend;
+pub mod clone;
 mod conflict;
 mod diff;
 mod discard;
