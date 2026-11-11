@@ -172,6 +172,13 @@ pub enum FileArea {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
 
+#[cfg(test)]
+impl TabId {
+    pub fn for_tests(id: u64) -> Self {
+        Self(id)
+    }
+}
+
 pub enum TabState {
     Start,
     Loading { path: PathBuf },
@@ -636,6 +643,20 @@ pub enum Message {
     /// Show the native folder dialog.
     OpenRepository,
     FolderPicked(Option<PathBuf>),
+    /// Clone dialog (M10-02).
+    CloneStart,
+    CloneUrlChanged(String),
+    CloneParentChanged(String),
+    CloneNameChanged(String),
+    CloneSubmodulesToggled(bool),
+    CloneBrowse,
+    CloneParentPicked(Option<PathBuf>),
+    CloneSubmit,
+    CloneProgress(git_core::Progress),
+    /// The clone ended: the new repository's folder, or the error.
+    CloneFinished(Result<PathBuf, String>),
+    /// Cancel a running clone, or close the dialog.
+    CloneCancel,
     /// Path typed on the start screen (fallback when no folder dialog is available).
     StartPathChanged(String),
     StartPathSubmitted,
@@ -927,6 +948,8 @@ pub struct App {
     pub form: Option<Form>,
     /// Open commit message dialog (reword, squash).
     pub message_dialog: Option<crate::overlay::MessageDialog>,
+    /// "Clone a repository" (M10-02).
+    pub clone_dialog: Option<crate::clone_dialog::CloneDialog>,
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
@@ -1007,6 +1030,7 @@ impl App {
             notice: None,
             modal: None,
             message_dialog: None,
+            clone_dialog: None,
             form: None,
             context_menu: None,
             shortcut_list: None,
@@ -2450,6 +2474,7 @@ impl App {
         let overlay_open = self.modal.is_some()
             || self.context_menu.is_some()
             || self.message_dialog.is_some()
+            || self.clone_dialog.is_some()
             || self.shortcut_list.is_some()
             || self.about
             || self.settings_page.is_some();
@@ -2704,6 +2729,20 @@ impl App {
     /// Closes the topmost dialog, menu, overlay or inline input; false if
     /// none was open (M6-07: Esc closes every overlay, also when a text
     /// field inside it had focus).
+    /// Esc on the clone dialog: cancels a running clone, else closes it.
+    fn close_clone_dialog(&mut self) -> bool {
+        match &self.clone_dialog {
+            Some(dialog) => {
+                match &dialog.running {
+                    Some(run) => run.cancel.cancel(),
+                    None => self.clone_dialog = None,
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
     fn close_topmost_overlay(&mut self) -> bool {
         std::mem::take(&mut self.about)
             || self.modal.take().is_some()
@@ -2711,6 +2750,7 @@ impl App {
             || self.shortcut_list.take().is_some()
             || self.form.take().is_some()
             || self.message_dialog.take().is_some()
+            || self.close_clone_dialog()
             || self.settings_page.take().is_some()
             || self
                 .active_view_mut()
@@ -3208,6 +3248,40 @@ impl App {
             return Task::none();
         };
         self.undo_redo_in(tab, undo, false)
+    }
+
+    /// Starts the clone of the open dialog in the background (M10-02):
+    /// progress and Cancel in the dialog, askpass like fetch.
+    fn start_clone(&mut self) -> Task<Message> {
+        let Some(dialog) = self.clone_dialog.as_mut() else {
+            return Task::none();
+        };
+        if dialog.running.is_some() {
+            return Task::none();
+        }
+        if let Some(problem) = dialog.problem() {
+            dialog.error = Some(problem.into());
+            return Task::none();
+        }
+        let Some(target) = dialog.full_path() else {
+            return Task::none();
+        };
+        let cancel = git_core::CancelToken::new();
+        dialog.error = None;
+        dialog.running = Some(crate::clone_dialog::CloneRun {
+            cancel: cancel.clone(),
+            progress: None,
+        });
+        let parent = PathBuf::from(dialog.parent.trim());
+        let mut git = git_core::CliBackend::new(parent);
+        if let Ok(exe) = std::env::current_exe() {
+            git = git.with_askpass(exe);
+        }
+        let (url, submodules) = (dialog.url.trim().to_owned(), dialog.submodules);
+        Task::run(
+            clone_stream(git, url, target, submodules, cancel),
+            |message| message,
+        )
     }
 
     /// Pops or applies the stash `id` in the active tab and records it for
@@ -7525,6 +7599,90 @@ impl App {
                 );
             }
             Message::FolderPicked(Some(path)) => return self.open_path(path),
+            Message::CloneStart => {
+                if let Some(tab) = self
+                    .active_tab()
+                    .filter(|t| matches!(t.state, TabState::Start))
+                    .map(|t| t.id)
+                {
+                    self.clone_dialog = Some(crate::clone_dialog::CloneDialog::new(
+                        tab,
+                        crate::clone_dialog::default_parent(&self.session.recent),
+                    ));
+                    return iced::widget::operation::focus(crate::ui::overlays::CLONE_URL_INPUT);
+                }
+            }
+            Message::CloneUrlChanged(url) => {
+                if let Some(d) = self.clone_dialog.as_mut().filter(|d| d.running.is_none()) {
+                    d.set_url(url);
+                }
+            }
+            Message::CloneParentChanged(parent) => {
+                if let Some(d) = self.clone_dialog.as_mut().filter(|d| d.running.is_none()) {
+                    d.set_parent(parent);
+                }
+            }
+            Message::CloneNameChanged(name) => {
+                if let Some(d) = self.clone_dialog.as_mut().filter(|d| d.running.is_none()) {
+                    d.set_name(name);
+                }
+            }
+            Message::CloneSubmodulesToggled(on) => {
+                if let Some(d) = self.clone_dialog.as_mut().filter(|d| d.running.is_none()) {
+                    d.submodules = on;
+                }
+            }
+            Message::CloneBrowse => {
+                return Task::perform(
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Where to clone to")
+                        .pick_folder(),
+                    |folder| Message::CloneParentPicked(folder.map(|f| f.path().to_path_buf())),
+                );
+            }
+            Message::CloneParentPicked(Some(path)) => {
+                if let Some(d) = self.clone_dialog.as_mut().filter(|d| d.running.is_none()) {
+                    d.set_parent(path.display().to_string());
+                }
+            }
+            Message::CloneParentPicked(None) => {}
+            Message::CloneSubmit => return self.start_clone(),
+            Message::CloneProgress(progress) => {
+                if let Some(run) = self.clone_dialog.as_mut().and_then(|d| d.running.as_mut()) {
+                    run.progress = Some(progress);
+                }
+            }
+            Message::CloneFinished(result) => {
+                let Some(dialog) = self.clone_dialog.as_mut() else {
+                    return Task::none();
+                };
+                dialog.running = None;
+                match result {
+                    Ok(path) => {
+                        let tab = dialog.tab;
+                        self.clone_dialog = None;
+                        let start_tab = self
+                            .tabs
+                            .iter()
+                            .any(|t| t.id == tab && matches!(t.state, TabState::Start));
+                        return if start_tab {
+                            self.open_in_tab(tab, path)
+                        } else {
+                            self.open_path(path)
+                        };
+                    }
+                    Err(error) if error == git_core::Error::Cancelled.to_string() => {
+                        dialog.error = Some("Clone cancelled.".into());
+                    }
+                    Err(error) => dialog.error = Some(error),
+                }
+            }
+            Message::CloneCancel => {
+                match self.clone_dialog.as_ref().and_then(|d| d.running.as_ref()) {
+                    Some(run) => run.cancel.cancel(),
+                    None => self.clone_dialog = None,
+                }
+            }
             Message::FolderPicked(None) => {}
             Message::StartPathChanged(path) => self.start_path = path,
             Message::StartPathSubmitted => {
@@ -8561,6 +8719,39 @@ fn yield_or_wait(view: &mut RepoView, next: Queued) -> String {
             format!("Please wait: {running} is still running")
         }
     }
+}
+
+/// Clones off the UI thread and emits [`Message::CloneProgress`], then
+/// [`Message::CloneFinished`] (M10-02).
+fn clone_stream(
+    git: git_core::CliBackend,
+    url: String,
+    target: PathBuf,
+    submodules: bool,
+    cancel: git_core::CancelToken,
+) -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(
+        64,
+        async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            use iced::futures::{SinkExt as _, StreamExt as _};
+
+            let (sender, mut updates) = iced::futures::channel::mpsc::unbounded();
+            let work = tokio::task::spawn_blocking(move || {
+                git_core::clone::clone(&git, &url, &target, submodules, &cancel, &mut |p| {
+                    let _ = sender.unbounded_send(p);
+                })
+                .map(|()| target)
+                .map_err(|e| e.to_string())
+            });
+            while let Some(progress) = updates.next().await {
+                let _ = output.send(Message::CloneProgress(progress)).await;
+            }
+            let result = work
+                .await
+                .unwrap_or_else(|e| Err(format!("Background task failed: {e}")));
+            let _ = output.send(Message::CloneFinished(result)).await;
+        },
+    )
 }
 
 /// Runs a network command off the UI thread and emits its progress
@@ -12166,6 +12357,96 @@ pub(crate) mod tests {
         assert_eq!(
             app.tabs[0].view().unwrap().busy.as_deref(),
             Some("Discard conflicted files")
+        );
+    }
+
+    #[test]
+    fn clone_dialog_flow() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CloneStart);
+        assert!(app.clone_dialog.is_some());
+        // Validation without I/O.
+        let _ = app.update(Message::CloneSubmit);
+        assert_eq!(
+            app.clone_dialog.as_ref().unwrap().error.as_deref(),
+            Some("Enter the URL of the repository")
+        );
+        let _ = app.update(Message::CloneUrlChanged("git@host:owner/tool.git".into()));
+        let _ = app.update(Message::CloneParentChanged("/work".into()));
+        let dialog = app.clone_dialog.as_ref().unwrap();
+        assert_eq!(dialog.name, "tool");
+        assert_eq!(dialog.error, None);
+        assert_eq!(
+            dialog.full_path(),
+            Some(std::path::PathBuf::from("/work").join("tool"))
+        );
+
+        let _ = app.update(Message::CloneSubmit);
+        let dialog = app.clone_dialog.as_ref().unwrap();
+        let cancel = dialog.running.as_ref().unwrap().cancel.clone();
+        // Fields are frozen while it runs.
+        let _ = app.update(Message::CloneUrlChanged("other".into()));
+        assert_eq!(
+            app.clone_dialog.as_ref().unwrap().url,
+            "git@host:owner/tool.git"
+        );
+        let _ = app.update(Message::CloneProgress(git_core::Progress {
+            phase: "Receiving objects".into(),
+            percent: Some(10),
+        }));
+        assert_eq!(
+            app.clone_dialog
+                .as_ref()
+                .unwrap()
+                .progress_text()
+                .as_deref(),
+            Some("Receiving objects 10 %")
+        );
+        // Cancel (button or Esc) stops the clone, the dialog stays.
+        let _ = app.update(Message::CloneCancel);
+        assert!(cancel.is_cancelled());
+        let _ = app.update(Message::CloneFinished(Err(
+            git_core::Error::Cancelled.to_string()
+        )));
+        let dialog = app.clone_dialog.as_ref().unwrap();
+        assert_eq!(dialog.error.as_deref(), Some("Clone cancelled."));
+        assert!(dialog.running.is_none());
+
+        // A finished clone opens in the tab the dialog came from.
+        let _ = app.update(Message::CloneSubmit);
+        let path = std::path::PathBuf::from("/work/tool");
+        let _ = app.update(Message::CloneFinished(Ok(path.clone())));
+        assert!(app.clone_dialog.is_none());
+        assert!(matches!(
+            &app.tabs[0].state,
+            TabState::Loading { path: p } if *p == path
+        ));
+        assert_eq!(app.tabs[0].id, tab);
+
+        // Cancel without a running clone closes the dialog.
+        let _ = app.update(checked(Shortcut::NewTab, false));
+        let _ = app.update(Message::CloneStart);
+        let _ = app.update(Message::CloneCancel);
+        assert!(app.clone_dialog.is_none());
+    }
+
+    #[test]
+    fn failed_clone_shows_gits_error_in_the_dialog() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let _ = app.update(Message::CloneStart);
+        let _ = app.update(Message::CloneUrlChanged("https://example.com/x.git".into()));
+        let _ = app.update(Message::CloneParentChanged("/work".into()));
+        let _ = app.update(Message::CloneSubmit);
+        let _ = app.update(Message::CloneFinished(Err(
+            "/work/x already exists and is not empty".into(),
+        )));
+        let dialog = app.clone_dialog.as_ref().unwrap();
+        assert_eq!(
+            dialog.error.as_deref(),
+            Some("/work/x already exists and is not empty")
         );
     }
 

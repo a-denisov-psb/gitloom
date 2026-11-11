@@ -11,6 +11,7 @@ mod app_icon;
 mod askpass;
 mod avatars;
 mod branch_tree;
+mod clone_dialog;
 mod conflict;
 mod crash;
 mod diff_blocks;

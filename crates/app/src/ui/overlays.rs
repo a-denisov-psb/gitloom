@@ -364,6 +364,95 @@ pub fn palette(palette: &crate::palette::Palette) -> Element<'_, Message> {
 
 /// Menu at its origin; a click anywhere else closes it.
 /// Commit message dialog (reword, squash).
+/// "Clone a repository" (M10-02): URL, where to clone to, name, full path,
+/// submodules; progress and Cancel while it runs.
+pub fn clone_dialog(dialog: &crate::clone_dialog::CloneDialog) -> Element<'_, Message> {
+    let idle = dialog.running.is_none();
+    let field = |label: &'static str, input: Element<'static, Message>| {
+        column![text(label).size(12), input].spacing(4)
+    };
+    let input = |placeholder: &str, value: &str, on_input: fn(String) -> Message| {
+        let mut input = iced::widget::text_input(placeholder, value)
+            .padding(6)
+            .style(theme::input);
+        if idle {
+            input = input.on_input(on_input).on_submit(Message::CloneSubmit);
+        }
+        input
+    };
+    let url = input(
+        "https://github.com/owner/repo.git",
+        &dialog.url,
+        Message::CloneUrlChanged,
+    )
+    .id(CLONE_URL_INPUT);
+    let parent = row![
+        input("Folder", &dialog.parent, Message::CloneParentChanged),
+        button(text("Browse…"))
+            .on_press_maybe(idle.then_some(Message::CloneBrowse))
+            .padding([6, 12])
+            .style(button::secondary),
+    ]
+    .spacing(6);
+    let name = input("Folder name", &dialog.name, Message::CloneNameChanged);
+    let full_path = dialog
+        .full_path()
+        .map_or_else(String::new, |p| p.display().to_string());
+    let mut submodules = iced::widget::checkbox(dialog.submodules)
+        .label("Clone submodules")
+        .size(14)
+        .text_size(12);
+    if idle {
+        submodules = submodules.on_toggle(Message::CloneSubmodulesToggled);
+    }
+    let mut content = column![
+        text("Clone a repository").size(17),
+        column![text("URL").size(12), url].spacing(4),
+        column![text("Where to clone to").size(12), parent].spacing(4),
+        column![text("Name").size(12), name].spacing(4),
+        field("Full path", muted(full_path).size(12).into()),
+        submodules,
+    ]
+    .spacing(12);
+    if let Some(progress) = dialog.progress_text() {
+        content = content.push(text(progress).size(12));
+    }
+    if let Some(error) = &dialog.error {
+        content = content.push(
+            text(error)
+                .size(12)
+                .style(theme::text_danger)
+                .wrapping(text::Wrapping::WordOrGlyph),
+        );
+    }
+    let ready = idle && dialog.problem().is_none();
+    content = content.push(
+        row![
+            space::horizontal(),
+            button(text("Cancel"))
+                .on_press(Message::CloneCancel)
+                .padding([6, 14])
+                .style(button::secondary),
+            button(text("Clone"))
+                .on_press_maybe(ready.then_some(Message::CloneSubmit))
+                .padding([6, 14])
+                .style(button::primary),
+        ]
+        .spacing(8),
+    );
+    let dialog = container(content)
+        .width(DIALOG_WIDTH)
+        .padding(20)
+        .style(theme::dialog);
+    opaque(
+        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
+            .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
+/// Id of the URL field (focused when the clone dialog opens).
+pub const CLONE_URL_INPUT: &str = "clone-url";
+
 pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Message> {
     let mut content = column![
         text(&dialog.title).size(17),
