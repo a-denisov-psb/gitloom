@@ -29,6 +29,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Preferences → Repository → SSH key: use a key from `~/.ssh` (or any key file) for fetch, pull and push of a repository (`core.sshCommand` in its Git config), or the system default; a custom SSH command is only replaced after confirmation. Authentication errors name the key.
 - Preferences → External tools → External editor: presets for VS Code, VSCodium, Sublime Text, IntelliJ IDEA and Zed or a custom command with `{path}`. "Open repository in editor" (Alt+E, command palette, toolbar button "Editor" while an editor is set) and "Open in external editor" in the file context menus.
 
+- Release packages for Windows on ARM64 (portable zip) and Linux ARM64 (AppImage, tar.gz), best effort, and a `.deb` package for Linux x64.
+
 - A stash pop or apply that stops in conflicts is no longer an error: a banner says the stash was kept, offers Undo and, once the conflicts are resolved, "Drop stash" / "Keep stash"; the conflict view names the sides "Updated upstream" and "Stashed changes".
 - Stash pop and apply can be undone (Ctrl+Z, toolbar, banner) and redone, with and without conflicts: files, index and stash list return exactly to the state before.
 - Conflicted files without a running operation show a banner that explains how to get out, with "Discard conflicted files…".
@@ -37,6 +39,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Release binaries are built with full link-time optimization (Cargo profile `dist`): smaller and slightly faster.
 - The start screen is laid out like GitKraken's New Tab: Open a repo, Clone a repo and Start a local repo on the left; recent repositories, Customize (Preferences, Manage identities) and Resources (user guide, report an issue, release notes) on the right.
 - The character counter of the commit summary sits inside the field at the right edge like GitKraken; it turns to the warning color at 10 characters left and red below 0.
 - Left panel sections in GitKraken's order: GITFLOW (when initialized), LOCAL, REMOTE, STASHES, TAGS, SUBMODULES. GITFLOW shows a tree like GitKraken: the development and production branches and folders "feature", "release", "hotfix", listed alphabetically.

@@ -8,7 +8,8 @@ Download the package for your system from the [releases page](https://github.com
 
 - **Windows (x64, x86):** run the `.msi` installer (asks for administrator rights) or unpack the portable `.zip` anywhere and start `gitloom.exe`. Until the binaries are signed, SmartScreen may warn: **More info** → **Run anyway**.
 - **macOS 11 or newer (Apple silicon and Intel):** open the `.dmg` and drag Gitloom to Applications. The app is not notarized by Apple, so the first start is blocked: right click the app → **Open** → **Open**, or System Settings → Privacy & Security → **Open Anyway**.
-- **Linux x64 (glibc 2.35 or newer):** make the AppImage executable (`chmod +x Gitloom-*.AppImage`) and run it. The `.tar.gz` contains the binary, a desktop entry (`io.github.a_denisov_psb.Gitloom.desktop`), AppStream metadata and an icon; copy the desktop entry to `~/.local/share/applications/` and the icon to `~/.local/share/icons/hicolor/256x256/apps/` to get a menu entry.
+- **Linux x64 (glibc 2.35 or newer):** make the AppImage executable (`chmod +x Gitloom-*.AppImage`) and run it. The `.tar.gz` contains the binary, a desktop entry (`io.github.a_denisov_psb.Gitloom.desktop`), AppStream metadata and an icon; copy the desktop entry to `~/.local/share/applications/` and the icon to `~/.local/share/icons/hicolor/256x256/apps/` to get a menu entry. On Debian and Ubuntu, `sudo apt install ./gitloom_*_amd64.deb` installs it with a menu entry.
+- **Windows on ARM64 and Linux ARM64 (best effort, not in every release):** the Windows portable `.zip` and the Linux `.AppImage` / `.tar.gz` work as described above.
 
 ## Open a repository
 

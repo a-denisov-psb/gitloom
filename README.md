@@ -28,7 +28,8 @@ Download the package for your system from the [releases page](https://github.com
 |---|---|---|
 | Windows 10/11 (x64, x86) | `.msi` installer or portable `.zip` | The installer asks for administrator rights; the zip needs none. |
 | macOS 11+ (Apple silicon and Intel) | `.dmg` | Drag Gitloom to Applications. |
-| Linux x64 (glibc 2.35+, e.g. Ubuntu 22.04) | `.AppImage` or `.tar.gz` | `chmod +x Gitloom-*.AppImage` and run it. The archive contains the binary, a desktop entry and an icon. |
+| Linux x64 (glibc 2.35+, e.g. Ubuntu 22.04) | `.AppImage`, `.tar.gz` or `.deb` | `chmod +x Gitloom-*.AppImage` and run it. The archive contains the binary, a desktop entry and an icon. |
+| Windows 11 on ARM64, Linux ARM64 (best effort) | portable `.zip`; `.AppImage` or `.tar.gz` | Built when CI can; a release may come without them. |
 
 **macOS:** the app is signed ad hoc but not notarized by Apple, so Gatekeeper blocks the first start. Open it once with right click → **Open** → **Open**, or allow it under System Settings → Privacy & Security → **Open Anyway**.
 
@@ -61,7 +62,9 @@ cargo run -p gitloom
 cargo run -p gitloom -- <path-to-repository>
 ```
 
-Linux needs X11/Wayland libraries and `libxkbcommon`. Without a GPU, use the software renderer: `ICED_BACKEND=tiny-skia cargo run -p gitloom`. Packages are built with `./scripts/package.sh` (Linux, macOS) or `scripts\package.ps1` (Windows); see [CONTRIBUTING](CONTRIBUTING.md).
+Linux needs X11/Wayland libraries and `libxkbcommon`. Without a GPU, use the software renderer: `ICED_BACKEND=tiny-skia cargo run -p gitloom`.
+
+Optimized binaries and packages are built with [`just`](https://github.com/casey/just): `just` lists the recipes, `just build <target>` puts a single binary into `dist/` (e.g. `just portable` for a Windows exe, also from Linux/WSL), `just package` builds the packages of your platform. See [CONTRIBUTING → Building](CONTRIBUTING.md#building).
 
 ## Development documentation
 

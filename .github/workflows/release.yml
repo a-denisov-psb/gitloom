@@ -58,16 +58,30 @@ jobs:
         run: cargo test --workspace --locked
 
   linux:
-    name: Linux x64
+    name: Linux ${{ matrix.arch }}
     needs: check
-    # Oldest LTS runner: the binaries need glibc 2.35 or newer (ADR-031).
-    runs-on: ubuntu-22.04
+    # Oldest LTS runners: the binaries need glibc 2.35 or newer (ADR-031).
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+            optional: false
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            optional: true
+    # Linux arm64 is best effort (ADR-016, ADR-052).
+    continue-on-error: ${{ matrix.optional }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-${{ matrix.arch }}
 
       - name: Install dependencies
         run: |
@@ -91,9 +105,15 @@ jobs:
           # 124: still running after 15 s, i.e. it started and did not crash.
           [[ $status -eq 124 ]] || { echo "AppImage exited with $status" >&2; exit 1; }
 
+      - name: Check the Debian package
+        if: matrix.arch == 'x64'
+        run: |
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+
       - uses: actions/upload-artifact@v4
         with:
-          name: packages-linux-x64
+          name: packages-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
@@ -162,7 +182,10 @@ jobs:
           - arch: x86
             target: i686-pc-windows-msvc
             optional: true
-    # Windows x86 is best effort (ADR-016).
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            optional: true
+    # Windows x86 and arm64 are best effort (ADR-016, ADR-052).
     continue-on-error: ${{ matrix.optional }}
     steps:
       - uses: actions/checkout@v5
@@ -193,10 +216,12 @@ jobs:
           Write-Error "SignPath signing is not set up yet (M6-10)."
           exit 1
 
+      # The x64 runner cannot start an arm64 binary.
       - name: Start the app
+        if: matrix.arch != 'arm64'
         shell: pwsh
         run: |
-          $exe = "target\${{ matrix.target }}\release\gitloom.exe"
+          $exe = "target\${{ matrix.target }}\dist\gitloom.exe"
           $process = Start-Process -FilePath $exe -ArgumentList $env:GITHUB_WORKSPACE -PassThru
           Start-Sleep -Seconds 15
           if ($process.HasExited) { throw "the app exited early with $($process.ExitCode)" }
@@ -244,6 +269,11 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           ./scripts/release-notes.sh "$version" > "$RUNNER_TEMP/notes.md"
+          # The packages this run built (best-effort targets may be missing).
+          {
+            printf '\n### Files\n\n'
+            for file in dist/*; do printf -- '- `%s`\n' "${file#dist/}"; done
+          } >> "$RUNNER_TEMP/notes.md"
           prerelease=()
           [[ "$version" == *-rc.* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" dist/* \

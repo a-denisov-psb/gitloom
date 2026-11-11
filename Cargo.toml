@@ -26,3 +26,10 @@ print_stdout = "warn"
 lto = "thin"
 # Keep the symbol table so crash report backtraces name functions (ADR-029).
 strip = "debuginfo"
+
+# Release builds and packages (ADR-052): slower to build, smaller and faster
+# binary. `release` stays the quick optimized build for development.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

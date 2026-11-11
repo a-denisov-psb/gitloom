@@ -17,6 +17,45 @@ Run before every commit. CI runs the same steps.
 scripts\check.ps1         # Windows
 ```
 
+## Building
+
+Optimized builds use [`just`](https://github.com/casey/just) as task runner and the Cargo profile `dist` (full LTO, one codegen unit; ADR-052). Install `just` once:
+
+```sh
+cargo install --locked just     # Linux, macOS, WSL
+winget install Casey.Just       # Windows
+```
+
+| Recipe | What it does |
+|---|---|
+| `just` | Lists the recipes |
+| `just check` | Quality gate (`scripts/check.sh` / `check.ps1`) |
+| `just build <target>` | Builds one binary with `--profile dist` into `dist/<bin>-<version>-<target>[.exe]` and prints path and size |
+| `just portable` | Same as `just build win-x64` |
+| `just targets` | Target aliases and whether this machine can build them |
+| `just package` | Release packages of this platform into `dist/` (`scripts/package.sh` / `package.ps1`) |
+| `just ci-packages [ref]` | Runs the release workflow as a dry run on `ref` (default `develop`), waits and downloads all packages into `dist/ci-<short-sha>/`; needs a logged-in `gh` |
+| `just clean` | `cargo clean` and removes `dist/` (the next build takes longer) |
+
+Targets of `just build`:
+
+| Target | On Linux/WSL | On Windows |
+|---|---|---|
+| `win-x64` | `x86_64-pc-windows-gnu`, needs mingw-w64 | `x86_64-pc-windows-msvc` |
+| `win-x86` | `i686-pc-windows-gnu`, needs mingw-w64 | `i686-pc-windows-msvc` |
+| `win-arm64` | not possible, use `just ci-packages` | `aarch64-pc-windows-msvc`, needs the MSVC ARM64 build tools |
+| `linux-x64` | `x86_64-unknown-linux-gnu` | use WSL |
+| `linux-arm64` | `aarch64-unknown-linux-gnu`; native on ARM64, else `cargo zigbuild` | use WSL |
+| `mac` | not possible, use `just ci-packages` | not possible, use `just ci-packages` |
+
+Prerequisites, named by `just build` when missing:
+
+- the Rust target: `rustup target add <triple>`
+- Windows from Linux/WSL: `sudo apt install mingw-w64`
+- Linux ARM64 from x64: `cargo install --locked cargo-zigbuild` and zig (`pip3 install ziglang` or [ziglang.org](https://ziglang.org/download/))
+
+Release packages come from CI (ADR-016): tags on `master` build and attach them, the manual dry run (`just ci-packages`) only uploads them as workflow artifacts. Windows x86/ARM64 and Linux ARM64 are best effort.
+
 ## Branching (git flow)
 
 | Branch | From | Into | Purpose |

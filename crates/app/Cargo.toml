@@ -67,6 +67,8 @@ infoPlistPath = "../../packaging/macos/Info.plist"
 [package.metadata.packager.deb]
 # Also used for the AppImage's desktop entry.
 desktopTemplate = "../../packaging/linux/appimage.desktop"
+# Write actions run the `git` executable (ADR-013).
+depends = ["git"]
 
 [package.metadata.packager.wix]
 languages = ["en-US"]
