@@ -158,6 +158,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
 | The left panel trees list branches (or tags) before folders on every level, both alphabetical | Maintainer decision 2026-11-11 (M11-11): the items you work with come first; GitKraken's own order differs between sections |
+| Preferences open as a centered modal over the dimmed window (fills small windows) instead of a full view | Maintainer decision 2026-11-11 (M11-13): the repository stays visible; "×" and Esc close it, a click beside it does not |
 | Reset is a dialog (Soft / Mixed / Hard) instead of GitKraken's submenu | The maintainer prefers the dialog (2026-11-11); it also explains the three modes |
 | Conflicted files without a running Git operation show a banner with "Discard conflicted files…" | ADR-044 (no dead ends): after a stash conflict and a restart nothing else explains them |
 | The repository and branch pickers open the centered palette lists ("Open recent repository", "Checkout branch") instead of a dropdown below the picker | M6-17: reuses the existing lists before 1.0; a real dropdown is a backlog item |

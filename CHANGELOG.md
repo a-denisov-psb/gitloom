@@ -45,6 +45,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Preferences open as a centered window over the app (the whole window when it is small); "×" or Esc closes them, Tab stays inside.
 - The start screen buttons "Open a repo", "Clone a repo" and "Start a local repo" have one size and the accent color, with text chosen for good contrast in every theme.
 - The left panel lists branches before folders on every level (LOCAL, REMOTE, GITFLOW, TAGS); TAGS groups tags into folders at `/` like the branches; the checked-out branch shows a check next to its branch icon, and rows of one level stay aligned.
 - Author, Date and SHA no longer hide by themselves in a narrow window; the table is clipped at the right instead, and the column headers line up exactly with the rows.

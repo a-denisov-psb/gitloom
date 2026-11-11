@@ -5091,6 +5091,13 @@ impl App {
         )
     }
 
+    /// Opens the Preferences modal at `category` (M11-13; deep links of the
+    /// palette, M12-12).
+    pub fn open_preferences(&mut self, category: settings::Category) -> Task<Message> {
+        let task = self.open_settings();
+        Task::batch([task, self.update(Message::SettingsCategory(category))])
+    }
+
     fn open_settings(&mut self) -> Task<Message> {
         self.context_menu = None;
         self.settings_page = Some(settings::Page::new(&self.settings));
@@ -5914,10 +5921,7 @@ impl App {
                 self.settings.tools.merge_tool = choice;
                 return self.save_settings();
             }
-            Message::SettingsOpenedAt(category) => {
-                let task = self.open_settings();
-                return Task::batch([task, self.update(Message::SettingsCategory(category))]);
-            }
+            Message::SettingsOpenedAt(category) => return self.open_preferences(category),
             Message::AvatarsToggled(on) => {
                 self.settings.appearance.avatars = on;
                 if !on {
@@ -12117,6 +12121,65 @@ pub(crate) mod tests {
         let current = highlighted(&app, CodeTheme::Dark);
         let _ = app.update(current);
         assert!(open_diff(&app).highlight.is_some());
+    }
+
+    #[test]
+    fn preferences_modal_opens_everywhere_and_closes() {
+        let entries = [
+            Message::SettingsOpened,
+            Message::SettingsOpenedAt(settings::Category::Editor),
+            checked(Shortcut::Settings, false),
+        ];
+        for entry in entries {
+            let mut app = ready_app(&["c"]);
+            let _ = app.update(entry.clone());
+            assert!(app.settings_page.is_some(), "{entry:?}");
+            // Esc closes it.
+            let _ = app.update(checked(Shortcut::Close, false));
+            assert!(app.settings_page.is_none(), "{entry:?}");
+        }
+        // "×" closes it; open_preferences selects the page.
+        let mut app = ready_app(&["c"]);
+        let _ = app.open_preferences(settings::Category::Signing);
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::Signing)
+        );
+        let _ = app.update(Message::SettingsClosed);
+        assert!(app.settings_page.is_none());
+        // The start screen opens it too, with the repository group disabled.
+        let (mut start, _) = App::new(Vec::new(), None);
+        let _ = start.update(Message::SettingsOpened);
+        assert!(start.settings_page.is_some());
+        let _ = start.update(Message::SettingsCategory(settings::Category::Gitflow));
+        assert_eq!(
+            start.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::General),
+            "repository pages need a repository"
+        );
+    }
+
+    #[test]
+    fn preferences_size_rule() {
+        use crate::ui::preferences_size;
+        use iced::Size;
+        assert_eq!(
+            preferences_size(Size::new(1400.0, 860.0)),
+            Size::new(960.0, 680.0)
+        );
+        assert_eq!(
+            preferences_size(Size::new(1000.0, 600.0)),
+            Size::new(800.0, 510.0)
+        );
+        // Small windows: the whole window.
+        assert_eq!(
+            preferences_size(Size::new(700.0, 600.0)),
+            Size::new(700.0, 600.0)
+        );
+        assert_eq!(
+            preferences_size(Size::new(900.0, 500.0)),
+            Size::new(900.0, 500.0)
+        );
     }
 
     #[test]

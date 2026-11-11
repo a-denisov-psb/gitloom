@@ -210,11 +210,13 @@ Acceptance: contrast unit test (WCAG ratio) for label and shortcut line in Light
 
 Note: `theme::on_fill` picks white or near-black text, whichever contrasts more with the accent (dark text in Dark and Classic Dark, white in Light); hover and press move the fill away from the text color (12 % and 24 %), so label, shortcut line and icon keep one color and AA in every state (test `start_buttons_reach_wcag_aa`). Buttons are 60 px high with the content centered; the shortcut line uses the label color at 12 px. `luminance`/`contrast` moved from the tests into `theme`. Snapshots `ui_check_start_screen` (three themes × 100/125 %) checked.
 
-### [ ] M11-13 Preferences in a modal
+### [x] M11-13 Preferences in a modal
 
 - Modal per the decisions table; all categories, the repository group and the start-screen case work as before.
 
 Acceptance: app tests: open from every entry point, Esc and "×" close, backdrop click does not close, focus stays inside, `open_preferences(page)` selects the page; layout test for the size rule incl. a small window; snapshots in both themes.
+
+Note: the Preferences are the first layer above the app (other dialogs, e.g. confirmations or About, open above them). The app behind sits in `ui::inert`: always in the tree (no state loss), while the modal is open it gets no events and widget operations skip it, so Tab and focus stay in the modal (layout test `preferences_modal_keeps_clicks_and_focus_inside`). `ui::preferences_size` holds the size rule (unit test). "Close" became an "×" icon with the tooltip "Close (Esc)". `App::open_preferences(category)` is the deep-link API. All existing Preferences snapshots re-rendered (both themes) and checked.
 
 ### [ ] M11-14 Panel toggles in the toolbar
 

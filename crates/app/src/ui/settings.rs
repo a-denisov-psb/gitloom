@@ -73,10 +73,14 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let header = row![
         text("Preferences").size(18),
         space::horizontal(),
-        button(text("Close"))
-            .on_press(Message::SettingsClosed)
-            .padding([4, 14])
-            .style(button::secondary),
+        crate::ui::panel::with_tooltip_text(
+            button(crate::icons::icon(crate::icons::Icon::Close, 16.0))
+                .on_press(Message::SettingsClosed)
+                .padding([4, 8])
+                .style(theme::flat)
+                .into(),
+            "Close (Esc)".to_owned(),
+        ),
     ]
     .align_y(iced::Center)
     .padding([10, 16]);

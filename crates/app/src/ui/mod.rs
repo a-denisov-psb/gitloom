@@ -18,6 +18,7 @@ pub mod context_area;
 pub(crate) mod diff;
 mod file_history;
 mod graph;
+mod inert;
 #[cfg(test)]
 pub use graph::lanes_width;
 pub use graph::{optimal_column_width, MIN_GRAPH_WIDTH};
@@ -86,10 +87,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(notice) = &app.notice {
         layout = layout.push(notice_banner(notice));
     }
-    layout = match (&app.settings_page, app.active_tab()) {
-        (Some(page), _) => layout.push(settings::view(app, page)),
-        (None, Some(tab)) => layout.push(tab_body(app, tab)),
-        (None, None) => layout.push(space::vertical()),
+    layout = match app.active_tab() {
+        Some(tab) => layout.push(tab_body(app, tab)),
+        None => layout.push(space::vertical()),
     };
     layout = layout.push(statusbar::view(app));
 
@@ -100,7 +100,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .into();
     // Ends a branch drag released outside a drop target (M4-11).
     let base = context_area::release_area(base, Message::BranchDragEnd);
+    // Behind the Preferences modal the app is visible but out of reach:
+    // no clicks, and Tab keeps the focus inside the modal (M11-13).
+    let base = inert::inert(base, app.settings_page.is_some());
     let mut layers = vec![base];
+    if let Some(page) = &app.settings_page {
+        layers.push(preferences(app, page));
+    }
     if let Some(menu) = &app.context_menu {
         layers.push(overlays::context_menu(menu, app.window_size()));
     }
@@ -230,6 +236,31 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     .on_resize(6, Message::PaneResized)
     .style(theme::panes)
     .into()
+}
+
+/// Size of the Preferences modal in a window `window` large (logical
+/// pixels): min(80 % of the width, 960) × min(85 % of the height, 680);
+/// below 720 × 520 it fills the window (M11-13).
+pub fn preferences_size(window: iced::Size) -> iced::Size {
+    if window.width < 720.0 || window.height < 520.0 {
+        return window;
+    }
+    iced::Size::new(
+        (window.width * 0.8).min(960.0),
+        (window.height * 0.85).min(680.0),
+    )
+}
+
+/// Preferences as a centered modal over the dimmed app (M11-13). A click
+/// on the backdrop does not close it; "×" and Esc do.
+fn preferences<'a>(app: &'a App, page: &'a crate::settings::Page) -> Element<'a, Message> {
+    let size = preferences_size(app.window_size());
+    let dialog = container(settings::view(app, page))
+        .width(size.width)
+        .height(size.height)
+        .clip(true)
+        .style(theme::dialog);
+    iced::widget::opaque(container(dialog).center(Fill).style(theme::backdrop))
 }
 
 /// Shadows of the side panels falling onto the graph (`panel_shadow`,
