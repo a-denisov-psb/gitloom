@@ -56,7 +56,7 @@ fn pop_apply_and_drop_by_commit_id() {
     let (newest, older) = (stashes[0].id.clone(), stashes[1].id.clone());
 
     // The older stash is stash@{1}; it is found by id.
-    cli.stash_apply(&older).unwrap();
+    git_core::apply_stash(&cli, &older, false).unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("a.txt")).unwrap(),
         "first\n"
@@ -73,7 +73,7 @@ fn pop_apply_and_drop_by_commit_id() {
         .collect();
     assert_eq!(left, std::slice::from_ref(&newest));
 
-    cli.stash_pop(&newest).unwrap();
+    git_core::apply_stash(&cli, &newest, true).unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("a.txt")).unwrap(),
         "second\n"
@@ -90,17 +90,20 @@ fn pop_with_conflict_keeps_the_stash() {
     repo.commit("a.txt", "committed\n", "Conflicting change");
     let id = backend(&repo).stashes().unwrap()[0].id.clone();
 
-    let error = cli.stash_pop(&id).unwrap_err();
-    assert!(matches!(error, Error::Command { .. }), "{error:?}");
+    let outcome = git_core::apply_stash(&cli, &id, true).unwrap();
+    assert_eq!(outcome, git_core::StashOutcome::Conflicts);
     assert_eq!(backend(&repo).stashes().unwrap().len(), 1);
 }
 
 #[test]
 fn unknown_stash_is_not_found() {
     let repo = isolated();
-    let error = CliBackend::new(repo.path())
-        .stash_pop("0123456789012345678901234567890123456789")
-        .unwrap_err();
+    let error = git_core::apply_stash(
+        &CliBackend::new(repo.path()),
+        "0123456789012345678901234567890123456789",
+        true,
+    )
+    .unwrap_err();
     assert!(matches!(error, Error::NotFound(_)));
 }
 

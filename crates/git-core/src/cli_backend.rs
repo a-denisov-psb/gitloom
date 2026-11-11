@@ -608,19 +608,6 @@ pub trait GitWriter: Send + Sync {
             .ok_or_else(|| Error::NotFound(format!("stash {id}")))
     }
 
-    /// Applies and removes the stash `id`; on conflicts Git keeps the stash.
-    fn stash_pop(&self, id: &str) -> Result<()> {
-        let name = self.stash_name(id)?;
-        self.run(&["stash", "pop", "--quiet", &name], RunOptions::default())
-            .map(drop)
-    }
-
-    fn stash_apply(&self, id: &str) -> Result<()> {
-        let name = self.stash_name(id)?;
-        self.run(&["stash", "apply", "--quiet", &name], RunOptions::default())
-            .map(drop)
-    }
-
     fn stash_drop(&self, id: &str) -> Result<()> {
         let name = self.stash_name(id)?;
         self.run(&["stash", "drop", "--quiet", &name], RunOptions::default())

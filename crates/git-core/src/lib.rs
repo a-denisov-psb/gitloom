@@ -31,6 +31,7 @@ mod reset;
 mod resolve;
 mod rewrite;
 pub mod ssh;
+mod stash;
 mod state;
 mod todo;
 mod watch;
@@ -93,6 +94,10 @@ pub use resolve::{
 };
 pub use rewrite::{reword_commit, squash_commits};
 pub use ssh::{SshConfig, SshSetting};
+pub use stash::{
+    apply_stash, apply_stash_recorded, redo_stash, stash_changed_since, undo_stash, unmerged_paths,
+    StashOutcome, StashRecord,
+};
 pub use state::{locked_file, Operation, RepoState};
 pub use todo::{
     build as build_todo, chains, default_message, needs_message, validate as validate_todo, Chain,
