@@ -842,6 +842,23 @@ mod tests {
         snapshot(&app, "editor-preferences");
     }
 
+    /// Word wrap (M11-07) in Hunk, Inline and Split; the wrapped line keeps
+    /// its number and marker on the first row.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_word_wrap() {
+        use crate::settings::DiffMode;
+        for (mode, name) in [
+            (DiffMode::Hunk, "hunk"),
+            (DiffMode::Inline, "inline"),
+            (DiffMode::Split, "split"),
+        ] {
+            let mut app = crate::app::tests::wide_diff_app(mode);
+            let _ = app.update(Message::EditorWordWrapToggled(true));
+            snapshot(&app, &format!("word-wrap-{name}"));
+        }
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

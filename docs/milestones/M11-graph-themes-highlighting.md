@@ -158,11 +158,13 @@ Acceptance: settings migration test; app tests that the views use the settings (
 
 Note: `editor_style::EditorStyle` (font, size, tab, numbers) with the derived sizes; at the default 12 px they equal the former constants (diff row 20, blame row 18, number column 52, marker 16), so all existing diff and conflict snapshots are pixel-equal. Diffs carry the style (set when a diff loads, `restyle` on a change re-measures the longest line); blame and the conflict view get it from the app. Font and tab size use steppers like Zoom. The font list comes from the font database iced loaded (`monospaced` faces), read when the category opens; a font from the settings that is not installed stays in the list and renders with the fallback. iced needs `'static` family names: each chosen name is kept once (`font_named`). The global "Editor" category sits after Appearance; the repository's "External editor" is `Category::RepoEditor` internally. Word wrap and Syntax highlighting are stored but shown disabled ("Not available yet") until M11-07 and M11-09. The conflict output editor keeps its tabs (it edits the file).
 
-### [ ] M11-07 Word wrap in diff views
+### [x] M11-07 Word wrap in diff views
 
 - Wrapping per the decisions table in Hunk, Inline and Split; selection and staging unchanged.
 
 Acceptance: unit tests for the row-count model (prefix sums, resize, split alignment); app tests: line selection on a wrapped line stages the logical line; performance check on the 2 MB file; snapshots wrapped in all modes.
+
+Note: `diff_wrap` (row characters, columns, prefix sums, visible rows). The view builds the layout per frame from the width `responsive` gives it (O(rows) over character counts cached at load and on style changes); iced reports the viewport width only while the content overflows, so the app uses the last reported width for scrolling (change navigation, first change) and the view never depends on it. Code text wraps at any glyph with a fixed width of whole characters and an absolute line height, so drawn and counted lines match. Performance: layout of 50,000 rows (≈ 2 MB) and the visible-row search take well under 25 ms in a debug build (unit test), far below the 50 ms frame budget; measured values go to `docs/PERFORMANCE.md` in M11-10. Snapshots `ui_check_word_wrap` (Hunk shows the wrapped line; Inline and Split open at the top in the simulator, Split alignment is covered by unit tests).
 
 ### [ ] M11-08 Highlighting engine
 

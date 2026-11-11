@@ -478,7 +478,7 @@ fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         .align_y(iced::Center)
         .into()
     };
-    // Word wrap (M11-07) and highlighting (M11-09) come later.
+    // Syntax highlighting comes with M11-09.
     let later = |label: &'a str, on: bool| -> Element<'a, Message> {
         field(
             label,
@@ -526,7 +526,14 @@ fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
                 .into(),
             None,
         ),
-        later("Word wrap", editor.word_wrap),
+        field(
+            "Word wrap",
+            iced::widget::toggler(editor.word_wrap)
+                .on_toggle(Message::EditorWordWrapToggled)
+                .label(if editor.word_wrap { "On" } else { "Off" })
+                .into(),
+            "Long lines continue on the next row in diffs; no horizontal scrolling then.",
+        ),
         later("Syntax highlighting", editor.syntax_highlighting),
         muted("Applies to diffs, blame, file history and the conflict view; the commit message fields keep their font.")
             .size(12),

@@ -96,6 +96,12 @@ pub struct DiffView {
     pub hscroll_id: iced::widget::Id,
     /// Preferences → Editor values the diff is drawn with (M11-06).
     pub style: crate::editor_style::EditorStyle,
+    /// Characters of every display row (word wrap, M11-07).
+    pub row_chars: Vec<crate::diff_wrap::RowChars>,
+    /// Width of one character in the editor font.
+    pub char_width: f32,
+    /// Width of the diff as the scrollbar last reported it (0 = unknown).
+    pub width: f32,
 }
 
 /// A branch being dragged: its name and kind, and the branch under the
@@ -254,7 +260,86 @@ impl DiffView {
             longest: String::new(),
             hscroll_id: iced::widget::Id::unique(),
             style: crate::editor_style::EditorStyle::default(),
+            row_chars: Vec::new(),
+            char_width: 0.0,
+            width: 0.0,
         }
+    }
+
+    /// Word wrap layout for a diff `width` wide, `None` without wrapping
+    /// (or before the diff loaded).
+    pub fn wrap_layout(&self, width: f32) -> Option<crate::diff_wrap::WrapLayout> {
+        if !self.style.wrap || width <= 0.0 || self.row_chars.len() != self.rows.len() {
+            return None;
+        }
+        let area = crate::diff_hscroll::text_area(self.layout, width, &self.style);
+        let columns = crate::diff_wrap::columns(area, self.char_width);
+        Some(crate::diff_wrap::WrapLayout::build(
+            &self.row_chars,
+            columns,
+        ))
+    }
+
+    /// Top of display row `row` in pixels (wrapped rows count their visual
+    /// lines).
+    pub fn row_top(&self, row: usize) -> f32 {
+        let height = self.style.line_height();
+        match self.wrap_layout(self.width) {
+            Some(layout) => layout.start(row) as f32 * height,
+            None => row as f32 * height,
+        }
+    }
+
+    /// Row at the scroll offset and the rows that fit into the viewport.
+    pub fn rows_at_scroll(&self) -> (usize, usize) {
+        let height = self.style.line_height();
+        match self.wrap_layout(self.width) {
+            Some(layout) => {
+                let top = layout.row_at((self.scroll.offset / height).round() as u32);
+                let (first, last) =
+                    layout.visible(self.scroll.offset, self.scroll.height, height, 0);
+                (top, last.saturating_sub(first))
+            }
+            None => (
+                (self.scroll.offset / height).round() as usize,
+                (self.scroll.height / height).floor() as usize,
+            ),
+        }
+    }
+
+    /// Characters of every display row as shown (tabs expanded, with the
+    /// no-newline note), for word wrap.
+    fn count_row_chars(&mut self) {
+        let Loadable::Ready(diff) = &self.diff else {
+            self.row_chars.clear();
+            return;
+        };
+        let style = self.style;
+        let chars = |h: u32, l: Option<u32>| -> usize {
+            let Some(line) = l.and_then(|l| {
+                diff.hunks
+                    .get(h as usize)
+                    .and_then(|hunk| hunk.lines.get(l as usize))
+            }) else {
+                return 0;
+            };
+            let mut count = style.expand(&line.content).chars().count();
+            if line.missing_newline {
+                count += crate::diff_hscroll::NO_NEWLINE.chars().count();
+            }
+            count
+        };
+        self.row_chars = self
+            .rows
+            .iter()
+            .map(|row| match *row {
+                DiffRow::Header(_) | DiffRow::Block(_) => crate::diff_wrap::RowChars::default(),
+                DiffRow::Line(h, l) => crate::diff_wrap::RowChars::single(chars(h, Some(l))),
+                DiffRow::Split(h, left, right) => {
+                    crate::diff_wrap::RowChars::split(chars(h, left), chars(h, right))
+                }
+            })
+            .collect();
     }
 
     /// Applies new editor settings: tabs, the measured text width and the
@@ -268,6 +353,8 @@ impl DiffView {
             self.longest = crate::diff_hscroll::longest_line(diff, style.tab);
         }
         self.text_width = crate::diff_hscroll::text_width(&self.longest, &style);
+        self.char_width = crate::diff_hscroll::char_width(&style);
+        self.count_row_chars();
         self.h_max = None;
         self.h_offset = self.h_offset.min(self.text_width);
     }
@@ -451,6 +538,8 @@ impl DiffView {
                     }
                 }
                 self.diff = Loadable::Ready(diff);
+                self.char_width = crate::diff_hscroll::char_width(&self.style);
+                self.count_row_chars();
             }
             Err(error) => self.diff = Loadable::Failed(error),
         }
