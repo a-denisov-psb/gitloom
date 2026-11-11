@@ -28,7 +28,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M9 | 1.0.0 | Fixes and consistency | Current |
 | M10 | 1.0.0 | Clone, init and Git settings | Planned |
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Planned |
-| M12 | 1.0.0 | Workflow polish | Outline |
+| M12 | 1.0.0 | Workflow polish | Planned |
 | M13 | 1.0.0 | Git flow graph layout | Outline |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
@@ -94,14 +94,16 @@ Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-set
 
 Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-themes-highlighting.md).
 
-### M12 – Workflow polish (outline)
+### M12 – Workflow polish (planned)
 
 - File lists: a click on the selected file deselects it (the diff closes); hover shows only Stage/Unstage, per-file Discard moves to the context menu (deviation, maintainer decision 2026-11-10).
 - Remotes: "Open on GitHub/GitLab/Bitbucket" (other hosts "Open in browser") in the remote context menu and the palette; repository start page only, URL derived offline.
-- Conflict view details: "conflict 1 of N" with arrows, side headers "Commit <sha> on <branch>", panel header "Merging X into Y", "Resolved Files" and "Mark all resolved".
-- Submodules: list with status (not initialized, out of date, modified), Update/Initialize, out-of-date hint after checkout and pull, double click opens in a new tab, section hidden without submodules. No add/remove.
+- Conflict view and running operations like GitKraken: "conflict n of N" with arrows, side headers "Commit <sha> on <branch>", a graph row and a details header for the conflict state, Conflicted/Resolved Files, "Mark all resolved", "Commit and …"/"Abort …" buttons; replaces the tab banner.
+- Submodules: list with status (not initialized, out of date, modified), Update/Initialize, out-of-date hint after checkout and pull, double click opens in a new tab, section always shown with its count like GitKraken. No add/remove.
 - Errors as non-modal toasts (bottom left like GitKraken) with plain-language text, Details and Copy; a modal only when a decision is needed; plain-language texts for common Git errors.
-- Undo coverage (ADR-043): stash push and drop, stage/unstage, "mark resolved", the local part of pull, remotes and upstream, repository settings in the Git config.
+- Undo coverage (ADR-043): stash push and drop, stage/unstage, "mark resolved", the local part of pull, remotes and upstream, submodule update; settings are not undo entries (ADR-043 amended).
+
+Details: [`milestones/M12-workflow-polish.md`](milestones/M12-workflow-polish.md).
 
 ### M13 – Git flow graph layout (outline)
 

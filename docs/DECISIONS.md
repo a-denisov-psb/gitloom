@@ -498,7 +498,8 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Status: accepted (maintainer, 2026-11-11; extends ADR-014)
 - Decision: every local write action in Gitloom can be undone and returns exactly to the state before (HEAD and refs, index including unmerged entries, working tree files, stash list). Means: ref changes (`RefChange`), snapshots of index and files (as for hard reset), `git stash store` for dropped stashes. Not undoable, with the reason shown in `docs/user/undo.md` → "Cannot be undone": push and deletions on a remote, fetch, clone and init (they create a new folder). Every milestone task that adds a write action has the acceptance criterion "undoable, or listed under Cannot be undone with the reason".
 - Why: undo makes Git safe for beginners and is a feature GitKraken offers only partly.
-- Consequences: gaps are closed in M9 (stash pop/apply, discard of conflicted files, reset on HEAD) and M12 (stash push/drop, stage/unstage, mark resolved, the local part of pull, remotes and upstream, repository settings). Undo history across restarts stays in the ideas backlog.
+- Consequences: gaps are closed in M9 (stash pop/apply, discard of conflicted files, reset on HEAD) and M12 (stash push/drop, stage/unstage, mark resolved, the local part of pull, remotes and upstream, submodule update). Undo history across restarts stays in the ideas backlog.
+- Amended (M12 plan, 2026-11-11): changes in the Preferences or the Git config (identity, SSH key, Gitflow, signing, commit template, general options) are settings, not undo entries; `docs/user/undo.md` lists them under "Cannot be undone" with "change them back in the Preferences".
 
 ## ADR-044 No dead ends
 
@@ -534,3 +535,10 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: `ThemePalette` carries style tokens (row tint, pill style, connector line, header band, column separators, panel shadow, node style) in addition to colors. Dark and Light keep their look through token values; "Classic Dark" uses them for the look of GitKraken 7.5 with own colors (no GitKraken assets).
 - Why: one rendering path for all themes instead of theme-specific branches in the views.
 - Consequences: new visual details are added as tokens; snapshot tests guard the existing themes.
+
+## ADR-049 Toast notifications and plain-language errors
+
+- Status: accepted (M12 plan, 2026-11-11)
+- Decision: errors that only inform appear as toasts at the bottom left (like GitKraken), stacked up to three; errors and warnings stay until closed, info and success close after 6 seconds. Each error toast has a plain-language title and explanation from a catalog in git-core that maps Git's stderr patterns; Git's command and output are available under "Details" and "Copy". Dialogs that need a decision stay modal. The notification location is fixed (GitKraken's setting is not adopted).
+- Why: modal error boxes with raw Git output block the work and confuse beginners (ADR-044).
+- Consequences: new error cases add a catalog entry with a test; status bar confirmations stay for successful actions.
