@@ -70,7 +70,11 @@ pub fn main(prompt: String) -> iced::Result {
     .title(|_: &Askpass| format!("{} – Authentication", git_core::identity::DISPLAY_NAME))
     // Also when the focused input captured the key.
     .subscription(|_: &Askpass| iced::event::listen_with(|event, _status, _window| escape(event)))
-    .theme(theme::app_theme(prefers_light()))
+    .theme(theme::app_theme(if prefers_light() {
+        theme::ThemeKind::Light
+    } else {
+        theme::ThemeKind::Dark
+    }))
     .settings(iced::Settings {
         default_text_size: 13.into(),
         ..iced::Settings::default()

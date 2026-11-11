@@ -2453,14 +2453,25 @@ impl App {
     /// Theme of the window: the choice in the settings; "System" follows
     /// the operating system and falls back to Dark when it is unknown.
     pub fn theme(&self) -> iced::Theme {
-        crate::theme::app_theme(self.light_theme())
+        crate::theme::app_theme(self.theme_kind())
     }
 
+    #[cfg(test)]
     pub fn light_theme(&self) -> bool {
+        self.theme_kind() == crate::theme::ThemeKind::Light
+    }
+
+    /// The theme in use (System follows the operating system).
+    pub fn theme_kind(&self) -> crate::theme::ThemeKind {
+        use crate::theme::ThemeKind;
         match self.settings.appearance.theme {
-            settings::ThemeChoice::Dark => false,
-            settings::ThemeChoice::Light => true,
-            settings::ThemeChoice::System => self.system_theme == iced::theme::Mode::Light,
+            settings::ThemeChoice::Dark => ThemeKind::Dark,
+            settings::ThemeChoice::Light => ThemeKind::Light,
+            settings::ThemeChoice::ClassicDark => ThemeKind::ClassicDark,
+            settings::ThemeChoice::System if self.system_theme == iced::theme::Mode::Light => {
+                ThemeKind::Light
+            }
+            settings::ThemeChoice::System => ThemeKind::Dark,
         }
     }
 

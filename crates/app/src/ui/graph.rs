@@ -1078,7 +1078,7 @@ mod tests {
 
     #[test]
     fn row_backgrounds_snap_to_pixels() {
-        let theme = crate::theme::app_theme(false);
+        let theme = crate::theme::app_theme(crate::theme::ThemeKind::Dark);
         for selected in [false, true] {
             let style =
                 crate::theme::graph_row(selected, 0)(&theme, iced::widget::button::Status::Hovered);

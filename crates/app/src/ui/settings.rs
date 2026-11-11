@@ -1041,6 +1041,7 @@ fn appearance(app: &App) -> Element<'_, Message> {
                 &[
                     (ThemeChoice::Dark, "Dark"),
                     (ThemeChoice::Light, "Light"),
+                    (ThemeChoice::ClassicDark, "Classic Dark"),
                     (ThemeChoice::System, "System"),
                 ],
                 appearance.theme,
