@@ -364,6 +364,11 @@ fn conflict_banner(
             "Drop the stash if you no longer need it."
         }
         ConflictBanner::Orphaned => {
+            actions = actions.push(
+                action("Discard conflicted files…", button::danger).on_press_maybe(
+                    idle.then_some(Message::Discard(crate::app::DiscardTarget::Conflicted)),
+                ),
+            );
             "Resolve them in the conflict view (click a conflicted file), or discard them."
         }
     };
