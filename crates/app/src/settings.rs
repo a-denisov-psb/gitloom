@@ -242,6 +242,10 @@ pub struct Appearance {
     pub toolbar_labels: bool,
     /// Widths of the graph table columns (M11-02).
     pub graph_columns: crate::graph_columns::ColumnWidths,
+    /// "Show commit author / date and time / SHA in graph" (M11-03).
+    pub graph_author: bool,
+    pub graph_date: bool,
+    pub graph_sha: bool,
 }
 
 impl Default for Appearance {
@@ -252,6 +256,9 @@ impl Default for Appearance {
             avatars: false,
             toolbar_labels: true,
             graph_columns: crate::graph_columns::ColumnWidths::default(),
+            graph_author: true,
+            graph_date: true,
+            graph_sha: true,
         }
     }
 }
@@ -864,6 +871,7 @@ mod tests {
         settings.diff.view_mode = DiffMode::Split;
         settings.appearance.graph_columns.refs = 150.0;
         settings.appearance.graph_columns.graph = Some(84.0);
+        settings.appearance.graph_sha = false;
         settings
     }
 

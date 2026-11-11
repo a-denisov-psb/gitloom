@@ -3,6 +3,8 @@
 //! right. Changes apply immediately.
 
 use iced::widget::{button, column, container, row, space, text, text_input, Column};
+
+use crate::graph_columns::ColumnId;
 use iced::{Element, Fill, Length};
 
 use crate::app::{App, Message};
@@ -1070,9 +1072,37 @@ fn appearance(app: &App) -> Element<'_, Message> {
                 .into(),
             "Off: icons only, the names are in the tooltips.",
         ),
+        graph_column_toggle(
+            "Show commit author in graph",
+            appearance.graph_author,
+            ColumnId::Author
+        ),
+        graph_column_toggle(
+            "Show commit date and time in graph",
+            appearance.graph_date,
+            ColumnId::Date
+        ),
+        graph_column_toggle(
+            "Show commit SHA in graph",
+            appearance.graph_sha,
+            ColumnId::Sha
+        ),
     ]
     .spacing(18)
     .into()
+}
+
+/// One of the column options (M11-03); the gear at the right end of the
+/// graph header has the same.
+fn graph_column_toggle<'a>(label: &'a str, shown: bool, column: ColumnId) -> Element<'a, Message> {
+    field(
+        label,
+        iced::widget::toggler(shown)
+            .on_toggle(move |on| Message::GraphColumnShown(column, on))
+            .label(if shown { "On" } else { "Off" })
+            .into(),
+        "Also in the gear menu at the right end of the graph header.",
+    )
 }
 
 fn zoom<'a>(percent: u32) -> Element<'a, Message> {

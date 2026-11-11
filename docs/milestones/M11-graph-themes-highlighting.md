@@ -123,11 +123,13 @@ Acceptance: unit tests for the width model (drag, minimums, optimal width per co
 
 Note: a border belongs to the column on its left; for Author, Date and SHA (right of the message, which fills) dragging right also widens them and narrows the message. The Graph column follows the lanes (2 … 12) until it is first resized (`graph: null` in `settings.json`). The fade goes to the row background (graph background or the selected row's tint); canvas initials of a node cut off by the column are hidden, since canvas text ignores the clip. The automatic hiding stays until M11-03; it uses the current widths. Persistence: global, as planned (open item answered by the plan).
 
-### [ ] M11-03 Column menu and visibility
+### [x] M11-03 Column menu and visibility
 
 - Gear menu with Author, Date, SHA and "Reset column widths"; the same options in Preferences → Appearance; automatic hiding removed.
 
 Acceptance: app tests for toggles from both places and reset; snapshot of the menu; narrow-window snapshot clips instead of hiding.
+
+Note: menu wording as planned (open GitKraken item stays for the maintainer); the menu closes after each choice like the other menus (checked entries are a new menu entry kind). The search and gear buttons lie over the right end of the header (header background behind them) instead of taking room, so the header cells line up with the rows; before, AUTHOR, DATE and SHA sat 25 px left of their columns. Reset restores the widths, not the visibility. Below 120 px for the message the table keeps that minimum and is clipped at the right.
 
 ### [ ] M11-04 Classic Dark graph look
 

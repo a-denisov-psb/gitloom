@@ -201,9 +201,7 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
         let content = match kind {
             PaneKind::Sidebar => sidebar::view(view),
             PaneKind::Center => match &view.center {
-                CenterView::Graph => {
-                    graph::view(view, &app.avatars, &app.settings.appearance.graph_columns)
-                }
+                CenterView::Graph => graph::view(view, &app.avatars, &app.settings.appearance),
                 CenterView::Diff(diff) => diff::view(view, diff, app.settings.diff.view_mode),
                 CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
                 CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),

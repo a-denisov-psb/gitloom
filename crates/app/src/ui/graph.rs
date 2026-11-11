@@ -25,9 +25,6 @@ const LANE_WIDTH: f32 = 18.0;
 const GRAPH_PADDING: f32 = 6.0;
 const ROW_PADDING: u16 = 8;
 const SCROLLBAR_WIDTH: f32 = 12.0;
-/// Optional columns are hidden while the message column would get narrower
-/// than this (until M11-03 removes the automatic hiding).
-const HIDE_BELOW_MESSAGE_WIDTH: f32 = 200.0;
 /// Room the table needs besides its columns: row paddings and scrollbar.
 const FIXED_WIDTH: f32 = 2.0 * ROW_PADDING as f32 + SCROLLBAR_WIDTH;
 const MIN_LANES: u16 = 2;
@@ -60,22 +57,28 @@ const OVERSCAN: usize = 10;
 pub fn view<'a>(
     repo: &'a RepoView,
     avatars: &'a crate::avatars::Avatars,
-    widths: &crate::graph_columns::ColumnWidths,
+    appearance: &crate::settings::Appearance,
 ) -> Element<'a, Message> {
     let lanes = repo.snapshot.layout.max_width;
-    let widths = widths.sanitized(MIN_GRAPH_WIDTH);
+    let widths = appearance.graph_columns.sanitized(MIN_GRAPH_WIDTH);
     let graph_width = widths.width(ColumnId::Graph, graph_width(lanes));
     // A Graph column narrower than the lanes fades out at its right edge.
     let clipped = graph_width < lanes_width(lanes);
-    // The available width decides which optional columns fit.
+    let columns = Columns::shown(appearance);
     let table = responsive(move |size| {
-        let columns = Columns::fitting(size.width, &widths, graph_width);
         let message = crate::graph_columns::message_width(
             size.width,
             FIXED_WIDTH,
             columns.sum(&widths, graph_width),
         );
         let room = crate::graph_columns::room(message);
+        // A window too narrow for all columns clips the table at the right
+        // (M11-03); the message column keeps its minimum.
+        let message_width: Length = if message < crate::graph_columns::MIN_MESSAGE_WIDTH {
+            Length::Fixed(crate::graph_columns::MIN_MESSAGE_WIDTH)
+        } else {
+            Fill
+        };
         let header_cell = |label: &'static str, column: ColumnId| -> Element<'_, Message> {
             let width = widths.width(column, graph_width);
             let handle = crate::ui::column_handle::column_handle(
@@ -104,10 +107,12 @@ pub fn view<'a>(
             .width(width)
             .into()
         };
+        // The header cells line up with the row cells; the buttons lie over
+        // its right end like GitKraken's gear.
         let mut header: iced::widget::Row<'_, Message> = row![
             header_cell("BRANCH / TAG", ColumnId::Refs),
             header_cell("GRAPH", ColumnId::Graph),
-            cell(muted("COMMIT MESSAGE").size(HEADER_SIZE), Fill),
+            cell(muted("COMMIT MESSAGE").size(HEADER_SIZE), message_width),
         ];
         if columns.author {
             header = header.push(header_cell("AUTHOR", ColumnId::Author));
@@ -118,23 +123,53 @@ pub fn view<'a>(
         if columns.sha {
             header = header.push(header_cell("SHA", ColumnId::Sha));
         }
+        let mut buttons = row![].align_y(iced::Center);
         if repo.search.is_none() {
             let tip = match crate::actions::ActionId::SearchCommits.shortcut_text() {
                 Some(keys) => format!("Search commits ({keys})"),
                 None => "Search commits".to_owned(),
             };
-            header = header.push(crate::ui::panel::with_tooltip_text(
+            buttons = buttons.push(crate::ui::panel::with_tooltip_text(
                 iced::widget::button(icons::tinted(Icon::Search, 13.0, |p| p.text_muted))
                     .on_press(Message::SearchOpened)
-                    .padding([2, 6])
+                    .padding([2, 3])
                     .style(theme::flat)
                     .into(),
                 tip,
             ));
         }
-        let header = container(header.padding([0, ROW_PADDING]).align_y(iced::Center))
+        buttons = buttons.push(crate::ui::panel::with_tooltip_text(
+            crate::ui::context_area::click_area(
+                iced::widget::mouse_area(
+                    container(icons::tinted(Icon::Settings, 13.0, |p| p.text_muted))
+                        .padding([2, 3]),
+                )
+                .interaction(iced::mouse::Interaction::Pointer),
+                Message::GraphColumnMenu,
+            ),
+            "Columns".to_owned(),
+        ));
+        let header = iced::widget::Stack::with_children([
+            container(header.padding([0, ROW_PADDING]).align_y(iced::Center))
+                .height(24)
+                .align_y(alignment::Vertical::Center)
+                .into(),
+            container(
+                container(buttons)
+                    .padding([0, 2])
+                    .height(Fill)
+                    .align_y(alignment::Vertical::Center)
+                    .style(theme::column_header),
+            )
+            .width(Fill)
             .height(24)
-            .align_y(alignment::Vertical::Center)
+            .align_x(alignment::Horizontal::Right)
+            .into(),
+        ]);
+        let header = container(header)
+            .height(24)
+            .width(Fill)
+            .clip(true)
             .style(theme::column_header);
 
         // Only the visible rows (plus overscan) exist; spacers keep the scrollbar exact.
@@ -150,10 +185,13 @@ pub fn view<'a>(
                     repo,
                     avatars,
                     row_index,
-                    &widths,
-                    graph_width,
-                    clipped,
-                    columns,
+                    &RowLayout {
+                        widths: &widths,
+                        graph_width,
+                        clipped,
+                        columns,
+                        message_width,
+                    },
                 )
             } else {
                 truncated_row()
@@ -258,25 +296,14 @@ pub struct Columns {
 }
 
 impl Columns {
-    /// Drops SHA, then date, then author until the message column gets
-    /// at least [`HIDE_BELOW_MESSAGE_WIDTH`] pixels in a table `width` wide.
-    pub fn fitting(width: f32, widths: &ColumnWidths, graph_width: f32) -> Self {
-        let mut columns = Self {
-            author: true,
-            date: true,
-            sha: true,
-        };
-        let message = |c: &Self| width - FIXED_WIDTH - c.sum(widths, graph_width);
-        if message(&columns) < HIDE_BELOW_MESSAGE_WIDTH {
-            columns.sha = false;
+    /// The optional columns the settings show (gear menu, Preferences →
+    /// Appearance; M11-03).
+    pub fn shown(appearance: &crate::settings::Appearance) -> Self {
+        Self {
+            author: appearance.graph_author,
+            date: appearance.graph_date,
+            sha: appearance.graph_sha,
         }
-        if message(&columns) < HIDE_BELOW_MESSAGE_WIDTH {
-            columns.date = false;
-        }
-        if message(&columns) < HIDE_BELOW_MESSAGE_WIDTH {
-            columns.author = false;
-        }
-        columns
     }
 
     /// Summed width of Branch/Tag, Graph and the shown optional columns.
@@ -400,16 +427,32 @@ pub fn lanes_width(lanes: u16) -> f32 {
     GRAPH_PADDING * 2.0 + LANE_WIDTH * f32::from(lanes.max(1))
 }
 
+/// Column geometry shared by all rows of one frame.
+#[derive(Clone, Copy)]
+pub struct RowLayout<'w> {
+    pub widths: &'w ColumnWidths,
+    pub graph_width: f32,
+    /// The Graph column is narrower than the lanes (fade).
+    pub clipped: bool,
+    pub columns: Columns,
+    /// Fill, or the minimum when the window is too narrow.
+    pub message_width: Length,
+}
+
 /// One table row: the WIP row or a commit row.
 pub fn graph_row<'a>(
     repo: &'a RepoView,
     avatars: &crate::avatars::Avatars,
     row_index: usize,
-    widths: &ColumnWidths,
-    graph_width: f32,
-    clipped: bool,
-    columns: Columns,
+    layout: &RowLayout<'_>,
 ) -> Element<'a, Message> {
+    let RowLayout {
+        widths,
+        graph_width,
+        clipped,
+        columns,
+        message_width,
+    } = *layout;
     let snapshot = &repo.snapshot;
     let Some(layout_row) = snapshot.layout.row(row_index) else {
         return container(text("")).height(ROW_HEIGHT).into();
@@ -446,7 +489,7 @@ pub fn graph_row<'a>(
                 repo.selection == Some(Selection::Wip),
                 color,
             ),
-            cell(summary, Fill),
+            cell(summary, message_width),
         ];
         return row_button(
             content,
@@ -500,7 +543,7 @@ pub fn graph_row<'a>(
             selected,
             color,
         ),
-        cell(summary.wrapping(text::Wrapping::None), Fill),
+        cell(summary.wrapping(text::Wrapping::None), message_width),
     ];
     if columns.author {
         content = content.push(cell(
@@ -1311,34 +1354,23 @@ mod tests {
     }
 
     #[test]
-    fn optional_columns_drop_in_order() {
-        let graph = graph_width(4);
+    fn shown_columns_follow_the_settings() {
+        let mut appearance = crate::settings::Appearance::default();
         let w = ColumnWidths::default();
-        let all =
-            FIXED_WIDTH + w.refs + graph + HIDE_BELOW_MESSAGE_WIDTH + w.author + w.date + w.sha;
-        let columns = |author, date, sha| Columns { author, date, sha };
-        assert_eq!(Columns::fitting(all, &w, graph), columns(true, true, true));
+        let all = Columns::shown(&appearance);
         assert_eq!(
-            Columns::fitting(all - 1.0, &w, graph),
-            columns(true, true, false)
+            all,
+            Columns {
+                author: true,
+                date: true,
+                sha: true
+            }
         );
-        assert_eq!(
-            Columns::fitting(all - w.sha - 1.0, &w, graph),
-            columns(true, false, false)
-        );
-        assert_eq!(
-            Columns::fitting(300.0, &w, graph),
-            columns(false, false, false)
-        );
-        // Wider columns leave less room.
-        let wide = ColumnWidths {
-            refs: w.refs + 50.0,
-            ..w
-        };
-        assert_eq!(
-            Columns::fitting(all, &wide, graph),
-            columns(true, true, false)
-        );
+        assert_eq!(all.sum(&w, 48.0), w.refs + 48.0 + w.author + w.date + w.sha);
+        appearance.graph_date = false;
+        let some = Columns::shown(&appearance);
+        assert!(some.author && !some.date && some.sha);
+        assert_eq!(some.sum(&w, 48.0), w.refs + 48.0 + w.author + w.sha);
     }
 
     #[test]

@@ -827,7 +827,9 @@ mod tests {
             .entries
             .iter()
             .filter_map(|e| match e {
-                MenuEntry::Item { label, .. } => Some(label.clone()),
+                MenuEntry::Item { label, .. } | MenuEntry::Check { label, .. } => {
+                    Some(label.clone())
+                }
                 MenuEntry::Separator => None,
             })
             .collect();
@@ -946,6 +948,30 @@ mod tests {
                 .any(|m| matches!(m, Message::ColumnDragStarted { .. })),
             "{produced:?}"
         );
+    }
+
+    /// Header cells line up with the row cells (M11-03: the search and
+    /// gear buttons lie over the header instead of taking room).
+    /// Layout only, so part of every test run.
+    #[test]
+    fn graph_header_lines_up_with_the_rows() {
+        let app = crate::app::tests::graph_app();
+        let mut sim = simulator(&app);
+        let x = |sim: &mut Simulator<'_, Message>, label: &str| {
+            let target = sim
+                .find(label)
+                .unwrap_or_else(|e| panic!("no {label}: {e}"));
+            iced_test::selector::Bounded::bounds(&target).x
+        };
+        let header = x(&mut sim, "AUTHOR");
+        let row = x(&mut sim, "Bo Dev");
+        assert!(
+            (header - row).abs() < 0.5,
+            "AUTHOR at {header}, rows at {row}"
+        );
+        let header = x(&mut sim, "COMMIT MESSAGE");
+        let row = x(&mut sim, "Feature work");
+        assert!((header - row).abs() < 0.5, "{header} vs {row}");
     }
 
     /// The section counts of a scrolling left panel end left of its
@@ -1082,6 +1108,26 @@ mod tests {
             app.settings.appearance.graph_columns.graph = Some(160.0);
             snapshot(&app, &format!("graph-columns-wide-{theme}"));
         }
+    }
+
+    /// Column menu at the gear (M11-03) with Date hidden, and a window too
+    /// narrow for all columns: the table is clipped at the right.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_column_menu() {
+        let mut app = crate::app::tests::graph_app();
+        let _ = app.update(Message::GraphColumnShown(
+            crate::graph_columns::ColumnId::Date,
+            false,
+        ));
+        let _ = app.update(Message::GraphColumnMenu(iced::Point::new(1060.0, 88.0)));
+        snapshot(&app, "graph-column-menu");
+        let _ = app.update(Message::MenuClosed);
+        let _ = app.update(Message::GraphColumnShown(
+            crate::graph_columns::ColumnId::Date,
+            true,
+        ));
+        snapshot_sized(&app, "graph-columns-narrow-window", (900.0, 600.0));
     }
 
     /// Preferences with the repository group (M8-01): "Repository · <name>"
