@@ -542,3 +542,10 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: errors that only inform appear as toasts at the bottom left (like GitKraken), stacked up to three; errors and warnings stay until closed, info and success close after 6 seconds. Each error toast has a plain-language title and explanation from a catalog in git-core that maps Git's stderr patterns; Git's command and output are available under "Details" and "Copy". Dialogs that need a decision stay modal. The notification location is fixed (GitKraken's setting is not adopted).
 - Why: modal error boxes with raw Git output block the work and confuse beginners (ADR-044).
 - Consequences: new error cases add a catalog entry with a test; status bar confirmations stay for successful actions.
+
+## ADR-050 Git flow graph layout by classification
+
+- Status: accepted (M13 plan, 2026-11-11)
+- Decision: an optional per-repository layout groups lanes like the classic Git flow diagram (production, hotfix, release, development, feature). Commits get their type from a pure classifier in `git-graph`: first-parent chains of production and development, live branch prefixes, then for deleted branches the merge structure (where a segment forks off and where it is merged) and Git's default merge messages; priority live ref > message > topology > unknown. Lanes come from `LaneHints` (M2-15) with group widths over the whole history.
+- Why: commits do not record their branch; fork and merge points plus merge messages recover it for Git flow histories with high reliability, and the topology itself is never changed, only lane placement and color.
+- Consequences: unknown segments are shown in a neutral color in the feature group; fast-forward and squash merges appear as development; the classifier must stay linear in the number of commits.
