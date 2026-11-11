@@ -215,10 +215,16 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
 
     // The horizontal range depends on the width: decided per layout pass.
     iced::widget::responsive(move |size| {
-        let max = diff_hscroll::max_offset(diff.layout, diff.text_width, size.width, &diff.style);
+        // Word wrap (M11-07): no horizontal scrolling.
+        let wrap = diff.wrap_layout(size.width);
+        let max = if wrap.is_some() {
+            0.0
+        } else {
+            diff_hscroll::max_offset(diff.layout, diff.text_width, size.width, &diff.style)
+        };
         let offset = diff.h_offset.min(max);
         let list = crate::ui::context_area::wheel_observer(
-            rows(repo, diff, file, offset),
+            rows(repo, diff, file, offset, wrap, size.width),
             |delta, shift| {
                 diff_hscroll::wheel_to_horizontal(delta, shift, cfg!(target_os = "macos"))
                     .map(Message::DiffWheel)
@@ -258,26 +264,65 @@ fn horizontal_bar<'a>(diff: &'a DiffView, width: f32, max: f32) -> Element<'a, M
         .into()
 }
 
-/// The visible rows of `file` with the code text moved left by `offset`.
+/// How a wrapped row is drawn (M11-07): its visual lines and the width
+/// its code text wraps at.
+#[derive(Debug, Clone, Copy)]
+struct Wrapped {
+    lines: u32,
+    text_width: f32,
+}
+
+/// The visible rows of `file` with the code text moved left by `offset`,
+/// or wrapped by `wrap` in a diff `width` wide.
 fn rows<'a>(
     repo: &'a RepoView,
     diff: &'a DiffView,
     file: &'a FileDiff,
     offset: f32,
+    wrap: Option<crate::diff_wrap::WrapLayout>,
+    width: f32,
 ) -> Element<'a, Message> {
     // Only visible lines are built; spacers keep the scrollbar exact.
     let style = &diff.style;
     let line_height = style.line_height();
     let total = diff.rows.len();
-    let (first, last) = crate::ui::rows_in_view(
-        diff.scroll.offset,
-        diff.scroll.height,
-        total,
-        line_height,
-        OVERSCAN,
-    );
+    let (first, last) = match &wrap {
+        Some(layout) => layout.visible(
+            diff.scroll.offset,
+            diff.scroll.height,
+            line_height,
+            OVERSCAN,
+        ),
+        None => crate::ui::rows_in_view(
+            diff.scroll.offset,
+            diff.scroll.height,
+            total,
+            line_height,
+            OVERSCAN,
+        ),
+    };
+    // Visual lines above and below the built rows.
+    let (above, below) = match &wrap {
+        Some(layout) => (
+            layout.start(first),
+            layout.total().saturating_sub(layout.start(last)),
+        ),
+        None => (first as u32, (total - last) as u32),
+    };
+    // Code text wraps at whole characters of the monospace font.
+    let wrap_width = wrap.as_ref().map(|_| {
+        let area = diff_hscroll::text_area(diff.layout, width, style);
+        let columns = crate::diff_wrap::columns(area, diff.char_width);
+        columns as f32 * diff.char_width + 0.5
+    });
+    let wrapped = |row: usize| -> Option<Wrapped> {
+        Some(Wrapped {
+            lines: wrap.as_ref()?.lines(row),
+            text_width: wrap_width?,
+        })
+    };
     let mut rows = Column::with_capacity(last - first + 2)
-        .push(space::vertical().height(first as f32 * line_height));
+        .push(space::vertical().height(above as f32 * line_height));
     let staged = diff.staged();
     let blocked = diff.line_staging_block();
     let selectable = staged.is_some() && blocked.is_none();
@@ -310,12 +355,22 @@ fn rows<'a>(
                 let cell = |side: Option<u32>, right: bool| {
                     let note = note.filter(|(r, _)| *r == right).map(|(_, t)| t);
                     split_cell(
-                        diff, hunk, h, side, right, row_index, selectable, note, offset,
+                        diff,
+                        hunk,
+                        h,
+                        side,
+                        right,
+                        row_index,
+                        selectable,
+                        note,
+                        offset,
+                        wrapped(row_index),
                     )
                 };
+                let height = wrapped(row_index).map_or(1, |w| w.lines) as f32 * line_height;
                 rows = rows.push(row![
                     cell(left, false),
-                    container(space::vertical().height(line_height))
+                    container(space::vertical().height(height))
                         .width(1)
                         .style(theme::divider),
                     cell(right, true),
@@ -330,7 +385,7 @@ fn rows<'a>(
             match hunk.lines.get(l as usize) {
                 Some(line) => {
                     let selected = diff.selection.contains(&(h, l));
-                    let element = diff_line(line, selected, offset, style);
+                    let element = diff_line(line, selected, offset, style, wrapped(row_index));
                     if selectable && line.kind != DiffLineKind::Context {
                         mouse_area(element)
                             .on_press(Message::DiffLineClicked(row_index))
@@ -344,13 +399,14 @@ fn rows<'a>(
             }
         });
     }
-    rows = rows.push(space::vertical().height((total - last) as f32 * line_height));
+    rows = rows.push(space::vertical().height(below as f32 * line_height));
 
     scrollable(rows)
         .id(diff.scroll_id.clone())
         .on_scroll(|viewport| Message::DiffScrolled {
             offset: viewport.absolute_offset().y,
             height: viewport.bounds().height,
+            width: viewport.bounds().width,
         })
         .height(Fill)
         .into()
@@ -492,8 +548,10 @@ fn split_cell<'a>(
     selectable: bool,
     note: Option<&'static str>,
     offset: f32,
+    wrapped: Option<Wrapped>,
 ) -> Element<'a, Message> {
     let style = &diff.style;
+    let height = wrapped.map_or(1, |w| w.lines) as f32 * style.line_height();
     let Some((l, line)) = line.and_then(|l| hunk.lines.get(l as usize).map(|line| (l, line)))
     else {
         let content: Element<'a, Message> = match note {
@@ -503,30 +561,31 @@ fn split_cell<'a>(
             None => space::horizontal().into(),
         };
         return container(content)
-            .height(style.line_height())
+            .height(height)
             .width(Fill)
-            .align_y(alignment::Vertical::Center)
+            .align_y(if wrapped.is_some() {
+                alignment::Vertical::Top
+            } else {
+                alignment::Vertical::Center
+            })
             .style(theme::diff_empty_side)
             .into();
     };
     let selected = diff.selection.contains(&(h, l));
     let number = if right { line.new_line } else { line.old_line };
-    let mut cells = row![].align_y(iced::Center);
+    let mut cells = row![].align_y(cells_align(wrapped));
     if style.numbers {
         cells = cells.push(line_number(number, style));
     }
-    let cell: Element<'a, Message> =
-        container(cells.push(marker(line.kind, style)).push(code_text(
-            shown_content(line, style),
-            offset,
-            style,
-        )))
-        .height(style.line_height())
-        .width(Fill)
-        .clip(true)
-        .align_y(alignment::Vertical::Center)
-        .style(theme::diff_line(line.kind, selected))
-        .into();
+    let cell: Element<'a, Message> = container(cells.push(marker(line.kind, style)).push(
+        code_text(shown_content(line, style), offset, style, wrapped),
+    ))
+    .height(height)
+    .width(Fill)
+    .clip(true)
+    .align_y(alignment::Vertical::Center)
+    .style(theme::diff_line(line.kind, selected))
+    .into();
     if selectable && line.kind != DiffLineKind::Context {
         mouse_area(cell)
             .on_press(Message::DiffSideClicked { row, right })
@@ -534,6 +593,15 @@ fn split_cell<'a>(
             .into()
     } else {
         cell
+    }
+}
+
+/// Wrapped rows keep numbers and markers on their first visual line.
+fn cells_align(wrapped: Option<Wrapped>) -> alignment::Vertical {
+    if wrapped.is_some() {
+        alignment::Vertical::Top
+    } else {
+        alignment::Vertical::Center
     }
 }
 
@@ -546,8 +614,10 @@ fn line_number<'a>(number: Option<u32>, style: &EditorStyle) -> Element<'a, Mess
             .style(theme::text_muted),
     )
     .width(style.number_width())
+    .height(style.line_height())
     .padding([0, 6])
     .align_x(alignment::Horizontal::Right)
+    .align_y(alignment::Vertical::Center)
     .into()
 }
 
@@ -562,6 +632,8 @@ fn marker<'a>(kind: DiffLineKind, style: &EditorStyle) -> Element<'a, Message> {
         .font(style.font)
         .size(style.size)
         .width(style.marker_width())
+        .height(style.line_height())
+        .align_y(alignment::Vertical::Center)
         .into()
 }
 
@@ -579,8 +651,9 @@ fn diff_line<'a>(
     selected: bool,
     offset: f32,
     style: &EditorStyle,
+    wrapped: Option<Wrapped>,
 ) -> Element<'a, Message> {
-    let mut cells = row![].align_y(iced::Center);
+    let mut cells = row![].align_y(cells_align(wrapped));
     if style.numbers {
         cells = cells
             .push(line_number(line.old_line, style))
@@ -590,8 +663,9 @@ fn diff_line<'a>(
         shown_content(line, style),
         offset,
         style,
+        wrapped,
     )))
-    .height(style.line_height())
+    .height(wrapped.map_or(1, |w| w.lines) as f32 * style.line_height())
     .width(Fill)
     .clip(true)
     .align_y(alignment::Vertical::Center)
@@ -601,7 +675,23 @@ fn diff_line<'a>(
 
 /// Code text of a line, moved left by `offset` and clipped to its room;
 /// line numbers and markers stay in place (M7-16).
-fn code_text<'a>(content: String, offset: f32, style: &EditorStyle) -> Element<'a, Message> {
+fn code_text<'a>(
+    content: String,
+    offset: f32,
+    style: &EditorStyle,
+    wrapped: Option<Wrapped>,
+) -> Element<'a, Message> {
+    if let Some(wrapped) = wrapped {
+        // Breaks at any character so the line count matches the model
+        // (whole characters per visual line, M11-07).
+        return text(content)
+            .font(style.font)
+            .size(style.size)
+            .line_height(text::LineHeight::Absolute(style.line_height().into()))
+            .wrapping(text::Wrapping::Glyph)
+            .width(wrapped.text_width)
+            .into();
+    }
     let text = text(content)
         .font(style.font)
         .size(style.size)

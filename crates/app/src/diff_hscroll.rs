@@ -43,6 +43,11 @@ pub fn text_width(line: &str, style: &EditorStyle) -> f32 {
     measure(line, style) + END_PADDING
 }
 
+/// Width of one character in the (monospace) editor font.
+pub fn char_width(style: &EditorStyle) -> f32 {
+    measure(&"0".repeat(20), style) / 20.0
+}
+
 /// Width of `text` in the editor font.
 fn measure(text: &str, style: &EditorStyle) -> f32 {
     use iced::advanced::text::Paragraph as _;

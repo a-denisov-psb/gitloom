@@ -23,6 +23,8 @@ pub struct EditorStyle {
     pub size: f32,
     pub tab: usize,
     pub numbers: bool,
+    /// Word wrap in the diff views (M11-07).
+    pub wrap: bool,
 }
 
 impl Default for EditorStyle {
@@ -38,6 +40,7 @@ impl EditorStyle {
             size: settings.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE) as f32,
             tab: settings.tab_size.clamp(MIN_TAB_SIZE, MAX_TAB_SIZE) as usize,
             numbers: settings.line_numbers,
+            wrap: settings.word_wrap,
         }
     }
 

@@ -279,6 +279,7 @@ pub enum Message {
     EditorFontSize(u32),
     EditorTabSize(u32),
     EditorLineNumbersToggled(bool),
+    EditorWordWrapToggled(bool),
     /// Gear at the right end of the graph header: column menu (M11-03).
     GraphColumnMenu(iced::Point),
     /// Show or hide the Author, Date or SHA column.
@@ -339,7 +340,9 @@ pub enum Message {
         request: DiffRequest,
         result: Result<(), String>,
     },
+    /// The diff's viewport (`width` for word wrap, M11-07).
     DiffScrolled {
+        width: f32,
         offset: f32,
         height: f32,
     },
@@ -5037,6 +5040,11 @@ impl App {
                 self.restyle_code_views();
                 return self.save_settings();
             }
+            Message::EditorWordWrapToggled(on) => {
+                self.settings.editor.word_wrap = on;
+                self.restyle_code_views();
+                return self.save_settings();
+            }
             Message::EditorLineNumbersToggled(on) => {
                 self.settings.editor.line_numbers = on;
                 self.restyle_code_views();
@@ -6287,11 +6295,9 @@ impl App {
                 let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) else {
                     return Task::none();
                 };
-                let height = diff.style.line_height();
-                let top = (diff.scroll.offset / height).round() as usize;
-                let visible = (diff.scroll.height / height).floor() as usize;
+                let (top, visible) = diff.rows_at_scroll();
                 if let Some(target) = diff.change_target(top, visible, next) {
-                    let offset = target as f32 * height;
+                    let offset = diff.row_top(target);
                     diff.scroll.offset = offset;
                     return scroll_by_id(diff.scroll_id.clone(), offset);
                 }
@@ -7674,11 +7680,11 @@ impl App {
                         // Opening a file (or switching the mode) shows its
                         // first change; reloads after staging keep the place.
                         if std::mem::take(&mut diff.scroll_to_change) {
-                            let height = diff.style.line_height();
-                            let visible = (diff.scroll.height / height).floor() as usize;
+                            let visible =
+                                (diff.scroll.height / diff.style.line_height()).floor() as usize;
                             let offset = diff
                                 .change_target(0, visible, true)
-                                .map_or(0.0, |row| row as f32 * height);
+                                .map_or(0.0, |row| diff.row_top(row));
                             if diff.layout.has_blocks() && offset > 0.0 {
                                 diff.scroll.offset = offset;
                                 return scroll_by_id(diff.scroll_id.clone(), offset);
@@ -7716,9 +7722,14 @@ impl App {
                     }
                 }
             }
-            Message::DiffScrolled { offset, height } => {
+            Message::DiffScrolled {
+                offset,
+                height,
+                width,
+            } => {
                 if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
                     diff.scroll = crate::repo_view::Scroll { offset, height };
+                    diff.width = width;
                 }
             }
             Message::DiffWheel(delta) => {
@@ -11379,6 +11390,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffScrolled {
             offset,
             height: 800.0,
+            width: 1000.0,
         });
     }
 
@@ -11396,6 +11408,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffScrolled {
             offset: 0.0,
             height: 600.0,
+            width: 1000.0,
         });
         app
     }
@@ -11429,6 +11442,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffScrolled {
             offset: 0.0,
             height: 600.0,
+            width: 1000.0,
         });
         let _ = app.update(Message::DiffLineClicked(7));
         app
@@ -11469,6 +11483,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffScrolled {
             offset: 0.0,
             height: 600.0,
+            width: 1000.0,
         });
         app
     }
@@ -11510,6 +11525,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffScrolled {
             offset: 0.0,
             height: 600.0,
+            width: 1000.0,
         });
         app
     }
@@ -11634,6 +11650,63 @@ pub(crate) mod tests {
         // A diff loaded later uses the settings too.
         let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
         assert_eq!(open_diff(&app).style.size, 24.0);
+    }
+
+    #[test]
+    fn word_wrap_keeps_line_selection_and_navigation() {
+        for mode in [
+            settings::DiffMode::Hunk,
+            settings::DiffMode::Inline,
+            settings::DiffMode::Split,
+        ] {
+            let mut app = wide_diff_app(mode);
+            let _ = app.update(Message::EditorWordWrapToggled(true));
+            assert!(app.settings.editor.word_wrap);
+            let diff = open_diff(&app);
+            assert!(diff.style.wrap);
+            // The wide line takes several visual lines at 1000 px.
+            let layout = diff.wrap_layout(diff.width).expect("wrap layout");
+            let wide = (0..diff.rows.len())
+                .find(|&r| layout.lines(r) > 1)
+                .expect("a wrapped row");
+            let height = diff.style.line_height();
+            assert!(
+                diff.row_top(wide + 1) > (wide + 1) as f32 * height,
+                "{mode:?}"
+            );
+            // Narrower: more visual lines.
+            assert!(diff.wrap_layout(500.0).unwrap().total() > layout.total());
+            // A click on the wrapped row selects its logical line.
+            let _ = app.update(if mode == settings::DiffMode::Split {
+                Message::DiffSideClicked {
+                    row: wide,
+                    right: true,
+                }
+            } else {
+                Message::DiffLineClicked(wide)
+            });
+            assert_eq!(open_diff(&app).selection.len(), 1, "{mode:?}");
+            let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+                git_core::MIN_GIT_VERSION,
+            )));
+            let _ = app.update(Message::ApplySelectedLines);
+            assert_eq!(running_args(&app), ["Stage lines of a"], "{mode:?}");
+        }
+        // Change navigation scrolls to the wrapped row tops.
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let _ = app.update(Message::EditorWordWrapToggled(true));
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 200.0,
+            width: 1000.0,
+        });
+        let _ = app.update(Message::DiffJumpChange { next: true });
+        let diff = open_diff(&app);
+        let (top, _) = diff.rows_at_scroll();
+        assert_eq!(diff.scroll.offset, diff.row_top(top));
+        // Off again: no layout.
+        let _ = app.update(Message::EditorWordWrapToggled(false));
+        assert!(open_diff(&app).wrap_layout(1000.0).is_none());
     }
 
     #[test]
@@ -15509,6 +15582,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::DiffScrolled {
             offset: 0.0,
             height: 600.0,
+            width: 1000.0,
         });
         app
     }
