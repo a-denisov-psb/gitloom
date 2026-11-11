@@ -122,11 +122,13 @@ Acceptance: integration tests: discard of a conflicted file (in HEAD and not in 
 
 Note (2026-11-11): done. `DiscardSnapshot` index entries carry unmerged stages; undo/redo write them with `git update-index --index-info` after removing the path. A path not in HEAD is removed with `git rm --cached --force` and deleted. Discard of a conflicted file closes its conflict view. The banner action discards every conflicted file after naming them ("Discard 2 conflicted files (a.txt, c.txt)? …"). Discarding conflicted files during a merge leaves the merge running (Abort stays the way out). Tests `crates/git-core/tests/discard_conflicted.rs`, app tests `discarding_a_conflicted_file_*`, `banner_discards_*`; snapshot `stash-conflict-2-orphaned` checked.
 
-### [ ] M9-04 Reset on the HEAD commit
+### [x] M9-04 Reset on the HEAD commit
 
 - Menu entry on HEAD; Soft disabled on HEAD with the reason; Mixed/Hard clear unmerged entries; undo restores them.
 
 Acceptance: menu tests (HEAD, during an operation, with conflicted files from a stash); integration tests for Mixed and Hard on HEAD with unmerged entries and their undo.
+
+Note (2026-11-11): done. `git write-tree` refuses unmerged entries, so the index is now recorded by `record_index`: unmerged entries entry by entry, the rest as a tree (the unmerged entries are taken out for `write-tree` and put back right away, so the reset itself runs on the untouched index); `restore_index` puts both back. Used by soft/mixed resets (`HistoryUndo::Reset.unmerged`) and hard resets (`ResetSnapshot.unmerged`), on any commit. Dialog buttons can now be disabled with a tooltip (`DialogButton.disabled`). Tests: app `reset_is_offered_on_the_head_commit`, `soft_reset_stays_available_on_other_commits`; git-core `mixed_reset_on_head_*`, `hard_reset_on_head_*`.
 
 ### [ ] M9-05 Sharp icons at fractional scales
 
