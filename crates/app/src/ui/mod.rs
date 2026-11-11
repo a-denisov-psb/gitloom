@@ -19,6 +19,7 @@ pub(crate) mod diff;
 mod file_history;
 mod graph;
 mod inert;
+mod shift;
 #[cfg(test)]
 pub use graph::lanes_width;
 pub use graph::{optimal_column_width, MIN_GRAPH_WIDTH};

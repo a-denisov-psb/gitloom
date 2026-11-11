@@ -1123,6 +1123,46 @@ mod tests {
         );
     }
 
+    /// A table wider than its viewport (M11-16): header and rows move by the
+    /// same offset and stay aligned; the vertical scrollbar stays at the
+    /// right edge of the viewport. Layout only.
+    #[test]
+    fn graph_table_scrolls_header_and_rows_together() {
+        let mut app = crate::app::tests::graph_app();
+        app.settings.appearance.graph_columns.message = 1500.0;
+        let positions = |app: &App| {
+            let id = app.tabs[0].view().unwrap().graph_scroll_id.clone();
+            let mut sim = simulator(app);
+            let mut x = |label: &str| {
+                let target = sim
+                    .find(label)
+                    .unwrap_or_else(|e| panic!("no {label}: {e}"));
+                iced_test::selector::Bounded::bounds(&target).x
+            };
+            let (header, row) = (x("AUTHOR"), x("Bo Dev"));
+            let list = sim.find(id).unwrap_or_else(|e| panic!("no list: {e}"));
+            let list = iced_test::selector::Bounded::bounds(&list);
+            (header, row, list.x + list.width)
+        };
+        let (header, row, right) = positions(&app);
+        assert!((header - row).abs() < 0.5, "{header} vs {row}");
+        let _ = app.update(Message::GraphHScrolled {
+            offset: 200.0,
+            max: 2000.0,
+        });
+        let (header2, row2, right2) = positions(&app);
+        eprintln!(
+            "DEBUG {header} {row} {right} -> {header2} {row2} {right2} off={}",
+            app.tabs[0].view().unwrap().graph_h_offset
+        );
+        assert!(
+            (header - 200.0 - header2).abs() < 0.5,
+            "{header} → {header2}"
+        );
+        assert!((row - 200.0 - row2).abs() < 0.5, "{row} → {row2}");
+        assert_eq!(right, right2, "the vertical scrollbar stays in place");
+    }
+
     /// Header cells line up with the row cells (M11-03: the search and
     /// gear buttons lie over the header instead of taking room).
     /// Layout only, so part of every test run.
@@ -1495,6 +1535,27 @@ mod tests {
             snapshot(&app, &format!("graph-columns-narrow-{theme}"));
             app.settings.appearance.graph_columns.graph = Some(160.0);
             snapshot(&app, &format!("graph-columns-wide-{theme}"));
+        }
+    }
+
+    /// Column widths and horizontal scrolling (M11-16): a table wider than
+    /// the window scrolled to the middle, and one narrower than the window
+    /// (the message fills); both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_graph_scrolling() {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice;
+            snapshot(&app, &format!("graph-scroll-fill-{theme}"));
+            app.settings.appearance.graph_columns.message = 900.0;
+            app.settings.appearance.graph_columns.author = 260.0;
+            let _ = app.update(Message::GraphHScrolled {
+                offset: 280.0,
+                max: 560.0,
+            });
+            snapshot(&app, &format!("graph-scroll-middle-{theme}"));
         }
     }
 
