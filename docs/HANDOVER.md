@@ -60,7 +60,7 @@ Not done / known limitations:
 
 Tasks only the maintainer can do. Claude Code adds new items here and ticks them off when done.
 
-- [ ] Final check before 1.0.0 (ADR-042): after M13, run the whole `docs/RELEASE-CHECKLIST.md` on Windows (all sections; release dry-run artifacts or a local build), answer the GitKraken verification items still open in the milestone files, then ask Claude Code for 1.0.0.
+- [ ] Final check before 1.0.0 (ADR-042): after M14, run the whole `docs/RELEASE-CHECKLIST.md` on Windows (all sections 1 … 8, including 7 … 7h; release dry-run artifacts or a local build), answer the GitKraken verification items still open in the milestone files, then ask Claude Code for 1.0.0.
 - [x] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown. (root cause: empty section, fixed in M6-20)
 - [x] rc.3: tag `v1.0.0-rc.3` pushed by the maintainer (the draft pre-release stays unpublished; rc.4 supersedes it).
 - [x] rc.4: tag `v1.0.0-rc.4` pushed and the pre-release published (2026-11-11).

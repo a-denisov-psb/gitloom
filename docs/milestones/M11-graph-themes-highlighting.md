@@ -18,6 +18,11 @@ In scope:
 - Stash node like GitKraken and the label "WIP on <branch>"
 - Preferences → Editor: font, font size, tab size, line numbers, word wrap, syntax highlighting
 - Syntax highlighting in all diff modes, blame, file history and the conflict view
+- Left panel: tree order, tag folders, checked-out marker
+- Start screen buttons
+- Preferences in a modal
+- Panel toggles in the toolbar
+- README screenshot generated from a fixture
 
 Out of scope:
 
@@ -40,10 +45,17 @@ Out of scope:
 | Highlighting engine | `syntect` with the `two-face` syntax set (languages like bat/VS Code built-ins) in a pure app module `highlight` without iced types: input file content and path, output style spans per line. Whole old and new files are highlighted (M7-02 full context), then mapped to diff lines, so multi-line comments and strings are right in every mode. Background task, cache keyed by blob id + theme, files over 1 MB or 20,000 lines are not highlighted (plain, with a muted note "Too large for syntax highlighting"). Unknown file types stay plain. Plain text is shown first and replaced when highlighting is ready. ADR-047. |
 | Highlighting colors | One syntect theme per Gitloom theme from `two-face`'s embedded themes, chosen for contrast with the diff backgrounds: Dark and Classic Dark a dark theme (e.g. "Visual Studio Dark+"), Light a light theme (e.g. "GitHub"); added/removed backgrounds stay Gitloom's, syntect only colors the text. Exact choice recorded in ADR-047. |
 | Conflict view | Ours and theirs columns highlighted like diffs; the editable output uses iced's text editor highlighter interface with the same engine. |
+| Tree order | In LOCAL, REMOTE (inside each remote), GITFLOW and TAGS every level of the tree lists its branches (or tags) first, then its folders; both groups case-insensitive alphabetical (`compare_names`). Remotes stay alphabetical. Maintainer decision 2026-11-11; replaces "folders first" (M7-14) and the mixed GITFLOW order (M9-06). UX-PARITY deviation. |
+| Tag folders | TAGS is a tree at `/` like the branch sections: same row components, folder collapse remembered per repository, filter applies, tree order above. Tag rows keep the tag icon. |
+| Checked-out marker | Like GitKraken: the checked-out branch shows the check **and** the branch icon. The check sits in the gutter left of the branch icon (the indent column of the parent level); icons and labels of all rows of the same depth stay aligned and nothing moves when another branch is checked out. LOCAL and GITFLOW. Highlighted row unchanged. |
+| Start screen buttons | "Open a repo", "Clone a repo" and "Start a local repo" have the same fixed size (width and height, also without a shortcut line), filled with the accent color (the color of the recent repository links) instead of grey, with hover and pressed states. Label and shortcut line on the button meet WCAG AA (4.5:1) in every theme; the shortcut line ("Ctrl+O") stays readable. Maintainer request 2026-11-11 (the shortcut hint was hard to read, grey felt uninviting). |
+| Preferences modal | Preferences open as a centered modal over the window instead of a full view: width min(80 % of the window, 960 px), height min(85 %, 680 px); below 720 × 520 logical px it fills the window. Category list left, content scrolls, close button "×" and Esc close it; a click on the backdrop does not close. Focus stays inside the modal (Tab order), the app behind is dimmed. Entry points unchanged; changes apply immediately as today. API `open_preferences(page)` for later deep links (M12-12). UX-PARITY deviation "GitKraken shows Preferences as a full view" (maintainer decision 2026-11-11). |
+| Panel toggles | Two icon toggle buttons at the right end of the toolbar, like VS Code: left panel (Lucide `panel-left`) and commit panel (`panel-right`), vendored like the other icons. Active state highlighted, tooltip "Hide left panel (Ctrl+J)" / "Show left panel (Ctrl+J)", likewise for Ctrl+K. Only in repository tabs. Maintainer request 2026-11-11 (toggling was only possible by shortcut). |
+| README screenshot | A scripted fixture repository with fictional authors and neutral names (several branches with folders, a merge, tags, a stash, Git flow initialized, a dirty working tree) is rendered headless with `iced_test` at 1600 × 900, 100 %, Dark theme, into `docs/screenshots/main-dark.png` (`scripts/screenshot.sh`, test ignored by default). The README uses it; the old `m5-main-dark-100.png` is removed. `.claude/commands/next-task.md` step 4 (milestone close) gets "run `scripts/screenshot.sh` and commit the updated screenshot". |
 
 ## Maintainer answers and GitKraken verification items
 
-Answered (GitKraken 7.5.2 screenshots, 2026-11-11): header gear at the right end; UI Customization has "Show commit author/date/sha in graph"; Editor page: Font, Font Size, Tab Size, End of Line Character, Syntax Highlighting, Show Line Numbers, Word Wrap; the stash node is a dashed square with an icon, labelled "WIP on develop"; rows in the graph are tinted in the lane color and filled pills connect to their node.
+Answered (GitKraken 7.5.2 screenshots, 2026-11-11): header gear at the right end; UI Customization has "Show commit author/date/sha in graph"; Editor page: Font, Font Size, Tab Size, End of Line Character, Syntax Highlighting, Show Line Numbers, Word Wrap; the stash node is a dashed square with an icon, labelled "WIP on develop"; rows in the graph are tinted in the lane color and filled pills connect to their node. Order of folders and branches: maintainer decision (2026-11-11) branches first, then folders, alphabetical, in every tree section; GitKraken's order is not followed. Checked-out branch: GitKraken shows a check and the branch icon.
 
 Open:
 
@@ -52,6 +64,7 @@ Open:
 | GitKraken's column menu: entries and wording | M11-03 |
 | Does GitKraken persist column widths per repository or globally? | M11-02 |
 | GitKraken word wrap in the split view: are both sides kept aligned? | M11-07 |
+| GitKraken: buttons to toggle the left panel and the commit panel? Where? | M11-14 |
 
 ## Milestone acceptance
 
@@ -60,6 +73,11 @@ Open:
 - [ ] Stashes show as dashed squares with an icon and "WIP on <branch>"; a new stash without message gets Git's default message.
 - [ ] Preferences → Editor settings apply to diffs, blame, file history and the conflict view.
 - [ ] Syntax highlighting in all diff modes, blame, file history and the conflict view, correct across multi-line constructs; large files fall back to plain with a note; no frame over 50 ms while scrolling a 2 MB file (`docs/PERFORMANCE.md`).
+- [ ] Every tree section lists branches/tags before folders, alphabetical at every level; TAGS shows folders; the checked-out branch shows the check and the branch icon with aligned rows.
+- [ ] Start screen buttons are equal in size, use the accent color and pass AA contrast in all themes.
+- [ ] Preferences open as a modal; Esc closes it.
+- [ ] Toolbar toggles hide and show the left and the commit panel.
+- [ ] The README screenshot is generated by `scripts/screenshot.sh`.
 - [ ] New dependencies pass cargo-deny and appear in the third-party notices; user guide, UX-PARITY, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 No release (ADR-042): when all tasks are done, continue with M12.
@@ -77,7 +95,12 @@ No release (ADR-042): when all tasks are done, continue with M12.
 | M11-07 | Word wrap in diff views | M11-06 |
 | M11-08 | Highlighting engine | – |
 | M11-09 | Highlighting in all views | M11-06, M11-08 |
-| M11-10 | Documentation and performance | M11-01 … M11-09 |
+| M11-10 | Documentation and performance | M11-01 … M11-09, M11-11 … M11-15 |
+| M11-11 | Tree order, tag folders, checked-out marker | – |
+| M11-12 | Start screen buttons | M11-01 |
+| M11-13 | Preferences in a modal | M11-06 |
+| M11-14 | Panel toggles in the toolbar | – |
+| M11-15 | README screenshot from a fixture | M11-04, M11-11 … M11-14 |
 
 ---
 
@@ -143,7 +166,39 @@ Acceptance: app tests: a diff gets spans after the background result, switching 
 - `docs/PERFORMANCE.md`: highlighting and wrap measurements (2 MB file, scrolling, first paint).
 - User guide `settings.md` (Appearance, Editor, columns), `daily-workflow.md` (columns, stashes), `coming-from-gitkraken.md`.
 - UX-PARITY rows and the deviation "no End of Line Character setting (no in-app file editor)".
-- `docs/RELEASE-CHECKLIST.md` section "7e. New in M11" (Classic Dark, columns, stash look, editor settings, highlighting on Windows fonts such as Consolas).
+- User guide: left panel order and tag folders, Preferences modal, panel toggles; `coming-from-gitkraken.md`.
+- `docs/RELEASE-CHECKLIST.md` section "7e. New in M11" (Classic Dark, columns, stash look, editor settings, highlighting on Windows fonts such as Consolas, tree order, tag folders, check plus branch icon, start screen colors, Preferences modal, panel toggles).
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed; measurements recorded.
+
+### [ ] M11-11 Tree order, tag folders, checked-out marker
+
+- `branch_tree` order: leaves before folders, both by `compare_names`, recursive; one rule for LOCAL, REMOTE, GITFLOW and TAGS. TAGS built as a tree. `sidebar::ref_item`: check in the gutter, branch icon kept.
+- UX-PARITY: left panel row and the new deviation; M7-14 and M9-06 notes point here.
+
+Acceptance: unit tests for the order (leaves first, case-insensitive, nested folders, ties); tree tests for tags with and without `/`; snapshots of LOCAL with the checked-out branch at depth 0 and inside a folder (both themes) with aligned icons and labels; `ui_check_gitflow_section` updated.
+
+### [ ] M11-12 Start screen buttons
+
+- Equal size, accent fill, states and contrast per the decisions table, in all three themes.
+
+Acceptance: contrast unit test (WCAG ratio) for label and shortcut line in Light, Dark and Classic Dark; snapshots of the start screen in all three themes at 100 and 125 %.
+
+### [ ] M11-13 Preferences in a modal
+
+- Modal per the decisions table; all categories, the repository group and the start-screen case work as before.
+
+Acceptance: app tests: open from every entry point, Esc and "×" close, backdrop click does not close, focus stays inside, `open_preferences(page)` selects the page; layout test for the size rule incl. a small window; snapshots in both themes.
+
+### [ ] M11-14 Panel toggles in the toolbar
+
+- Two toggle buttons per the decisions table, synchronized with Ctrl+J/Ctrl+K and the palette.
+
+Acceptance: app tests (click and shortcut give the same state, tooltips follow the state, not on the start screen); toolbar snapshots with both panels shown and hidden.
+
+### [ ] M11-15 README screenshot from a fixture
+
+- Fixture script, ignored snapshot test, `scripts/screenshot.sh`, README, `next-task.md` step 4.
+
+Acceptance: the script produces the PNG on Linux CI tooling without a display; README renders it; no real names or e-mail addresses in the fixture.

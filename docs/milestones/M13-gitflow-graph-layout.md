@@ -2,7 +2,7 @@
 
 Target version: **1.0.0** (no release of its own, ADR-042)
 
-Runs on `develop` after M12. Last planned milestone before 1.0.0.
+Runs on `develop` after M12. M14 follows.
 
 ## Goal
 
@@ -108,9 +108,4 @@ Acceptance: measurements recorded; docs reviewed.
 
 ## After M13
 
-All planned milestones are done. Do not ask for planning. Instead:
-
-1. `docs/ROADMAP.md`: M13 done; "Current milestone" → "Final check and release 1.0.0 (M6-13, M6-15; ADR-042)".
-2. `docs/HANDOVER.md`: current state; the maintainer to-do "Final check before 1.0.0" stays open and lists all checklist sections 7 … 7g.
-3. `docs/PLANNING-HANDOVER.md`: milestone history lines for M9 … M13 (version "1.0.0 (unreleased)"), section 8 "Next: final check by the maintainer, then 1.0.0".
-4. Stop with the milestone report and the line "Bereit für den finalen Test (Checkliste Abschnitte 7 … 7g); 1.0.0 auf Zuruf."
+No release (ADR-042): when all tasks are done, continue with M14.

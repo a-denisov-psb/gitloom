@@ -107,6 +107,8 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 
 ### [x] M7-14 Left panel tree like GitKraken
 
+Note (2026-11-11): the tree order "folders first" is replaced by M11-11 (branches first, then folders).
+
 First task of M7 (the ID is new; it runs before M7-01). Behavior per the decisions table ("Left panel tree").
 
 - Tree model in the app (pure function, unit-tested): from the branch list to folders and leaves per section/remote; cached per snapshot and filter, not rebuilt per frame (target: 2 000 branches build in < 5 ms).

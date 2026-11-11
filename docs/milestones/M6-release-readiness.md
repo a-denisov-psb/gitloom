@@ -387,4 +387,4 @@ Note (2026-11-10): done. Cause in iced 0.14 (wgpu): each row's canvas mesh is mo
 
 ### [ ] M6-15 Release v1.0.0
 
-After the last planned milestone (M13) and the maintainer's full run of `docs/RELEASE-CHECKLIST.md` (ADR-042): `/release` for 1.0.0 from `develop`, only when the maintainer asks; Windows artifacts signed if SignPath (M6-10) is ready.
+After the last planned milestone (M14) and the maintainer's full run of `docs/RELEASE-CHECKLIST.md` (ADR-042): `/release` for 1.0.0 from `develop`, only when the maintainer asks; Windows artifacts signed if SignPath (M6-10) is ready.
