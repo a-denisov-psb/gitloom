@@ -140,6 +140,8 @@ Note (2026-11-11): done. Every helper in `icons.rs` returns the wrapper widget `
 
 ### [x] M9-06 Left panel order and GITFLOW content
 
+Note (2026-11-11): the mixed GITFLOW order is replaced by M11-11 (branches first, then folders, in every tree section).
+
 - Section order and GITFLOW tree per the decisions table; keyboard focus follows the new order.
 - UX-PARITY: left panel row updated, deviation "The GITFLOW section sits between LOCAL and REMOTE" removed; M7-08/M7-15 notes point to M9-06.
 

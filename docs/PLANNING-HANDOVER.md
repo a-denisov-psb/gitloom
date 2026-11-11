@@ -119,6 +119,8 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - M8 detailed plan and the 1.1 line (2026-11-10): `docs/milestones/M8-repository-settings.md`, ADR-040, ADR-041, ROADMAP, UX-PARITY rows and deviations; `release/1.1.0` branched from `develop`.
 - Single release line, undo principle and roadmap M9–M13 (2026-11-11): ADR-042 … ADR-044, ROADMAP, `docs/milestones/M9-fixes-and-consistency.md`, CLAUDE.md and `.claude/commands/` adjusted; `release/1.1.0` removed.
 
+- 2026-11-11 planning update: tree order branches first (M11-11), Templates page and stash template (M10-10), external editor per repository (M10-11), Preferences modal, panel toggles, README screenshot, stash folders and rename, bulk delete, palette settings, M14 commit details with ADR-051 (only unpushed commits editable), custom commands after 1.0.0.
+
 Add new agreed-but-not-yet-applied changes here.
 
 ## 7. Open decisions and verification items
@@ -144,8 +146,8 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. M9 runs on `develop`; the planning chat writes the plans for M10 … M13 ahead so Claude Code never waits (ADR-042).
-2. After M13: the maintainer runs the whole release checklist on Windows and answers the open GitKraken items; then 1.0.0 (M6-15).
+1. M9 is done; M10 runs on `develop`, M11 … M14 are planned (ADR-042).
+2. After M14: the maintainer runs the whole release checklist on Windows and answers the open GitKraken items; then 1.0.0 (M6-15).
 3. M6-10 (SignPath) can happen any time before 1.0.0.
 
 ## 9. Document map

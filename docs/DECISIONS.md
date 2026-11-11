@@ -559,3 +559,19 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: an optional per-repository layout groups lanes like the classic Git flow diagram (production, hotfix, release, development, feature). Commits get their type from a pure classifier in `git-graph`: first-parent chains of production and development, live branch prefixes, then for deleted branches the merge structure (where a segment forks off and where it is merged) and Git's default merge messages; priority live ref > message > topology > unknown. Lanes come from `LaneHints` (M2-15) with group widths over the whole history.
 - Why: commits do not record their branch; fork and merge points plus merge messages recover it for Git flow histories with high reliability, and the topology itself is never changed, only lane placement and color.
 - Consequences: unknown segments are shown in a neutral color in the feature group; fast-forward and squash merges appear as development; the classifier must stay linear in the number of commits.
+
+## ADR-051 Edit the message of unpushed commits by rebuilding the chain
+
+Status: accepted (2026-11-11)
+
+Context: GitKraken lets the user edit a commit message by clicking it in the commit details. Changing a message changes the commit id and the ids of all its descendants. For pushed commits this forces a force push and breaks the clones of everyone who pulled. A reword through `git rebase` replays merges and can bring back conflicts that were already resolved. The maintainer decided (2026-11-11) that only commits that were not pushed may be edited this way.
+
+Decision:
+
+- Eligible: commits on the checked-out branch (HEAD or an ancestor of HEAD) that no remote-tracking ref contains (`git for-each-ref --contains <c> refs/remotes`), while no Git operation runs. Detached HEAD: not eligible.
+- Mechanism (HEAD included, no rebase, no checkout): commits on the ancestry path from the target to HEAD (`git rev-list --topo-order --reverse --ancestry-path <target>..HEAD`, plus the target) are rebuilt oldest first with `git commit-tree <same tree>`, parents mapped to their rebuilt ids (other parents unchanged), the original author name, e-mail and date, the raw original message (new message for the target; encoding header kept), committer = current identity and time (like amend and rebase). With `commit.gpgSign` true the rebuilt commits are signed (`-S`). Then `git update-ref -m "gitloom: edit message of <short>" refs/heads/<branch> <new head> <old head>`. HEAD stays symbolic, so the index and the working tree are untouched; a moved branch makes the update fail ("the branch changed").
+- Other local branches and tags that contain the target keep the old commits; the dialog lists them.
+- Pushed commits are not editable by click; the tooltip names the remote branch and points to interactive rebase (M4), which stays the explicit way with its own warnings and the force push of M3.
+- Undo: `update-ref` back to the old head with the new head as expected value; redo the reverse. One entry "Edit commit message" (ADR-043).
+
+Consequences: no conflicts, also across merges; works with a dirty working tree; signatures of rebuilt commits are renewed or dropped (dialog note when `commit.gpgSign` is false and a rebuilt commit was signed). The old commits stay reachable through the reflog until Git prunes them.

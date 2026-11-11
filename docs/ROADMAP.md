@@ -4,7 +4,7 @@
 
 **M10 – Clone, init and Git settings** → [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md)
 
-Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M13 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
+Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M14 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
 ## Vision
 
@@ -30,6 +30,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Planned |
 | M12 | 1.0.0 | Workflow polish | Planned |
 | M13 | 1.0.0 | Git flow graph layout | Planned |
+| M14 | 1.0.0 | Commit details like GitKraken | Planned |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -59,7 +60,7 @@ Action registry with shortcut list (Ctrl+/), settings view, light and dark theme
 
 ### M6 – Release readiness (1.0)
 
-Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with release candidates rc.1 … rc.4, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Open: M6-10 (SignPath), M6-13 (checklist run, now the final check before 1.0.0) and M6-15 (1.0.0, after M13). Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
+Product identity in one place (name "Gitloom" kept, ADR-033), license GPL-3.0-or-later with third-party notices and About dialog, app icon, crash reports (local only), opt-in update check, accessibility pass, packaging (AppImage, tar.gz, universal dmg, msi/zip for Windows x64 and x86) and a tag-driven release workflow, Windows signing via SignPath Foundation, macOS ad-hoc signature, public repository with release candidates rc.1 … rc.4, user documentation, a consolidated Windows walkthrough and the open GitKraken checks. Open: M6-10 (SignPath), M6-13 (checklist run, now the final check before 1.0.0) and M6-15 (1.0.0, after M14). Details: [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md).
 
 ### M7 – Left panel tree, diff view modes and Git flow (done)
 
@@ -116,6 +117,10 @@ When Git flow is initialized, an optional layout draws the graph like the classi
 
 Details: [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph-layout.md).
 
+### M14 – Commit details like GitKraken (planned)
+
+Commit details like GitKraken: framed message box that edits unpushed commits by a click without a rebase (ADR-051), author block with co-authors and parent links, file list with summary, sort, Path/Tree and all files, relative time markers in the graph. Details: [`milestones/M14-commit-details.md`](milestones/M14-commit-details.md).
+
 ## Non-goals
 
 - Anything that needs a hosting provider's API or an account: pull requests, issues, boards, CI status, creating hosted repositories. Links that open the provider's website are fine.
@@ -126,6 +131,8 @@ Details: [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph
 ## Ideas backlog
 
 Own ideas and deferred items. To be assigned to milestones with the maintainer.
+
+- **Custom commands (planned first after 1.0.0, maintainer 2026-11-11)**: Preferences page with "+" entries: name, target (repository, branch, remote branch, commit, tag, stash, file), command with placeholders per target (`{commit}`, `{commit.short}`, `{commit.summary}`, `{commit.message}`, `{branch}`, `{remote}`, `{tag}`, `{file}`, `{repo}`) and `{input:<label>}` asked at run time; several lines run as steps and stop at the first failure. Shown in the target's context menu under "Custom commands ›" and in the palette. Version 1 runs `git` only; placeholders are passed as single arguments (no shell, no injection); confirmation on by default; output in a modal with the exit code (optional success toast). Undo restores all local refs and HEAD from a snapshot (working tree and remote effects excluded and named in the dialog). Global and per-entry enable switch; presets: amend message and force push (HEAD), delete remote branch, fetch all with prune, gc. Needs its own ADR (safety, undo). Like Fork and Sourcetree; GitKraken has none.
 
 - **Interactive rebase keeps prepared messages after a conflict** (M4 known limitation).
 - **Revert without changes** (M4 known limitation): offer "Commit empty" instead of Git's error.

@@ -48,6 +48,9 @@ Out of scope (later or never):
 | Message prompt | Same page, section "Commit message prompt (all repositories)": the instruction text, stored in `settings.json` (global), with "Reset to default". Default: "Write a Git commit message for the staged changes below. Follow the commit template if one is given and the style of the recent commits. Summary: imperative mood, at most 72 characters. Then a blank line and a short description of what changed and why. Reply with the commit message only." |
 | Copy prompt | "Copy commit message prompt…" in the context menu of the Staged Files header and the staged file list, and in the palette; disabled with "Stage changes first" when nothing is staged. Modal "Commit message prompt": read-only preview, size ("12,345 characters"), notes for omitted parts, the line "Check the diff for secrets before sharing it.", buttons Copy (also Ctrl+C) and Close; Copy closes the modal and confirms in the status bar. Content in this order: instruction; commit template (if any); "Branch: <name>"; "Recent commits:" with the last 10 summaries of HEAD; "Files:" with status and +/- counts; the staged diff (`git diff --cached`, 3 lines context). Limits: 60,000 characters for the diff; binary files, files over 256 KB and files that do not fit are listed as "(diff omitted)". No network, no AI (non-goal); a Gitloom extension (UX-PARITY). |
 | Undo | Clone and init: not undoable (ADR-043). Preference and Git config changes are settings, not undo entries; `docs/user/undo.md` lists them under "Cannot be undone" with the reason "change them back in the Preferences". |
+| Templates page | New global category Preferences → Templates (after Signing). Sections: "Commit message prompt" (moved here from Repository → Commit; if M10-07 is not done yet, build it here directly) and "Stash message". Each section links to the other template place: "Commit template: set per repository in Repository · <name> → Commit". The commit template itself stays repository-specific like GitKraken. Maintainer decision 2026-11-11. |
+| Stash message template | Section "Stash message" on the Templates page, like the external editor setting: checkbox "Use stash message template" (default off = Git writes its default message); while off the dropdown is disabled. Dropdown with presets and "Custom": `WIP on {branch} · {datetime}`, `{branch} · {datetime}` (first entry), `{datetime} · {branch}`, `{branch}: {summary}`, `{branch}/{datetime}` (hint: "groups stashes by branch in the STASHES section"). Custom shows a text field. Placeholders: `{branch}` (detached HEAD: "detached"), `{date}` (`2026-11-11`), `{time}` (`10:42`), `{datetime}` (`2026-11-11 10:42`), `{sha}` (short HEAD), `{summary}` (HEAD summary). Unknown placeholder: inline hint "Unknown placeholder {x}"; empty custom: hint "Git's default message is used". A preview line shows the result for the active repository ("Open a repository to see a preview" on the start screen). A message the user entered for a stash always wins; the template applies whenever a stash would otherwise get no message. Stored in `settings.json`. Gitloom extension (UX-PARITY). Settings are not undo entries (ADR-043). |
+| External editor per repository | Preferences → Repository · <name> → "External editor": "Use global setting (<name of the global editor>)" or the same presets plus custom command as the global setting. Stored as `gitloom.externalEditor` in the repository config (pattern of the SSH key per repository, M8-05). All entry points (Alt+E, toolbar button, palette, file context menus) use the repository value when set. The toolbar button "Editor" shows when either the global or the repository editor is set. |
 
 ## Maintainer answers and GitKraken verification items
 
@@ -60,6 +63,7 @@ Open:
 | GitKraken's clone dialog: labels, default folder, does it open the repository automatically? | M10-02 |
 | GitKraken's init dialog: fields, does it create an initial commit? | M10-03 |
 | How does GitKraken show a signed commit in the commit details? | M10-05 |
+| GitKraken: is there any stash message template or prompt? (expected: no → extension) | M10-10 |
 
 ## Milestone acceptance
 
@@ -70,6 +74,8 @@ Open:
 - [ ] The commit template prefills empty messages and is stored as Git's `commit.template`; comments are removed when chosen.
 - [ ] "Copy commit message prompt…" copies the documented content within the limits.
 - [ ] Prune, `.orig`, long paths and toolbar labels work as described.
+- [ ] Preferences → Templates holds the commit message prompt and the stash message template; quick stashes use the template when enabled.
+- [ ] A repository can override the external editor; all entry points use it.
 - [ ] User guide, UX-PARITY, `docs/user/undo.md`, release checklist and CHANGELOG updated; third-party notices list the `.gitignore` templates; `./scripts/check.sh` green; CI green.
 
 No release (ADR-042): when all tasks are done, continue with M11.
@@ -86,7 +92,9 @@ No release (ADR-042): when all tasks are done, continue with M11.
 | M10-06 | Commit template | – |
 | M10-07 | Copy commit message prompt | M10-06 |
 | M10-08 | Small options | – |
-| M10-09 | Documentation | M10-01 … M10-08 |
+| M10-09 | Documentation | M10-01 … M10-08, M10-10, M10-11 |
+| M10-10 | Templates page and stash message template | M10-07 |
+| M10-11 | External editor per repository | – |
 
 ---
 
@@ -144,6 +152,8 @@ Acceptance: integration tests: save without `commit.template` creates the file a
 
 ### [ ] M10-07 Copy commit message prompt
 
+Note (planning update 2026-11-11): the "Commit message prompt" section lives on the global Preferences → Templates page (M10-10); build it there directly instead of on Repository → Commit.
+
 - Prompt builder in git-core or a pure app module (no I/O in the view), the message prompt section on the same page, entry points, modal, clipboard.
 
 Acceptance: unit tests for the builder (order of parts, template present/absent, limits, binary and large files, truncation notes); app tests for the entry points and the disabled state; snapshot of the modal.
@@ -156,10 +166,22 @@ Acceptance: unit tests for the fetch and mergetool arguments; settings migration
 
 ### [ ] M10-09 Documentation
 
-- User guide: `getting-started.md` (start screen, clone, init), `settings.md` (General, Signing, Repository → Commit), `daily-workflow.md` (template, prompt), `coming-from-gitkraken.md`.
-- UX-PARITY rows; extensions: commit message prompt, signature status texts.
+- User guide: `getting-started.md` (start screen, clone, init), `settings.md` (General, Signing, Repository → Commit, Templates, external editor per repository), `daily-workflow.md` (template, prompt, stash template), `coming-from-gitkraken.md`.
+- UX-PARITY rows; extensions: commit message prompt, signature status texts, stash message template; deviation "commit message prompt on a global Templates page".
 - `docs/user/undo.md`: clone, init and settings under "Cannot be undone".
-- `docs/RELEASE-CHECKLIST.md` section "7d. New in M10" (clone HTTPS and SSH with credentials, init, GPG signing with Gpg4win pinentry, SSH signing with the agent, template, prompt, long paths).
+- `docs/RELEASE-CHECKLIST.md` section "7d. New in M10" (clone HTTPS and SSH with credentials, init, GPG signing with Gpg4win pinentry, SSH signing with the agent, template, prompt, long paths, stash with every preset and custom, external editor per repository).
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed against the implemented behavior.
+
+### [ ] M10-10 Templates page and stash message template
+
+- Preferences → Templates per the decisions table; move the commit message prompt section; stash message template with presets, custom, validation and preview; the stash push uses the rendered template when enabled and no message was entered.
+
+Acceptance: unit tests for rendering (every placeholder, detached HEAD, unknown placeholder, empty custom); integration test: stash with template on → `git stash list` shows the rendered message; off → Git's default; an entered message wins; settings migration test; snapshots of the Templates page (off, preset, custom with an unknown placeholder) in both themes.
+
+### [ ] M10-11 External editor per repository
+
+- Repository page entry and resolution per the decisions table.
+
+Acceptance: unit test for the resolution (repository over global, global only, none); app tests: Alt+E and a file context menu use the repository editor; the toolbar button shows with only a repository editor; snapshot of the repository page.
