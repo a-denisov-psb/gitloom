@@ -143,6 +143,33 @@ pub fn mergetool_args(tool: Option<&str>, path: &str, delete_orig: bool) -> Vec<
     args
 }
 
+/// Sets the repository's external editor (`gitloom.externalEditor` in its
+/// config, M10-11); `None` removes it (the global setting applies).
+pub fn set_repository_editor(git: &dyn GitWriter, command: Option<&str>) -> Result<()> {
+    let key = crate::identity::config_key("externalEditor");
+    match command.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(command) => git
+            .run(&["config", "--local", &key, command], RunOptions::default())
+            .map(drop),
+        None => {
+            let (code, output) = git.run_status(
+                &["config", "--local", "--unset-all", &key],
+                RunOptions::default(),
+            )?;
+            // 5: the key was not set.
+            if matches!(code, Some(0 | 5)) {
+                Ok(())
+            } else {
+                Err(Error::Command {
+                    command: "git config --unset-all".into(),
+                    code,
+                    stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                })
+            }
+        }
+    }
+}
+
 /// Opens the diff of `path` in the external tool and waits until it exits.
 pub fn run_difftool(
     git: &dyn GitWriter,

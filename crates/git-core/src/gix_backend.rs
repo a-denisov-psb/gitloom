@@ -636,6 +636,15 @@ impl GitBackend for GixBackend {
         Ok(std::fs::read_to_string(path).ok())
     }
 
+    fn external_editor(&self) -> Result<Option<String>> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        Ok(config
+            .string(crate::identity::config_key("externalEditor").as_str())
+            .map(|v| v.to_string())
+            .filter(|v| !v.trim().is_empty()))
+    }
+
     fn commit_template_options(&self) -> Result<crate::commit_template::TemplateOptions> {
         let repo = self.local();
         let config = repo.config_snapshot();

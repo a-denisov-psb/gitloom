@@ -59,7 +59,7 @@ pub use discard::{
 pub use editor::{editor_call, editor_main, EditorInput, EditorKind};
 pub use external_tools::{
     configured_tool, difftool_args, mergetool_args, parse_tool_help, run_difftool, run_mergetool,
-    tool_info, DiffTarget, ToolInfo, ToolKind,
+    set_repository_editor, tool_info, DiffTarget, ToolInfo, ToolKind,
 };
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use flow::{FlowBranch, FlowConfig, FlowKind};
@@ -575,6 +575,12 @@ pub trait GitBackend: Send + Sync {
 
     /// Content of the configured `commit.template`, if any.
     fn commit_template(&self) -> Result<Option<String>>;
+
+    /// External editor command of the repository (`gitloom.externalEditor`,
+    /// M10-11); `None` uses the global setting.
+    fn external_editor(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
 
     /// How the commit panel uses the template (M10-06).
     fn commit_template_options(&self) -> Result<commit_template::TemplateOptions> {
