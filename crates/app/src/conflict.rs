@@ -18,6 +18,27 @@ pub struct ConflictView {
     pub output: text_editor::Content,
     /// The output was edited by hand; it wins over the picks until reset.
     pub edited: bool,
+    /// Syntax highlighting of the ours and theirs files (M11-09).
+    pub highlight: Option<ConflictHighlight>,
+}
+
+/// Highlighted "ours" and "theirs" files of a conflict (M11-09).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictHighlight {
+    pub theme: crate::highlight::CodeTheme,
+    pub ours: crate::highlight::Outcome,
+    pub theirs: crate::highlight::Outcome,
+}
+
+impl ConflictHighlight {
+    /// Spans of line `index` of the ours (or theirs) file.
+    pub fn spans(&self, ours: bool, index: usize) -> Option<&[crate::highlight::Span]> {
+        let side = if ours { &self.ours } else { &self.theirs };
+        match side {
+            crate::highlight::Outcome::Highlighted(h) => h.lines.get(index).map(Vec::as_slice),
+            crate::highlight::Outcome::Plain(_) => None,
+        }
+    }
 }
 
 impl ConflictView {
@@ -29,6 +50,7 @@ impl ConflictView {
             picks: Picks::default(),
             output: text_editor::Content::new(),
             edited: false,
+            highlight: None,
         }
     }
 

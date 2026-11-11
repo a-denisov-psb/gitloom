@@ -259,13 +259,25 @@ fn blame_view(view: &BlameView, style: EditorStyle) -> Element<'_, Message> {
                     .align_x(iced::Right),
             );
         }
-        let line = line
-            .push(
-                text(style.expand(content).into_owned())
-                    .size(style.size)
-                    .font(style.font)
-                    .wrapping(text::Wrapping::None),
+        let code: Element<'_, Message> = match view.spans(line_index, style.code_theme) {
+            Some(spans) if style.highlight => iced::widget::rich_text(
+                crate::highlight::segments(content, spans, style.tab)
+                    .into_iter()
+                    .map(|(piece, span)| crate::ui::diff::code_span(piece, span, &style))
+                    .collect::<Vec<_>>(),
             )
+            .size(style.size)
+            .font(style.font)
+            .wrapping(text::Wrapping::None)
+            .into(),
+            _ => text(style.expand(content).into_owned())
+                .size(style.size)
+                .font(style.font)
+                .wrapping(text::Wrapping::None)
+                .into(),
+        };
+        let line = line
+            .push(code)
             .spacing(10)
             .height(row_height)
             .align_y(iced::Center)
