@@ -29,6 +29,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Preferences → Repository → SSH key: use a key from `~/.ssh` (or any key file) for fetch, pull and push of a repository (`core.sshCommand` in its Git config), or the system default; a custom SSH command is only replaced after confirmation. Authentication errors name the key.
 - Preferences → External tools → External editor: presets for VS Code, VSCodium, Sublime Text, IntelliJ IDEA and Zed or a custom command with `{path}`. "Open repository in editor" (Alt+E, command palette, toolbar button "Editor" while an editor is set) and "Open in external editor" in the file context menus.
 
+- Graph columns can be resized like GitKraken: drag the border at the right of a column header (Branch / Tag, Graph, Author, Date, SHA); a double click sets the width that fits the visible rows (Graph: all lanes, at most half the table). The commit message fills the rest and keeps at least 120 px; a Graph column narrower than its lanes fades out at the right edge. Widths are kept across restarts.
 - Release packages for Windows on ARM64 (portable zip) and Linux ARM64 (AppImage, tar.gz), best effort, and a `.deb` package for Linux x64.
 
 - A stash pop or apply that stops in conflicts is no longer an error: a banner says the stash was kept, offers Undo and, once the conflicts are resolved, "Drop stash" / "Keep stash"; the conflict view names the sides "Updated upstream" and "Stashed changes".

@@ -172,6 +172,16 @@ pub enum FileArea {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
 
+/// A graph header border being dragged (M11-02).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColumnDrag {
+    pub column: crate::graph_columns::ColumnId,
+    /// Width when the drag started.
+    pub origin: f32,
+    /// How much wider the column may get (message column minimum).
+    pub room: f32,
+}
+
 #[cfg(test)]
 impl TabId {
     pub fn for_tests(id: u64) -> Self {
@@ -256,6 +266,23 @@ pub enum Message {
     TabClosed(TabId),
     TabOpened,
     PaneResized(pane_grid::ResizeEvent),
+    /// A graph header border was pressed (M11-02): the column's width then
+    /// and how much wider it may get.
+    ColumnDragStarted {
+        column: crate::graph_columns::ColumnId,
+        origin: f32,
+        room: f32,
+    },
+    /// Cursor distance from the press while dragging a border.
+    ColumnDragged(f32),
+    ColumnDragEnded,
+    /// Double click on a border: optimal width (`table`: table width).
+    ColumnFit {
+        column: crate::graph_columns::ColumnId,
+        origin: f32,
+        room: f32,
+        table: f32,
+    },
     FilterChanged(String),
     SectionToggled(Section),
     /// Hunk / Inline / Split in the diff header or the palette (M7-01).
@@ -996,6 +1023,8 @@ pub struct App {
     pub tabs: Vec<Tab>,
     pub active: usize,
     pub panes: Panes,
+    /// Graph column border being dragged (M11-02).
+    pub column_drag: Option<ColumnDrag>,
     pub status: String,
     /// Content of the path input on the start screen.
     pub start_path: String,
@@ -1095,6 +1124,7 @@ impl App {
             tabs: Vec::new(),
             active: 0,
             panes: Panes::new(Default::default()),
+            column_drag: None,
             status: String::new(),
             start_path: String::new(),
             session: Session::default(),
@@ -4900,6 +4930,48 @@ impl App {
                 self.add_tab(TabState::Start);
             }
             Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
+            Message::ColumnDragStarted {
+                column,
+                origin,
+                room,
+            } => {
+                self.column_drag = Some(ColumnDrag {
+                    column,
+                    origin,
+                    room,
+                });
+            }
+            Message::ColumnDragged(delta) => {
+                if let Some(drag) = self.column_drag {
+                    let min =
+                        crate::graph_columns::min_width(drag.column, crate::ui::MIN_GRAPH_WIDTH);
+                    let width = crate::graph_columns::dragged(drag.origin, delta, drag.room, min);
+                    self.settings
+                        .appearance
+                        .graph_columns
+                        .set(drag.column, width);
+                }
+            }
+            Message::ColumnDragEnded => {
+                if self.column_drag.take().is_some() {
+                    return self.save_settings();
+                }
+            }
+            Message::ColumnFit {
+                column,
+                origin,
+                room,
+                table,
+            } => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let optimal = crate::ui::optimal_column_width(view, column, table);
+                let min = crate::graph_columns::min_width(column, crate::ui::MIN_GRAPH_WIDTH);
+                let width = crate::graph_columns::fitted(origin, optimal, room, min);
+                self.settings.appearance.graph_columns.set(column, width);
+                return self.save_settings();
+            }
             Message::SessionLoaded(loaded) => return self.restore(loaded),
             Message::GitDetected(git) => {
                 self.notice = git.reason();
@@ -10801,6 +10873,88 @@ pub(crate) mod tests {
         // A timer of the old interval does nothing.
         let _ = app.update(Message::AutoFetchDue(seq));
         assert!(app.tabs[0].view().unwrap().busy.is_none());
+    }
+
+    #[test]
+    fn dragging_a_column_border_resizes_within_limits() {
+        use crate::graph_columns::{ColumnId, MIN_WIDTH};
+        let mut app = ready_app(&["c"]);
+        // Without a press nothing changes.
+        let _ = app.update(Message::ColumnDragged(40.0));
+        assert_eq!(app.settings.appearance.graph_columns.refs, 200.0);
+
+        let _ = app.update(Message::ColumnDragStarted {
+            column: ColumnId::Refs,
+            origin: 200.0,
+            room: 100.0,
+        });
+        let _ = app.update(Message::ColumnDragged(30.0));
+        assert_eq!(app.settings.appearance.graph_columns.refs, 230.0);
+        let _ = app.update(Message::ColumnDragged(500.0));
+        assert_eq!(
+            app.settings.appearance.graph_columns.refs, 300.0,
+            "message keeps its minimum"
+        );
+        let _ = app.update(Message::ColumnDragged(-1000.0));
+        assert_eq!(app.settings.appearance.graph_columns.refs, MIN_WIDTH);
+        let _ = app.update(Message::ColumnDragEnded);
+        assert!(app.column_drag.is_none());
+        let _ = app.update(Message::ColumnDragged(40.0));
+        assert_eq!(app.settings.appearance.graph_columns.refs, MIN_WIDTH);
+
+        // Graph: one lane at least, fixed after the drag.
+        let _ = app.update(Message::ColumnDragStarted {
+            column: ColumnId::Graph,
+            origin: 48.0,
+            room: 100.0,
+        });
+        let _ = app.update(Message::ColumnDragged(-100.0));
+        let _ = app.update(Message::ColumnDragEnded);
+        assert_eq!(
+            app.settings.appearance.graph_columns.graph,
+            Some(crate::ui::MIN_GRAPH_WIDTH)
+        );
+    }
+
+    #[test]
+    fn double_click_on_a_border_sets_the_optimal_width() {
+        use crate::graph_columns::ColumnId;
+        let mut app = graph_app();
+        let fit = |app: &mut App, column, origin| {
+            let _ = app.update(Message::ColumnFit {
+                column,
+                origin,
+                room: 1000.0,
+                table: 1200.0,
+            });
+            app.settings.appearance.graph_columns.width(column, 0.0)
+        };
+        // The widest pill group: "feature" (padding, border, cell padding).
+        let refs = fit(&mut app, ColumnId::Refs, 200.0);
+        let pill = crate::overlay::text_width("feature", 12.0) + 14.0;
+        assert!(refs > pill && refs < 200.0, "{refs}");
+        // Author: the longest name plus cell padding and slack.
+        let author = fit(&mut app, ColumnId::Author, 130.0);
+        let name = crate::overlay::text_width("Ana Lyst", 13.0);
+        assert!(author > name + 8.0 && author < name + 12.0, "{author}");
+        // SHA: 1-character ids, so the minimum.
+        assert_eq!(
+            fit(&mut app, ColumnId::Sha, 70.0),
+            crate::graph_columns::MIN_WIDTH
+        );
+        // Graph: the lanes of the layout, at most half the table.
+        let lanes = app.tabs[0].view().unwrap().snapshot.layout.max_width;
+        assert_eq!(
+            fit(&mut app, ColumnId::Graph, 100.0),
+            crate::ui::lanes_width(lanes)
+        );
+        let _ = app.update(Message::ColumnFit {
+            column: ColumnId::Graph,
+            origin: 100.0,
+            room: 1000.0,
+            table: 100.0,
+        });
+        assert_eq!(app.settings.appearance.graph_columns.graph, Some(50.0));
     }
 
     #[test]

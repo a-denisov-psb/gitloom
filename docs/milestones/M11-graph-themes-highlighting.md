@@ -115,11 +115,13 @@ Acceptance: snapshots of main window, Preferences and dialogs in Dark and Light 
 
 Note (2026-11-11): done. `ThemePalette` tokens `row_tint_alpha`, `ref_pill` (`PillStyle`), `ref_connector`, `header_band`, `column_separator`, `panel_shadow`, `node_style` (`NodeStyle`); `ThemeKind` and `app_theme(kind)`; `palette(theme)` tells Classic Dark from Dark by its background color (no allocation in style functions). Only `header_band` is drawn yet (the column header, equal to `bg_panel` in Dark and Light); the graph tokens are used by M11-04. Classic Dark colors as planned; derived values: hover `#2c313a`, selection `#1d4a5c`, border `#323842`; all text and lane contrast tests pass for the three palettes. There is no palette theme switch yet (it comes with M12-12 "Set: Theme ›"); the theme is chosen in Preferences → Appearance. Pixel comparison: 50 existing snapshots rendered before and after, 0 differ. Snapshots `ui_check_classic_dark` (main window, Preferences, dialog) checked.
 
-### [ ] M11-02 Resizable graph columns
+### [x] M11-02 Resizable graph columns
 
 - Draggable header borders, double click for optimal width, minimum widths, Graph column clipping with fade, persistence.
 
 Acceptance: unit tests for the width model (drag, minimums, optimal width per column, message fill); app tests for drag messages and restore after restart; snapshots with a narrow Graph column.
+
+Note: a border belongs to the column on its left; for Author, Date and SHA (right of the message, which fills) dragging right also widens them and narrows the message. The Graph column follows the lanes (2 … 12) until it is first resized (`graph: null` in `settings.json`). The fade goes to the row background (graph background or the selected row's tint); canvas initials of a node cut off by the column are hidden, since canvas text ignores the clip. The automatic hiding stays until M11-03; it uses the current widths. Persistence: global, as planned (open item answered by the plan).
 
 ### [ ] M11-03 Column menu and visibility
 

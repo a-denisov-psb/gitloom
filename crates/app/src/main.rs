@@ -20,6 +20,7 @@ mod fetch;
 mod file_history;
 mod format;
 mod fuzzy;
+mod graph_columns;
 mod icons;
 mod launch;
 mod menus;

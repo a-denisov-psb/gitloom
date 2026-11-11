@@ -240,6 +240,8 @@ pub struct Appearance {
     pub avatars: bool,
     /// Labels under the toolbar icons (M10-08); on by default.
     pub toolbar_labels: bool,
+    /// Widths of the graph table columns (M11-02).
+    pub graph_columns: crate::graph_columns::ColumnWidths,
 }
 
 impl Default for Appearance {
@@ -249,6 +251,7 @@ impl Default for Appearance {
             zoom_percent: ZOOM_DEFAULT,
             avatars: false,
             toolbar_labels: true,
+            graph_columns: crate::graph_columns::ColumnWidths::default(),
         }
     }
 }
@@ -859,6 +862,8 @@ mod tests {
         settings.tools.merge_tool = ToolChoice::None;
         settings.tools.terminal_command = "alacritty --working-directory {path}".into();
         settings.diff.view_mode = DiffMode::Split;
+        settings.appearance.graph_columns.refs = 150.0;
+        settings.appearance.graph_columns.graph = Some(84.0);
         settings
     }
 
