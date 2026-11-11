@@ -22,6 +22,8 @@ In scope:
 - STASHES as a tree at `/`, rename a stash
 - Multi-selection in the left panel with bulk delete
 - Command palette: settings toggles, choices and deep links
+- Commit message prompt button in the commit panel
+- WSL repositories: notice, polling watcher, trust prompt (preparation for a WSL mode, ADR-053)
 
 Out of scope:
 
@@ -54,6 +56,8 @@ Out of scope:
 | Multi-selection in the left panel | Rows of LOCAL, REMOTE, GITFLOW and TAGS (not folders, stashes, submodules). Click: single selection and jump to the commit (as today). Ctrl+click toggles a row, Shift+click selects the range from the anchor in visible order (rows in collapsed folders are not included); Esc clears; filter changes drop rows that are no longer visible. Selected rows use the selection style of the graph multi-selection. |
 | Bulk delete | Context menu on a selected row with two or more selected: "Delete <n> branches…" / "Delete <n> tags…" / "Delete <n> branches and tags…", plus "Hide in graph"/"Show in graph" for branches. One dialog lists the items grouped (Local branches, Remote branches per remote, Tags); the checked-out branch is listed greyed as "checked out, skipped". With remote branches the dialog says "Remote branches cannot be restored with Undo." Execution: local `git branch -d` for all, unmerged ones in one follow-up confirmation for `-D` (wording as the single delete); tags `git tag -d`; remote branches one `git push <remote> --delete <b…>` per remote with the network progress and cancel of M3. Partial failures: the others stay deleted, one error toast lists the failed items with reasons. Undo: everything local is one step "Delete <n> branches" (refs at the recorded oids, upstream config restored as for the single delete); remote deletions are listed in `docs/user/undo.md` → "Cannot be undone" (ADR-043). |
 | Palette and settings | Ctrl+Shift+P opens the palette too (VS Code habit), unless the shortcut list shows a GitKraken binding for it (then only Ctrl+P, note in UX-PARITY). A settings registry (id, label, page, kind, keywords, repository-specific flag) is the single source for the Preferences pages' field anchors and the palette. Palette entries: (1) "Toggle: <label> (on/off)" for **every** boolean setting; (2) "Set: <label> ›" sub-lists **only** for settings changed in daily work: Theme, Diff view, Stash message template, External editor (global; repository override with a repository tab: "Repository: External editor ›"); "Choose identity…" stays and gets the keyword "profile"; (3) "Preferences: <page>" for every page and "Preferences: <label>" for every setting: opens the Preferences modal at the page, scrolls to the field and highlights it for 1.5 s. Repository-specific entries only with a repository tab active. Maintainer request 2026-11-11. |
+| Commit prompt button | Small icon button (Lucide `sparkles`, vendored like the other icons; VS Code shows a sparkle in the same place) at the right end of the line "Committing as <identity>", right-aligned with the summary field. Click opens the modal "Commit message prompt" (M10-07). Tooltip "Copy commit message prompt…"; without staged changes disabled with the tooltip "Stage changes first". Context menu and palette entries stay. Maintainer request 2026-11-11 (the entry was hard to find). Gitloom extension (no AI inside Gitloom; the button only copies). |
+| WSL repositories | On Windows a repository path under `\\wsl$\<distro>\…` or `\\wsl.localhost\<distro>\…` (case-insensitive, either slash) is a WSL repository (helper `wsl_location(path) -> Option<WslLocation { distro, linux_path }>`, ADR-053). (1) Notice bar in the tab: "This repository is inside WSL (<distro>). Gitloom uses Windows Git here, which is slow and can show wrong file modes or line endings. A WSL mode is planned." with "Don't show again" (stored per path in `settings.json`). Recent repositories show a muted badge "WSL: <distro>". (2) The file watcher uses polling (2 s) for these paths, since Windows change notifications on `\\wsl$` are unreliable. (3) Git's "detected dubious ownership" error (any repository) becomes a plain-language message with the button "Trust this repository…": after confirmation `git config --global --add safe.directory <path as Git prints it>`, then the repository opens (ADR-044). Not undoable (a setting; listed in `docs/user/undo.md`). |
 
 ## Maintainer answers and GitKraken verification items
 
@@ -68,6 +72,7 @@ Open:
 | "Mark all resolved" in GitKraken with conflict markers still in a file: warning or not? | M12-05 |
 | GitKraken: "Rename stash"/"Edit stash message" in the stash menu? Wording? | M12-10 |
 | GitKraken 7.5.2: multi-selection in the left panel and bulk delete? (if not: Gitloom extension) | M12-11 |
+| GitKraken: any notice for repositories on WSL or network paths? | M12-14 |
 
 ## Milestone acceptance
 
@@ -81,6 +86,8 @@ Open:
 - [ ] STASHES shows folders; a stash can be renamed in place (position kept); undo and redo restore the exact stash list.
 - [ ] Several branches and tags can be selected with Ctrl/Shift and deleted in one step; the local part is one undo step; remote deletion is confirmed as not undoable.
 - [ ] The palette toggles every boolean setting, offers the listed choices and jumps to any setting.
+- [ ] The sparkle button opens the commit message prompt; disabled without staged changes.
+- [ ] WSL repositories show the notice and the badge, refresh by polling, and "dubious ownership" offers "Trust this repository…".
 - [ ] User guide, UX-PARITY, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 No release (ADR-042): when all tasks are done, continue with M13.
@@ -97,10 +104,12 @@ No release (ADR-042): when all tasks are done, continue with M13.
 | M12-06 | Submodules | M12-02 |
 | M12-07 | Undo: stash push/drop, stage/unstage, mark resolved | M12-05 |
 | M12-08 | Undo: pull, remotes, upstream, submodule update | M12-06 |
-| M12-09 | Documentation | M12-01 … M12-08, M12-10 … M12-12 |
+| M12-09 | Documentation | M12-01 … M12-08, M12-10 … M12-14 |
 | M12-10 | Stash folders and rename | – (needs M11-05) |
 | M12-11 | Multi-selection and bulk delete in the left panel | M12-02 |
 | M12-12 | Palette: settings toggles, choices and deep links | – (needs M11-13) |
+| M12-13 | Commit prompt button | – |
+| M12-14 | WSL notice, polling watcher, trust prompt | M12-02 |
 
 ---
 
@@ -159,6 +168,7 @@ Acceptance: integration tests per entry (pull with fast-forward, merge and rebas
 - `docs/user/undo.md` complete with the "Cannot be undone" list (also rename stash and bulk delete, the remote part under "Cannot be undone"); user guide for operations, toasts, submodules, remote links, `daily-workflow.md` (stash folders and rename, multi-selection and bulk delete), `settings.md` (palette entries); `coming-from-gitkraken.md`.
 - UX-PARITY rows and deviations (hover, fixed toast location).
 - `docs/RELEASE-CHECKLIST.md` section "7f. New in M12" (also: rename a stash in the middle of the list and undo it, bulk delete local and remote branches on Windows, palette toggles and deep links).
+- `getting-started.md` (WSL repositories and "Trust this repository"), `undo.md` (safe.directory under "Cannot be undone"), UX-PARITY extensions (commit prompt button, WSL notice); release checklist 7f: sparkle button, open a repository from `\\wsl.localhost\…` on Windows (notice, badge, changes in WSL appear within a few seconds), dubious ownership.
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed against the implemented behavior.
@@ -180,3 +190,15 @@ Acceptance: app tests for Ctrl/Shift ranges (also across collapsed folders), Esc
 - Settings registry, palette entries and deep links per the decisions table; Ctrl+Shift+P.
 
 Acceptance: unit test: every boolean setting of the registry has a toggle entry, every page and setting a "Preferences:" entry; app tests: a toggle changes the setting, a choice sub-list sets the value, "Preferences: Default branch name" opens the modal at the page with the field highlighted; repository-specific entries hidden on the start screen.
+
+### [ ] M12-13 Commit prompt button
+
+- Button per the decisions table.
+
+Acceptance: app tests: click opens the modal, disabled state and tooltip without staged changes; snapshots of the commit panel with and without staged changes in all three themes.
+
+### [ ] M12-14 WSL notice, polling watcher, trust prompt
+
+- `wsl_location`, notice bar with "Don't show again", recent-list badge, watcher mode by location, dubious-ownership message and trust action, per the decisions table and ADR-053.
+
+Acceptance: unit tests for `wsl_location` (both prefixes, case, `/` and `\`, distro names with `-` and `.`, non-WSL UNC paths, always `None` on non-Windows); unit test for recognizing Git's dubious-ownership message; app tests: notice shown and dismissed per path, badge in the recent list, watcher chooses polling for a WSL path; integration test (Linux): a repository owned by another uid (or `GIT_TEST_ASSUME_DIFFERENT_OWNER=1`) shows the message and opens after "Trust this repository…" with `safe.directory` written to a temporary global config.

@@ -593,3 +593,18 @@ Decision:
 - `SHA256SUMS` covers every file of the run; the draft release notes get a generated "Files" list, so missing best-effort files are visible.
 
 Consequences: release builds take longer (fat LTO, one codegen unit) and give a smaller, slightly faster binary. Packages of best-effort targets can be missing from a release without failing it. A cross-built Windows GNU exe from `just portable` is for testing; the published Windows packages stay MSVC builds from CI.
+
+## ADR-053 Remote backend readiness (WSL and SSH later)
+
+Status: accepted (2026-11-11)
+
+Context: The maintainer develops in WSL. Opened from Windows through `\\wsl$`, a repository is slow (gitoxide reads many small files over 9P), change notifications are unreliable, and Windows Git sees file modes, line endings, credentials and SSH keys differently from the Git inside WSL. Editors such as VS Code and Zed solve this with an agent that runs inside WSL or on an SSH host while the UI stays local. Gitloom plans the same after 1.0.0 ("WSL mode", then "SSH remote", ROADMAP); until then the code must not grow in a direction that blocks it.
+
+Decision:
+
+- `git-core` stays the only place that touches a repository. Its public API takes and returns plain owned data (no iced types, no `gix` types, no borrowed handles kept by the app across calls; progress and prompts as plain messages over channels), so that it can later be served over a byte stream (serde) without redesign. New API follows this; existing exceptions are listed in `docs/ARCHITECTURE.md` and removed when touched.
+- Every process Gitloom starts for a repository (Git, askpass, editor, terminal, file manager) goes through the existing launch helpers; no new direct `Command::new` elsewhere. A later repository location (local, WSL distro, SSH host) can then switch them in one place.
+- Paths under `\\wsl$\<distro>\…` and `\\wsl.localhost\<distro>\…` are recognized by `wsl_location`; until the WSL mode exists they get a notice, a polling watcher and a plain-language trust prompt for "dubious ownership" (M12-14).
+- Agent and protocol are designed in the WSL mode milestone after 1.0.0 (own ADR).
+
+Consequences: small discipline costs now; no behavior change for local repositories; the WSL notice tells users why such repositories are slow.

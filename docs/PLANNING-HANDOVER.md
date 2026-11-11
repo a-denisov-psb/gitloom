@@ -120,6 +120,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - M8 detailed plan and the 1.1 line (2026-11-10): `docs/milestones/M8-repository-settings.md`, ADR-040, ADR-041, ROADMAP, UX-PARITY rows and deviations; `release/1.1.0` branched from `develop`.
 - Single release line, undo principle and roadmap M9–M13 (2026-11-11): ADR-042 … ADR-044, ROADMAP, `docs/milestones/M9-fixes-and-consistency.md`, CLAUDE.md and `.claude/commands/` adjusted; `release/1.1.0` removed.
 
+- 2026-11-11 planning update 3: graph column widths with horizontal scrolling (M11-16, replaces the message-fills rule of M11-02), commit prompt button (M12-13), WSL notice, polling watcher and trust prompt (M12-14), ADR-053 remote backend readiness; WSL mode and SSH remote in the ideas backlog.
 - 2026-11-11 planning update: tree order branches first (M11-11), Templates page and stash template (M10-10), external editor per repository (M10-11), Preferences modal, panel toggles, README screenshot, stash folders and rename, bulk delete, palette settings, M14 commit details with ADR-051 (only unpushed commits editable), custom commands after 1.0.0.
 
 Add new agreed-but-not-yet-applied changes here.
