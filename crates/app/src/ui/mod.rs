@@ -21,7 +21,7 @@ pub(crate) mod panel;
 mod rebase;
 pub(crate) mod settings;
 mod sidebar;
-mod start;
+pub(crate) mod start;
 pub(crate) mod statusbar;
 mod tabs;
 mod toolbar;
