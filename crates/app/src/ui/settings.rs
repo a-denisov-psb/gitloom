@@ -478,18 +478,6 @@ fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         .align_y(iced::Center)
         .into()
     };
-    // Syntax highlighting comes with M11-09.
-    let later = |label: &'a str, on: bool| -> Element<'a, Message> {
-        field(
-            label,
-            crate::ui::panel::with_tooltip(
-                iced::widget::toggler(on)
-                    .label(if on { "On" } else { "Off" })
-                    .into(),
-            ),
-            None,
-        )
-    };
     column![
         field(
             "Font",
@@ -534,7 +522,18 @@ fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
                 .into(),
             "Long lines continue on the next row in diffs; no horizontal scrolling then.",
         ),
-        later("Syntax highlighting", editor.syntax_highlighting),
+        field(
+            "Syntax highlighting",
+            iced::widget::toggler(editor.syntax_highlighting)
+                .on_toggle(Message::EditorHighlightingToggled)
+                .label(if editor.syntax_highlighting {
+                    "On"
+                } else {
+                    "Off"
+                })
+                .into(),
+            "Files over 1 MB or 20,000 lines stay plain.",
+        ),
         muted("Applies to diffs, blame, file history and the conflict view; the commit message fields keep their font.")
             .size(12),
     ]

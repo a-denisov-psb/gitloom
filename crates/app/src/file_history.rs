@@ -24,9 +24,25 @@ pub struct BlameView {
     pub cancel: CancelToken,
     pub scroll_id: iced::widget::Id,
     pub scroll: Scroll,
+    /// Syntax highlighting of the blamed file (M11-09) and its theme.
+    pub highlight: Option<(crate::highlight::CodeTheme, crate::highlight::Outcome)>,
 }
 
 impl BlameView {
+    /// Spans of line `index` when highlighting for `theme` arrived.
+    pub fn spans(
+        &self,
+        index: usize,
+        theme: crate::highlight::CodeTheme,
+    ) -> Option<&[crate::highlight::Span]> {
+        match &self.highlight {
+            Some((t, crate::highlight::Outcome::Highlighted(h))) if *t == theme => {
+                h.lines.get(index).map(Vec::as_slice)
+            }
+            _ => None,
+        }
+    }
+
     pub fn new(path: String, rev: Option<String>) -> Self {
         Self {
             path,
@@ -35,6 +51,7 @@ impl BlameView {
             cancel: CancelToken::new(),
             scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
+            highlight: None,
         }
     }
 }

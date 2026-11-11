@@ -100,6 +100,14 @@ fn view_with<'a>(
             muted(source).size(12),
         ]
         .push(encoding_label(diff))
+        .push(
+            (diff.style.highlight
+                && diff
+                    .highlight
+                    .as_ref()
+                    .is_some_and(|sides| sides.too_large()))
+            .then(|| muted("Too large for syntax highlighting").size(12)),
+        )
         .push(space::horizontal())
         .push(selection_action)
         .push(if standalone {
@@ -385,7 +393,7 @@ fn rows<'a>(
             match hunk.lines.get(l as usize) {
                 Some(line) => {
                     let selected = diff.selection.contains(&(h, l));
-                    let element = diff_line(line, selected, offset, style, wrapped(row_index));
+                    let element = diff_line(diff, line, selected, offset, wrapped(row_index));
                     if selectable && line.kind != DiffLineKind::Context {
                         mouse_area(element)
                             .on_press(Message::DiffLineClicked(row_index))
@@ -577,9 +585,11 @@ fn split_cell<'a>(
     if style.numbers {
         cells = cells.push(line_number(number, style));
     }
-    let cell: Element<'a, Message> = container(cells.push(marker(line.kind, style)).push(
-        code_text(shown_content(line, style), offset, style, wrapped),
-    ))
+    let cell: Element<'a, Message> = container(
+        cells
+            .push(marker(line.kind, style))
+            .push(line_text(diff, line, offset, wrapped)),
+    )
     .height(height)
     .width(Fill)
     .clip(true)
@@ -647,29 +657,113 @@ fn shown_content(line: &DiffLine, style: &EditorStyle) -> String {
 }
 
 fn diff_line<'a>(
+    diff: &DiffView,
     line: &DiffLine,
     selected: bool,
     offset: f32,
-    style: &EditorStyle,
     wrapped: Option<Wrapped>,
 ) -> Element<'a, Message> {
+    let style = &diff.style;
     let mut cells = row![].align_y(cells_align(wrapped));
     if style.numbers {
         cells = cells
             .push(line_number(line.old_line, style))
             .push(line_number(line.new_line, style));
     }
-    container(cells.push(marker(line.kind, style)).push(code_text(
-        shown_content(line, style),
-        offset,
-        style,
-        wrapped,
-    )))
+    container(
+        cells
+            .push(marker(line.kind, style))
+            .push(line_text(diff, line, offset, wrapped)),
+    )
     .height(wrapped.map_or(1, |w| w.lines) as f32 * style.line_height())
     .width(Fill)
     .clip(true)
     .align_y(alignment::Vertical::Center)
     .style(theme::diff_line(line.kind, selected))
+    .into()
+}
+
+/// The code of a diff line: highlighted when the result is there
+/// (M11-09), else plain.
+fn line_text<'a>(
+    diff: &DiffView,
+    line: &DiffLine,
+    offset: f32,
+    wrapped: Option<Wrapped>,
+) -> Element<'a, Message> {
+    let style = &diff.style;
+    match diff.spans_for(line) {
+        Some(spans) => {
+            let mut pieces = crate::highlight::segments(&line.content, spans, style.tab);
+            if line.missing_newline {
+                pieces.push((diff_hscroll::NO_NEWLINE.to_owned(), None));
+            }
+            rich_code(pieces, offset, style, wrapped)
+        }
+        None => code_text(shown_content(line, style), offset, style, wrapped),
+    }
+}
+
+/// An iced text span of a highlighted piece.
+pub fn code_span<'a>(
+    text: String,
+    piece: Option<crate::highlight::SpanStyle>,
+    style: &EditorStyle,
+) -> iced::widget::text::Span<'a> {
+    let span = iced::widget::span(text);
+    let Some(piece) = piece else {
+        return span;
+    };
+    let [r, g, b, a] = piece.color;
+    span.color(iced::Color::from_rgba8(r, g, b, f32::from(a) / 255.0))
+        .font(iced::Font {
+            weight: if piece.bold {
+                iced::font::Weight::Bold
+            } else {
+                style.font.weight
+            },
+            style: if piece.italic {
+                iced::font::Style::Italic
+            } else {
+                style.font.style
+            },
+            ..style.font
+        })
+}
+
+/// Highlighted code text, placed like [`code_text`].
+fn rich_code<'a>(
+    pieces: Vec<(String, Option<crate::highlight::SpanStyle>)>,
+    offset: f32,
+    style: &EditorStyle,
+    wrapped: Option<Wrapped>,
+) -> Element<'a, Message> {
+    let spans: Vec<iced::widget::text::Span<'a>> = pieces
+        .into_iter()
+        .map(|(text, piece)| code_span(text, piece, style))
+        .collect();
+    let rich = iced::widget::rich_text(spans)
+        .font(style.font)
+        .size(style.size);
+    if let Some(wrapped) = wrapped {
+        return rich
+            .line_height(text::LineHeight::Absolute(style.line_height().into()))
+            .wrapping(text::Wrapping::Glyph)
+            .width(wrapped.text_width)
+            .into();
+    }
+    let rich = rich.wrapping(text::Wrapping::None);
+    if offset <= 0.0 {
+        return rich.into();
+    }
+    iced::widget::pin(
+        container(rich)
+            .height(style.line_height())
+            .align_y(alignment::Vertical::Center),
+    )
+    .x(-offset)
+    .width(Fill)
+    .height(style.line_height())
     .into()
 }
 

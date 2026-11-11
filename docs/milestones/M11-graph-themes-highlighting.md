@@ -174,11 +174,13 @@ Acceptance: unit tests: Rust and Python samples get keyword/string/comment spans
 
 Note: module `crates/app/src/highlight.rs`; choices recorded in ADR-047 (regex-fancy, OneHalfDark / GitHub). The background task and the mapping to diff lines come with M11-09, which uses the module (until then it is test-only code).
 
-### [ ] M11-09 Highlighting in all views
+### [x] M11-09 Highlighting in all views
 
 - Diff modes (Hunk, Inline, Split), blame, file history, conflict view columns and output editor; plain first, highlighted when ready; the Editor setting switches it off.
 
 Acceptance: app tests: a diff gets spans after the background result, switching the setting off removes them, a stale result for another file is ignored; snapshots of a Rust diff in all modes and themes; conflict view snapshot.
+
+Note: whole old and new files come from the full-context diff (Inline, Split) or, for the Hunk view, from a whole-file diff loaded in the same background task; lines map by their old/new line numbers. Results carry the theme family and a load generation, so a result for another file, an older load or the other theme family is not used. The cache key is a hash of path and content (the diff carries no blob ids); the cache is shared with the tasks (`Arc<Mutex<…>>`, 64 entries). Blame highlights the blamed file; the conflict view highlights "ours" and "theirs" (clean parts plus each side's lines) and the editable output through an iced `Highlighter` on the same engine (parser snapshots every 50 lines; colors only, the editor font stays). Spans are drawn with `rich_text`; tabs expand per piece. "Too large for syntax highlighting" in the diff header. Snapshots `ui_check_highlighting` (3 modes × 3 themes, conflict view) checked.
 
 ### [ ] M11-10 Documentation and performance
 

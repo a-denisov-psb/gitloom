@@ -25,6 +25,9 @@ pub struct EditorStyle {
     pub numbers: bool,
     /// Word wrap in the diff views (M11-07).
     pub wrap: bool,
+    /// Syntax highlighting (M11-09) and the theme family it uses.
+    pub highlight: bool,
+    pub code_theme: crate::highlight::CodeTheme,
 }
 
 impl Default for EditorStyle {
@@ -41,6 +44,8 @@ impl EditorStyle {
             tab: settings.tab_size.clamp(MIN_TAB_SIZE, MAX_TAB_SIZE) as usize,
             numbers: settings.line_numbers,
             wrap: settings.word_wrap,
+            highlight: settings.syntax_highlighting,
+            code_theme: crate::highlight::CodeTheme::Dark,
         }
     }
 

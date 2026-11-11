@@ -11,6 +11,7 @@
 //! +--------------------------------------------------------------+
 //! ```
 
+mod code_highlighter;
 mod column_handle;
 mod conflict;
 pub mod context_area;

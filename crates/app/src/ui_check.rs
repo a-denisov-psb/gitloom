@@ -859,6 +859,30 @@ mod tests {
         }
     }
 
+    /// Syntax highlighting (M11-09): a Rust diff in every mode and theme,
+    /// and the conflict view.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_highlighting() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        for (choice, theme) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
+            for (mode, name) in [
+                (DiffMode::Hunk, "hunk"),
+                (DiffMode::Inline, "inline"),
+                (DiffMode::Split, "split"),
+            ] {
+                let app = crate::app::tests::rust_diff_app(mode, choice);
+                snapshot(&app, &format!("highlight-{name}-{theme}"));
+            }
+        }
+        let app = crate::app::tests::rust_conflict_app();
+        snapshot(&app, "highlight-conflict-dark");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

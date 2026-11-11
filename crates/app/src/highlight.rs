@@ -77,12 +77,12 @@ pub enum Outcome {
     Plain(Plain),
 }
 
-fn syntaxes() -> &'static SyntaxSet {
+pub(crate) fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
-fn theme(theme: CodeTheme) -> &'static Theme {
+pub(crate) fn theme(theme: CodeTheme) -> &'static Theme {
     static DARK: OnceLock<Theme> = OnceLock::new();
     static LIGHT: OnceLock<Theme> = OnceLock::new();
     let cell = match theme {
@@ -95,7 +95,7 @@ fn theme(theme: CodeTheme) -> &'static Theme {
 /// The syntax of `path` (by extension, then by file name such as
 /// `Makefile`), else by the first line (`#!/usr/bin/env python`); `None`
 /// for plain text and unknown types.
-fn syntax_for(path: &str, first_line: &str) -> Option<&'static SyntaxReference> {
+pub(crate) fn syntax_for(path: &str, first_line: &str) -> Option<&'static SyntaxReference> {
     let set = syntaxes();
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let by_extension = name
@@ -175,14 +175,174 @@ impl Cache {
         }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 }
 
+/// Highlighted old and new side of a diff (M11-09).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffSides {
+    pub theme: CodeTheme,
+    pub old: Outcome,
+    pub new: Outcome,
+}
+
+impl DiffSides {
+    /// Spans of a diff line: removed lines from the old side, added and
+    /// context lines from the new side (by their line numbers).
+    pub fn spans_for(&self, line: &git_core::DiffLine) -> Option<&[Span]> {
+        let (side, number) = match line.kind {
+            git_core::DiffLineKind::Removed => (&self.old, line.old_line),
+            git_core::DiffLineKind::Added | git_core::DiffLineKind::Context => {
+                (&self.new, line.new_line)
+            }
+        };
+        let Outcome::Highlighted(h) = side else {
+            return None;
+        };
+        let index = usize::try_from(number?.checked_sub(1)?).ok()?;
+        h.lines.get(index).map(Vec::as_slice)
+    }
+
+    /// The file was too large on a side (the view says so).
+    pub fn too_large(&self) -> bool {
+        [&self.old, &self.new]
+            .iter()
+            .any(|side| **side == Outcome::Plain(Plain::TooLarge))
+    }
+}
+
+/// Old and new file text from a diff with full context: every line at its
+/// line number (lines a diff with less context leaves out stay empty).
+pub fn diff_texts(diff: &git_core::FileDiff) -> (String, String) {
+    fn place<'a>(side: &mut Vec<&'a str>, number: Option<u32>, text: &'a str) {
+        let Some(index) = number.and_then(|n| usize::try_from(n).ok()?.checked_sub(1)) else {
+            return;
+        };
+        if side.len() <= index {
+            side.resize(index + 1, "");
+        }
+        side[index] = text;
+    }
+    let mut old: Vec<&str> = Vec::new();
+    let mut new: Vec<&str> = Vec::new();
+    for line in diff.hunks.iter().flat_map(|h| &h.lines) {
+        match line.kind {
+            git_core::DiffLineKind::Removed => place(&mut old, line.old_line, &line.content),
+            git_core::DiffLineKind::Added => place(&mut new, line.new_line, &line.content),
+            git_core::DiffLineKind::Context => {
+                place(&mut old, line.old_line, &line.content);
+                place(&mut new, line.new_line, &line.content);
+            }
+        }
+    }
+    let join = |lines: Vec<&str>| {
+        let mut text = lines.join("\n");
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text
+    };
+    (join(old), join(new))
+}
+
+/// The "ours" and "theirs" file of a conflicted text: the clean parts with
+/// each side's conflict lines (as the conflict view shows them).
+pub fn conflict_texts(text: &git_core::ConflictText) -> (String, String) {
+    let mut ours = String::new();
+    let mut theirs = String::new();
+    let push = |side: &mut String, line: &str| {
+        side.push_str(line.trim_end_matches(['\n', '\r']));
+        side.push('\n');
+    };
+    for chunk in &text.chunks {
+        match chunk {
+            git_core::Chunk::Clean(lines) => {
+                for line in lines {
+                    push(&mut ours, line);
+                    push(&mut theirs, line);
+                }
+            }
+            git_core::Chunk::Conflict(hunk) => {
+                hunk.ours.iter().for_each(|l| push(&mut ours, l));
+                hunk.theirs.iter().for_each(|l| push(&mut theirs, l));
+            }
+        }
+    }
+    (ours, theirs)
+}
+
+/// An id for a file's content (stands in for its blob id in the cache).
+pub fn content_id(path: &str, text: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    text.hash(&mut hasher);
+    format!("{:016x}-{}", hasher.finish(), text.len())
+}
+
+/// Highlights `text` of `path`, from `cache` when it was done before.
+pub fn cached(
+    cache: &std::sync::Mutex<Cache>,
+    path: &str,
+    text: &str,
+    theme: CodeTheme,
+) -> Outcome {
+    let id = content_id(path, text);
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.get(&id, theme).cloned()) {
+        return hit;
+    }
+    let outcome = highlight(path, text, theme);
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(&id, theme, outcome.clone());
+    }
+    outcome
+}
+
+/// `content` cut into styled pieces by `spans` (unstyled between them),
+/// with tabs expanded to `tab` columns as the views show them.
+pub fn segments(content: &str, spans: &[Span], tab: usize) -> Vec<(String, Option<SpanStyle>)> {
+    let tab = tab.max(1);
+    let mut column = 0;
+    let mut expand = |piece: &str| {
+        let mut out = String::with_capacity(piece.len());
+        for c in piece.chars() {
+            if c == '\t' {
+                let spaces = tab - column % tab;
+                out.extend(std::iter::repeat_n(' ', spaces));
+                column += spaces;
+            } else {
+                out.push(c);
+                column += 1;
+            }
+        }
+        out
+    };
+    let mut pieces = Vec::new();
+    let mut at = 0;
+    for span in spans {
+        let (start, end) = (span.range.start.max(at), span.range.end.min(content.len()));
+        if start >= end || !content.is_char_boundary(start) || !content.is_char_boundary(end) {
+            continue;
+        }
+        if start > at {
+            pieces.push((expand(&content[at..start]), None));
+        }
+        pieces.push((expand(&content[start..end]), Some(span.style)));
+        at = end;
+    }
+    if at < content.len() {
+        pieces.push((expand(&content[at..]), None));
+    }
+    pieces
+}
+
 /// The licenses of the bundled syntaxes and themes, as listed in the
 /// third-party notices (`crates/app/assets/syntax-acknowledgements.md`),
 /// with LF line ends like every file in the repository.
+#[cfg(test)]
 pub fn acknowledgements() -> String {
     two_face::acknowledgement::listing()
         .to_md()
@@ -313,6 +473,94 @@ mod tests {
         assert_eq!(cache.len(), Cache::CAPACITY);
         assert!(cache.get("blob1", CodeTheme::Dark).is_none());
         assert!(cache.get("b63", CodeTheme::Dark).is_some());
+    }
+
+    #[test]
+    fn diff_lines_take_spans_of_their_side() {
+        use git_core::{DiffHunk, DiffLine, DiffLineKind, FileDiff};
+        let line = |kind, old, new, content: &str| DiffLine {
+            kind,
+            content: content.into(),
+            old_line: old,
+            new_line: new,
+            missing_newline: false,
+            crlf: false,
+        };
+        let diff = FileDiff {
+            old_path: Some("a.rs".into()),
+            new_path: Some("a.rs".into()),
+            binary: false,
+            too_large: false,
+            encoding: None,
+            hunks: vec![DiffHunk {
+                header: String::new(),
+                old_start: 1,
+                old_count: 3,
+                new_start: 1,
+                new_count: 3,
+                lines: vec![
+                    line(DiffLineKind::Context, Some(1), Some(1), "/* open"),
+                    line(DiffLineKind::Removed, Some(2), None, "end */ fn old() {}"),
+                    line(DiffLineKind::Added, None, Some(2), "still comment */"),
+                    line(DiffLineKind::Context, Some(3), Some(3), "fn x() {}"),
+                ],
+            }],
+        };
+        let (old, new) = diff_texts(&diff);
+        assert_eq!(old, "/* open\nend */ fn old() {}\nfn x() {}\n");
+        assert_eq!(new, "/* open\nstill comment */\nfn x() {}\n");
+        let sides = DiffSides {
+            theme: CodeTheme::Dark,
+            old: highlight("a.rs", &old, CodeTheme::Dark),
+            new: highlight("a.rs", &new, CodeTheme::Dark),
+        };
+        let lines = &diff.hunks[0].lines;
+        let open = sides.spans_for(&lines[0]).unwrap()[0].style;
+        // The added line continues the comment on the new side.
+        assert!(sides
+            .spans_for(&lines[2])
+            .unwrap()
+            .iter()
+            .all(|s| s.style == open));
+        // The removed line ends the comment on the old side; code follows.
+        assert!(sides
+            .spans_for(&lines[1])
+            .unwrap()
+            .iter()
+            .any(|s| s.style != open));
+        assert!(!sides.too_large());
+    }
+
+    #[test]
+    fn segments_expand_tabs_and_keep_gaps() {
+        let style = SpanStyle {
+            color: [1, 2, 3, 255],
+            bold: false,
+            italic: false,
+        };
+        let spans = [Span { range: 0..2, style }, Span { range: 3..5, style }];
+        let pieces = segments("ab\tcd ef", &spans, 4);
+        let texts: Vec<&str> = pieces.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["ab", "  ", "cd", " ef"]);
+        assert_eq!(pieces[0].1, Some(style));
+        assert_eq!(pieces[1].1, None);
+        // Out-of-range spans are skipped.
+        let bad = [Span {
+            range: 50..60,
+            style,
+        }];
+        assert_eq!(segments("x", &bad, 4), [("x".to_owned(), None)]);
+    }
+
+    #[test]
+    fn cached_highlights_once() {
+        let cache = std::sync::Mutex::new(Cache::default());
+        let first = cached(&cache, "a.rs", "fn x() {}\n", CodeTheme::Dark);
+        assert_eq!(cache.lock().unwrap().len(), 1);
+        let second = cached(&cache, "a.rs", "fn x() {}\n", CodeTheme::Dark);
+        assert_eq!(first, second);
+        assert_eq!(cache.lock().unwrap().len(), 1);
+        assert_ne!(content_id("a.rs", "x"), content_id("b.rs", "x"));
     }
 
     /// The third-party notices include this file; regenerate it with

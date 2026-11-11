@@ -102,6 +102,12 @@ pub struct DiffView {
     pub char_width: f32,
     /// Width of the diff as the scrollbar last reported it (0 = unknown).
     pub width: f32,
+    /// Syntax highlighting of both sides (M11-09), when it arrived for the
+    /// current content (`generation`).
+    pub highlight: Option<Arc<crate::highlight::DiffSides>>,
+    /// Counts loads, so a late highlighting result of an older load is
+    /// ignored.
+    pub generation: u64,
 }
 
 /// A branch being dragged: its name and kind, and the branch under the
@@ -263,7 +269,21 @@ impl DiffView {
             row_chars: Vec::new(),
             char_width: 0.0,
             width: 0.0,
+            highlight: None,
+            generation: 0,
         }
+    }
+
+    /// Spans of `line` when highlighting is on and its result matches the
+    /// current theme.
+    pub fn spans_for(&self, line: &git_core::DiffLine) -> Option<&[crate::highlight::Span]> {
+        if !self.style.highlight {
+            return None;
+        }
+        self.highlight
+            .as_deref()
+            .filter(|sides| sides.theme == self.style.code_theme)
+            .and_then(|sides| sides.spans_for(line))
     }
 
     /// Word wrap layout for a diff `width` wide, `None` without wrapping
@@ -486,6 +506,8 @@ impl DiffView {
 
     /// Stores the loaded diff and flattens its hunks into display rows.
     pub fn set_diff(&mut self, diff: Result<FileDiff, String>) {
+        self.generation += 1;
+        self.highlight = None;
         self.rows.clear();
         self.blocks.clear();
         self.block_rows.clear();

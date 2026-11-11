@@ -145,7 +145,15 @@ fn text_view<'a>(
         .font(style.font)
         .size(style.size)
         .height(Fill)
-        .style(theme::editor);
+        .style(theme::editor)
+        .highlight_with::<crate::ui::code_highlighter::SyntaxHighlighter>(
+            crate::ui::code_highlighter::Settings {
+                path: conflict.path.clone(),
+                theme: style.code_theme,
+                enabled: style.highlight,
+            },
+            crate::ui::code_highlighter::format,
+        );
 
     column![
         toolbar,
@@ -174,19 +182,43 @@ fn side_panel<'a>(
     let ours = side == Side::Ours;
     let mut rows = Column::new().spacing(0);
     let mut hunk = 0;
+    // Line of this side's file (clean lines and its own conflict lines),
+    // for the highlighting spans (M11-09).
+    let mut file_line = 0;
+    let highlight = conflict
+        .highlight
+        .as_ref()
+        .filter(|h| style.highlight && h.theme == style.code_theme);
+    let code = |line: &str, index: usize, muted_text: bool| -> Element<'a, Message> {
+        let line = display(line);
+        match highlight.and_then(|h| h.spans(ours, index)) {
+            Some(spans) => iced::widget::rich_text(
+                crate::highlight::segments(line, spans, style.tab)
+                    .into_iter()
+                    .map(|(piece, span)| crate::ui::diff::code_span(piece, span, &style))
+                    .collect::<Vec<_>>(),
+            )
+            .font(style.font)
+            .size(style.size)
+            .into(),
+            None => {
+                let text = text(style.expand(line).into_owned())
+                    .font(style.font)
+                    .size(style.size);
+                if muted_text {
+                    text.style(theme::text_muted).into()
+                } else {
+                    text.into()
+                }
+            }
+        }
+    };
     for chunk in &conflict_text.chunks {
         match chunk {
             Chunk::Clean(lines) => {
                 for line in lines {
-                    rows = rows.push(
-                        container(
-                            text(style.expand(display(line)).into_owned())
-                                .font(style.font)
-                                .size(style.size)
-                                .style(theme::text_muted),
-                        )
-                        .padding([0, 26]),
-                    );
+                    rows = rows.push(container(code(line, file_line, true)).padding([0, 26]));
+                    file_line += 1;
                 }
             }
             Chunk::Conflict(conflict_hunk) => {
@@ -232,9 +264,7 @@ fn side_panel<'a>(
                                         line: line_index,
                                     }
                                 }),
-                                text(style.expand(display(line)).into_owned())
-                                    .font(style.font)
-                                    .size(style.size),
+                                code(line, file_line + line_index, false),
                             ]
                             .spacing(8)
                             .align_y(iced::Center),
@@ -244,6 +274,7 @@ fn side_panel<'a>(
                         .style(theme::conflict_line(ours, picked)),
                     );
                 }
+                file_line += lines.len();
                 if lines.is_empty() {
                     rows = rows.push(
                         container(muted("(no lines)").size(11))

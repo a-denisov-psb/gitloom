@@ -280,6 +280,30 @@ pub enum Message {
     EditorTabSize(u32),
     EditorLineNumbersToggled(bool),
     EditorWordWrapToggled(bool),
+    EditorHighlightingToggled(bool),
+    /// Syntax highlighting of a conflicted file arrived (M11-09).
+    ConflictHighlighted {
+        tab: TabId,
+        path: String,
+        highlight: crate::conflict::ConflictHighlight,
+    },
+    /// Syntax highlighting of a blamed file arrived (M11-09).
+    BlameHighlighted {
+        tab: TabId,
+        path: String,
+        rev: Option<String>,
+        theme: crate::highlight::CodeTheme,
+        outcome: crate::highlight::Outcome,
+    },
+    /// Syntax highlighting of a diff arrived (M11-09).
+    DiffHighlighted {
+        tab: TabId,
+        request: DiffRequest,
+        generation: u64,
+        sides: Arc<crate::highlight::DiffSides>,
+    },
+    /// Nothing to do (an optional background result that did not come).
+    Noop,
     /// Gear at the right end of the graph header: column menu (M11-03).
     GraphColumnMenu(iced::Point),
     /// Show or hide the Author, Date or SHA column.
@@ -1040,6 +1064,8 @@ pub struct App {
     pub panes: Panes,
     /// Graph column border being dragged (M11-02).
     pub column_drag: Option<ColumnDrag>,
+    /// Highlighted files, shared with the background tasks (M11-09).
+    highlight_cache: Arc<std::sync::Mutex<crate::highlight::Cache>>,
     pub status: String,
     /// Content of the path input on the start screen.
     pub start_path: String,
@@ -1140,6 +1166,7 @@ impl App {
             active: 0,
             panes: Panes::new(Default::default()),
             column_drag: None,
+            highlight_cache: Arc::default(),
             status: String::new(),
             start_path: String::new(),
             session: Session::default(),
@@ -4514,9 +4541,193 @@ impl App {
         )
     }
 
-    /// Style of the code views from Preferences → Editor (M11-06).
+    /// Style of the code views from Preferences → Editor (M11-06) and the
+    /// code theme of the active theme (M11-09).
     pub fn editor_style(&self) -> crate::editor_style::EditorStyle {
-        crate::editor_style::EditorStyle::from_settings(&self.settings.editor)
+        crate::editor_style::EditorStyle {
+            code_theme: match self.theme_kind() {
+                crate::theme::ThemeKind::Light => crate::highlight::CodeTheme::Light,
+                crate::theme::ThemeKind::Dark | crate::theme::ThemeKind::ClassicDark => {
+                    crate::highlight::CodeTheme::Dark
+                }
+            },
+            ..crate::editor_style::EditorStyle::from_settings(&self.settings.editor)
+        }
+    }
+
+    /// Requests highlighting for the open diffs of all tabs that lack a
+    /// result for the current theme.
+    fn highlight_code_views(&self) -> Task<Message> {
+        Task::batch(self.tabs.iter().flat_map(|tab| {
+            [
+                self.highlight_diff(tab.id),
+                self.highlight_blame(tab.id),
+                self.highlight_conflict(tab.id),
+            ]
+        }))
+    }
+
+    /// Highlights the ours and theirs files of the conflict open in `tab`
+    /// (M11-09).
+    fn highlight_conflict(&self, tab: TabId) -> Task<Message> {
+        let style = self.editor_style();
+        let Some(CenterView::Conflict(conflict)) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .and_then(Tab::view)
+            .map(|v| &v.center)
+        else {
+            return Task::none();
+        };
+        let theme = style.code_theme;
+        let Some(text) = conflict.text() else {
+            return Task::none();
+        };
+        if !style.highlight
+            || conflict
+                .highlight
+                .as_ref()
+                .is_some_and(|h| h.theme == theme)
+        {
+            return Task::none();
+        }
+        let (ours, theirs) = crate::highlight::conflict_texts(text);
+        let path = conflict.path.clone();
+        let cache = Arc::clone(&self.highlight_cache);
+        Task::perform(
+            blocking(move || {
+                let highlight = crate::conflict::ConflictHighlight {
+                    theme,
+                    ours: crate::highlight::cached(&cache, &path, &ours, theme),
+                    theirs: crate::highlight::cached(&cache, &path, &theirs, theme),
+                };
+                Ok::<_, String>((path, highlight))
+            }),
+            move |result| match result {
+                Ok((path, highlight)) => Message::ConflictHighlighted {
+                    tab,
+                    path,
+                    highlight,
+                },
+                Err(_) => Message::Noop,
+            },
+        )
+    }
+
+    /// Highlights the blamed file of `tab` in the background (M11-09).
+    fn highlight_blame(&self, tab: TabId) -> Task<Message> {
+        let style = self.editor_style();
+        let Some(blame) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .and_then(Tab::view)
+            .and_then(|view| match &view.center {
+                CenterView::FileHistory(history) => history.blame.as_ref(),
+                _ => None,
+            })
+        else {
+            return Task::none();
+        };
+        let theme = style.code_theme;
+        let Loadable::Ready(lines) = &blame.blame else {
+            return Task::none();
+        };
+        if !style.highlight
+            || lines.binary
+            || blame.highlight.as_ref().is_some_and(|(t, _)| *t == theme)
+        {
+            return Task::none();
+        }
+        let mut text: String = lines
+            .lines
+            .iter()
+            .map(|(_, line)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        text.push('\n');
+        let (path, rev) = (blame.path.clone(), blame.rev.clone());
+        let cache = Arc::clone(&self.highlight_cache);
+        Task::perform(
+            blocking(move || {
+                let outcome = crate::highlight::cached(&cache, &path, &text, theme);
+                Ok::<_, String>((path, rev, outcome))
+            }),
+            move |result| match result {
+                Ok((path, rev, outcome)) => Message::BlameHighlighted {
+                    tab,
+                    path,
+                    rev,
+                    theme,
+                    outcome,
+                },
+                Err(_) => Message::Noop,
+            },
+        )
+    }
+
+    /// Highlights both sides of the diff open in `tab` in the background
+    /// (M11-09). Inline and Split diffs carry the whole file; for the Hunk
+    /// view the whole-file diff is loaded first, so multi-line comments and
+    /// strings are right on every line.
+    fn highlight_diff(&self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tabs.iter().find(|t| t.id == tab).and_then(Tab::view) else {
+            return Task::none();
+        };
+        let diff = match &view.center {
+            CenterView::Diff(diff) => diff.as_ref(),
+            CenterView::FileHistory(history) => match history.diff.as_ref() {
+                Some(diff) => diff,
+                None => return Task::none(),
+            },
+            _ => return Task::none(),
+        };
+        let theme = diff.style.code_theme;
+        let Loadable::Ready(file) = &diff.diff else {
+            return Task::none();
+        };
+        if !diff.style.highlight
+            || file.binary
+            || file.too_large
+            || diff.highlight.as_ref().is_some_and(|h| h.theme == theme)
+        {
+            return Task::none();
+        }
+        let request = diff.request.clone();
+        let generation = diff.generation;
+        let cache = Arc::clone(&self.highlight_cache);
+        let backend = Arc::clone(&view.backend);
+        let loaded = diff.layout.has_blocks().then(|| file.clone());
+        let path = request.path.clone();
+        let old_path = file.old_path.clone().unwrap_or_else(|| path.clone());
+        Task::perform(
+            blocking(move || {
+                let full = match loaded {
+                    Some(file) => file,
+                    None => backend
+                        .file_diff_with(&request, git_core::DiffContext::Full)
+                        .map_err(|e| e.to_string())?,
+                };
+                let (old, new) = crate::highlight::diff_texts(&full);
+                let sides = crate::highlight::DiffSides {
+                    theme,
+                    old: crate::highlight::cached(&cache, &old_path, &old, theme),
+                    new: crate::highlight::cached(&cache, &path, &new, theme),
+                };
+                Ok::<_, String>((request, sides))
+            }),
+            move |result| match result {
+                Ok((request, sides)) => Message::DiffHighlighted {
+                    tab,
+                    request,
+                    generation,
+                    sides: Arc::new(sides),
+                },
+                // Highlighting is optional: without it the diff stays plain.
+                Err(_) => Message::Noop,
+            },
+        )
     }
 
     /// Applies changed editor settings to the open diffs (their text width
@@ -5040,6 +5251,64 @@ impl App {
                 self.restyle_code_views();
                 return self.save_settings();
             }
+            Message::Noop => {}
+            Message::ConflictHighlighted {
+                tab,
+                path,
+                highlight,
+            } => {
+                if let Some(CenterView::Conflict(conflict)) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .map(|v| &mut v.center)
+                {
+                    if conflict.path == path {
+                        conflict.highlight = Some(highlight);
+                    }
+                }
+            }
+            Message::BlameHighlighted {
+                tab,
+                path,
+                rev,
+                theme,
+                outcome,
+            } => {
+                if let Some(blame) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|view| match &mut view.center {
+                        CenterView::FileHistory(history) => history.blame.as_mut(),
+                        _ => None,
+                    })
+                    .filter(|b| b.path == path && b.rev == rev)
+                {
+                    blame.highlight = Some((theme, outcome));
+                }
+            }
+            Message::EditorHighlightingToggled(on) => {
+                self.settings.editor.syntax_highlighting = on;
+                self.restyle_code_views();
+                return Task::batch([self.save_settings(), self.highlight_code_views()]);
+            }
+            Message::DiffHighlighted {
+                tab,
+                request,
+                generation,
+                sides,
+            } => {
+                let Some(diff) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.center.diff_mut())
+                else {
+                    return Task::none();
+                };
+                // A result for another file or an older load is stale.
+                if diff.request == request && diff.generation == generation {
+                    diff.highlight = Some(sides);
+                }
+            }
             Message::EditorWordWrapToggled(on) => {
                 self.settings.editor.word_wrap = on;
                 self.restyle_code_views();
@@ -5497,7 +5766,11 @@ impl App {
                 return Task::batch([save, self.restart_auto_fetch()]);
             }
             Message::SettingsOpened => return self.open_settings(),
-            Message::SystemTheme(mode) => self.system_theme = mode,
+            Message::SystemTheme(mode) => {
+                self.system_theme = mode;
+                self.restyle_code_views();
+                return self.highlight_code_views();
+            }
             Message::ExternalDiff => return self.external_diff(),
             Message::OpenTerminal => {
                 let Some(root) = self
@@ -5667,7 +5940,9 @@ impl App {
             Message::ThemeChosen(choice) => {
                 if self.settings.appearance.theme != choice {
                     self.settings.appearance.theme = choice;
-                    return self.save_settings();
+                    // Code colors follow the theme (M11-09).
+                    self.restyle_code_views();
+                    return Task::batch([self.save_settings(), self.highlight_code_views()]);
                 }
             }
             Message::SettingsClosed => self.settings_page = None,
@@ -6046,6 +6321,7 @@ impl App {
                         Ok(blame) => Loadable::Ready(blame),
                         Err(error) => Loadable::Failed(error),
                     };
+                    return self.highlight_blame(tab);
                 }
             }
             Message::BlameScrolled { offset, height } => {
@@ -7679,6 +7955,7 @@ impl App {
                         diff.set_diff(result.map_err(|e| e.to_string()));
                         // Opening a file (or switching the mode) shows its
                         // first change; reloads after staging keep the place.
+                        let mut scroll = Task::none();
                         if std::mem::take(&mut diff.scroll_to_change) {
                             let visible =
                                 (diff.scroll.height / diff.style.line_height()).floor() as usize;
@@ -7687,9 +7964,11 @@ impl App {
                                 .map_or(0.0, |row| diff.row_top(row));
                             if diff.layout.has_blocks() && offset > 0.0 {
                                 diff.scroll.offset = offset;
-                                return scroll_by_id(diff.scroll_id.clone(), offset);
+                                scroll = scroll_by_id(diff.scroll_id.clone(), offset);
                             }
                         }
+                        // Plain first; colors when the background result arrives.
+                        return Task::batch([scroll, self.highlight_diff(tab)]);
                     }
                 }
             }
@@ -8070,6 +8349,7 @@ impl App {
                     // A failed load has no path; it belongs to the open view.
                     if path.is_empty() || conflict.path == path {
                         conflict.set_loaded(result);
+                        return self.highlight_conflict(tab);
                     }
                 }
             }
@@ -11246,7 +11526,7 @@ pub(crate) mod tests {
         app
     }
 
-    fn open_diff(app: &App) -> &crate::repo_view::DiffView {
+    pub(crate) fn open_diff(app: &App) -> &crate::repo_view::DiffView {
         match &app.tabs[0].view().unwrap().center {
             CenterView::Diff(diff) => diff,
             _ => panic!("no diff"),
@@ -11707,6 +11987,136 @@ pub(crate) mod tests {
         // Off again: no layout.
         let _ = app.update(Message::EditorWordWrapToggled(false));
         assert!(open_diff(&app).wrap_layout(1000.0).is_none());
+    }
+
+    /// Unstaged diff of a Rust file in `mode` (M11-09 snapshots).
+    pub(crate) fn rust_diff_app(mode: settings::DiffMode, theme: settings::ThemeChoice) -> App {
+        let mut app = staging_app(&["src/parser.rs"], &[]);
+        app.settings.appearance.theme = theme;
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "src/parser.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old = "/// Parses a list of numbers.\npub fn parse(text: &str) -> Vec<u32> {\n    // Split at commas.\n    text.split(',')\n        .filter_map(|n| n.trim().parse().ok())\n        .collect()\n}\n\n/* A block comment\n   over two lines. */\nconst LIMIT: usize = 100;\n";
+        let new = "/// Parses a list of numbers.\npub fn parse(text: &str) -> Vec<u32> {\n    // Split at commas and semicolons.\n    text.split([',', ';'])\n        .filter_map(|n| n.trim().parse().ok())\n        .take(LIMIT)\n        .collect()\n}\n\n/* A block comment\n   over two lines. */\nconst LIMIT: usize = 100;\n";
+        let text = git_core::text_diff_with(old.as_bytes(), new.as_bytes(), mode.context());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("src/parser.rs".into()),
+                new_path: Some("src/parser.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let result = highlight_result(&app, old, new);
+        let _ = app.update(result);
+        app
+    }
+
+    /// The result of the background highlighting of the open diff with the
+    /// whole `old` and `new` file.
+    pub(crate) fn highlight_result(app: &App, old: &str, new: &str) -> Message {
+        let diff = open_diff(app);
+        let theme = app.editor_style().code_theme;
+        let path = diff.request.path.clone();
+        Message::DiffHighlighted {
+            tab: app.tabs[0].id,
+            request: diff.request.clone(),
+            generation: diff.generation,
+            sides: Arc::new(crate::highlight::DiffSides {
+                theme,
+                old: crate::highlight::highlight(&path, old, theme),
+                new: crate::highlight::highlight(&path, new, theme),
+            }),
+        }
+    }
+
+    /// The diff of "a" in `wide_diff_app` as if it were a Rust file, with
+    /// its highlighting computed like the background task does.
+    fn highlighted(app: &App, theme: crate::highlight::CodeTheme) -> Message {
+        let diff = open_diff(app);
+        let Loadable::Ready(file) = &diff.diff else {
+            panic!("diff not loaded");
+        };
+        let (old, new) = crate::highlight::diff_texts(file);
+        Message::DiffHighlighted {
+            tab: app.tabs[0].id,
+            request: diff.request.clone(),
+            generation: diff.generation,
+            sides: Arc::new(crate::highlight::DiffSides {
+                theme,
+                old: crate::highlight::highlight("a.rs", &old, theme),
+                new: crate::highlight::highlight("a.rs", &new, theme),
+            }),
+        }
+    }
+
+    #[test]
+    fn diff_highlighting_arrives_and_switches_off() {
+        use crate::highlight::CodeTheme;
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let line = |app: &App| {
+            let diff = open_diff(app);
+            let Loadable::Ready(file) = &diff.diff else {
+                panic!("diff not loaded");
+            };
+            file.hunks[0].lines[0].clone()
+        };
+        // Plain first.
+        assert!(open_diff(&app).spans_for(&line(&app)).is_none());
+        let result = highlighted(&app, CodeTheme::Dark);
+        let _ = app.update(result);
+        assert!(open_diff(&app).spans_for(&line(&app)).is_some());
+        // Off: no spans; the result stays for switching back.
+        let _ = app.update(Message::EditorHighlightingToggled(false));
+        assert!(open_diff(&app).spans_for(&line(&app)).is_none());
+        let _ = app.update(Message::EditorHighlightingToggled(true));
+        assert!(open_diff(&app).spans_for(&line(&app)).is_some());
+        // Another theme family: the dark result is not used for Light.
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
+        assert_eq!(open_diff(&app).style.code_theme, CodeTheme::Light);
+        assert!(open_diff(&app).spans_for(&line(&app)).is_none());
+    }
+
+    #[test]
+    fn stale_highlighting_results_are_ignored() {
+        use crate::highlight::CodeTheme;
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let old = highlighted(&app, CodeTheme::Dark);
+        // The diff reloads (e.g. after staging): a result of the older load
+        // does not apply.
+        let diff = open_diff(&app);
+        let reload = Message::DiffLoaded {
+            tab: app.tabs[0].id,
+            request: diff.request.clone(),
+            context: settings::DiffMode::Inline.context(),
+            result: match &diff.diff {
+                Loadable::Ready(file) => Ok(file.clone()),
+                _ => panic!("diff not loaded"),
+            },
+        };
+        let _ = app.update(reload);
+        let _ = app.update(old);
+        assert!(open_diff(&app).highlight.is_none(), "older load");
+        // A result for another file is ignored too.
+        let mut other = highlighted(&app, CodeTheme::Dark);
+        if let Message::DiffHighlighted { request, .. } = &mut other {
+            request.path = "b".into();
+        }
+        let _ = app.update(other);
+        assert!(open_diff(&app).highlight.is_none(), "other file");
+        let current = highlighted(&app, CodeTheme::Dark);
+        let _ = app.update(current);
+        assert!(open_diff(&app).highlight.is_some());
     }
 
     #[test]
@@ -14280,6 +14690,60 @@ pub(crate) mod tests {
             view.pending_merge.is_none(),
             "does not touch the working tree"
         );
+    }
+
+    /// A Rust file in conflict, loaded and highlighted (M11-09 snapshot).
+    pub(crate) fn rust_conflict_app() -> App {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["src/lib.rs"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ConflictOpened("src/lib.rs".into()));
+        let text = git_core::ConflictText {
+            chunks: vec![
+                git_core::Chunk::Clean(vec![
+                    "/// Greets.\n".into(),
+                    "pub fn greet(name: &str) -> String {\n".into(),
+                ]),
+                git_core::Chunk::Conflict(git_core::ConflictHunk {
+                    ours: vec!["    format!(\"Hello, {name}!\") // ours\n".into()],
+                    base: vec![],
+                    theirs: vec!["    format!(\"Hi {name}\") /* theirs */\n".into()],
+                }),
+                git_core::Chunk::Clean(vec!["}\n".into()]),
+            ],
+            eol: "\n",
+        };
+        let (ours, theirs) = crate::highlight::conflict_texts(&text);
+        let _ = app.update(Message::ConflictLoaded {
+            tab,
+            path: "src/lib.rs".into(),
+            result: Ok(git_core::LoadedConflict {
+                path: "src/lib.rs".into(),
+                stages: git_core::ConflictStages::default(),
+                content: git_core::ConflictContent::Text(text),
+            }),
+        });
+        let theme = app.editor_style().code_theme;
+        let _ = app.update(Message::ConflictHighlighted {
+            tab,
+            path: "src/lib.rs".into(),
+            highlight: crate::conflict::ConflictHighlight {
+                theme,
+                ours: crate::highlight::highlight("src/lib.rs", &ours, theme),
+                theirs: crate::highlight::highlight("src/lib.rs", &theirs, theme),
+            },
+        });
+        let _ = app.update(Message::ConflictTakeAll(git_core::Side::Ours));
+        app
+    }
+
+    #[test]
+    fn conflict_highlighting_applies_to_the_open_file() {
+        let app = rust_conflict_app();
+        let conflict = conflict_center(&app).unwrap();
+        let highlight = conflict.highlight.as_ref().unwrap();
+        assert!(highlight.spans(true, 1).is_some());
+        assert!(highlight.spans(false, 2).is_some());
     }
 
     fn conflict_center(app: &App) -> Option<&crate::conflict::ConflictView> {
