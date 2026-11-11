@@ -774,6 +774,38 @@ mod tests {
         snapshot(&app, "classic-dark-2-dialog");
     }
 
+    /// Classic Dark graph look (M11-04): row tint, filled pills with their
+    /// connector (checked-out branch, remote and tag), a selected and a
+    /// hovered row, several lanes, header separators and panel shadows.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_classic_dark_graph() {
+        let reference = |name: &str, kind, target: &str| git_core::Reference {
+            name: name.into(),
+            kind,
+            target: target.into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        let mut app = crate::app::tests::graph_app_with(vec![
+            reference("origin/main", git_core::RefKind::RemoteBranch, "a"),
+            reference("v1.0.0", git_core::RefKind::Tag, "b"),
+        ]);
+        app.settings.appearance.theme = crate::settings::ThemeChoice::ClassicDark;
+        let _ = app.update(Message::CommitSelected("f".into()));
+        let mut sim = simulator(&app);
+        // Hover over the "Main work" row.
+        let target = sim
+            .find("Main work")
+            .unwrap_or_else(|e| panic!("no row: {e}"));
+        sim.point_at(iced_test::selector::Bounded::bounds(&target).center());
+        let snap = sim.snapshot(&app.theme()).unwrap();
+        assert!(snap
+            .matches_image(fresh_path("classic-dark-graph"))
+            .unwrap());
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

@@ -201,7 +201,12 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
         let content = match kind {
             PaneKind::Sidebar => sidebar::view(view),
             PaneKind::Center => match &view.center {
-                CenterView::Graph => graph::view(view, &app.avatars, &app.settings.appearance),
+                CenterView::Graph => panel_depth(graph::view(
+                    view,
+                    &app.avatars,
+                    &app.settings.appearance,
+                    app.theme_kind().palette(),
+                )),
                 CenterView::Diff(diff) => diff::view(view, diff, app.settings.diff.view_mode),
                 CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
                 CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),
@@ -221,6 +226,29 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     .on_resize(6, Message::PaneResized)
     .style(theme::panes)
     .into()
+}
+
+/// Shadows of the side panels falling onto the graph (`panel_shadow`,
+/// Classic Dark only, M11-04): narrow gradients at both edges.
+fn panel_depth(content: Element<'_, Message>) -> Element<'_, Message> {
+    const WIDTH: f32 = 6.0;
+    let edge = |left: bool| -> Element<'_, Message> {
+        container(
+            container(space::horizontal())
+                .width(WIDTH)
+                .height(Fill)
+                .style(theme::panel_shadow(left)),
+        )
+        .width(Fill)
+        .height(Fill)
+        .align_x(if left {
+            iced::alignment::Horizontal::Left
+        } else {
+            iced::alignment::Horizontal::Right
+        })
+        .into()
+    };
+    iced::widget::Stack::with_children([content, edge(true), edge(false)]).into()
 }
 
 /// Center views without a background of their own get the graph's.
