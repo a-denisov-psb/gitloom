@@ -670,6 +670,12 @@ pub enum Message {
     InitSubmit,
     InitFinished(Result<(PathBuf, git_core::init::InitOutcome), String>),
     InitClosed,
+    /// Signature status of a commit arrived (M10-05).
+    SignatureLoaded {
+        tab: TabId,
+        id: String,
+        result: Result<Option<git_core::signature::Signature>, String>,
+    },
     /// Preferences → Signing (M10-04).
     SigningLoaded(Result<settings::SigningPage, String>),
     /// Write one signing key of the global config (`None` removes it).
@@ -3761,7 +3767,29 @@ impl App {
         let backend = Arc::clone(&view.backend);
         let commit = id.clone();
         let is_stash = view.snapshot.is_stash(&id);
-        Task::perform(
+        // The signature status, once per commit (M10-05).
+        let signature = if is_stash || view.signatures.contains_key(&id) {
+            Task::none()
+        } else {
+            view.signatures.insert(id.clone(), Loadable::Loading);
+            let writer = Arc::clone(&view.writer);
+            let signed = id.clone();
+            Task::perform(
+                blocking(move || {
+                    git_core::signature::signature(writer.as_ref(), &signed)
+                        .map_err(|e| e.to_string())
+                }),
+                {
+                    let id = id.clone();
+                    move |result| Message::SignatureLoaded {
+                        tab: tab_id,
+                        id: id.clone(),
+                        result,
+                    }
+                },
+            )
+        };
+        let changes = Task::perform(
             blocking(move || {
                 // A stash keeps staged changes and untracked files in extra parents.
                 let changes = if is_stash {
@@ -3776,7 +3804,8 @@ impl App {
                 id: id.clone(),
                 result,
             },
-        )
+        );
+        Task::batch([changes, signature])
     }
 
     fn select(&mut self, selection: Selection) -> Task<Message> {
@@ -7855,6 +7884,15 @@ impl App {
             Message::InitClosed => {
                 if self.init_dialog.as_ref().is_some_and(|d| !d.running) {
                     self.init_dialog = None;
+                }
+            }
+            Message::SignatureLoaded { tab, id, result } => {
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    let value = match result {
+                        Ok(signature) => Loadable::Ready(signature),
+                        Err(error) => Loadable::Failed(error),
+                    };
+                    view.signatures.insert(id, value);
                 }
             }
             Message::SigningLoaded(result) => {
@@ -12802,6 +12840,35 @@ pub(crate) mod tests {
             &app.tabs[0].state,
             TabState::Loading { path: p } if *p == path
         ));
+    }
+
+    #[test]
+    fn selecting_a_commit_requests_its_signature_once() {
+        use git_core::signature::{Signature, SignatureState};
+        let mut app = ready_app(&["c", "b", "a"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("b".into()));
+        let view = app.tabs[0].view().unwrap();
+        assert!(matches!(view.signatures.get("b"), Some(Loadable::Loading)));
+        let good = Signature {
+            state: SignatureState::Good,
+            signer: "Ana".into(),
+            key: "ABCD".into(),
+        };
+        let _ = app.update(Message::SignatureLoaded {
+            tab,
+            id: "b".into(),
+            result: Ok(Some(good.clone())),
+        });
+        let _ = app.update(Message::CommitSelected("a".into()));
+        let _ = app.update(Message::CommitSelected("b".into()));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            view.signatures.get("b"),
+            Some(&Loadable::Ready(Some(good))),
+            "not requested again"
+        );
+        assert!(matches!(view.signatures.get("a"), Some(Loadable::Loading)));
     }
 
     #[test]

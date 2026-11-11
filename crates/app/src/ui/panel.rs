@@ -365,11 +365,17 @@ fn details<'a>(
 
     let author = row![
         crate::ui::avatar(avatars.get(&commit.email), &commit.author, 32.0),
-        column![
-            text(&commit.author),
-            muted(author_line(&commit.email, commit.author_time)).size(12),
-        ]
-        .spacing(2),
+        {
+            let mut lines = column![
+                text(&commit.author),
+                muted(author_line(&commit.email, commit.author_time)).size(12),
+            ]
+            .spacing(2);
+            if let Some(badge) = signature_badge(view, &commit.id) {
+                lines = lines.push(badge);
+            }
+            lines
+        },
     ]
     .spacing(10)
     .align_y(iced::Center);
@@ -409,6 +415,37 @@ fn details<'a>(
         .padding(12);
 
     crate::ui::vscroll(content).height(Fill).into()
+}
+
+/// Signature badge after the author line (M10-05): green for a good
+/// signature, red for a bad one, muted otherwise; the key id as tooltip.
+fn signature_badge<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>> {
+    use git_core::signature::SignatureState;
+    let Some(Loadable::Ready(Some(signature))) = view.signatures.get(id) else {
+        return None;
+    };
+    let style = match signature.state {
+        SignatureState::Good => theme::text_success,
+        SignatureState::Bad => theme::text_danger,
+        _ => theme::text_muted,
+    };
+    let icon = match signature.state {
+        SignatureState::Bad => crate::icons::Icon::Alert,
+        _ => crate::icons::Icon::Check,
+    };
+    let badge = row![
+        crate::icons::colored(icon, 12.0, move |t| {
+            style(t).color.unwrap_or(iced::Color::BLACK)
+        }),
+        text(signature.text()).size(12).style(style),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+    Some(if signature.key.is_empty() {
+        badge.into()
+    } else {
+        with_tooltip_text(badge.into(), format!("Key {}", signature.key))
+    })
 }
 
 /// "email · authored date", without the separator when the email is empty.

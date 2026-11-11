@@ -155,6 +155,10 @@ pub fn text_accent(theme: &Theme) -> text::Style {
     text_with(|p| p.accent)(theme)
 }
 
+pub fn text_success(theme: &Theme) -> text::Style {
+    text_with(|p| p.success)(theme)
+}
+
 pub fn text_warning(theme: &Theme) -> text::Style {
     text_with(|p| p.warning)(theme)
 }
