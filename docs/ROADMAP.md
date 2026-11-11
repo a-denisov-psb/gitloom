@@ -29,7 +29,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M10 | 1.0.0 | Clone, init and Git settings | Planned |
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Planned |
 | M12 | 1.0.0 | Workflow polish | Planned |
-| M13 | 1.0.0 | Git flow graph layout | Outline |
+| M13 | 1.0.0 | Git flow graph layout | Planned |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -105,7 +105,7 @@ Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-th
 
 Details: [`milestones/M12-workflow-polish.md`](milestones/M12-workflow-polish.md).
 
-### M13 – Git flow graph layout (outline)
+### M13 – Git flow graph layout (planned)
 
 When Git flow is initialized, an optional layout draws the graph like the classic Git flow diagram: fixed lane groups from left to right (production, hotfix, release, development, feature/other), one color per type, built on `LaneHints` (M2-15).
 
@@ -113,6 +113,8 @@ When Git flow is initialized, an optional layout draws the graph like the classi
 - Priority: live branch prefix > Git's default merge message ("Merge branch 'feature/x' into develop") > topology > feature. "Merge branch 'develop' of …" counts as development.
 - Group widths over the whole history (as `LaneHints` does), never per viewport. Unknown segments go to the feature group in a neutral color with the tooltip "Branch type unknown".
 - Toggle in the graph column menu (M11), the palette and Preferences → Repository → Gitflow; disabled with a reason when Git flow is not initialized. Optional: names of deleted branches from merge messages as faded labels. Gitloom extension (UX-PARITY).
+
+Details: [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph-layout.md).
 
 ## Non-goals
 
