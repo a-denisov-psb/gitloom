@@ -752,6 +752,28 @@ mod tests {
         snapshot(&app, "repository-editor");
     }
 
+    /// Classic Dark (M11-01): main window, Preferences and a dialog.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_classic_dark() {
+        let mut app = crate::app::tests::flow_app();
+        app.settings.appearance.theme = crate::settings::ThemeChoice::ClassicDark;
+        snapshot(&app, "classic-dark-0-main");
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Appearance,
+        ));
+        snapshot(&app, "classic-dark-1-preferences");
+        let _ = app.update(Message::SettingsClosed);
+        app.modal = Some(crate::overlay::Modal::confirm(
+            "Delete branch",
+            "Delete feature/login? It is merged into main.",
+            "Delete",
+            true,
+            Message::DismissNotice,
+        ));
+        snapshot(&app, "classic-dark-2-dialog");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

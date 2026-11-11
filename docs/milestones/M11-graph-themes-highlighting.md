@@ -106,12 +106,14 @@ No release (ADR-042): when all tasks are done, continue with M12.
 
 ## Tasks
 
-### [ ] M11-01 Style tokens and the Classic Dark theme
+### [x] M11-01 Style tokens and the Classic Dark theme
 
 - Tokens per the decisions table; Dark and Light values reproduce today's look; `ThemeChoice::ClassicDark` with its palette; theme choice in Preferences → Appearance and the palette's theme switch.
 - ADR-048.
 
 Acceptance: snapshots of main window, Preferences and dialogs in Dark and Light unchanged (pixel comparison against the current snapshots); Classic Dark snapshots checked by eye; settings migration test.
+
+Note (2026-11-11): done. `ThemePalette` tokens `row_tint_alpha`, `ref_pill` (`PillStyle`), `ref_connector`, `header_band`, `column_separator`, `panel_shadow`, `node_style` (`NodeStyle`); `ThemeKind` and `app_theme(kind)`; `palette(theme)` tells Classic Dark from Dark by its background color (no allocation in style functions). Only `header_band` is drawn yet (the column header, equal to `bg_panel` in Dark and Light); the graph tokens are used by M11-04. Classic Dark colors as planned; derived values: hover `#2c313a`, selection `#1d4a5c`, border `#323842`; all text and lane contrast tests pass for the three palettes. There is no palette theme switch yet (it comes with M12-12 "Set: Theme ›"); the theme is chosen in Preferences → Appearance. Pixel comparison: 50 existing snapshots rendered before and after, 0 differ. Snapshots `ui_check_classic_dark` (main window, Preferences, dialog) checked.
 
 ### [ ] M11-02 Resizable graph columns
 

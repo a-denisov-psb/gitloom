@@ -226,6 +226,8 @@ pub enum ThemeChoice {
     Light,
     /// Follow the operating system.
     System,
+    /// GitKraken 7.5 look (M11-01).
+    ClassicDark,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -752,6 +754,16 @@ mod tests {
         // A default pointing nowhere is dropped.
         let broken = parse(r#"{"identities": {"list": [], "default": 3}}"#).unwrap();
         assert_eq!(broken.identities.default, None);
+    }
+
+    #[test]
+    fn classic_dark_is_stored_by_name() {
+        let parsed = parse(r#"{"appearance": {"theme": "classic-dark"}}"#).unwrap();
+        assert_eq!(parsed.appearance.theme, ThemeChoice::ClassicDark);
+        let mut settings = Settings::default();
+        settings.appearance.theme = ThemeChoice::ClassicDark;
+        assert!(to_json(&settings).contains("classic-dark"));
+        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
     }
 
     #[test]
