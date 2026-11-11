@@ -608,7 +608,8 @@ pub trait GitWriter: Send + Sync {
     /// Stashes all changes including untracked files (`git stash push -u`).
     fn stash_push(&self, message: Option<&str>) -> Result<()> {
         let mut args = vec!["stash", "push", "--include-untracked", "--quiet"];
-        if let Some(message) = message {
+        // No empty `--message`: Git then writes its default message (M11-05).
+        if let Some(message) = message.filter(|m| !m.trim().is_empty()) {
             args.extend(["--message", message]);
         }
         self.run(&args, RunOptions::default()).map(drop)

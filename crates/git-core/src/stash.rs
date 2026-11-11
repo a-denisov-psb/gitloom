@@ -287,3 +287,68 @@ pub fn redo_stash(git: &dyn GitWriter, root: &Path, record: &StashRecord) -> Res
     }
     apply_stash_recorded(git, root, &record.stash, record.pop)
 }
+
+/// Label of a stash like GitKraken's (M11-05): Git's default message
+/// (`WIP on <branch>: <sha> <summary>`) and an empty one (`On <branch>:`)
+/// read "WIP on <branch>"; a message given by the user reads without the
+/// `On <branch>: ` prefix. Anything else stays as it is.
+pub fn stash_label(message: &str) -> String {
+    let message = message.trim();
+    // Branch names cannot contain ':', so the first ": " ends the branch.
+    if let Some(rest) = message.strip_prefix("WIP on ") {
+        if let Some((branch, _)) = rest.split_once(':') {
+            return format!("WIP on {branch}");
+        }
+    }
+    if let Some(rest) = message.strip_prefix("On ") {
+        if let Some((branch, text)) = rest.split_once(':') {
+            let text = text.trim();
+            return if text.is_empty() {
+                format!("WIP on {branch}")
+            } else {
+                text.to_owned()
+            };
+        }
+    }
+    message.to_owned()
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::stash_label;
+
+    #[test]
+    fn default_and_empty_messages_read_wip_on_branch() {
+        assert_eq!(
+            stash_label("WIP on main: 1a2b3c4 Add parser"),
+            "WIP on main"
+        );
+        assert_eq!(
+            stash_label("WIP on feature/x: 1a2b3c4 fix: handle a: b"),
+            "WIP on feature/x"
+        );
+        assert_eq!(
+            stash_label("WIP on (no branch): 1a2b3c4 x"),
+            "WIP on (no branch)"
+        );
+        assert_eq!(stash_label("On develop:"), "WIP on develop");
+        assert_eq!(stash_label("On develop: "), "WIP on develop");
+    }
+
+    #[test]
+    fn custom_messages_lose_the_prefix() {
+        assert_eq!(
+            stash_label("On main: try the new parser"),
+            "try the new parser"
+        );
+        assert_eq!(stash_label("On release/1.2: fix: a: b"), "fix: a: b");
+        assert_eq!(stash_label("On main: WIP on main: x"), "WIP on main: x");
+    }
+
+    #[test]
+    fn other_messages_stay() {
+        assert_eq!(stash_label("autostash"), "autostash");
+        assert_eq!(stash_label("  spaced  "), "spaced");
+        assert_eq!(stash_label("On the road"), "On the road");
+    }
+}

@@ -142,11 +142,13 @@ Acceptance: snapshots in Classic Dark (selected row, hover, several lanes, check
 
 Note: tint drawn in the graph canvas from the node to the right edge of the Graph column, not on the selected row (its own tint stays). The connector runs from the pill to the refs cell edge and on in the canvas, which now starts at the column edge (no left cell padding; `lane_x` adds it). `NodeStyle::Ringed` draws a ring with a gap around initials and avatars. Separators only in the header (line at the right edge of every header cell); panel depth as 6 px gradients at both graph edges. Pills of a row use the lane color of its commit (also tags and remote branches); the Preferences "Default" badge keeps the kind color. Pixel comparison: all Dark/Light snapshots equal except one anti-aliased pixel at 150 % (`sharp-icons-150`) from the moved canvas origin; `stash-template-1-preset` shows the current time. Snapshot `ui_check_classic_dark_graph` checked.
 
-### [ ] M11-05 Stash node and label
+### [x] M11-05 Stash node and label
 
 - Node drawing and label rule per the decisions table in graph, STASHES section and details; stash push without empty `-m`.
 
 Acceptance: unit tests for the label rule (default message, empty, custom, other branch names with `:`); integration test: "Stash" without message → Git's default message; snapshots in all three themes.
+
+Note: `git_core::stash_label` (branch names cannot contain `:`, so the first `:` ends the branch; `WIP on (no branch)` for a detached HEAD; other messages, e.g. `autostash`, stay). The label replaces the stash's summary in the snapshot, so graph row, details title and search use it; STASHES filters on the full message. Square 16 px, dashed, Lucide `archive` (the toolbar's Stash icon) 10 px in the lane color. `stash_push` drops a blank message. Snapshot `ui_check_stash_node` (three themes) checked.
 
 ### [ ] M11-06 Preferences → Editor
 

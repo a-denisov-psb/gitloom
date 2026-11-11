@@ -62,7 +62,9 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .filter(|s| matches(&s.message))
         .map(|s| {
             let item = list_button(
-                text(&s.message).wrapping(text::Wrapping::None).into(),
+                text(git_core::stash_label(&s.message))
+                    .wrapping(text::Wrapping::None)
+                    .into(),
                 1,
                 Message::CommitSelected(s.id.clone()),
             );

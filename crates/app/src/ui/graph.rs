@@ -39,6 +39,9 @@ const HEADER_SIZE: f32 = 11.0;
 const MAX_LANES: u16 = 12;
 const NODE_RADIUS: f32 = 9.0;
 const MERGE_RADIUS: f32 = 4.5;
+/// Side of the stash square and of the icon inside it (M11-05).
+const STASH_SIZE: f32 = 16.0;
+const STASH_ICON: f32 = 10.0;
 /// Graph line style like GitKraken's (M7-18, measured against a
 /// reference screenshot; style tokens in M9): line width, the radius of
 /// the rounded 90° turn where an edge leaves or joins a node, and the
@@ -974,7 +977,24 @@ fn graph_with_avatar<'a>(
         _ => None,
     };
     let x = lane_x(row.lane);
+    let lane = row.color.0;
+    let stash = matches!(node, Node::Stash);
     let cell = graph_cell(row, index, node, dimmed, look);
+    if stash {
+        let alpha = if dimmed { 0.3 } else { 1.0 };
+        let icon = icons::colored(Icon::Stash, STASH_ICON, move |theme| {
+            theme::lane_color(theme::palette(theme), lane).scale_alpha(alpha)
+        });
+        return iced::widget::Stack::with_children([
+            cell,
+            container(icon)
+                .padding(iced::Padding::default().left(x - STASH_ICON / 2.0))
+                .height(Fill)
+                .align_y(alignment::Vertical::Center)
+                .into(),
+        ])
+        .into();
+    }
     let Some(handle) = avatar else {
         return cell;
     };
@@ -1108,13 +1128,14 @@ impl canvas::Program<Message> for GraphCell {
             }
             Node::Merge => frame.fill(&Path::circle(node, MERGE_RADIUS), color),
             Node::Stash => {
-                let size = NODE_RADIUS * 1.4;
+                // Dashed square like GitKraken's; the archive icon lies on
+                // top (`graph_with_avatar`), M11-05.
                 let square = Path::rectangle(
-                    Point::new(node.x - size / 2.0, node.y - size / 2.0),
-                    iced::Size::new(size, size),
+                    Point::new(node.x - STASH_SIZE / 2.0, node.y - STASH_SIZE / 2.0),
+                    iced::Size::new(STASH_SIZE, STASH_SIZE),
                 );
                 frame.fill(&square, p.bg_graph);
-                frame.stroke(&square, line(color, false));
+                frame.stroke(&square, line(color, true));
             }
             Node::Commit {
                 avatar: Some(_), ..
