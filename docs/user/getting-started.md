@@ -12,7 +12,7 @@ Download the package for your system from the [releases page](https://github.com
 
 ## Open a repository
 
-- Start screen: **Open repository** (native folder dialog), a typed path, or a recent repository.
+- Start screen (like GitKraken's New Tab): **Open a repo** (native folder dialog), a typed path below it, or a recent repository; Customize opens the Preferences or the identities; Resources open the user guide, the issue tracker and the release notes in the browser.
 - **Ctrl+O** opens the folder dialog, **Ctrl+Shift+O** the list of recent repositories.
 - From a terminal: `gitloom <path> [<path>...]` opens each path in its own tab. A subfolder opens its repository; an already open repository switches to its tab. On Windows the terminal returns to the prompt right away.
 

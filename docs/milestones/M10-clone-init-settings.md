@@ -92,12 +92,14 @@ No release (ADR-042): when all tasks are done, continue with M11.
 
 ## Tasks
 
-### [ ] M10-01 Start screen like GitKraken's New Tab
+### [x] M10-01 Start screen like GitKraken's New Tab
 
 - New layout per the decisions table; Clone and Start buttons open the dialogs of M10-02/M10-03 (until then disabled with "Not available yet").
 - Resource links open the browser (existing `open_target`).
 
 Acceptance: app tests for every entry (open, recent, remove missing, links, Preferences, Manage identities); snapshots in both themes at 100 and 125 %.
+
+Note (2026-11-11): done. `ui/start.rs` rebuilt: big buttons with icon and shortcut line, the path input (ADR-010) under "Open a repo", Clone/Start disabled with "Not available yet"; right column Recent repositories (name in the link color, path muted), Customize, Resources. Links: `<repo>/blob/master/docs/user/README.md`, `<repo>/issues/new`, `<repo>/blob/master/CHANGELOG.md` (`master` = the released docs). "Remove missing" is unchanged (a recent repository that fails to open offers "Remove from recent"). `start_screen_entries` clicks every entry in the simulator (part of every run); snapshots `ui_check_start_screen` (dark/light, 100/125 %) checked.
 
 ### [ ] M10-02 Clone
 

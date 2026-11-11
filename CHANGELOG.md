@@ -26,6 +26,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- The start screen is laid out like GitKraken's New Tab: Open a repo, Clone a repo and Start a local repo on the left; recent repositories, Customize (Preferences, Manage identities) and Resources (user guide, report an issue, release notes) on the right.
 - The character counter of the commit summary sits inside the field at the right edge like GitKraken; it turns to the warning color at 10 characters left and red below 0.
 - Left panel sections in GitKraken's order: GITFLOW (when initialized), LOCAL, REMOTE, STASHES, TAGS, SUBMODULES. GITFLOW shows a tree like GitKraken: the development and production branches and folders "feature", "release", "hotfix", listed alphabetically.
 - Graph lines are thinner and turn with rounded 90° corners like GitKraken's instead of curves; WIP and stash edges are dotted.
