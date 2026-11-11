@@ -4,7 +4,7 @@ A fast, open-source Git client with the workflow GitKraken users already know. N
 
 > Not affiliated with GitKraken or Axosoft.
 
-![Gitloom showing a repository with its lane graph](docs/screenshots/m5-main-dark-100.png)
+![Gitloom showing a repository with its lane graph](docs/screenshots/main-dark.png)
 
 **[User guide](docs/user/README.md)** · [Releases](https://github.com/a-denisov-psb/gitloom/releases) · [Keyboard shortcuts](docs/UX-PARITY.md#keyboard-shortcuts)
 

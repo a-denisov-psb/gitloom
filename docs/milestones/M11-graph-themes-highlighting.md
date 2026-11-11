@@ -226,11 +226,13 @@ Acceptance: app tests (click and shortcut give the same state, tooltips follow t
 
 Note: Lucide `panel-left` / `panel-right` (v1.55.0, vendored). The buttons send the same `ShortcutChecked` as the shortcuts (without the focus query), so palette, shortcut and click share one path; "active" uses the mode-button highlight. They sit after Settings with an 8 px gap, icon only (also without compact mode). Layout test `panel_toggles_in_the_toolbar` clicks the left toggle; snapshots `ui_check_panel_toggles` checked.
 
-### [ ] M11-15 README screenshot from a fixture
+### [x] M11-15 README screenshot from a fixture
 
 - Fixture script, ignored snapshot test, `scripts/screenshot.sh`, README, `next-task.md` step 4.
 
 Acceptance: the script produces the PNG on Linux CI tooling without a display; README renders it; no real names or e-mail addresses in the fixture.
+
+Note: `ui_check::tests::readme_screenshot` (ignored) builds "weather-station" with the Git CLI: authors Mia Hollis, Ravi Okafor, Lena Brandt (`@example.org`), fixed dates, branches `develop`, `feature/alerts`, `feature/ui/charts`, `release/1.0.0`, merges, tags `v0.9.0`/`v1.0.0`, Git flow config, a stash and a dirty tree; the global Git config is ignored and the repository has its own `user.name`/`user.email`, so the machine's identity never shows. It renders 1600 × 900 at scale 1 (tiny-skia, no display). Found on the way: `snapshot_scaled` drew without a first redraw event, so iced 0.14 buttons looked disabled; it now runs one update first (affects the start screen snapshots of M9-05/M11-12, which now show the real button colors). Old `m5-main-dark-100.png` removed; README and `getting-started.md` use `main-dark.png`; `next-task.md` step 4 runs the script at milestone close.
 
 ### [ ] M11-16 Column widths and horizontal scrolling
 

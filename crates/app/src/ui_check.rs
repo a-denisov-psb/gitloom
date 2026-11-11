@@ -62,6 +62,11 @@ pub fn snapshot_sized(app: &App, name: &str, size: (f32, f32)) -> PathBuf {
 /// simulator always uses 2), e.g. 1.1 for a zoom of 110 % on a 100 %
 /// display (M9-05). Writes `target/ui-snapshots/<name>.png`.
 pub fn snapshot_scaled(app: &App, name: &str, scale: f32) -> PathBuf {
+    snapshot_scaled_sized(app, name, scale, SIZE)
+}
+
+/// [`snapshot_scaled`] for a window of `window` logical pixels.
+pub fn snapshot_scaled_sized(app: &App, name: &str, scale: f32, window: (f32, f32)) -> PathBuf {
     use iced::advanced::renderer::Headless as _;
     use iced::theme::Base as _;
     use iced_test::runtime::user_interface::{Cache, UserInterface};
@@ -76,8 +81,20 @@ pub fn snapshot_scaled(app: &App, name: &str, scale: f32) -> PathBuf {
     .expect("headless renderer");
     let theme = app.theme();
     let base = theme.base();
-    let size = iced::Size::new(SIZE.0, SIZE.1);
+    let size = iced::Size::new(window.0, window.1);
     let mut ui = UserInterface::build(app.view(), size, Cache::default(), &mut renderer);
+    // Widgets such as buttons learn their status from the first redraw
+    // event; without it they draw as disabled.
+    let mut messages = Vec::new();
+    let _ = ui.update(
+        &[iced::Event::Window(iced::window::Event::RedrawRequested(
+            std::time::Instant::now(),
+        ))],
+        iced::mouse::Cursor::Unavailable,
+        &mut renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut messages,
+    );
     ui.draw(
         &mut renderer,
         &theme,
@@ -87,8 +104,8 @@ pub fn snapshot_scaled(app: &App, name: &str, scale: f32) -> PathBuf {
         iced::mouse::Cursor::Unavailable,
     );
     let physical = iced::Size::new(
-        (SIZE.0 * scale).round() as u32,
-        (SIZE.1 * scale).round() as u32,
+        (window.0 * scale).round() as u32,
+        (window.1 * scale).round() as u32,
     );
     let rgba = renderer.screenshot(physical, scale, base.background_color);
     let pixmap = resvg::tiny_skia::IntSize::from_wh(physical.width, physical.height)
@@ -1128,6 +1145,141 @@ mod tests {
         let header = x(&mut sim, "COMMIT MESSAGE");
         let row = x(&mut sim, "Feature work");
         assert!((header - row).abs() < 0.5, "{header} vs {row}");
+    }
+
+    /// README screenshot (M11-15): a scripted fixture repository with
+    /// fictional authors (branches in folders, a merge, tags, a stash, Git
+    /// flow, a dirty working tree), Dark, 1600 × 900 at 100 %.
+    /// `scripts/screenshot.sh` runs it and copies the PNG to
+    /// `docs/screenshots/main-dark.png`.
+    #[test]
+    #[ignore = "renders the README screenshot; run scripts/screenshot.sh"]
+    fn readme_screenshot() {
+        use std::process::Command;
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("weather-station");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut clock = 1_767_000_000_i64;
+        let mut git = |args: &[&str], author: (&str, &str)| {
+            clock += 5_400;
+            let date = format!("@{clock} +0100");
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_AUTHOR_NAME", author.0)
+                .env("GIT_AUTHOR_EMAIL", author.1)
+                .env("GIT_COMMITTER_NAME", author.0)
+                .env("GIT_COMMITTER_EMAIL", author.1)
+                .env("GIT_AUTHOR_DATE", &date)
+                .env("GIT_COMMITTER_DATE", &date)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?}: {output:?}");
+        };
+        let mia = ("Mia Hollis", "mia@example.org");
+        let ravi = ("Ravi Okafor", "ravi@example.org");
+        let lena = ("Lena Brandt", "lena@example.org");
+        let write = |path: &str, text: &str| {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
+        };
+        type Author<'a> = (&'a str, &'a str);
+        let commit = |git: &mut dyn FnMut(&[&str], Author<'_>), message: &str, author| {
+            git(&["add", "-A"], author);
+            git(&["commit", "-q", "-m", message], author);
+        };
+        git(&["init", "-q", "-b", "main"], mia);
+        git(&["config", "commit.gpgsign", "false"], mia);
+        // The commit panel shows this identity, never the machine's.
+        git(&["config", "user.name", mia.0], mia);
+        git(&["config", "user.email", mia.1], mia);
+        write("README.md", "# Weather station\n");
+        commit(&mut git, "Initial commit", mia);
+        write("src/sensor.rs", "pub fn read() -> f32 { 0.0 }\n");
+        commit(&mut git, "Add the sensor driver", mia);
+        git(&["tag", "v0.9.0"], mia);
+        git(&["switch", "-q", "-c", "develop"], ravi);
+        write("src/display.rs", "pub fn show(_: f32) {}\n");
+        commit(&mut git, "Show readings on the display", ravi);
+        git(&["switch", "-q", "-c", "feature/ui/charts"], lena);
+        write("src/chart.rs", "pub fn draw() {}\n");
+        commit(&mut git, "Draw temperature charts", lena);
+        write("src/chart.rs", "pub fn draw() { /* axes */ }\n");
+        commit(&mut git, "Label the chart axes", lena);
+        git(&["switch", "-q", "develop"], ravi);
+        git(&["switch", "-q", "-c", "feature/alerts"], ravi);
+        write("src/alerts.rs", "pub fn check(_: f32) {}\n");
+        commit(&mut git, "Warn when it freezes", ravi);
+        git(&["switch", "-q", "develop"], ravi);
+        git(
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                "feature/alerts",
+                "-m",
+                "Merge branch 'feature/alerts' into develop",
+            ],
+            ravi,
+        );
+        write("src/sensor.rs", "pub fn read() -> f32 { 21.5 }\n");
+        commit(&mut git, "Calibrate the sensor", mia);
+        git(&["switch", "-q", "-c", "release/1.0.0"], mia);
+        write("CHANGELOG.md", "## 1.0.0\n");
+        commit(&mut git, "Prepare release 1.0.0", mia);
+        git(&["switch", "-q", "main"], mia);
+        git(
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                "release/1.0.0",
+                "-m",
+                "Merge branch 'release/1.0.0'",
+            ],
+            mia,
+        );
+        git(&["tag", "v1.0.0"], mia);
+        git(&["switch", "-q", "develop"], mia);
+        for (key, value) in [
+            ("gitflow.branch.master", "main"),
+            ("gitflow.branch.develop", "develop"),
+            ("gitflow.prefix.feature", "feature/"),
+            ("gitflow.prefix.release", "release/"),
+            ("gitflow.prefix.hotfix", "hotfix/"),
+            ("gitflow.prefix.versiontag", "v"),
+        ] {
+            git(&["config", key, value], mia);
+        }
+        // A stash and a dirty working tree.
+        write(
+            "src/display.rs",
+            "pub fn show(value: f32) { let _ = value; }\n",
+        );
+        git(&["stash", "push", "-q", "-m", "Try a larger font"], mia);
+        write("src/sensor.rs", "pub fn read() -> f32 { 21.7 }\n");
+        write("notes/ideas.md", "- humidity sensor\n");
+
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(crate::app::tests::loaded(crate::session::Session::default()));
+        let backend: Arc<dyn git_core::GitBackend> =
+            Arc::new(git_core::GixBackend::discover(&root).unwrap());
+        let snapshot = crate::snapshot::RepoSnapshot::load(backend.as_ref()).unwrap();
+        app.tabs[0].state = crate::app::TabState::Ready(Box::new(crate::repo_view::RepoView::new(
+            backend,
+            Arc::new(snapshot),
+        )));
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let _ = app.update(Message::WindowResized(iced::Size::new(1600.0, 900.0)));
+        let _ = app.update(Message::WipSelected);
+        app.settings.appearance.theme = crate::settings::ThemeChoice::Dark;
+        snapshot_scaled_sized(&app, "readme-main-dark", 1.0, (1600.0, 900.0));
     }
 
     /// Panel toggles (M11-14): a click on a toolbar toggle hides the panel
