@@ -105,6 +105,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(dialog) = &app.clone_dialog {
         layers.push(overlays::clone_dialog(dialog));
     }
+    if let Some(dialog) = &app.init_dialog {
+        layers.push(overlays::init_dialog(dialog));
+    }
     if let Some(dialog) = &app.message_dialog {
         layers.push(overlays::message_dialog(dialog));
     }

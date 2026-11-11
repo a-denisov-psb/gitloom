@@ -657,6 +657,24 @@ pub enum Message {
     CloneFinished(Result<PathBuf, String>),
     /// Cancel a running clone, or close the dialog.
     CloneCancel,
+    /// Init dialog (M10-03).
+    InitStart,
+    InitDefaultBranch(Option<String>),
+    InitNameChanged(String),
+    InitParentChanged(String),
+    InitBrowse,
+    InitParentPicked(Option<PathBuf>),
+    InitBranchChanged(String),
+    InitReadmeToggled(bool),
+    InitGitignoreChosen(String),
+    InitSubmit,
+    InitFinished(Result<(PathBuf, git_core::init::InitOutcome), String>),
+    InitClosed,
+    /// Preferences → General "Default branch name" (M10-03).
+    DefaultBranchLoaded(Result<Option<String>, String>),
+    DefaultBranchInput(String),
+    DefaultBranchSave,
+    DefaultBranchSaved(Result<Option<String>, String>),
     /// Path typed on the start screen (fallback when no folder dialog is available).
     StartPathChanged(String),
     StartPathSubmitted,
@@ -950,6 +968,8 @@ pub struct App {
     pub message_dialog: Option<crate::overlay::MessageDialog>,
     /// "Clone a repository" (M10-02).
     pub clone_dialog: Option<crate::clone_dialog::CloneDialog>,
+    /// "Start a local repository" (M10-03).
+    pub init_dialog: Option<crate::clone_dialog::InitDialog>,
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
@@ -1031,6 +1051,7 @@ impl App {
             modal: None,
             message_dialog: None,
             clone_dialog: None,
+            init_dialog: None,
             form: None,
             context_menu: None,
             shortcut_list: None,
@@ -2475,6 +2496,7 @@ impl App {
             || self.context_menu.is_some()
             || self.message_dialog.is_some()
             || self.clone_dialog.is_some()
+            || self.init_dialog.is_some()
             || self.shortcut_list.is_some()
             || self.about
             || self.settings_page.is_some();
@@ -2751,6 +2773,7 @@ impl App {
             || self.form.take().is_some()
             || self.message_dialog.take().is_some()
             || self.close_clone_dialog()
+            || self.init_dialog.take_if(|d| !d.running).is_some()
             || self.settings_page.take().is_some()
             || self
                 .active_view_mut()
@@ -4576,7 +4599,15 @@ impl App {
     fn open_settings(&mut self) -> Task<Message> {
         self.context_menu = None;
         self.settings_page = Some(settings::Page::new(&self.settings));
-        iced::widget::operation::focus(crate::ui::settings::AUTO_FETCH_INPUT)
+        Task::batch([
+            iced::widget::operation::focus(crate::ui::settings::AUTO_FETCH_INPUT),
+            Task::perform(
+                blocking(|| {
+                    git_core::global_config("init.defaultBranch").map_err(|e| e.to_string())
+                }),
+                Message::DefaultBranchLoaded,
+            ),
+        ])
     }
 
     /// Re-applies the stored offset when a different graph or diff became visible.
@@ -7647,6 +7678,184 @@ impl App {
             }
             Message::CloneParentPicked(None) => {}
             Message::CloneSubmit => return self.start_clone(),
+            Message::InitStart => {
+                if let Some(tab) = self
+                    .active_tab()
+                    .filter(|t| matches!(t.state, TabState::Start))
+                    .map(|t| t.id)
+                {
+                    self.init_dialog = Some(crate::clone_dialog::InitDialog::new(
+                        tab,
+                        crate::clone_dialog::default_parent(&self.session.recent),
+                    ));
+                    return Task::batch([
+                        iced::widget::operation::focus(crate::ui::overlays::INIT_NAME_INPUT),
+                        Task::perform(
+                            blocking(|| {
+                                git_core::global_config("init.defaultBranch")
+                                    .map_err(|e| e.to_string())
+                            }),
+                            |result| Message::InitDefaultBranch(result.ok().flatten()),
+                        ),
+                    ]);
+                }
+            }
+            Message::InitDefaultBranch(branch) => {
+                if let Some(d) = self.init_dialog.as_mut() {
+                    d.default_branch_loaded(branch);
+                }
+            }
+            Message::InitNameChanged(name) => {
+                if let Some(d) = self.init_dialog.as_mut().filter(|d| !d.running) {
+                    d.name = name;
+                    d.error = None;
+                }
+            }
+            Message::InitParentChanged(parent) => {
+                if let Some(d) = self.init_dialog.as_mut().filter(|d| !d.running) {
+                    d.parent = parent;
+                    d.error = None;
+                }
+            }
+            Message::InitBrowse => {
+                return Task::perform(
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Initialize in")
+                        .pick_folder(),
+                    |folder| Message::InitParentPicked(folder.map(|f| f.path().to_path_buf())),
+                );
+            }
+            Message::InitParentPicked(Some(path)) => {
+                if let Some(d) = self.init_dialog.as_mut().filter(|d| !d.running) {
+                    d.parent = path.display().to_string();
+                }
+            }
+            Message::InitParentPicked(None) => {}
+            Message::InitBranchChanged(branch) => {
+                if let Some(d) = self.init_dialog.as_mut().filter(|d| !d.running) {
+                    d.set_branch(branch);
+                }
+            }
+            Message::InitReadmeToggled(on) => {
+                if let Some(d) = self.init_dialog.as_mut().filter(|d| !d.running) {
+                    d.readme = on;
+                }
+            }
+            Message::InitGitignoreChosen(name) => {
+                if let Some(d) = self.init_dialog.as_mut().filter(|d| !d.running) {
+                    d.gitignore = (name != crate::clone_dialog::NO_GITIGNORE).then_some(name);
+                }
+            }
+            Message::InitSubmit => {
+                let Some(dialog) = self.init_dialog.as_mut().filter(|d| !d.running) else {
+                    return Task::none();
+                };
+                if let Some(problem) = dialog.problem() {
+                    dialog.error = Some(problem.into());
+                    return Task::none();
+                }
+                let Some(target) = dialog.full_path() else {
+                    return Task::none();
+                };
+                dialog.running = true;
+                dialog.error = None;
+                let (name, options) = (dialog.name.trim().to_owned(), dialog.options());
+                return Task::perform(
+                    blocking(move || {
+                        git_core::init::init(&target, &name, &options)
+                            .map(|outcome| (target, outcome))
+                            .map_err(|e| e.to_string())
+                    }),
+                    Message::InitFinished,
+                );
+            }
+            Message::InitFinished(result) => {
+                let Some(dialog) = self.init_dialog.as_mut() else {
+                    return Task::none();
+                };
+                dialog.running = false;
+                match result {
+                    Ok((path, outcome)) => {
+                        let tab = dialog.tab;
+                        self.init_dialog = None;
+                        if outcome == git_core::init::InitOutcome::NoIdentity {
+                            self.status = "The new files are not committed: set your Git \
+                                           identity first (Preferences → Identities)."
+                                .into();
+                        }
+                        let start_tab = self
+                            .tabs
+                            .iter()
+                            .any(|t| t.id == tab && matches!(t.state, TabState::Start));
+                        return if start_tab {
+                            self.open_in_tab(tab, path)
+                        } else {
+                            self.open_path(path)
+                        };
+                    }
+                    Err(error) => dialog.error = Some(error),
+                }
+            }
+            Message::InitClosed => {
+                if self.init_dialog.as_ref().is_some_and(|d| !d.running) {
+                    self.init_dialog = None;
+                }
+            }
+            Message::DefaultBranchLoaded(result) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    match result {
+                        Ok(value) => {
+                            page.default_branch_input = value.clone().unwrap_or_default();
+                            page.default_branch = Some(value);
+                        }
+                        Err(error) => page.default_branch_error = Some(error),
+                    }
+                }
+            }
+            Message::DefaultBranchInput(value) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.default_branch_input = value;
+                    page.default_branch_error = None;
+                }
+            }
+            Message::DefaultBranchSave => {
+                let Some(page) = self.settings_page.as_mut() else {
+                    return Task::none();
+                };
+                let value = page.default_branch_input.trim().to_owned();
+                if !value.is_empty() {
+                    if let Some(problem) = git_core::check_branch_name(&value) {
+                        page.default_branch_error = Some(problem.into());
+                        return Task::none();
+                    }
+                }
+                let value = (!value.is_empty()).then_some(value);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::set_global_config("init.defaultBranch", value.as_deref())
+                            .map(|()| value)
+                            .map_err(|e| e.to_string())
+                    }),
+                    Message::DefaultBranchSaved,
+                );
+            }
+            Message::DefaultBranchSaved(result) => match result {
+                Ok(value) => {
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.default_branch = Some(value.clone());
+                        page.default_branch_input = value.clone().unwrap_or_default();
+                    }
+                    self.status = match value {
+                        Some(branch) => format!("New repositories start on {branch}"),
+                        None => "Default branch name removed from the Git config".into(),
+                    };
+                }
+                Err(error) => {
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.default_branch_error = Some(error);
+                    }
+                }
+            },
             Message::CloneProgress(progress) => {
                 if let Some(run) = self.clone_dialog.as_mut().and_then(|d| d.running.as_mut()) {
                     run.progress = Some(progress);
@@ -12430,6 +12639,77 @@ pub(crate) mod tests {
         let _ = app.update(Message::CloneStart);
         let _ = app.update(Message::CloneCancel);
         assert!(app.clone_dialog.is_none());
+    }
+
+    #[test]
+    fn init_dialog_flow() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(Session::default()));
+        let _ = app.update(Message::InitStart);
+        let _ = app.update(Message::InitDefaultBranch(Some("trunk".into())));
+        let _ = app.update(Message::InitParentChanged("/work".into()));
+        assert_eq!(app.init_dialog.as_ref().unwrap().branch, "trunk");
+        let _ = app.update(Message::InitSubmit);
+        assert_eq!(
+            app.init_dialog.as_ref().unwrap().error.as_deref(),
+            Some("Enter a name")
+        );
+        let _ = app.update(Message::InitNameChanged("project".into()));
+        let _ = app.update(Message::InitGitignoreChosen("Rust".into()));
+        let _ = app.update(Message::InitGitignoreChosen("None".into()));
+        assert_eq!(app.init_dialog.as_ref().unwrap().gitignore, None);
+        let _ = app.update(Message::InitSubmit);
+        assert!(app.init_dialog.as_ref().unwrap().running);
+        // Esc does not close it while it runs.
+        let _ = app.update(Message::InitClosed);
+        assert!(app.init_dialog.is_some());
+        let _ = app.update(Message::InitFinished(Err("cannot create".into())));
+        let dialog = app.init_dialog.as_ref().unwrap();
+        assert_eq!(dialog.error.as_deref(), Some("cannot create"));
+        assert!(!dialog.running);
+
+        let _ = app.update(Message::InitSubmit);
+        let path = std::path::PathBuf::from("/work/project");
+        let _ = app.update(Message::InitFinished(Ok((
+            path.clone(),
+            git_core::init::InitOutcome::NoIdentity,
+        ))));
+        assert!(app.init_dialog.is_none());
+        assert!(app.status.contains("not committed"), "{}", app.status);
+        assert!(matches!(
+            &app.tabs[0].state,
+            TabState::Loading { path: p } if *p == path
+        ));
+    }
+
+    #[test]
+    fn default_branch_name_preference() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::DefaultBranchLoaded(Ok(None)));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.default_branch, Some(None));
+        let _ = app.update(Message::DefaultBranchInput("bad name".into()));
+        let _ = app.update(Message::DefaultBranchSave);
+        assert!(app
+            .settings_page
+            .as_ref()
+            .unwrap()
+            .default_branch_error
+            .is_some());
+        let _ = app.update(Message::DefaultBranchInput("trunk".into()));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().default_branch_error,
+            None
+        );
+        let _ = app.update(Message::DefaultBranchSaved(Ok(Some("trunk".into()))));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().default_branch,
+            Some(Some("trunk".into()))
+        );
+        assert_eq!(app.status, "New repositories start on trunk");
+        let _ = app.update(Message::DefaultBranchSaved(Ok(None)));
+        assert_eq!(app.settings_page.as_ref().unwrap().default_branch_input, "");
     }
 
     #[test]

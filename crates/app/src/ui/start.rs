@@ -41,7 +41,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
             String::new(),
             Some(Message::CloneStart),
         ),
-        big_button(Icon::Plus, "Start a local repo", String::new(), None),
+        big_button(
+            Icon::Plus,
+            "Start a local repo",
+            String::new(),
+            Some(Message::InitStart),
+        ),
     ]
     .spacing(10)
     .width(280);

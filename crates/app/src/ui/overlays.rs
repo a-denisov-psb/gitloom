@@ -450,6 +450,108 @@ pub fn clone_dialog(dialog: &crate::clone_dialog::CloneDialog) -> Element<'_, Me
     )
 }
 
+/// "Start a local repository" (M10-03): name, where, full path, default
+/// branch, README and `.gitignore`.
+pub fn init_dialog(dialog: &crate::clone_dialog::InitDialog) -> Element<'_, Message> {
+    let idle = !dialog.running;
+    let input = |placeholder: &str, value: &str, on_input: fn(String) -> Message| {
+        let mut input = iced::widget::text_input(placeholder, value)
+            .padding(6)
+            .style(theme::input);
+        if idle {
+            input = input.on_input(on_input).on_submit(Message::InitSubmit);
+        }
+        input
+    };
+    let full_path = dialog
+        .full_path()
+        .map_or_else(String::new, |p| p.display().to_string());
+    let mut readme = iced::widget::checkbox(dialog.readme)
+        .label("Create README.md")
+        .size(14)
+        .text_size(12);
+    if idle {
+        readme = readme.on_toggle(Message::InitReadmeToggled);
+    }
+    let templates: Vec<String> = std::iter::once(crate::clone_dialog::NO_GITIGNORE.to_owned())
+        .chain(
+            git_core::init::GITIGNORE_TEMPLATES
+                .iter()
+                .map(|(name, _)| (*name).to_owned()),
+        )
+        .collect();
+    let chosen = dialog
+        .gitignore
+        .clone()
+        .unwrap_or_else(|| crate::clone_dialog::NO_GITIGNORE.to_owned());
+    let gitignore = pick_list(templates, Some(chosen), Message::InitGitignoreChosen)
+        .padding(6)
+        .width(Fill);
+    let mut content = column![
+        text("Start a local repository").size(17),
+        column![
+            text("Name").size(12),
+            input("my-project", &dialog.name, Message::InitNameChanged).id(INIT_NAME_INPUT)
+        ]
+        .spacing(4),
+        column![
+            text("Initialize in").size(12),
+            row![
+                input("Folder", &dialog.parent, Message::InitParentChanged),
+                button(text("Browse…"))
+                    .on_press_maybe(idle.then_some(Message::InitBrowse))
+                    .padding([6, 12])
+                    .style(button::secondary),
+            ]
+            .spacing(6)
+        ]
+        .spacing(4),
+        column![text("Full path").size(12), muted(full_path).size(12)].spacing(4),
+        column![
+            text("Default branch").size(12),
+            input("main", &dialog.branch, Message::InitBranchChanged)
+        ]
+        .spacing(4),
+        readme,
+        column![text(".gitignore template").size(12), gitignore].spacing(4),
+    ]
+    .spacing(12);
+    if let Some(error) = &dialog.error {
+        content = content.push(
+            text(error)
+                .size(12)
+                .style(theme::text_danger)
+                .wrapping(text::Wrapping::WordOrGlyph),
+        );
+    }
+    let ready = idle && dialog.problem().is_none();
+    content = content.push(
+        row![
+            space::horizontal(),
+            button(text("Cancel"))
+                .on_press_maybe(idle.then_some(Message::InitClosed))
+                .padding([6, 14])
+                .style(button::secondary),
+            button(text("Create repository"))
+                .on_press_maybe(ready.then_some(Message::InitSubmit))
+                .padding([6, 14])
+                .style(button::primary),
+        ]
+        .spacing(8),
+    );
+    let dialog = container(content)
+        .width(DIALOG_WIDTH)
+        .padding(20)
+        .style(theme::dialog);
+    opaque(
+        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
+            .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
+/// Id of the name field (focused when the init dialog opens).
+pub const INIT_NAME_INPUT: &str = "init-name";
+
 /// Id of the URL field (focused when the clone dialog opens).
 pub const CLONE_URL_INPUT: &str = "clone-url";
 

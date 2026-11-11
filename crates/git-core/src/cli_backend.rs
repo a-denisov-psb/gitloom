@@ -96,27 +96,7 @@ pub fn detect_git() -> GitAvailability {
 /// `user.name` and `user.email` of the global config, if both are set
 /// (M8-03). Runs outside any repository. Blocking.
 pub fn global_identity() -> Result<Option<crate::Identity>> {
-    let get = |key: &str| -> Result<Option<String>> {
-        let output = command(Path::new("git"))
-            .args(["config", "--global", "--get", key])
-            .current_dir(std::env::temp_dir())
-            .output()
-            .map_err(|e| Error::Backend(format!("Could not run git: {e}")))?;
-        match output.status.code() {
-            Some(0) => Ok(Some(
-                String::from_utf8_lossy(&output.stdout).trim().to_owned(),
-            )),
-            // 1: the key is not set.
-            Some(1) => Ok(None),
-            code => Err(Error::Command {
-                command: format!("git config --global --get {key}"),
-                code,
-                stderr: String::from_utf8_lossy(&output.stderr)
-                    .trim_end()
-                    .to_owned(),
-            }),
-        }
-    };
+    let get = global_config;
     match (get("user.name")?, get("user.email")?) {
         (Some(name), Some(email)) => Ok(crate::Identity::new(&name, &email).ok()),
         _ => Ok(None),
@@ -125,6 +105,49 @@ pub fn global_identity() -> Result<Option<crate::Identity>> {
 
 /// Writes `identity` to the global config (M8-03, the default identity
 /// while "Keep the global Git config updated" is on). Blocking.
+/// Value of `key` in the global Git config, `None` if it is not set.
+/// Blocking.
+pub fn global_config(key: &str) -> Result<Option<String>> {
+    let output = command(Path::new("git"))
+        .args(["config", "--global", "--get", key])
+        .current_dir(std::env::temp_dir())
+        .output()
+        .map_err(|e| Error::Backend(format!("Could not run git: {e}")))?;
+    match output.status.code() {
+        Some(0) => Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        )),
+        // 1: the key is not set.
+        Some(1) => Ok(None),
+        code => Err(Error::Command {
+            command: format!("git config --global --get {key}"),
+            code,
+            stderr: String::from_utf8_lossy(&output.stderr)
+                .trim_end()
+                .to_owned(),
+        }),
+    }
+}
+
+/// Sets `key` in the global Git config, or removes it (`None`; a key that
+/// is not set is fine). Blocking.
+pub fn set_global_config(key: &str, value: Option<&str>) -> Result<()> {
+    let args: Vec<&str> = match value {
+        Some(value) => vec!["config", "--global", key, value],
+        None => vec!["config", "--global", "--unset-all", key],
+    };
+    let output = command(Path::new("git"))
+        .args(&args)
+        .current_dir(std::env::temp_dir())
+        .output()
+        .map_err(|e| Error::Backend(format!("Could not run git: {e}")))?;
+    // 5: unsetting a key that is not set.
+    if value.is_none() && output.status.code() == Some(5) {
+        return Ok(());
+    }
+    finish(format!("git {}", args.join(" ")), output).map(drop)
+}
+
 pub fn write_global_identity(identity: &crate::Identity) -> Result<()> {
     if let Some(problem) = crate::identity_problem(&identity.name, &identity.email) {
         return Err(Error::Backend(problem.to_owned()));
