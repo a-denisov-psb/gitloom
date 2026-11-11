@@ -100,6 +100,67 @@ fn compare_names(a: &str, b: &str) -> Ordering {
     lower(a).cmp(&lower(b)).then_with(|| a.cmp(b))
 }
 
+/// GITFLOW section (M9-06): the production and development branches and
+/// every branch with a Git flow prefix, the prefix as a folder ("feature" ›
+/// "f2"). Like GitKraken, folders and branches are one case-insensitive
+/// alphabetical list. `branches` are (index into the refs, local branch
+/// name) after the text filter. Folder paths are the collapse keys
+/// (`gitflow:feature`). Returns the tree and the number of branches.
+pub fn gitflow<'a>(
+    branches: impl IntoIterator<Item = (usize, &'a str)>,
+    config: &git_core::FlowConfig,
+) -> (Vec<Node>, usize) {
+    let mut root: Vec<Node> = Vec::new();
+    let mut count = 0;
+    for (index, name) in branches {
+        if name == config.production || name == config.development {
+            root.push(Node::Branch {
+                index,
+                label: name.to_owned(),
+            });
+            count += 1;
+            continue;
+        }
+        let Some(branch) = config.classify(name) else {
+            continue;
+        };
+        count += 1;
+        let prefix = config.prefix(branch.kind);
+        let folder = prefix.trim_end_matches('/');
+        let folder = if folder.is_empty() { prefix } else { folder };
+        let path = format!("gitflow:{}", branch.kind.noun());
+        let position = root
+            .iter()
+            .position(|n| matches!(n, Node::Folder { path: p, .. } if *p == path));
+        let position = position.unwrap_or_else(|| {
+            root.push(Node::Folder {
+                name: folder.to_owned(),
+                path: path.clone(),
+                children: Vec::new(),
+            });
+            root.len() - 1
+        });
+        if let Some(Node::Folder { children, .. }) = root.get_mut(position) {
+            children.push(Node::Branch {
+                index,
+                label: branch.name,
+            });
+        }
+    }
+    sort_mixed(&mut root);
+    (root, count)
+}
+
+/// Sorts folders and branches together, case-insensitively.
+fn sort_mixed(nodes: &mut [Node]) {
+    nodes.sort_by(|a, b| compare_names(a.name(), b.name()));
+    for node in nodes {
+        if let Node::Folder { children, .. } = node {
+            sort_mixed(children);
+        }
+    }
+}
+
 /// One visible row of a group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row<'t> {
@@ -269,6 +330,80 @@ impl Groups {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn flow() -> git_core::FlowConfig {
+        git_core::FlowConfig::defaults(&["master"])
+    }
+
+    /// Rows as compact text: folders with "▾"/"▸", branches with their index.
+    fn flow_text(names: &[&str], collapsed: &[&str], filtering: bool) -> (String, usize) {
+        let (tree, count) = gitflow(names.iter().copied().enumerate(), &flow());
+        let text = rows(&tree, &|path| collapsed.contains(&path), filtering)
+            .into_iter()
+            .map(|row| match row {
+                Row::Folder {
+                    depth,
+                    name,
+                    expanded,
+                    ..
+                } => format!(
+                    "{}{}{name}",
+                    "  ".repeat(depth),
+                    if expanded { "▾" } else { "▸" }
+                ),
+                Row::Branch {
+                    depth,
+                    index,
+                    label,
+                } => format!("{}{label}#{index}", "  ".repeat(depth)),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        (text, count)
+    }
+
+    #[test]
+    fn gitflow_mixes_folders_and_branches_alphabetically() {
+        let names = [
+            "master",
+            "feature/f2",
+            "develop",
+            "release/1.2.0",
+            "feature/Alpha",
+            "topic",
+            "hotfix/1.1.1",
+            "feature/ui/toolbar",
+        ];
+        let (text, count) = flow_text(&names, &[], false);
+        assert_eq!(
+            text,
+            "develop#2\n▾feature\n  Alpha#4\n  f2#1\n  ui/toolbar#7\n▾hotfix\n  1.1.1#6\n\
+             master#0\n▾release\n  1.2.0#3"
+        );
+        assert_eq!(count, 7, "topic is not a Git flow branch");
+    }
+
+    #[test]
+    fn gitflow_without_main_branches_and_collapsed_folders() {
+        // Missing production/development branches are not shown.
+        let (text, count) = flow_text(&["feature/a", "feature/b"], &["gitflow:feature"], false);
+        assert_eq!(text, "▸feature");
+        assert_eq!(count, 2);
+        // A text filter expands everything.
+        let (text, _) = flow_text(&["feature/a"], &["gitflow:feature"], true);
+        assert_eq!(text, "▾feature\n  a#0");
+        let (text, count) = flow_text(&[], &[], false);
+        assert_eq!((text.as_str(), count), ("", 0));
+    }
+
+    #[test]
+    fn gitflow_uses_custom_prefixes_as_folders() {
+        let mut config = flow();
+        config.feature = "feat-".into();
+        let (tree, count) = gitflow([(0, "feat-x"), (1, "main")], &config);
+        assert_eq!(count, 1);
+        assert!(matches!(&tree[0], Node::Folder { name, .. } if name == "feat-"));
+    }
 
     /// Compact text of the rows: indentation per depth, folders end in `/`.
     fn render(nodes: &[Node], collapsed: &[&str], expand_all: bool) -> String {

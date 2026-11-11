@@ -75,48 +75,59 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .collect();
 
     let hide_active = repo.ref_filter.is_active();
-    let local = section(
+    let mut local = Some(section(
         repo,
         Section::Local,
         "LOCAL",
         groups.local_count.label(hide_active),
         local,
-    );
-    // GITFLOW between LOCAL and REMOTE, only when initialized (maintainer
-    // decision, M7-15).
-    let sections = match &repo.snapshot.flow {
-        Some(config) => column![local, gitflow(repo, config, &needle)],
-        None => column![local],
-    };
-    let sections = sections
-        .push(section_with_action(
-            repo,
-            Section::Remote,
-            "REMOTE",
-            groups.remote_count.label(hide_active),
-            remote,
-            Some((
-                Icon::Plus,
-                "Add remote",
-                HeaderAction::Press(Box::new(Message::AddRemoteStart)),
-            )),
-        ))
-        .push(section(
-            repo,
-            Section::Tags,
-            "TAGS",
-            tags.len().to_string(),
-            tags,
-        ))
-        .push(section(
-            repo,
-            Section::Stashes,
-            "STASHES",
-            stashes.len().to_string(),
-            stashes,
-        ))
-        .push(submodules())
-        .spacing(6);
+    ));
+    let mut gitflow_section = repo
+        .snapshot
+        .flow
+        .as_ref()
+        .map(|config| gitflow(repo, config, &needle));
+    let mut remote = Some(section_with_action(
+        repo,
+        Section::Remote,
+        "REMOTE",
+        groups.remote_count.label(hide_active),
+        remote,
+        Some((
+            Icon::Plus,
+            "Add remote",
+            HeaderAction::Press(Box::new(Message::AddRemoteStart)),
+        )),
+    ));
+    let mut stashes = Some(section(
+        repo,
+        Section::Stashes,
+        "STASHES",
+        stashes.len().to_string(),
+        stashes,
+    ));
+    let mut tags = Some(section(
+        repo,
+        Section::Tags,
+        "TAGS",
+        tags.len().to_string(),
+        tags,
+    ));
+    let mut submodules_section = Some(submodules());
+    let mut sections = column![].spacing(6);
+    for kind in section_order(gitflow_section.is_some()) {
+        let element = match kind {
+            Section::Gitflow => gitflow_section.take(),
+            Section::Local => local.take(),
+            Section::Remote => remote.take(),
+            Section::Stashes => stashes.take(),
+            Section::Tags => tags.take(),
+            Section::Submodules => submodules_section.take(),
+        };
+        if let Some(element) = element {
+            sections = sections.push(element);
+        }
+    }
 
     let filter = text_input("Filter", &repo.filter)
         .id(crate::app::FILTER_INPUT)
@@ -139,6 +150,24 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .height(Fill)
         .style(theme::panel)
         .into()
+}
+
+/// Order of the sections like GitKraken: GITFLOW (when initialized),
+/// LOCAL, REMOTE, STASHES, TAGS, SUBMODULES (M9-06). Keyboard focus
+/// follows the widget order.
+pub fn section_order(gitflow: bool) -> Vec<Section> {
+    let mut order = Vec::with_capacity(6);
+    if gitflow {
+        order.push(Section::Gitflow);
+    }
+    order.extend([
+        Section::Local,
+        Section::Remote,
+        Section::Stashes,
+        Section::Tags,
+        Section::Submodules,
+    ]);
+    order
 }
 
 fn section<'a>(
@@ -232,55 +261,55 @@ enum HeaderAction {
     Menu(fn(iced::Point) -> Message),
 }
 
-/// GITFLOW section (M7-08): Features / Releases / Hotfixes with the branch
-/// names without prefix; the same rows as LOCAL; a green "+" starts one.
+/// GITFLOW section (M9-06, replaces the groups of M7-08): a tree of the
+/// production and development branches and the prefixed branches, the
+/// prefix as a folder, folders and branches mixed alphabetically like
+/// GitKraken; the same rows as LOCAL; a green "+" starts one.
 fn gitflow<'a>(
     repo: &'a RepoView,
     config: &git_core::FlowConfig,
     needle: &str,
 ) -> Element<'a, Message> {
     let filtering = !needle.is_empty();
-    let mut items = Vec::new();
-    let mut count = 0;
-    for (kind, title) in [
-        (git_core::FlowKind::Feature, "Features"),
-        (git_core::FlowKind::Release, "Releases"),
-        (git_core::FlowKind::Hotfix, "Hotfixes"),
-    ] {
-        let branches: Vec<(&Reference, String)> = repo
-            .snapshot
-            .refs
-            .iter()
-            .filter(|r| r.kind == RefKind::LocalBranch)
-            .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(needle))
-            .filter_map(|r| {
-                config
-                    .classify(&r.name)
-                    .filter(|b| b.kind == kind)
-                    .map(|b| (r, b.name))
-            })
-            .collect();
-        count += branches.len();
-        // Like GitKraken: a group is listed only when it has branches.
-        if branches.is_empty() {
-            continue;
-        }
-        let key = format!("gitflow:{}", kind.noun());
-        let expanded = filtering || !repo.folders_collapsed.contains(&key);
-        items.push(folder_row(
-            format!("{title} ({})", branches.len()),
-            key,
-            expanded,
-            1,
-        ));
-        if expanded {
-            items.extend(
-                branches
-                    .into_iter()
-                    .map(|(reference, name)| ref_item(repo, reference, name, 2)),
-            );
-        }
-    }
+    let branches = repo
+        .snapshot
+        .refs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.kind == RefKind::LocalBranch)
+        .filter(|(_, r)| needle.is_empty() || r.name.to_lowercase().contains(needle))
+        .map(|(index, r)| (index, r.name.as_str()));
+    let (tree, count) = crate::branch_tree::gitflow(branches, config);
+    let collapsed = |path: &str| repo.folders_collapsed.contains(path);
+    let items: Vec<_> = crate::branch_tree::rows(&tree, &collapsed, filtering)
+        .into_iter()
+        .map(|row| match row {
+            Row::Folder {
+                depth,
+                name,
+                path,
+                expanded,
+            } => folder_row(
+                name.to_owned(),
+                path.to_owned(),
+                expanded,
+                1 + u16::try_from(depth).unwrap_or(0),
+            ),
+            Row::Branch {
+                depth,
+                index,
+                label,
+            } => match repo.snapshot.refs.get(index) {
+                Some(reference) => ref_item(
+                    repo,
+                    reference,
+                    label.to_owned(),
+                    1 + u16::try_from(depth).unwrap_or(0),
+                ),
+                None => space::horizontal().width(0).into(),
+            },
+        })
+        .collect();
     section_with_action(
         repo,
         Section::Gitflow,
@@ -639,5 +668,22 @@ mod tests {
         assert_eq!(ahead_behind_badge(Some((2, 0))).as_deref(), Some("↑2"));
         assert_eq!(ahead_behind_badge(Some((0, 5))).as_deref(), Some("↓5"));
         assert_eq!(ahead_behind_badge(Some((3, 1))).as_deref(), Some("↑3 ↓1"));
+    }
+
+    #[test]
+    fn sections_are_ordered_like_gitkraken() {
+        assert_eq!(
+            section_order(true),
+            [
+                Section::Gitflow,
+                Section::Local,
+                Section::Remote,
+                Section::Stashes,
+                Section::Tags,
+                Section::Submodules
+            ]
+        );
+        assert_eq!(section_order(false)[0], Section::Local);
+        assert_eq!(section_order(false).len(), 5);
     }
 }
