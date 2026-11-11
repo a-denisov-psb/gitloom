@@ -83,7 +83,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-/// A large action button: icon, title and a muted second line (shortcut).
+/// Height of the start screen buttons (M11-12).
+const START_BUTTON_HEIGHT: f32 = 60.0;
+
+/// A large action button: icon, title and a second line (shortcut).
 /// Without a message it is disabled with "Not available yet".
 fn big_button<'a>(
     icon: Icon,
@@ -92,23 +95,32 @@ fn big_button<'a>(
     message: Option<Message>,
 ) -> Element<'a, Message> {
     let enabled = message.is_some();
-    let title = text(title).size(15).style(if enabled {
-        theme::text_normal
-    } else {
-        theme::text_faint
-    });
-    let mut lines = column![title].spacing(2);
+    // Label and shortcut take the button's text color, chosen for
+    // contrast on the accent fill (M11-12).
+    let mut lines = column![text(title).size(15)].spacing(2);
     if !hint.is_empty() {
-        lines = lines.push(muted(hint).size(11));
+        lines = lines.push(text(hint).size(12));
     }
-    let content = row![icons::button_icon(icon, 20.0, enabled), lines]
-        .spacing(12)
-        .align_y(iced::Center);
+    let icon: Element<'a, Message> = if enabled {
+        icons::colored(icon, 20.0, theme::start_button_icon).into()
+    } else {
+        icons::button_icon(icon, 20.0, false).into()
+    };
+    let content = row![icon, lines].spacing(12).align_y(iced::Center);
+    // All three have one size, with or without a shortcut line.
+    let content = container(content)
+        .height(Fill)
+        .align_y(iced::alignment::Vertical::Center);
     let button = button(content)
         .on_press_maybe(message)
-        .padding([12, 16])
+        .padding([0, 16])
         .width(Fill)
-        .style(button::secondary);
+        .height(START_BUTTON_HEIGHT)
+        .style(if enabled {
+            theme::start_button
+        } else {
+            button::secondary
+        });
     if enabled {
         button.into()
     } else {

@@ -933,13 +933,14 @@ mod tests {
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_start_screen() {
-        for (light, theme) in [(false, "dark"), (true, "light")] {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
             let mut app = start_app();
-            app.settings.appearance.theme = if light {
-                crate::settings::ThemeChoice::Light
-            } else {
-                crate::settings::ThemeChoice::Dark
-            };
+            app.settings.appearance.theme = choice;
             for percent in [100_u32, 125] {
                 let scale = percent as f32 / 100.0;
                 let _ = app.update(Message::SystemScaleChanged(scale));
