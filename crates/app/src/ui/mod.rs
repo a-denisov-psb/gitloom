@@ -108,6 +108,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(dialog) = &app.init_dialog {
         layers.push(overlays::init_dialog(dialog));
     }
+    if let Some(prompt) = &app.prompt_dialog {
+        layers.push(overlays::prompt_dialog(prompt));
+    }
     if let Some(dialog) = &app.message_dialog {
         layers.push(overlays::message_dialog(dialog));
     }

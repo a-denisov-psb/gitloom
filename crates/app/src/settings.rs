@@ -26,6 +26,24 @@ pub struct Settings {
     /// Commit identities (M8-03, ADR-041): only name and email are kept
     /// here; repositories store their choice in their own Git config.
     pub identities: Identities,
+    /// Preferences → Templates (M10-07, M10-10).
+    pub templates: Templates,
+}
+
+/// Preferences → Templates (M10-07): texts shared by all repositories.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Templates {
+    /// Instruction at the top of the commit message prompt.
+    pub commit_prompt: String,
+}
+
+impl Default for Templates {
+    fn default() -> Self {
+        Self {
+            commit_prompt: git_core::prompt::DEFAULT_INSTRUCTION.to_owned(),
+        }
+    }
 }
 
 /// A saved identity (name and email).
@@ -167,6 +185,7 @@ impl Default for Settings {
             tools: ExternalTools::default(),
             diff: DiffSettings::default(),
             identities: Identities::default(),
+            templates: Templates::default(),
         }
     }
 }
@@ -318,6 +337,8 @@ pub enum Category {
     Identities,
     /// Commit and tag signing in the global Git config (M10-04).
     Signing,
+    /// Commit message prompt and stash message template (M10-07, M10-10).
+    Templates,
     ExternalTools,
     /// Identity of the active tab's repository (M8-04).
     Identity,
@@ -331,11 +352,12 @@ pub enum Category {
 
 impl Category {
     /// Categories that apply everywhere, at the top of the list.
-    pub const GLOBAL: [Self; 5] = [
+    pub const GLOBAL: [Self; 6] = [
         Self::General,
         Self::Appearance,
         Self::Identities,
         Self::Signing,
+        Self::Templates,
         Self::ExternalTools,
     ];
     /// Categories of the active tab's repository, below the group header
@@ -354,6 +376,7 @@ impl Category {
             Self::Appearance => "Appearance",
             Self::Identities => "Identities",
             Self::Signing => "Signing",
+            Self::Templates => "Templates",
             Self::Identity => "Identity",
             Self::SshKey => "SSH key",
             Self::Commit => "Commit",
@@ -690,6 +713,19 @@ mod tests {
         // A default pointing nowhere is dropped.
         let broken = parse(r#"{"identities": {"list": [], "default": 3}}"#).unwrap();
         assert_eq!(broken.identities.default, None);
+    }
+
+    #[test]
+    fn templates_load_from_older_files_and_round_trip() {
+        // Files written before M10-07 get the default prompt.
+        let old = parse(r#"{"version": 1}"#).unwrap();
+        assert_eq!(
+            old.templates.commit_prompt,
+            git_core::prompt::DEFAULT_INSTRUCTION
+        );
+        let mut settings = Settings::default();
+        settings.templates.commit_prompt = "Be brief.".into();
+        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
     }
 
     #[test]

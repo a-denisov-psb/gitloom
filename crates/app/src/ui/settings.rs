@@ -58,6 +58,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Appearance => appearance(app),
         Category::Identities => identities(app),
         Category::Signing => signing(page),
+        Category::Templates => templates(app),
         Category::ExternalTools => external_tools(&app.settings, page),
         Category::Identity => repository_identity(app),
         Category::SshKey => ssh_key(app, page),
@@ -493,6 +494,34 @@ fn commit_template<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         muted(location).size(12),
     ]
     .spacing(14)
+    .into()
+}
+
+/// Preferences → Templates (M10-07): the commit message prompt for all
+/// repositories; the commit template itself is per repository.
+fn templates(app: &App) -> Element<'_, Message> {
+    let editor = iced::widget::text_editor(&app.prompt_instruction)
+        .on_action(Message::PromptInstructionEdited)
+        .padding(6)
+        .style(theme::editor)
+        .height(140)
+        .width(560.0);
+    let changed = app.settings.templates.commit_prompt != git_core::prompt::DEFAULT_INSTRUCTION;
+    column![
+        text("Commit message prompt (all repositories)").size(15),
+        muted(
+            "The instruction at the top of \"Copy commit message prompt…\" (staged files menu, \
+             command palette). Paste the prompt into a tool of your choice."
+        )
+        .size(12),
+        editor,
+        button(text("Reset to default"))
+            .on_press_maybe(changed.then_some(Message::PromptInstructionReset))
+            .padding([5, 12])
+            .style(button::secondary),
+        muted("Commit template: set per repository in Repository · <name> → Commit.").size(12),
+    ]
+    .spacing(10)
     .into()
 }
 

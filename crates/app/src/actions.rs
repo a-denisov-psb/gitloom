@@ -84,6 +84,8 @@ pub enum ActionId {
     About,
     /// Opens Preferences → Identities (M8-03).
     ManageIdentities,
+    /// "Copy commit message prompt…" (M10-07).
+    CopyCommitPrompt,
     /// Toolbar actions in the palette (M6-07: every action by keyboard).
     Pull,
     Push,
@@ -518,6 +520,13 @@ fn table() -> Vec<Action> {
     add(A::Pull, "Pull", RepoActions, Global, &[]);
     add(A::Push, "Push", RepoActions, Global, &[]);
     add(A::Stash, "Stash", RepoActions, Global, &[]);
+    add(
+        A::CopyCommitPrompt,
+        "Copy commit message prompt…",
+        RepoActions,
+        Global,
+        &[],
+    );
     add(A::PopStash, "Pop stash", RepoActions, Global, &[]);
     add(
         A::Refresh,
@@ -854,6 +863,7 @@ fn table() -> Vec<Action> {
                 | A::Push
                 | A::Stash
                 | A::PopStash
+                | A::CopyCommitPrompt
                 | A::ContextMenu
                 | A::SearchCommits
                 | A::FileHistory

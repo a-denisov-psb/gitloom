@@ -450,6 +450,72 @@ pub fn clone_dialog(dialog: &crate::clone_dialog::CloneDialog) -> Element<'_, Me
     )
 }
 
+/// "Commit message prompt" (M10-07): read-only preview, size, notes and
+/// the reminder about secrets; Copy (also Ctrl+C) and Close.
+pub fn prompt_dialog(prompt: &git_core::prompt::Prompt) -> Element<'_, Message> {
+    let size = prompt.text.chars().count();
+    let mut info = column![muted(format!("{} characters", group_digits(size))).size(12)].spacing(2);
+    for note in &prompt.notes {
+        info = info.push(muted(note.clone()).size(12));
+    }
+    info = info.push(
+        text("Check the diff for secrets before sharing it.")
+            .size(12)
+            .style(theme::text_warning),
+    );
+    let preview = container(
+        crate::ui::vscroll(
+            text(&prompt.text)
+                .font(Font::MONOSPACE)
+                .size(12)
+                .wrapping(text::Wrapping::WordOrGlyph),
+        )
+        .height(Length::Fixed(320.0)),
+    )
+    .padding(8)
+    .width(Fill)
+    .style(theme::dialog_details);
+    let content = column![
+        text("Commit message prompt").size(17),
+        preview,
+        info,
+        row![
+            space::horizontal(),
+            button(text("Close"))
+                .on_press(Message::PromptClosed)
+                .padding([6, 14])
+                .style(button::secondary),
+            button(text("Copy"))
+                .on_press(Message::PromptCopy)
+                .padding([6, 14])
+                .style(button::primary),
+        ]
+        .spacing(8),
+    ]
+    .spacing(12);
+    let dialog = container(content)
+        .width(720)
+        .padding(20)
+        .style(theme::dialog);
+    opaque(
+        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
+            .interaction(iced::mouse::Interaction::Idle),
+    )
+}
+
+/// `12345` as "12,345".
+pub fn group_digits(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// "Start a local repository" (M10-03): name, where, full path, default
 /// branch, README and `.gitignore`.
 pub fn init_dialog(dialog: &crate::clone_dialog::InitDialog) -> Element<'_, Message> {
@@ -657,4 +723,15 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
         .on_press(Message::MenuClosed)
         .on_right_press(Message::MenuClosed),
     )
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    #[test]
+    fn digits_are_grouped() {
+        assert_eq!(super::group_digits(0), "0");
+        assert_eq!(super::group_digits(999), "999");
+        assert_eq!(super::group_digits(12_345), "12,345");
+        assert_eq!(super::group_digits(1_234_567), "1,234,567");
+    }
 }
