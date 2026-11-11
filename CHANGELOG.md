@@ -22,6 +22,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Stash pop and apply can be undone (Ctrl+Z, toolbar, banner) and redone, with and without conflicts: files, index and stash list return exactly to the state before.
 - Conflicted files without a running operation show a banner that explains how to get out, with "Discard conflicted files…".
 - Conflicted files can be discarded (context menu, "Discard all", the banner) after a confirmation; undo brings back both sides and the conflict.
+- "Reset <branch> to this commit…" is also offered on the HEAD commit: Mixed clears the index (also conflicts) and keeps the files, Hard discards uncommitted changes; Soft is disabled there. Undo restores conflicted files as well.
 
 ### Changed
 

@@ -63,6 +63,8 @@ pub struct ResetSnapshot {
     pub head_before: Oid,
     pub head_after: Oid,
     pub index_tree: Oid,
+    /// Unmerged index entries, not part of `index_tree` (M9-04).
+    pub unmerged: Vec<crate::IndexSnapshot>,
     pub files: Vec<RawFile>,
 }
 
@@ -111,9 +113,7 @@ pub fn hard_reset_with_snapshot(
 ) -> Result<ResetSnapshot> {
     let head_before =
         head_commit(git)?.ok_or_else(|| Error::Backend("There is no commit to reset".into()))?;
-    let index_tree = git
-        .run(&["write-tree"], RunOptions::default())?
-        .stdout_text();
+    let (index_tree, unmerged) = crate::record_index(git)?;
     let mut files = Vec::new();
     for path in affected_paths(git, id)? {
         files.push(capture_file(git, root, &path)?);
@@ -123,7 +123,8 @@ pub fn hard_reset_with_snapshot(
     Ok(ResetSnapshot {
         head_before,
         head_after,
-        index_tree: index_tree.trim().to_owned(),
+        index_tree,
+        unmerged,
         files,
     })
 }
@@ -135,7 +136,7 @@ pub fn undo_hard_reset(git: &dyn GitWriter, root: &Path, snapshot: &ResetSnapsho
         return Err(Error::Backend("Cannot undo: the repository changed".into()));
     }
     reset(git, &snapshot.head_before, ResetMode::Soft)?;
-    git.run(&["read-tree", &snapshot.index_tree], RunOptions::default())?;
+    crate::restore_index(git, &snapshot.index_tree, &snapshot.unmerged)?;
     for file in &snapshot.files {
         restore_file(git, root, file)?;
     }

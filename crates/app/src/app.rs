@@ -1291,16 +1291,19 @@ impl App {
                             label: "Cancel".into(),
                             kind: crate::overlay::ButtonKind::Secondary,
                             message: None,
+                            disabled: None,
                         },
                         crate::overlay::DialogButton {
                             label: "Local only".into(),
                             kind: crate::overlay::ButtonKind::Secondary,
                             message: Some(Message::RenameConfirmed { remote: false }),
+                            disabled: None,
                         },
                         crate::overlay::DialogButton {
                             label: "Rename remote too".into(),
                             kind: crate::overlay::ButtonKind::Primary,
                             message: Some(Message::RenameConfirmed { remote: true }),
+                            disabled: None,
                         },
                     ],
                     default: Some(1),
@@ -2095,11 +2098,13 @@ impl App {
                         label: "Close".into(),
                         kind: crate::overlay::ButtonKind::Secondary,
                         message: None,
+                        disabled: None,
                     },
                     crate::overlay::DialogButton {
                         label: "Set upstream".into(),
                         kind: crate::overlay::ButtonKind::Primary,
                         message: Some(Message::SetUpstreamStart(local)),
+                        disabled: None,
                     },
                 ],
                 default: Some(1),
@@ -3088,13 +3093,14 @@ impl App {
                     HistoryUndo::HardReset(git_core::hard_reset_with_snapshot(git, &root, id)?),
                 ),
                 Message::Reset { id, mode, .. } => {
-                    let index_tree = git_core::index_tree(git)?;
+                    let (index_tree, unmerged) = git_core::record_index(git)?;
                     git_core::reset(git, id, *mode)?;
                     (
                         MergeOutcome::Done,
                         HistoryUndo::Reset {
                             mode: *mode,
                             index_tree,
+                            unmerged,
                         },
                     )
                 }
@@ -6006,8 +6012,9 @@ impl App {
                             pickable: clean
                                 && snapshot.head.target().is_some_and(|head| head != id),
                             revertable: clean && snapshot.head.target().is_some(),
-                            resettable: clean
-                                && snapshot.head.target().is_some_and(|head| head != id),
+                            // Also on HEAD itself: Mixed and Hard clear
+                            // the index (and conflicts) there (M9-04).
+                            resettable: clean && snapshot.head.target().is_some(),
                         }
                     })
                     .unwrap_or_default();
@@ -7861,11 +7868,13 @@ fn not_merged_dialog(error: String, name: String) -> Modal {
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Force delete".into(),
                 kind: crate::overlay::ButtonKind::Danger,
                 message: Some(Message::DeleteBranchConfirmed { name, force: true }),
+                disabled: None,
             },
         ],
         default: Some(0),
@@ -7906,16 +7915,19 @@ fn leave_detached_dialog(count: usize, head: String, target: CheckoutTarget) -> 
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Leave anyway".into(),
                 kind: crate::overlay::ButtonKind::Danger,
                 message: Some(Message::CheckoutChecked(target)),
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Create branch".into(),
                 kind: crate::overlay::ButtonKind::Primary,
                 message: Some(Message::NewBranchStart(Some(head))),
+                disabled: None,
             },
         ],
         default: Some(2),
@@ -7937,11 +7949,13 @@ fn checkout_blocked_dialog(error: String, target: CheckoutTarget) -> Modal {
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Stash and checkout".into(),
                 kind: crate::overlay::ButtonKind::Primary,
                 message: Some(Message::StashAndCheckout(target)),
+                disabled: None,
             },
         ],
         default: Some(1),
@@ -8007,11 +8021,13 @@ fn merge_blocked_dialog(error: String, request: Message) -> Option<Modal> {
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: format!("Stash and {operation}"),
                 kind: crate::overlay::ButtonKind::Primary,
                 message: Some(retry),
+                disabled: None,
             },
         ],
         default: Some(1),
@@ -8056,6 +8072,8 @@ fn reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
     use git_core::ResetMode;
     let head = head_name(snapshot);
     let short = &id[..id.len().min(7)];
+    // On HEAD a soft reset would change nothing (M9-04).
+    let on_head = snapshot.head.target() == Some(id);
     let button = |mode: ResetMode, kind| crate::overlay::DialogButton {
         label: mode.label().into(),
         kind,
@@ -8064,6 +8082,8 @@ fn reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
             mode,
             confirmed: false,
         }),
+        disabled: (on_head && mode == ResetMode::Soft)
+            .then(|| "HEAD is already at this commit".to_owned()),
     };
     Modal {
         title: format!("Reset {head} to {short}"),
@@ -8077,6 +8097,7 @@ fn reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             button(ResetMode::Soft, crate::overlay::ButtonKind::Secondary),
             button(ResetMode::Mixed, crate::overlay::ButtonKind::Primary),
@@ -8132,6 +8153,7 @@ fn hard_reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Hard reset".into(),
@@ -8141,6 +8163,7 @@ fn hard_reset_dialog(snapshot: &RepoSnapshot, id: &str) -> Modal {
                     mode: git_core::ResetMode::Hard,
                     confirmed: true,
                 }),
+                disabled: None,
             },
         ],
         default: Some(0),
@@ -8159,18 +8182,21 @@ fn empty_pick_dialog(snapshot: &RepoSnapshot) -> Option<Modal> {
         label: format!("Abort {}", operation.command()),
         kind: crate::overlay::ButtonKind::Secondary,
         message: Some(Message::AbortOperation),
+        disabled: None,
     }];
     if operation.can_skip() {
         buttons.push(crate::overlay::DialogButton {
             label: "Skip".into(),
             kind: crate::overlay::ButtonKind::Secondary,
             message: Some(Message::SkipOperation),
+            disabled: None,
         });
     }
     buttons.push(crate::overlay::DialogButton {
         label: "Commit empty".into(),
         kind: crate::overlay::ButtonKind::Primary,
         message: Some(Message::CommitEmpty),
+        disabled: None,
     });
     let default = buttons.len().checked_sub(2);
     Some(Modal {
@@ -8343,16 +8369,19 @@ fn push_rejected_dialog(error: String) -> Modal {
                 label: "Cancel".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Force push".into(),
                 kind: crate::overlay::ButtonKind::Danger,
                 message: Some(Message::ForcePushRequested),
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: "Pull".into(),
                 kind: crate::overlay::ButtonKind::Primary,
                 message: Some(Message::Pull(None)),
+                disabled: None,
             },
         ],
         default: Some(2),
@@ -8411,11 +8440,13 @@ fn pull_failed_dialog(
                 label: "Close".into(),
                 kind: crate::overlay::ButtonKind::Secondary,
                 message: None,
+                disabled: None,
             },
             crate::overlay::DialogButton {
                 label: format!("Abort {operation}"),
                 kind: crate::overlay::ButtonKind::Danger,
                 message: Some(Message::AbortOperation),
+                disabled: None,
             },
         ],
         default: Some(0),
@@ -12592,6 +12623,64 @@ pub(crate) mod tests {
             app.tabs[0].view().unwrap().busy.as_deref(),
             Some("Hard reset HEAD to c")
         );
+    }
+
+    #[test]
+    fn reset_is_offered_on_the_head_commit() {
+        // `staging_app` is detached at "c" (HEAD).
+        let mut app = staging_app(&[], &[]);
+        let open_menu = |app: &mut App| {
+            let _ = app.update(Message::CommitContextMenu {
+                id: "c".into(),
+                position: iced::Point::ORIGIN,
+            });
+        };
+        open_menu(&mut app);
+        assert_eq!(
+            menu_item_enabled(&app, "Reset HEAD to this commit…"),
+            Some(true)
+        );
+        // Conflicted files from a stash do not block it.
+        with_conflicts(&mut app, &["a.txt"]);
+        open_menu(&mut app);
+        assert_eq!(
+            menu_item_enabled(&app, "Reset HEAD to this commit…"),
+            Some(true)
+        );
+        // A running operation does.
+        let mut merging = app_in_state(merging());
+        open_menu(&mut merging);
+        assert_eq!(
+            menu_item_enabled(&merging, "Reset HEAD to this commit…"),
+            Some(false)
+        );
+
+        app.context_menu = None;
+        let _ = app.update(Message::ResetStart("c".into()));
+        let modal = app.modal.clone().unwrap();
+        let soft = &modal.buttons[1];
+        assert_eq!(soft.label, "Soft");
+        assert_eq!(
+            soft.disabled.as_deref(),
+            Some("HEAD is already at this commit")
+        );
+        assert!(modal.action(1).is_none(), "Soft does nothing");
+        assert!(matches!(
+            modal.action(2),
+            Some(Message::Reset {
+                mode: git_core::ResetMode::Mixed,
+                ..
+            })
+        ));
+        assert!(modal.buttons[2].disabled.is_none());
+    }
+
+    #[test]
+    fn soft_reset_stays_available_on_other_commits() {
+        let mut app = ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::ResetStart("b".into()));
+        let modal = app.modal.clone().unwrap();
+        assert!(modal.buttons.iter().all(|b| b.disabled.is_none()));
     }
 
     #[test]

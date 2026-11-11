@@ -44,11 +44,14 @@ pub fn modal(modal: &Modal) -> Element<'_, Message> {
             ButtonKind::Secondary => button::secondary,
             ButtonKind::Danger => button::danger,
         };
-        button(text(&b.label))
-            .on_press(Message::ModalAction(index))
+        let button = button(text(&b.label))
+            .on_press_maybe(b.disabled.is_none().then_some(Message::ModalAction(index)))
             .padding([6, 14])
-            .style(style)
-            .into()
+            .style(style);
+        match &b.disabled {
+            Some(reason) => crate::ui::panel::with_tooltip_text(button.into(), reason.clone()),
+            None => button.into(),
+        }
     });
     content = content.push(row![space::horizontal()].extend(buttons).spacing(8));
 

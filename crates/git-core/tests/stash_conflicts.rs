@@ -294,3 +294,57 @@ fn undo_is_refused_after_head_moved() {
     let error = undo_stash(&cli, repo.path(), &record).unwrap_err();
     assert!(error.to_string().contains("repository changed"), "{error}");
 }
+
+/// Mixed reset on HEAD with conflicted files from a stash: the index is
+/// cleared (files kept), undo brings the unmerged entries back (M9-04).
+#[test]
+fn mixed_reset_on_head_clears_conflicts_and_is_undone() {
+    use git_core::{current_branch, record_index, reset, undo_history, HistoryChange, HistoryUndo};
+    let repo = isolated();
+    let cli = CliBackend::new(repo.path());
+    let id = stash_then_conflicting_merge(&repo);
+    apply_stash(&cli, &id, true).unwrap();
+    let before = state(&repo);
+    let head = repo.head();
+
+    let (index_tree, unmerged) = record_index(&cli).unwrap();
+    assert_eq!(state(&repo), before, "recording leaves the index alone");
+    reset(&cli, &head, git_core::ResetMode::Mixed).unwrap();
+    assert!(unmerged_paths(&cli).unwrap().is_empty());
+    assert_eq!(files(repo.path()), before.files, "files are kept");
+
+    let change = HistoryChange {
+        label: "Mixed reset".into(),
+        kind: HistoryUndo::Reset {
+            mode: git_core::ResetMode::Mixed,
+            index_tree,
+            unmerged,
+        },
+        before: head.clone(),
+        after: head,
+        branch: current_branch(&cli).unwrap(),
+    };
+    undo_history(&cli, repo.path(), &change).unwrap();
+    assert_eq!(state(&repo), before);
+}
+
+/// Hard reset on HEAD with conflicted files: everything uncommitted goes,
+/// undo restores files and unmerged entries (M9-04).
+#[test]
+fn hard_reset_on_head_clears_conflicts_and_is_undone() {
+    use git_core::{hard_reset_with_snapshot, undo_hard_reset};
+    let repo = isolated();
+    let cli = CliBackend::new(repo.path());
+    let id = stash_then_conflicting_merge(&repo);
+    apply_stash(&cli, &id, true).unwrap();
+    repo.write("untracked.txt", "stays\n");
+    let before = state(&repo);
+    let head = repo.head();
+
+    let snapshot = hard_reset_with_snapshot(&cli, repo.path(), &head).unwrap();
+    assert!(unmerged_paths(&cli).unwrap().is_empty());
+    assert_eq!(repo.git(&["status", "--porcelain"]), "?? untracked.txt");
+
+    undo_hard_reset(&cli, repo.path(), &snapshot).unwrap();
+    assert_eq!(state(&repo), before);
+}

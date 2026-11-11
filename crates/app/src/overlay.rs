@@ -18,6 +18,8 @@ pub struct DialogButton {
     pub kind: ButtonKind,
     /// Sent after the dialog closed; `None` only closes it.
     pub message: Option<Message>,
+    /// Shown disabled with this reason as tooltip (M9-04).
+    pub disabled: Option<String>,
 }
 
 /// Modal dialog over the whole window.
@@ -45,11 +47,13 @@ impl Modal {
                     label: "Copy".into(),
                     kind: ButtonKind::Secondary,
                     message: Some(Message::CopyToClipboard(details)),
+                    disabled: None,
                 },
                 DialogButton {
                     label: "Close".into(),
                     kind: ButtonKind::Primary,
                     message: None,
+                    disabled: None,
                 },
             ],
             default: Some(1),
@@ -66,6 +70,7 @@ impl Modal {
                 label: "Close".into(),
                 kind: ButtonKind::Primary,
                 message: None,
+                disabled: None,
             }],
             default: Some(0),
         }
@@ -92,11 +97,13 @@ impl Modal {
                     label: "Close".into(),
                     kind: ButtonKind::Secondary,
                     message: None,
+                    disabled: None,
                 },
                 DialogButton {
                     label: "Retry".into(),
                     kind: ButtonKind::Primary,
                     message: Some(retry),
+                    disabled: None,
                 },
             ],
             default: Some(1),
@@ -117,16 +124,19 @@ impl Modal {
                     label: "Cancel".into(),
                     kind: ButtonKind::Secondary,
                     message: None,
+                    disabled: None,
                 },
                 DialogButton {
                     label: "Keep staged".into(),
                     kind: ButtonKind::Secondary,
                     message: Some(keep_staged),
+                    disabled: None,
                 },
                 DialogButton {
                     label: "Discard staged too".into(),
                     kind: ButtonKind::Danger,
                     message: Some(everything),
+                    disabled: None,
                 },
             ],
             default: Some(1),
@@ -150,6 +160,7 @@ impl Modal {
                     label: "Cancel".into(),
                     kind: ButtonKind::Secondary,
                     message: None,
+                    disabled: None,
                 },
                 DialogButton {
                     label: confirm_label.into(),
@@ -159,6 +170,7 @@ impl Modal {
                         ButtonKind::Primary
                     },
                     message: Some(on_confirm),
+                    disabled: None,
                 },
             ],
             default: Some(1),
@@ -167,7 +179,10 @@ impl Modal {
 
     /// Message of button `index`, if it has one (closing happens in any case).
     pub fn action(&self, index: usize) -> Option<Message> {
-        self.buttons.get(index).and_then(|b| b.message.clone())
+        self.buttons
+            .get(index)
+            .filter(|b| b.disabled.is_none())
+            .and_then(|b| b.message.clone())
     }
 
     /// Message of the default button (Enter).

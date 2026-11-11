@@ -47,8 +47,8 @@ pub use conflict::{
 };
 pub use diff::{text_diff_with, TextDiff};
 pub use discard::{
-    discard_all, discard_everything, discard_files, discard_lines, revert_lines, DiscardSnapshot,
-    FileSnapshot, IndexSnapshot,
+    discard_all, discard_everything, discard_files, discard_lines, record_index, restore_index,
+    revert_lines, DiscardSnapshot, FileSnapshot, IndexSnapshot,
 };
 pub use editor::{editor_call, editor_main, EditorInput, EditorKind};
 pub use external_tools::{
