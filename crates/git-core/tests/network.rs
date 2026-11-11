@@ -474,7 +474,7 @@ fn upstream_and_remote_management() {
     cli.add_remote("backup", url).unwrap();
     assert_eq!(backend.remotes().unwrap(), ["backup", "origin"]);
     assert_eq!(backend.remote_url("backup").unwrap().as_deref(), Some(url));
-    network(&local, git_core::fetch_remote_args("backup")).unwrap();
+    network(&local, git_core::fetch_remote_args("backup", false)).unwrap();
     assert!(local.try_git(&["rev-parse", "--verify", "--quiet", "backup/main"]));
 
     cli.set_remote_url("backup", "https://example.com/other.git")
