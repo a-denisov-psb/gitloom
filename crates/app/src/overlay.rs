@@ -410,13 +410,18 @@ const DRAWN_FONT: iced::Font = iced::Font::with_name("Fira Sans");
 /// Width of `text` at `size` in the default font, measured with the font
 /// system the renderer uses (so it is exact on every platform).
 pub fn text_width(text: &str, size: f32) -> f32 {
+    text_width_in(text, size, DRAWN_FONT)
+}
+
+/// Width of `text` at `size` in `font` (see [`text_width`]).
+pub fn text_width_in(text: &str, size: f32, font: iced::Font) -> f32 {
     use iced::advanced::text::Paragraph as _;
     let paragraph = iced::advanced::graphics::text::Paragraph::with_text(iced::advanced::Text {
         content: text,
         bounds: Size::INFINITE,
         size: size.into(),
         line_height: iced::widget::text::LineHeight::default(),
-        font: DRAWN_FONT,
+        font,
         align_x: iced::advanced::text::Alignment::Default,
         align_y: iced::alignment::Vertical::Top,
         shaping: iced::widget::text::Shaping::default(),

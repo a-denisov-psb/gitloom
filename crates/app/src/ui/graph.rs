@@ -14,22 +14,31 @@ use iced::{alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, 
 
 use crate::app::Message;
 use crate::format;
+use crate::graph_columns::{ColumnId, ColumnWidths};
 use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Selection};
 use crate::theme;
 use crate::ui::muted;
 
 pub const ROW_HEIGHT: f32 = 30.0;
-const COL_REFS: f32 = 200.0;
-const COL_AUTHOR: f32 = 130.0;
-const COL_DATE: f32 = 135.0;
-const COL_SHA: f32 = 70.0;
 const LANE_WIDTH: f32 = 18.0;
 const GRAPH_PADDING: f32 = 6.0;
 const ROW_PADDING: u16 = 8;
 const SCROLLBAR_WIDTH: f32 = 12.0;
-const MIN_MESSAGE_WIDTH: f32 = 200.0;
+/// Optional columns are hidden while the message column would get narrower
+/// than this (until M11-03 removes the automatic hiding).
+const HIDE_BELOW_MESSAGE_WIDTH: f32 = 200.0;
+/// Room the table needs besides its columns: row paddings and scrollbar.
+const FIXED_WIDTH: f32 = 2.0 * ROW_PADDING as f32 + SCROLLBAR_WIDTH;
 const MIN_LANES: u16 = 2;
+/// Narrowest Graph column: one lane (M11-02).
+pub const MIN_GRAPH_WIDTH: f32 = GRAPH_PADDING * 2.0 + LANE_WIDTH;
+/// Width of the fade at the right edge of a clipped Graph column.
+const FADE_WIDTH: f32 = 12.0;
+/// Horizontal padding of a table cell (both sides).
+const CELL_PADDING: f32 = 4.0;
+/// Header label size.
+const HEADER_SIZE: f32 = 11.0;
 const MAX_LANES: u16 = 12;
 const NODE_RADIUS: f32 = 9.0;
 const MERGE_RADIUS: f32 = 4.5;
@@ -48,24 +57,66 @@ const EDGE_OVERLAP: f32 = 2.0;
 /// Rows rendered above and below the viewport.
 const OVERSCAN: usize = 10;
 
-pub fn view<'a>(repo: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Element<'a, Message> {
-    let graph_width = graph_width(repo.snapshot.layout.max_width);
+pub fn view<'a>(
+    repo: &'a RepoView,
+    avatars: &'a crate::avatars::Avatars,
+    widths: &crate::graph_columns::ColumnWidths,
+) -> Element<'a, Message> {
+    let lanes = repo.snapshot.layout.max_width;
+    let widths = widths.sanitized(MIN_GRAPH_WIDTH);
+    let graph_width = widths.width(ColumnId::Graph, graph_width(lanes));
+    // A Graph column narrower than the lanes fades out at its right edge.
+    let clipped = graph_width < lanes_width(lanes);
     // The available width decides which optional columns fit.
     let table = responsive(move |size| {
-        let columns = Columns::fitting(size.width, graph_width);
-        let mut header = row![
-            cell(muted("BRANCH / TAG").size(11), COL_REFS),
-            cell(muted("GRAPH").size(11), graph_width),
-            cell(muted("COMMIT MESSAGE").size(11), Fill),
+        let columns = Columns::fitting(size.width, &widths, graph_width);
+        let message = crate::graph_columns::message_width(
+            size.width,
+            FIXED_WIDTH,
+            columns.sum(&widths, graph_width),
+        );
+        let room = crate::graph_columns::room(message);
+        let header_cell = |label: &'static str, column: ColumnId| -> Element<'_, Message> {
+            let width = widths.width(column, graph_width);
+            let handle = crate::ui::column_handle::column_handle(
+                Message::ColumnDragStarted {
+                    column,
+                    origin: width,
+                    room,
+                },
+                Message::ColumnDragged,
+                Message::ColumnDragEnded,
+                Message::ColumnFit {
+                    column,
+                    origin: width,
+                    room,
+                    table: size.width,
+                },
+            );
+            iced::widget::Stack::with_children([
+                cell(muted(label).size(HEADER_SIZE), width),
+                container(handle)
+                    .width(width)
+                    .height(Fill)
+                    .align_x(alignment::Horizontal::Right)
+                    .into(),
+            ])
+            .width(width)
+            .into()
+        };
+        let mut header: iced::widget::Row<'_, Message> = row![
+            header_cell("BRANCH / TAG", ColumnId::Refs),
+            header_cell("GRAPH", ColumnId::Graph),
+            cell(muted("COMMIT MESSAGE").size(HEADER_SIZE), Fill),
         ];
         if columns.author {
-            header = header.push(cell(muted("AUTHOR").size(11), COL_AUTHOR));
+            header = header.push(header_cell("AUTHOR", ColumnId::Author));
         }
         if columns.date {
-            header = header.push(cell(muted("DATE").size(11), COL_DATE));
+            header = header.push(header_cell("DATE", ColumnId::Date));
         }
         if columns.sha {
-            header = header.push(cell(muted("SHA").size(11), COL_SHA));
+            header = header.push(header_cell("SHA", ColumnId::Sha));
         }
         if repo.search.is_none() {
             let tip = match crate::actions::ActionId::SearchCommits.shortcut_text() {
@@ -95,7 +146,15 @@ pub fn view<'a>(repo: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Ele
             .push(space::vertical().height(first as f32 * ROW_HEIGHT));
         for row_index in first..last {
             rows = rows.push(if row_index < graph_rows {
-                graph_row(repo, avatars, row_index, graph_width, columns)
+                graph_row(
+                    repo,
+                    avatars,
+                    row_index,
+                    &widths,
+                    graph_width,
+                    clipped,
+                    columns,
+                )
             } else {
                 truncated_row()
             });
@@ -200,32 +259,116 @@ pub struct Columns {
 
 impl Columns {
     /// Drops SHA, then date, then author until the message column gets
-    /// at least [`MIN_MESSAGE_WIDTH`] pixels in a table `width` wide.
-    pub fn fitting(width: f32, graph_width: f32) -> Self {
+    /// at least [`HIDE_BELOW_MESSAGE_WIDTH`] pixels in a table `width` wide.
+    pub fn fitting(width: f32, widths: &ColumnWidths, graph_width: f32) -> Self {
         let mut columns = Self {
             author: true,
             date: true,
             sha: true,
         };
-        let fixed = 2.0 * ROW_PADDING as f32 + COL_REFS + graph_width + SCROLLBAR_WIDTH;
-        let message = |c: &Self| {
-            width
-                - fixed
-                - if c.author { COL_AUTHOR } else { 0.0 }
-                - if c.date { COL_DATE } else { 0.0 }
-                - if c.sha { COL_SHA } else { 0.0 }
-        };
-        if message(&columns) < MIN_MESSAGE_WIDTH {
+        let message = |c: &Self| width - FIXED_WIDTH - c.sum(widths, graph_width);
+        if message(&columns) < HIDE_BELOW_MESSAGE_WIDTH {
             columns.sha = false;
         }
-        if message(&columns) < MIN_MESSAGE_WIDTH {
+        if message(&columns) < HIDE_BELOW_MESSAGE_WIDTH {
             columns.date = false;
         }
-        if message(&columns) < MIN_MESSAGE_WIDTH {
+        if message(&columns) < HIDE_BELOW_MESSAGE_WIDTH {
             columns.author = false;
         }
         columns
     }
+
+    /// Summed width of Branch/Tag, Graph and the shown optional columns.
+    pub fn sum(&self, widths: &ColumnWidths, graph_width: f32) -> f32 {
+        widths.refs
+            + graph_width
+            + if self.author { widths.author } else { 0.0 }
+            + if self.date { widths.date } else { 0.0 }
+            + if self.sha { widths.sha } else { 0.0 }
+    }
+}
+
+/// Ref pill geometry, shared by [`pill`] and [`pills_width`].
+const PILL_PADDING: f32 = 6.0;
+const PILL_TEXT_SIZE: f32 = 12.0;
+const PILL_ICON_SIZE: f32 = 11.0;
+const REMOTE_ICON_SIZE: f32 = 12.0;
+const PILL_SPACING: f32 = 4.0;
+/// Size of the "+N" after the first pill.
+const MORE_SIZE: f32 = 11.0;
+
+/// Default text size of the table (the app's default).
+const TEXT_SIZE: f32 = 13.0;
+/// Slack added to measured widths so rounding never clips the text.
+const FIT_SLACK: f32 = 2.0;
+
+/// Optimal width of `column` (double click on its border, M11-02): the
+/// widest content in the visible rows; Graph: all lanes of the loaded
+/// layout, at most half of the `table` width. Not limited here; the caller
+/// applies minimum and room.
+pub fn optimal_column_width(repo: &RepoView, column: ColumnId, table: f32) -> f32 {
+    use crate::overlay::{text_width, text_width_in};
+    if column == ColumnId::Graph {
+        return crate::graph_columns::graph_optimal(
+            lanes_width(repo.snapshot.layout.max_width),
+            table,
+        );
+    }
+    let snapshot = &repo.snapshot;
+    let wip = usize::from(snapshot.has_wip);
+    // Before the first scroll event the height is unknown: a typical window.
+    let height = if repo.scroll.height > 0.0 {
+        repo.scroll.height
+    } else {
+        40.0 * ROW_HEIGHT
+    };
+    let (first, last) = crate::ui::rows_in_view(
+        repo.scroll.offset,
+        height,
+        snapshot.layout.len(),
+        ROW_HEIGHT,
+        0,
+    );
+    let commits = (first.saturating_sub(wip)..last.saturating_sub(wip))
+        .filter_map(|index| snapshot.commits.get(index).map(|commit| (index, commit)));
+    let content = commits
+        .map(|(index, commit)| match column {
+            ColumnId::Refs => {
+                let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
+                pills_width(&ref_labels(&refs, &snapshot.head, commit))
+            }
+            ColumnId::Author => text_width(&commit.author, TEXT_SIZE),
+            ColumnId::Date => text_width(&format::date_time(commit.author_time), TEXT_SIZE),
+            ColumnId::Sha => text_width_in(
+                &commit.id[..commit.id.len().min(7)],
+                TEXT_SIZE,
+                iced::Font::MONOSPACE,
+            ),
+            ColumnId::Graph => 0.0,
+        })
+        .fold(0.0_f32, f32::max);
+    content + 2.0 * CELL_PADDING + FIT_SLACK
+}
+
+/// Width of the pill group [`ref_pills`] draws for `labels`.
+fn pills_width(labels: &[RefLabel]) -> f32 {
+    use crate::overlay::text_width;
+    let Some(first) = labels.first() else {
+        return 0.0;
+    };
+    // Padding 6 on both sides and the 1 px border.
+    let mut pill = 2.0 * PILL_PADDING + 2.0 + text_width(&first.text, PILL_TEXT_SIZE);
+    if first.head && first.kind == LabelKind::Local {
+        pill += PILL_ICON_SIZE + PILL_SPACING;
+    }
+    if !first.remotes.is_empty() {
+        pill += REMOTE_ICON_SIZE + PILL_SPACING;
+    }
+    if labels.len() > 1 {
+        pill += PILL_SPACING + text_width(&format!("+{}", labels.len() - 1), MORE_SIZE);
+    }
+    pill
 }
 
 /// Rows `first..last` intersecting the viewport, extended by [`OVERSCAN`].
@@ -252,12 +395,19 @@ pub fn graph_width(lanes: u16) -> f32 {
     GRAPH_PADDING * 2.0 + LANE_WIDTH * f32::from(lanes)
 }
 
+/// Width all `lanes` need (at least one): the optimal Graph width.
+pub fn lanes_width(lanes: u16) -> f32 {
+    GRAPH_PADDING * 2.0 + LANE_WIDTH * f32::from(lanes.max(1))
+}
+
 /// One table row: the WIP row or a commit row.
 pub fn graph_row<'a>(
     repo: &'a RepoView,
     avatars: &crate::avatars::Avatars,
     row_index: usize,
+    widths: &ColumnWidths,
     graph_width: f32,
+    clipped: bool,
     columns: Columns,
 ) -> Element<'a, Message> {
     let snapshot = &repo.snapshot;
@@ -288,10 +438,13 @@ pub fn graph_row<'a>(
             _ => text("").into(),
         };
         let content = row![
-            cell(refs, COL_REFS),
-            cell(
+            cell(refs, widths.refs),
+            graph_column(
                 graph_cell(layout_row, row_index, Node::Wip, false),
                 graph_width,
+                clipped,
+                repo.selection == Some(Selection::Wip),
+                color,
             ),
             cell(summary, Fill),
         ];
@@ -328,6 +481,8 @@ pub fn graph_row<'a>(
         text(&commit.summary)
     };
 
+    let selected =
+        repo.selected_commit() == Some(commit.id.as_str()) || repo.multi.contains(&commit.id);
     let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
     let refs_cell: Element<'_, Message> = match &repo.new_branch {
         Some(input) if input.row.as_deref() == Some(commit.id.as_str()) => new_branch_input(input),
@@ -337,35 +492,38 @@ pub fn graph_row<'a>(
         ),
     };
     let mut content = row![
-        cell(refs_cell, COL_REFS),
-        cell(
+        cell(refs_cell, widths.refs),
+        graph_column(
             graph_with_avatar(layout_row, row_index, node, dimmed),
             graph_width,
+            clipped,
+            selected,
+            color,
         ),
         cell(summary.wrapping(text::Wrapping::None), Fill),
     ];
     if columns.author {
         content = content.push(cell(
             muted(&commit.author).wrapping(text::Wrapping::None),
-            COL_AUTHOR,
+            widths.author,
         ));
     }
     if columns.date {
         content = content.push(cell(
             muted(format::date_time(commit.author_time)).wrapping(text::Wrapping::None),
-            COL_DATE,
+            widths.date,
         ));
     }
     if columns.sha {
         content = content.push(cell(
             muted(&commit.id[..commit.id.len().min(7)]).font(iced::Font::MONOSPACE),
-            COL_SHA,
+            widths.sha,
         ));
     }
 
     let row = row_button(
         content,
-        repo.selected_commit() == Some(commit.id.as_str()) || repo.multi.contains(&commit.id),
+        selected,
         color,
         Message::CommitSelected(commit.id.clone()),
     );
@@ -513,7 +671,9 @@ fn ref_pills<'a>(
     let Some(first) = labels.first() else {
         return text("").into();
     };
-    let mut pills = row![pill(first, drag)].spacing(4).align_y(iced::Center);
+    let mut pills = row![pill(first, drag)]
+        .spacing(PILL_SPACING)
+        .align_y(iced::Center);
     if labels.len() > 1 {
         let rest = Column::with_children(
             labels[1..]
@@ -522,7 +682,7 @@ fn ref_pills<'a>(
         )
         .spacing(2);
         pills = pills.push(tooltip(
-            muted(format!("+{}", labels.len() - 1)).size(11),
+            muted(format!("+{}", labels.len() - 1)).size(MORE_SIZE),
             container(rest).padding([4, 8]).style(theme::tooltip),
             tooltip::Position::Bottom,
         ));
@@ -537,20 +697,20 @@ fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> El
         LabelKind::Tag => RefKind::Tag,
         LabelKind::DetachedHead => RefKind::LocalBranch,
     };
-    let mut content = row![].spacing(4).align_y(iced::Center);
+    let mut content = row![].spacing(PILL_SPACING).align_y(iced::Center);
     if label.head && label.kind == LabelKind::Local {
-        content = content.push(icons::icon(Icon::Check, 11.0));
+        content = content.push(icons::icon(Icon::Check, PILL_ICON_SIZE));
     }
     content = content.push(
         text(label.text.clone())
-            .size(12)
+            .size(PILL_TEXT_SIZE)
             .wrapping(text::Wrapping::None),
     );
     if !label.remotes.is_empty() {
         // GitKraken shows a remote icon on combined pills; the names are
         // in the tooltip.
         content = content.push(tooltip(
-            icons::tinted(Icon::Cloud, 12.0, |p| p.text_muted),
+            icons::tinted(Icon::Cloud, REMOTE_ICON_SIZE, |p| p.text_muted),
             container(text(label.remotes.join(", ")).size(12))
                 .padding([4, 8])
                 .style(theme::tooltip),
@@ -558,7 +718,7 @@ fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> El
         ));
     }
     let pill = container(content)
-        .padding([1, 6])
+        .padding([1.0, PILL_PADDING])
         .clip(true)
         .style(theme::ref_pill(kind, label.head));
     let pill: Element<'_, Message> = match &label.checkout {
@@ -598,6 +758,36 @@ fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> El
     }
 }
 
+/// Graph cell `width` wide, with a fade at its right edge when it clips the
+/// lanes (M11-02).
+fn graph_column(
+    graph: Element<'_, Message>,
+    width: f32,
+    clipped: bool,
+    selected: bool,
+    lane_color: u32,
+) -> Element<'_, Message> {
+    let graph = cell(graph, width);
+    if !clipped {
+        return graph;
+    }
+    iced::widget::Stack::with_children([
+        graph,
+        container(
+            container(space::horizontal())
+                .width(FADE_WIDTH)
+                .height(Fill)
+                .style(theme::graph_fade(selected, lane_color)),
+        )
+        .width(width)
+        .height(Fill)
+        .align_x(alignment::Horizontal::Right)
+        .into(),
+    ])
+    .width(width)
+    .into()
+}
+
 fn cell<'a>(
     content: impl Into<Element<'a, Message>>,
     width: impl Into<Length>,
@@ -605,7 +795,7 @@ fn cell<'a>(
     container(content)
         .width(width)
         .height(Fill)
-        .padding([0, 4])
+        .padding([0.0, CELL_PADDING])
         .align_y(alignment::Vertical::Center)
         .clip(true)
         .into()
@@ -779,6 +969,11 @@ impl canvas::Program<Message> for GraphCell {
             }
             Node::Commit { initials, .. } => {
                 frame.fill(&Path::circle(node, NODE_RADIUS), color);
+                // Canvas text escapes the cell's clip: a node cut off by a
+                // narrow Graph column (M11-02) shows no initials.
+                if node.x + NODE_RADIUS > bounds.width {
+                    return vec![frame.into_geometry()];
+                }
                 frame.fill_text(canvas::Text {
                     content: initials.clone(),
                     position: node,
@@ -1118,19 +1313,32 @@ mod tests {
     #[test]
     fn optional_columns_drop_in_order() {
         let graph = graph_width(4);
-        let fixed = 2.0 * ROW_PADDING as f32 + COL_REFS + graph + SCROLLBAR_WIDTH;
-        let all = fixed + MIN_MESSAGE_WIDTH + COL_AUTHOR + COL_DATE + COL_SHA;
+        let w = ColumnWidths::default();
+        let all =
+            FIXED_WIDTH + w.refs + graph + HIDE_BELOW_MESSAGE_WIDTH + w.author + w.date + w.sha;
         let columns = |author, date, sha| Columns { author, date, sha };
-        assert_eq!(Columns::fitting(all, graph), columns(true, true, true));
+        assert_eq!(Columns::fitting(all, &w, graph), columns(true, true, true));
         assert_eq!(
-            Columns::fitting(all - 1.0, graph),
+            Columns::fitting(all - 1.0, &w, graph),
             columns(true, true, false)
         );
         assert_eq!(
-            Columns::fitting(all - COL_SHA - 1.0, graph),
+            Columns::fitting(all - w.sha - 1.0, &w, graph),
             columns(true, false, false)
         );
-        assert_eq!(Columns::fitting(300.0, graph), columns(false, false, false));
+        assert_eq!(
+            Columns::fitting(300.0, &w, graph),
+            columns(false, false, false)
+        );
+        // Wider columns leave less room.
+        let wide = ColumnWidths {
+            refs: w.refs + 50.0,
+            ..w
+        };
+        assert_eq!(
+            Columns::fitting(all, &wide, graph),
+            columns(true, true, false)
+        );
     }
 
     #[test]

@@ -873,6 +873,81 @@ mod tests {
         snapshot(&app, "context-menu-wide");
     }
 
+    /// Dragging the border right of BRANCH / TAG with real mouse events
+    /// resizes the column; a double click sets its optimal width (M11-02).
+    /// Layout only, so part of every test run.
+    #[test]
+    fn graph_header_border_drags_and_fits() {
+        use iced::mouse::{Button, Event as Mouse};
+        use iced::{Event, Point};
+        let mut app = crate::app::tests::graph_app();
+        let messages = |app: &App, events: Vec<Event>, at: Point| -> Vec<Message> {
+            let mut sim = simulator(app);
+            sim.point_at(at);
+            let _ = sim.simulate(events);
+            sim.into_messages().collect()
+        };
+        let label = {
+            let mut sim = simulator(&app);
+            let label = sim
+                .find("BRANCH / TAG")
+                .unwrap_or_else(|e| panic!("no header: {e}"));
+            iced_test::selector::Bounded::bounds(&label)
+        };
+        // The label starts after the cell padding; the handle lies over the
+        // right edge of the 200 px cell.
+        let border = Point::new(label.x - 4.0 + 200.0 - 2.0, label.center_y());
+        let drag = vec![
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+            Event::Mouse(Mouse::CursorMoved {
+                position: Point::new(border.x + 25.0, border.y),
+            }),
+            Event::Mouse(Mouse::CursorMoved {
+                position: Point::new(border.x + 40.0, border.y + 300.0),
+            }),
+            Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+        ];
+        for message in messages(&app, drag, border) {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.settings.appearance.graph_columns.refs, 240.0);
+        assert!(app.column_drag.is_none());
+
+        // Double click on the moved border: optimal width.
+        let border = Point::new(border.x + 40.0, border.y);
+        let click = [
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+            Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+        ];
+        let double: Vec<Event> = click.iter().chain(click.iter()).cloned().collect();
+        let produced = messages(&app, double, border);
+        assert!(
+            produced
+                .iter()
+                .any(|m| matches!(m, Message::ColumnFit { .. })),
+            "{produced:?}"
+        );
+        for message in produced {
+            let _ = app.update(message);
+        }
+        let refs = app.settings.appearance.graph_columns.refs;
+        // The widest pill group: "feature".
+        let pill = crate::overlay::text_width("feature", 12.0) + 14.0;
+        assert!(refs > pill && refs < 200.0, "{refs}");
+        // A press elsewhere in the header does not start a drag.
+        let produced = messages(
+            &app,
+            vec![Event::Mouse(Mouse::ButtonPressed(Button::Left))],
+            Point::new(label.center_x(), label.center_y()),
+        );
+        assert!(
+            !produced
+                .iter()
+                .any(|m| matches!(m, Message::ColumnDragStarted { .. })),
+            "{produced:?}"
+        );
+    }
+
     /// The section counts of a scrolling left panel end left of its
     /// scrollbar (M6-22). Layout only, so part of every test run.
     #[test]
@@ -982,6 +1057,30 @@ mod tests {
             for (zoom, size) in [(100, SIZE), (200, (SIZE.0 / 2.0, SIZE.1 / 2.0))] {
                 snapshot_sized(&app, &format!("graph-lines-{theme}-{zoom}"), size);
             }
+        }
+    }
+
+    /// Resized graph columns (M11-02): a Graph column of one lane clips the
+    /// lanes with a fade; wider Branch/Tag and Author columns; both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_graph_columns() {
+        let mut app = crate::app::tests::graph_app();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            app.settings.appearance.graph_columns = crate::graph_columns::ColumnWidths {
+                refs: 120.0,
+                graph: Some(crate::ui::MIN_GRAPH_WIDTH),
+                author: 180.0,
+                ..Default::default()
+            };
+            snapshot(&app, &format!("graph-columns-narrow-{theme}"));
+            app.settings.appearance.graph_columns.graph = Some(160.0);
+            snapshot(&app, &format!("graph-columns-wide-{theme}"));
         }
     }
 
