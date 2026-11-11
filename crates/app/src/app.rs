@@ -715,6 +715,11 @@ pub enum Message {
     SigningProgramInput(String),
     SigningProgramSave,
     SigningRefresh,
+    /// Stash message template (M10-10).
+    StashTemplateToggled(bool),
+    /// A preset or "Custom" picked from the dropdown.
+    StashTemplateChosen(String),
+    StashTemplateInput(String),
     /// Small options (M10-08).
     PruneToggled(bool),
     DeleteOrigToggled(bool),
@@ -4690,6 +4695,36 @@ impl App {
         )
     }
 
+    /// What the stash template gives for the active repository right now,
+    /// `None` when it is off or gives no message (M10-10).
+    pub fn stash_template_preview(&self) -> Option<crate::stash_template::Rendered> {
+        let view = self.active_tab().and_then(Tab::view)?;
+        let head = view.head_commit();
+        let context = crate::stash_template::Context {
+            branch: view.snapshot.head.branch().map(str::to_owned),
+            sha: view
+                .snapshot
+                .head
+                .target()
+                .map(|id| id[..id.len().min(7)].to_owned())
+                .unwrap_or_default(),
+            summary: head.map(|c| c.summary.clone()).unwrap_or_default(),
+            now: i64::try_from(crate::update::now()).unwrap_or(i64::MAX),
+        };
+        Some(crate::stash_template::render(
+            &self.settings.templates.stash_template,
+            &context,
+        ))
+    }
+
+    fn stash_template_message(&self) -> Option<String> {
+        if !self.settings.templates.stash_enabled {
+            return None;
+        }
+        self.stash_template_preview()
+            .and_then(|r| r.message().map(str::to_owned))
+    }
+
     /// Loads the commit template of the active repository (M10-06).
     fn load_template(&mut self) -> Task<Message> {
         let Some(root) = self.active_repo_path().map(|(_, path)| path) else {
@@ -5088,6 +5123,24 @@ impl App {
                 }
             }
             Message::CrashReportDismissed => self.crash_notice = None,
+            Message::StashTemplateToggled(on) => {
+                self.settings.templates.stash_enabled = on;
+                return self.save_settings();
+            }
+            Message::StashTemplateChosen(choice) => {
+                let custom = choice == STASH_CUSTOM;
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.stash_custom = custom;
+                }
+                if !custom {
+                    self.settings.templates.stash_template = choice;
+                }
+                return self.save_settings();
+            }
+            Message::StashTemplateInput(text) => {
+                self.settings.templates.stash_template = text;
+                return self.save_settings();
+            }
             Message::PruneToggled(on) => {
                 self.settings.general.prune_on_fetch = on;
                 return self.save_settings();
@@ -6953,8 +7006,12 @@ impl App {
             Message::StashPush | Message::StashPop(_) | Message::StashApply(_)
                 if self.state_blocked(Guarded::Stash) => {}
             Message::StashPush => {
+                // The stash message template applies when no message was
+                // entered (M10-10).
+                let message = self.stash_template_message();
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
-                    return self.run_write(tab, "Stash", |git| git.stash_push(None));
+                    return self
+                        .run_write(tab, "Stash", move |git| git.stash_push(message.as_deref()));
                 }
             }
             Message::StashPop(id) => return self.apply_stash(id, true),
@@ -9610,6 +9667,9 @@ fn global_event(event: Event, status: event::Status, window: window::Id) -> Opti
 }
 
 /// Why committing is not possible right now, if it is not.
+/// Dropdown entry for a custom stash message template (M10-10).
+pub const STASH_CUSTOM: &str = "Custom";
+
 /// Why a file cannot be opened in the external editor (M8-08).
 pub const NOT_IN_WORKTREE: &str = "The file does not exist in the working tree";
 
@@ -13193,6 +13253,76 @@ pub(crate) mod tests {
             text: "Write a commit message.\n\nBranch: main\n".into(),
             notes: vec!["1 diff omitted (binary)".into()],
         }
+    }
+
+    #[test]
+    fn stash_template_gives_the_stash_message() {
+        let mut app = ready_app(&["c"]);
+        // Off: Git's default message.
+        assert_eq!(app.stash_template_message(), None);
+        let _ = app.update(Message::StashTemplateToggled(true));
+        let _ = app.update(Message::StashTemplateChosen("{branch}: {summary}".into()));
+        // `ready_app` is detached at "c".
+        assert_eq!(app.stash_template_message().as_deref(), Some("detached:"));
+        let _ = app.update(Message::StashTemplateChosen(STASH_CUSTOM.into()));
+        assert!(app.settings_page.is_none() || app.settings_page.as_ref().unwrap().stash_custom);
+        let _ = app.update(Message::StashTemplateInput("{bad}".into()));
+        assert_eq!(app.stash_template_message(), None, "unknown placeholder");
+        let _ = app.update(Message::StashTemplateInput("Saved {sha}".into()));
+        assert_eq!(app.stash_template_message().as_deref(), Some("Saved c"));
+        // The toolbar stash runs with it.
+        let _ = app.update(git_available());
+        let _ = app.update(Message::StashPush);
+        assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stash"));
+    }
+
+    /// The rendered template ends up in `git stash list`; without one Git
+    /// writes its default message.
+    #[test]
+    fn stash_list_shows_the_rendered_message() {
+        use git_core::GitWriter as _;
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&status.stdout).trim().to_owned()
+        };
+        git(&["init", "--quiet", "-b", "main"]);
+        std::fs::write(dir.path().join("a.txt"), "a\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&[
+            "-c",
+            "commit.gpgSign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "Base",
+        ]);
+        let context = crate::stash_template::Context {
+            branch: Some("main".into()),
+            sha: "abc1234".into(),
+            summary: "Base".into(),
+            now: 1_794_393_720,
+        };
+        let rendered = crate::stash_template::render("{branch} · {datetime}", &context);
+        let cli = git_core::CliBackend::new(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+        cli.stash_push(rendered.message()).unwrap();
+        assert_eq!(
+            git(&["stash", "list", "--format=%gs"]),
+            "On main: main · 2026-11-11 10:42"
+        );
+        std::fs::write(dir.path().join("a.txt"), "again\n").unwrap();
+        cli.stash_push(None).unwrap();
+        assert!(git(&["stash", "list", "-1", "--format=%gs"]).starts_with("WIP on main:"));
     }
 
     #[test]

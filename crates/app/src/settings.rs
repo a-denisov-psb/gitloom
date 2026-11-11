@@ -36,12 +36,18 @@ pub struct Settings {
 pub struct Templates {
     /// Instruction at the top of the commit message prompt.
     pub commit_prompt: String,
+    /// "Use stash message template" (M10-10); off: Git's default message.
+    pub stash_enabled: bool,
+    /// The stash message template (a preset or a custom text).
+    pub stash_template: String,
 }
 
 impl Default for Templates {
     fn default() -> Self {
         Self {
             commit_prompt: git_core::prompt::DEFAULT_INSTRUCTION.to_owned(),
+            stash_enabled: false,
+            stash_template: crate::stash_template::PRESETS[0].to_owned(),
         }
     }
 }
@@ -429,6 +435,9 @@ pub struct Page {
     pub signing: Option<Result<SigningPage, String>>,
     /// Typed GPG program (saved with Save).
     pub gpg_program_input: String,
+    /// "Custom" was picked for the stash template while its text still
+    /// matches a preset (M10-10).
+    pub stash_custom: bool,
     /// `core.longpaths` of the global config (Windows, M10-08); `None`
     /// while loading.
     pub long_paths: Option<bool>,
@@ -512,6 +521,7 @@ impl Page {
             signing: None,
             gpg_program_input: String::new(),
             long_paths: None,
+            stash_custom: false,
             template: None,
             template_summary: String::new(),
         }
@@ -751,8 +761,15 @@ mod tests {
             old.templates.commit_prompt,
             git_core::prompt::DEFAULT_INSTRUCTION
         );
+        assert!(!old.templates.stash_enabled);
+        assert_eq!(
+            old.templates.stash_template,
+            crate::stash_template::PRESETS[0]
+        );
         let mut settings = Settings::default();
         settings.templates.commit_prompt = "Be brief.".into();
+        settings.templates.stash_enabled = true;
+        settings.templates.stash_template = "{sha}".into();
         assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
     }
 

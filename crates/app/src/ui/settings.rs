@@ -520,9 +520,89 @@ fn templates(app: &App) -> Element<'_, Message> {
             .padding([5, 12])
             .style(button::secondary),
         muted("Commit template: set per repository in Repository · <name> → Commit.").size(12),
+        space::vertical().height(12),
+        stash_template(app),
     ]
     .spacing(10)
     .into()
+}
+
+/// "Stash message" (M10-10): like the external editor setting, a switch,
+/// a preset list with "Custom" and a text field for a custom template.
+fn stash_template(app: &App) -> Element<'_, Message> {
+    use crate::stash_template::{preset_hint, Rendered, PRESETS};
+    let templates = &app.settings.templates;
+    let enabled = templates.stash_enabled;
+    let custom = app.settings_page.as_ref().is_some_and(|p| p.stash_custom)
+        || !PRESETS.contains(&templates.stash_template.as_str());
+    let selected = if custom {
+        crate::app::STASH_CUSTOM.to_owned()
+    } else {
+        templates.stash_template.clone()
+    };
+    let options: Vec<String> = PRESETS
+        .iter()
+        .map(|p| (*p).to_owned())
+        .chain(std::iter::once(crate::app::STASH_CUSTOM.to_owned()))
+        .collect();
+    let choice: Element<'_, Message> = if enabled {
+        iced::widget::pick_list(options, Some(selected), Message::StashTemplateChosen)
+            .width(Length::Fixed(420.0))
+            .into()
+    } else {
+        // Disabled while the switch is off.
+        text_input("", &selected)
+            .padding(6)
+            .style(theme::input)
+            .width(Length::Fixed(420.0))
+            .into()
+    };
+    let mut section = column![
+        text("Stash message").size(15),
+        iced::widget::checkbox(enabled)
+            .label("Use stash message template")
+            .on_toggle(Message::StashTemplateToggled),
+        choice,
+    ]
+    .spacing(10);
+    if enabled && custom {
+        section = section.push(
+            text_input("{branch} · {datetime}", &templates.stash_template)
+                .on_input(Message::StashTemplateInput)
+                .padding(6)
+                .style(theme::input)
+                .width(Length::Fixed(420.0)),
+        );
+    }
+    if let Some(hint) = preset_hint(&templates.stash_template).filter(|_| enabled && !custom) {
+        section = section.push(muted(hint).size(12));
+    }
+    let preview = app.stash_template_preview();
+    let line = match &preview {
+        None => muted("Open a repository to see a preview").size(12),
+        Some(rendered @ (Rendered::Empty | Rendered::Unknown(_))) => {
+            text(rendered.hint().unwrap_or_default()).size(12).style(
+                if matches!(rendered, Rendered::Unknown(_)) {
+                    theme::text_danger
+                } else {
+                    theme::text_muted
+                },
+            )
+        }
+        Some(Rendered::Message(message)) => muted(format!("Preview: {message}")).size(12),
+    };
+    if enabled {
+        section = section.push(line);
+    }
+    section
+        .push(
+            muted(
+                "Placeholders: {branch} (\"detached\" without a branch), {date}, {time}, \
+                 {datetime}, {sha}, {summary}. A message you enter for a stash always wins.",
+            )
+            .size(12),
+        )
+        .into()
 }
 
 /// Preferences → Signing (M10-04): format, key, GPG program and the

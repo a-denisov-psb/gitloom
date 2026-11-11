@@ -711,6 +711,33 @@ mod tests {
         snapshot(&app, "toolbar-without-labels");
     }
 
+    /// Preferences → Templates with the stash message template (M10-10):
+    /// off, a preset, custom with an unknown placeholder; both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_stash_template() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = ready_app(&["c"]);
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let _ = app.update(Message::SettingsOpenedAt(
+                crate::settings::Category::Templates,
+            ));
+            snapshot(&app, &format!("stash-template-0-off-{theme}"));
+            let _ = app.update(Message::StashTemplateToggled(true));
+            let _ = app.update(Message::StashTemplateChosen("{branch}/{datetime}".into()));
+            snapshot(&app, &format!("stash-template-1-preset-{theme}"));
+            let _ = app.update(Message::StashTemplateChosen(
+                crate::app::STASH_CUSTOM.into(),
+            ));
+            let _ = app.update(Message::StashTemplateInput("{branch} {user}".into()));
+            snapshot(&app, &format!("stash-template-2-custom-{theme}"));
+        }
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
