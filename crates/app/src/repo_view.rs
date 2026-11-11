@@ -683,6 +683,13 @@ impl RepoView {
     pub fn commit_message(&self) -> String {
         let summary = self.summary.trim();
         let description = self.description.text();
+        // "Remove comments from commit messages" (M10-06).
+        let options = &self.snapshot.template_options;
+        let description = if options.remove_comments {
+            git_core::commit_template::strip_comment_lines(&description, &options.comment_char)
+        } else {
+            description
+        };
         let description = description.trim();
         if description.is_empty() {
             summary.to_owned()
@@ -841,11 +848,24 @@ impl RepoView {
             Some(_) => {}
             None => {
                 self.merge_prefilled = None;
-                if empty {
+                // M10-06: summary line, blank line, description; only while
+                // "Apply this template" is on, never while amending.
+                let options = &self.snapshot.template_options;
+                if empty && options.apply && !self.amend {
                     if let Some(template) = &self.snapshot.commit_template {
-                        self.description = iced::widget::text_editor::Content::with_text(
-                            &strip_comments(template),
-                        );
+                        let text = if options.remove_comments {
+                            git_core::commit_template::strip_comment_lines(
+                                template,
+                                &options.comment_char,
+                            )
+                        } else {
+                            template.clone()
+                        };
+                        let (summary, description) =
+                            git_core::commit_template::split_template(&text);
+                        self.summary = summary;
+                        self.description =
+                            iced::widget::text_editor::Content::with_text(&description);
                     }
                 }
             }

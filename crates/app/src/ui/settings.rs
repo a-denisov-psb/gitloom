@@ -61,6 +61,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::ExternalTools => external_tools(&app.settings, page),
         Category::Identity => repository_identity(app),
         Category::SshKey => ssh_key(app, page),
+        Category::Commit => commit_template(app, page),
         Category::Gitflow => gitflow(app, page),
     };
 
@@ -135,6 +136,7 @@ fn category_title(app: &App, category: Category) -> String {
         (Category::Gitflow, Some(name)) => format!("Gitflow · {name}"),
         (Category::Identity, Some(name)) => format!("Identity · {name}"),
         (Category::SshKey, Some(name)) => format!("SSH key · {name}"),
+        (Category::Commit, Some(name)) => format!("Commit · {name}"),
         _ => category.title().to_owned(),
     }
 }
@@ -419,6 +421,79 @@ fn field<'a>(
         content = content.push(muted(note).size(12));
     }
     content.into()
+}
+
+/// Preferences → Repository → Commit (M10-06): like GitKraken's "Commit
+/// Template": apply and remove-comments options, summary with counter,
+/// description, save.
+fn commit_template<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
+    let settings = match &page.template {
+        None => return muted("Loading…").into(),
+        Some(Err(error)) => {
+            return text(format!("Could not read the commit template: {error}"))
+                .style(theme::text_danger)
+                .into()
+        }
+        Some(Ok(settings)) => settings,
+    };
+    let options = &settings.options;
+    let check = |label: &'static str, on: bool, apply: bool| {
+        iced::widget::checkbox(on)
+            .label(label)
+            .on_toggle(move |on| Message::TemplateOptionToggled { apply, on })
+    };
+    let remaining = 72_i64 - page.template_summary.chars().count() as i64;
+    let summary = row![
+        text_input("Summary", &page.template_summary)
+            .on_input(Message::TemplateSummaryInput)
+            .padding(6)
+            .style(theme::input)
+            .width(Length::Fixed(480.0)),
+        muted(remaining.to_string()).size(11),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    let description = iced::widget::text_editor(&app.template_description)
+        .placeholder("Description")
+        .on_action(Message::TemplateDescriptionEdited)
+        .padding(6)
+        .style(theme::editor)
+        .height(140)
+        .width(480.0);
+    let location = match &settings.file {
+        Some(file) if file.shared() => format!(
+            "Stored in {} (commit.template, {} config: used by all repositories).",
+            file.path.display(),
+            file.scope
+        ),
+        Some(file) => format!("Stored in {} (commit.template).", file.path.display()),
+        None => format!(
+            "Saving creates .git/{}/commit-template.txt and sets commit.template for this \
+             repository.",
+            git_core::identity::BINARY_NAME
+        ),
+    };
+    column![
+        check(
+            "Apply this template to commit messages",
+            options.apply,
+            true
+        ),
+        check(
+            "Remove comments from commit messages",
+            options.remove_comments,
+            false
+        ),
+        field("Summary", summary.into(), None),
+        description,
+        button(text("Save commit template"))
+            .on_press(Message::TemplateSave)
+            .padding([6, 14])
+            .style(button::primary),
+        muted(location).size(12),
+    ]
+    .spacing(14)
+    .into()
 }
 
 /// Preferences → Signing (M10-04): format, key, GPG program and the
