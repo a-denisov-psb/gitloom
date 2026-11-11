@@ -39,6 +39,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- Commit and stash details say "1 changed file" instead of "1 changed files".
 - Icons stay sharp at fractional zoom levels and display scale factors (110 %, 125 %, 150 %): their size and position snap to whole physical pixels.
 - UTF-16 text files with a byte order mark (for example written by PowerShell 5) are shown as text with their encoding instead of "Binary file not shown"; their lines, blocks and hunks cannot be staged one by one, the whole file can.
 

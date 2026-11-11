@@ -389,7 +389,7 @@ fn details<'a>(
 
     let files: Element<'a, Message> = match view.details.as_ref().map(|d| &d.changes) {
         Some(Loadable::Ready(DetailChanges::Commit(changes))) => column![
-            muted(format!("{} changed files", changes.len())),
+            muted(changed_files(changes.len())),
             Column::with_children(
                 changes
                     .iter()
@@ -448,6 +448,15 @@ fn signature_badge<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>
     })
 }
 
+/// "1 changed file", "0 changed files", "2 changed files".
+pub(crate) fn changed_files(count: usize) -> String {
+    if count == 1 {
+        "1 changed file".to_owned()
+    } else {
+        format!("{count} changed files")
+    }
+}
+
 /// "email · authored date", without the separator when the email is empty.
 pub(crate) fn author_line(email: &str, time: i64) -> String {
     let date = format::date_time(time);
@@ -465,7 +474,7 @@ fn stash_files<'a>(
     changes: &'a git_core::StashChanges,
 ) -> Element<'a, Message> {
     use git_core::StashPart;
-    let mut content = column![muted(format!("{} changed files", changes.file_count()))].spacing(8);
+    let mut content = column![muted(changed_files(changes.file_count()))].spacing(8);
     for (title, part, files) in [
         ("Staged", StashPart::Staged, &changes.staged),
         ("Unstaged", StashPart::Unstaged, &changes.unstaged),
@@ -650,6 +659,13 @@ pub(crate) fn with_tooltip_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changed_files_plural() {
+        assert_eq!(changed_files(0), "0 changed files");
+        assert_eq!(changed_files(1), "1 changed file");
+        assert_eq!(changed_files(2), "2 changed files");
+    }
 
     #[test]
     fn counter_warns_at_ten_and_turns_red_below_zero() {
