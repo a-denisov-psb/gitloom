@@ -180,11 +180,13 @@ Note (2026-11-11): done. `fetch_all`, `pull` and `fetch_remote_args` take the pr
 
 Acceptance: docs reviewed against the implemented behavior.
 
-### [ ] M10-10 Templates page and stash message template
+### [x] M10-10 Templates page and stash message template
 
 - Preferences → Templates per the decisions table; move the commit message prompt section; stash message template with presets, custom, validation and preview; the stash push uses the rendered template when enabled and no message was entered.
 
 Acceptance: unit tests for rendering (every placeholder, detached HEAD, unknown placeholder, empty custom); integration test: stash with template on → `git stash list` shows the rendered message; off → Git's default; an entered message wins; settings migration test; snapshots of the Templates page (off, preset, custom with an unknown placeholder) in both themes.
+
+Note (2026-11-11): done. The Templates page itself came with M10-07; this task adds the "Stash message" section and `stash_template.rs` (pure rendering, presets, hints). Dates use the same UTC clock as the graph's date column. The toolbar/palette Stash (`Message::StashPush`) is the only stash without an entered message; "Stash and checkout/merge" keep their own messages ("an entered message wins"). While the switch is off the dropdown shows as a disabled field (iced 0.14's pick list has no disabled state). An unknown placeholder or an empty custom text falls back to Git's default message. Tests: unit tests in `stash_template.rs`, app `stash_template_gives_the_stash_message`, `stash_list_shows_the_rendered_message` (real repository), settings migration; snapshots `ui_check_stash_template` (off, preset, custom with unknown placeholder; dark/light) checked.
 
 ### [ ] M10-11 External editor per repository
 

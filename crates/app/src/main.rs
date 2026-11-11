@@ -36,6 +36,7 @@ mod session;
 mod settings;
 mod shortcuts;
 mod snapshot;
+mod stash_template;
 mod theme;
 mod ui;
 #[cfg(test)]
