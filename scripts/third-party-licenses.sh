@@ -36,8 +36,14 @@ cargo about generate --locked scripts/third-party/list.tsv.hbs -o "$out_dir/list
     printf '```\n\n'
     printf '### Iced icon font\n\n'
     printf 'The icon font embedded by iced (`Iced-Icons.ttf`) is part of the iced crates and covered by their MIT license above.\n'
+    printf '\n### .gitignore templates (CC0-1.0)\n\n'
+    printf 'Templates under `crates/git-core/assets/gitignore/` (C++, Go, Java, JetBrains, macOS, Node, Python, Rust, VisualStudio, Windows), https://github.com/github/gitignore\n\n'
+    printf '```text\n'
+    cat crates/git-core/assets/gitignore/LICENSE
+    printf '```\n'
 } >> "$out_dir/notices.md"
 printf 'Lucide icons\t-\tISC\n' >> "$out_dir/list.tsv"
+printf 'gitignore templates\t-\tCC0-1.0\n' >> "$out_dir/list.tsv"
 # Drop blank lines of the template.
 grep -v '^$' "$out_dir/list.tsv" > "$out_dir/list.clean.tsv"
 
