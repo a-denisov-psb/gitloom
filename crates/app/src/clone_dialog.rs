@@ -172,3 +172,110 @@ mod tests {
         assert_eq!(d.progress_text().as_deref(), Some("Receiving objects 45 %"));
     }
 }
+
+/// "Start a local repository" dialog (M10-03): state and validation.
+#[derive(Debug, Clone)]
+pub struct InitDialog {
+    pub tab: TabId,
+    pub name: String,
+    /// "Initialize in": the parent folder.
+    pub parent: String,
+    /// Prefilled from `init.defaultBranch`, else `main`.
+    pub branch: String,
+    branch_edited: bool,
+    pub readme: bool,
+    /// Bundled `.gitignore` template, `None` for none.
+    pub gitignore: Option<String>,
+    pub error: Option<String>,
+    pub running: bool,
+}
+
+/// Label of "no template" in the `.gitignore` choice.
+pub const NO_GITIGNORE: &str = "None";
+
+impl InitDialog {
+    pub fn new(tab: TabId, parent: String) -> Self {
+        Self {
+            tab,
+            name: String::new(),
+            parent,
+            branch: "main".into(),
+            branch_edited: false,
+            readme: true,
+            gitignore: None,
+            error: None,
+            running: false,
+        }
+    }
+
+    /// The configured default branch arrived (`init.defaultBranch`).
+    pub fn default_branch_loaded(&mut self, branch: Option<String>) {
+        if let Some(branch) = branch.filter(|b| !b.trim().is_empty()) {
+            if !self.branch_edited {
+                self.branch = branch;
+            }
+        }
+    }
+
+    pub fn set_branch(&mut self, branch: String) {
+        self.branch_edited = true;
+        self.branch = branch;
+        self.error = None;
+    }
+
+    pub fn full_path(&self) -> Option<PathBuf> {
+        let (parent, name) = (self.parent.trim(), self.name.trim());
+        (!parent.is_empty() && !name.is_empty()).then(|| PathBuf::from(parent).join(name))
+    }
+
+    /// What is missing before the repository can be created (no I/O).
+    pub fn problem(&self) -> Option<&'static str> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            Some("Enter a name")
+        } else if name.contains(['/', '\\']) || name == "." || name == ".." {
+            Some("The name cannot contain / or \\")
+        } else if self.parent.trim().is_empty() {
+            Some("Choose where to create the repository")
+        } else {
+            git_core::check_branch_name(self.branch.trim())
+        }
+    }
+
+    pub fn options(&self) -> git_core::init::InitOptions {
+        git_core::init::InitOptions {
+            branch: self.branch.trim().to_owned(),
+            readme: self.readme,
+            gitignore: self.gitignore.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    #[test]
+    fn init_dialog_validation_and_default_branch() {
+        let mut d = InitDialog::new(TabId::for_tests(1), "/work".into());
+        assert_eq!(d.branch, "main");
+        d.default_branch_loaded(Some("trunk".into()));
+        assert_eq!(d.branch, "trunk");
+        assert_eq!(d.problem(), Some("Enter a name"));
+        d.name = "project".into();
+        assert_eq!(d.problem(), None);
+        assert_eq!(d.full_path(), Some(PathBuf::from("/work").join("project")));
+        d.set_branch("bad name".into());
+        d.default_branch_loaded(Some("other".into()));
+        assert_eq!(d.branch, "bad name", "an edited branch stays");
+        assert!(d.problem().is_some());
+        let options = {
+            d.set_branch("dev".into());
+            d.gitignore = Some("Rust".into());
+            d.options()
+        };
+        assert_eq!(options.branch, "dev");
+        assert!(options.readme);
+        assert_eq!(options.gitignore.as_deref(), Some("Rust"));
+    }
+}

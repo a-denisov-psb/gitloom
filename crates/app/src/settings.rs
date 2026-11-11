@@ -380,6 +380,11 @@ pub struct Page {
     /// Repository the repository category's form was built for; the form
     /// follows the active tab (M8-01).
     pub repo: Option<(crate::app::TabId, std::path::PathBuf)>,
+    /// `init.defaultBranch` of the global Git config (`None` while loading),
+    /// the typed value and why saving failed (M10-03).
+    pub default_branch: Option<Option<String>>,
+    pub default_branch_input: String,
+    pub default_branch_error: Option<String>,
 }
 
 /// Fields of the Gitflow category, in [`FlowForm::values`] order.
@@ -438,6 +443,9 @@ impl Page {
             ssh_replace: false,
             editor_custom: false,
             repo: None,
+            default_branch: None,
+            default_branch_input: String::new(),
+            default_branch_error: None,
         }
     }
 

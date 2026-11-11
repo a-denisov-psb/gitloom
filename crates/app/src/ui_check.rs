@@ -541,7 +541,7 @@ mod tests {
         assert!(matches!(one("Report an issue"), Message::OpenLink(u) if u == new_issue_url()));
         assert!(matches!(one("Release notes"), Message::OpenLink(u) if u == release_notes_url()));
         assert!(matches!(one("Clone a repo"), Message::CloneStart));
-        assert!(clicked(&app, "Start a local repo").is_empty());
+        assert!(matches!(one("Start a local repo"), Message::InitStart));
         assert!(user_guide_url().starts_with(git_core::identity::REPOSITORY_URL));
         assert!(new_issue_url().ends_with("/issues/new"));
     }
@@ -566,6 +566,21 @@ mod tests {
             });
         }
         snapshot(&app, "clone-dialog-1-running");
+    }
+
+    /// Init dialog (M10-03) with a name and a `.gitignore` template.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_init_dialog() {
+        let mut app = start_app();
+        let _ = app.update(Message::InitStart);
+        let _ = app.update(Message::InitNameChanged("project".into()));
+        let _ = app.update(Message::InitGitignoreChosen("Rust".into()));
+        snapshot(&app, "init-dialog");
+        let _ = app.update(Message::InitClosed);
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::DefaultBranchLoaded(Ok(Some("trunk".into()))));
+        snapshot(&app, "preferences-general-default-branch");
     }
 
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.

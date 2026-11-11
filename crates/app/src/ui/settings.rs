@@ -527,11 +527,45 @@ fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
         input = input.push(text(error).size(12).style(theme::text_danger));
     }
     let updates = settings.general.check_updates;
+    // Default branch name of new repositories (`init.defaultBranch`, M10-03).
+    let loaded = page.default_branch.is_some();
+    let changed = page
+        .default_branch
+        .as_ref()
+        .is_some_and(|value| value.as_deref().unwrap_or("") != page.default_branch_input.trim());
+    let mut branch = text_input("main", &page.default_branch_input)
+        .padding(6)
+        .style(theme::input)
+        .width(200);
+    if loaded {
+        branch = branch
+            .on_input(Message::DefaultBranchInput)
+            .on_submit(Message::DefaultBranchSave);
+    }
+    let mut default_branch = column![row![
+        branch,
+        button(text("Save"))
+            .on_press_maybe(changed.then_some(Message::DefaultBranchSave))
+            .padding([6, 12])
+            .style(button::secondary),
+    ]
+    .spacing(8)
+    .align_y(iced::Center)]
+    .spacing(4);
+    if let Some(error) = &page.default_branch_error {
+        default_branch = default_branch.push(text(error).size(12).style(theme::text_danger));
+    }
     column![
         field(
             "Auto-fetch interval",
             input.into(),
             "Fetches all remotes of open repositories in the background. 0 turns auto-fetch off.",
+        ),
+        field(
+            "Default branch name",
+            default_branch.into(),
+            "Used when creating new repositories (init.defaultBranch in the global Git config); \
+             empty removes it.",
         ),
         field(
             "Check for updates",
