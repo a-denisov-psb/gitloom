@@ -49,6 +49,7 @@ Details: `docs/ARCHITECTURE.md`.
 - New dependencies: latest stable version that is at least 14 days old, pinned to minor (`"0.88"`). Significant ones get an entry in `docs/DECISIONS.md`.
 - Platform-specific code (`#[cfg(unix)]`, `#[cfg(windows)]`) keeps its imports and helpers inside the same cfg scope. Before pushing, run clippy for the Windows target if available.
 - Do not extend milestone scope with new features. Decide plan gaps, contradictions and design questions yourself and document them (ADR-034: most conservative, GitKraken-closest variant; ADR, milestone note or `docs/UX-PARITY.md` deviation). Stop only for the stop reasons listed in ADR-034.
+- Every write action is undoable, or listed under "Cannot be undone" in `docs/user/undo.md` with the reason (ADR-043). No state may leave the user without a visible way back (ADR-044).
 
 ## Git workflow (git flow)
 
@@ -57,7 +58,7 @@ Details: `docs/ARCHITECTURE.md`.
 | `master` | Released versions only, each tagged `vX.Y.Z` |
 | `develop` | Integration branch, always green |
 | `feature/<task-id>-<slug>` | One per task, e.g. `feature/M1-03-lane-layout`, branched from `develop` |
-| `release/X.Y.Z` | Milestone release, created automatically at milestone end (`/release`, ADR-034) |
+| `release/X.Y.Z` | Release branch, only when the maintainer asks for a release (`/release`, ADR-042) |
 | `hotfix/X.Y.Z` | Fixes on `master`, only when the maintainer asks or a release CI run is red |
 
 - Commits: Conventional Commits with the crate as scope, e.g. `feat(git-graph): assign lanes to merge parents`, `fix(app): keep selection after refresh`. Small, focused commits.
@@ -89,5 +90,5 @@ Details: `docs/ARCHITECTURE.md`.
 
 - Report to the maintainer in German, as short as possible. Code and repo content stay English.
 - Per task: exactly one line after merging: `M6-03 ✔ – <result>; Abweichung: <deviation>` (omit the deviation part if there is none).
-- At milestone end (end of `/release`): one detailed report as a table: tasks, deviations with reasons, maintainer to-dos, open risks.
+- At milestone end: one detailed report as a table (tasks, deviations with reasons, maintainer to-dos, open risks), then continue with the next planned milestone without waiting (ADR-042).
 - On problems: the problem plus what you decided.

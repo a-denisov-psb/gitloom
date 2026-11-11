@@ -416,6 +416,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Consequences: `CLAUDE.md`, `.claude/commands/` and `.claude/settings.json` allow
   pushing `master` and tags as part of `/release`. Force-push, `reset --hard`, `rebase`
   and `clean` stay denied. Reports are one line per task and one report per milestone.
+- Amended by ADR-042: until 1.0.0 a milestone ends without a release; Claude Code continues with the next planned milestone.
 
 ## ADR-035 Headless UI checks with iced_test
 
@@ -466,14 +467,14 @@ Architecture decision records in short form. New entries at the bottom. Change a
 
 ## ADR-039 M7 on develop before 1.0.0
 
-- Status: accepted (maintainer, 2026-11-09)
+- Status: superseded by ADR-042 (maintainer, 2026-11-09)
 - Decision: M7 starts on `develop` while 1.0.0 is still in release candidates (rc.2 tagged, not published). `master` (`v1.0.0-rc.2`) is the 1.0 line: further release candidates and 1.0.0 itself (M6-15) are made from `master` with `hotfix/1.0.x`-style branches (`release/1.0.0` from `master` for the final version), never from `develop`; each such fix is merged back into `develop`.
 - Why: the remaining M6 steps wait for the maintainer (publishing, SignPath, checklist run); development should not stall, and 1.0 must not contain M7 work.
 - Consequences: `/release` for M6-15 branches from `master`, not `develop`; CHANGELOG `[Unreleased]` on `develop` collects 1.1 changes, fixes for 1.0 get their own section on the 1.0 line.
 
 ## ADR-040 M8 on develop before 1.1.0
 
-- Status: accepted (maintainer, 2026-11-10)
+- Status: superseded by ADR-042 (maintainer, 2026-11-10)
 - Decision: before the first M8 merge, `release/1.1.0` is branched from `develop` (M7 complete including the follow-ups M7-15 … M7-18 and the rc.3 merge-back). It is the 1.1 line: M7-13 (version, CHANGELOG date, tag) happens there after `v1.0.0`; fixes for 1.1 are made on it and merged back into `develop`. `develop` continues with M8. In `develop`'s CHANGELOG the M7 entries move from `[Unreleased]` to a section `## [1.1.0] - unreleased`; `[Unreleased]` collects M8 only.
 - Why: same reasoning as ADR-039: development does not wait for the maintainer's release steps, and 1.1 must not contain M8 work.
 - Consequences: three lines exist for a while (`master` 1.0, `release/1.1.0`, `develop`); a fix for 1.0 is merged from `master` into `release/1.1.0` and `develop`; `/release` for M7-13 runs on `release/1.1.0`.
@@ -484,3 +485,24 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: Gitloom keeps a list of identities (name and email only) in `settings.json`. A repository's identity, SSH key and Git flow live in Git's own configuration (`user.name`/`user.email`, `core.sshCommand`, `gitflow.*`) and are read from it with their origin. Gitloom writes the repository config only on an explicit choice, and the global config only for the default identity while "Keep the global Git config updated with the default identity" is on. SSH keys are referenced by path (`ssh -i "<key>" -o IdentitiesOnly=yes`), never copied; passphrases are not stored. A `core.sshCommand` that Gitloom did not write is replaced only after confirmation.
 - Why: the command line, other clients and Gitloom see the same settings; no hidden per-repository state that drifts from Git's; no secrets in Gitloom's files.
 - Consequences: identity and SSH key per repository are Gitloom extensions (GitKraken switches a global profile and has one global key); UX-PARITY lists them as deviations. Automatic selection (`includeIf`), signing keys and a key generator stay in the backlog.
+
+## ADR-042 Single release line until 1.0.0
+
+- Status: accepted (maintainer, 2026-11-11; supersedes ADR-039 and ADR-040, amends ADR-034)
+- Decision: no releases or release candidates until 1.0.0. All work happens on `develop`; fixes included. A milestone ends with its report but without `/release`, and Claude Code continues with the next milestone that has a task-level file; if there is none, it stops and asks for planning. M7 and M8 ship with 1.0.0 (M7-13 and M8-10 dropped); `release/1.1.0` is merged into `develop` and deleted; `master` stays at `v1.0.0-rc.4`. 1.0.0 (M6-15) is released from `develop` through `release/1.0.0` after the last planned milestone and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks. `CHANGELOG.md` collects everything under `[Unreleased]`. Hotfixes on `master` only on request.
+- Why: the maintainer is the only user so far; release candidates and per-milestone releases cost time and tokens without feedback. Testing everything once at the end is enough.
+- Consequences: the planning chat plans ahead so Claude Code never waits; the workspace version stays `1.0.0-rc.4` until the release; maintainer checks are collected for the final run.
+
+## ADR-043 Undo everything local
+
+- Status: accepted (maintainer, 2026-11-11; extends ADR-014)
+- Decision: every local write action in Gitloom can be undone and returns exactly to the state before (HEAD and refs, index including unmerged entries, working tree files, stash list). Means: ref changes (`RefChange`), snapshots of index and files (as for hard reset), `git stash store` for dropped stashes. Not undoable, with the reason shown in `docs/user/undo.md` → "Cannot be undone": push and deletions on a remote, fetch, clone and init (they create a new folder). Every milestone task that adds a write action has the acceptance criterion "undoable, or listed under Cannot be undone with the reason".
+- Why: undo makes Git safe for beginners and is a feature GitKraken offers only partly.
+- Consequences: gaps are closed in M9 (stash pop/apply, discard of conflicted files, reset on HEAD) and M12 (stash push/drop, stage/unstage, mark resolved, the local part of pull, remotes and upstream, repository settings). Undo history across restarts stays in the ideas backlog.
+
+## ADR-044 No dead ends
+
+- Status: accepted (maintainer, 2026-11-11)
+- Decision: no state may leave the user without a visible way back. Every state that blocks normal work (conflicts, a stopped operation, a partly applied command) shows a banner that explains it in plain language and offers Undo or Abort; discard and reset keep working in it. Raw Git output is shown only as details, never as the only explanation.
+- Why: a beginner stuck after a stash conflict could neither undo, discard nor reset (2026-11-11).
+- Consequences: M9 fixes the stash case and adds a generic banner for conflicted files without an operation; M12 turns error boxes into toasts with plain-language text.

@@ -116,6 +116,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - rc.2 scope, M7 left panel tree, M8/M9 outlines (2026-11-09): M6-17, M6-18, M7-14 in the milestone files, ROADMAP M8/M9, backlog updated.
 - rc.3 fixes and M7 follow-ups (2026-11-10): M6-19 … M6-23 on the 1.0 line, M7-15 … M7-18 on `develop`.
 - M8 detailed plan and the 1.1 line (2026-11-10): `docs/milestones/M8-repository-settings.md`, ADR-040, ADR-041, ROADMAP, UX-PARITY rows and deviations; `release/1.1.0` branched from `develop`.
+- Single release line, undo principle and roadmap M9–M13 (2026-11-11): ADR-042 … ADR-044, ROADMAP, `docs/milestones/M9-fixes-and-consistency.md`, CLAUDE.md and `.claude/commands/` adjusted; `release/1.1.0` removed.
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -128,19 +129,23 @@ Maintainer to-dos (manual checks only the maintainer can do: Windows runs, real 
 | 1 | Final project name ("Gitloom" is a working title) | decided 2026-11-05: keep "Gitloom" despite the collision with the GitLoom product (ADR-033, supersedes the rename decision of 2026-11-03); repository `github.com/a-denisov-psb/gitloom` |
 | 2 | Confirm license (MIT OR Apache-2.0) | decided 2026-11-03: GPL-3.0-or-later (ADR-008), switch in M6-03 |
 | 3 | Maintainer's own ideas beyond GitKraken for the backlog | Open, git flow layout is the first one |
-| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0; 2026-11-06: Git flow start/finish planned in M7 (ADR-037), the graph layout stays in the backlog |
+| 4 | Git flow layout: backlog only, or its own milestone with a detailed plan? Which position in the roadmap? | decided 2026-10-26: backlog, after 1.0; 2026-11-06: Git flow start/finish planned in M7 (ADR-037), the graph layout stays in the backlog; 2026-11-11: graph layout planned as M13 |
 | 5 | M4 known limitations (rebase conflict loses remaining prepared messages, revert without changes, autostash conflict without notice): keep or plan follow-ups? | decided 2026-10-26: backlog (ROADMAP) |
 | 6 | Verify in GitKraken whether the interactive rebase list shows the newest commit on top (Gitloom does) | Open, maintainer to-do M4-07 |
 | 7 | Profiles like GitKraken's (workspace with own tabs and settings) or identities only? | decided 2026-11-09: identities only (name and email per repository), M8 |
 | 8 | Order after M7 | decided 2026-11-09: M8 repository settings and tools, then M9 graph columns, themes and syntax highlighting |
+| 9 | Intermediate releases before 1.0.0? | decided 2026-11-11: none (ADR-042); everything is tested once at the end |
+| 10 | AI features | decided 2026-11-11: none (non-goal); only a copyable commit message prompt (M10) |
+| 11 | Provider integrations (issues, boards, CI, pull requests) | decided 2026-11-11: none; only "Open on <provider>" links (M12) |
+| 12 | Undo and beginners | decided 2026-11-11: undo everything local (ADR-043), no dead ends (ADR-044) |
 
 Questions raised by Claude Code during implementation are tracked in `docs/HANDOVER.md` → "Open questions"; check it at the start of every planning session.
 
 ## 8. Suggested next planning steps
 
-1. rc.4 prepared 2026-11-10 (toolbar centering; rc.3: M6-19 … M6-23; rc.2: M6-16 … M6-18). Next: findings of M6-10/M6-13 on rc.4 (further rcs if needed), then M6-15 (1.0.0) on request.
-2. M7 is implemented including M7-15 … M7-18; release 1.1.0 from `release/1.1.0` after `v1.0.0` (ADR-040). The maintainer answers the GitKraken verification items of M7 and runs section 7a of the release checklist.
-3. M8 runs on `develop` (one Claude Code chat for the milestone); release 1.2.0 after 1.1.0. Detail plan for M9 when M8 is implemented (outline in ROADMAP).
+1. M9 runs on `develop`; the planning chat writes the plans for M10 … M13 ahead so Claude Code never waits (ADR-042).
+2. After M13: the maintainer runs the whole release checklist on Windows and answers the open GitKraken items; then 1.0.0 (M6-15).
+3. M6-10 (SignPath) can happen any time before 1.0.0.
 
 ## 9. Document map
 
