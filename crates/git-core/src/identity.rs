@@ -55,6 +55,11 @@ pub fn reflog_message(action: &str) -> String {
     format!("{BINARY_NAME}: {action}")
 }
 
+/// Key of a Gitloom option in a Git config, e.g. `gitloom.removeComments`.
+pub fn config_key(name: &str) -> String {
+    format!("{BINARY_NAME}.{name}")
+}
+
 /// Title of a window of the product, optionally with a leading part.
 pub fn window_title(part: Option<&str>) -> String {
     match part {
@@ -73,6 +78,7 @@ mod tests {
         assert_eq!(temp_prefix("editor"), format!("{BINARY_NAME}-editor"));
         assert_eq!(reflog_message("undo"), format!("{BINARY_NAME}: undo"));
         assert_eq!(window_title(None), DISPLAY_NAME);
+        assert_eq!(config_key("x"), format!("{BINARY_NAME}.x"));
         assert_eq!(window_title(Some("repo")), format!("repo – {DISPLAY_NAME}"));
     }
 }
