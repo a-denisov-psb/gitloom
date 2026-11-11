@@ -5,7 +5,7 @@ use iced::widget::{button, column, container, row, space, text, text_input};
 use iced::{Element, Fill};
 
 use crate::app::Message;
-use crate::branch_tree::{folder_key, Row};
+use crate::branch_tree::{folder_key, tag_folder_key, Row};
 use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Section};
 use crate::theme;
@@ -16,13 +16,6 @@ const INDENT: f32 = 14.0;
 pub fn view(repo: &RepoView) -> Element<'_, Message> {
     let needle = repo.filter.to_lowercase();
     let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
-    let refs_of = |kind: RefKind| {
-        repo.snapshot
-            .refs
-            .iter()
-            .filter(move |r| r.kind == kind)
-            .filter(|r| matches(&r.name))
-    };
 
     // LOCAL and REMOTE as folder trees (M7-14), cached per snapshot,
     // text filter and hide/solo state.
@@ -50,9 +43,50 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         }
     }
 
-    let tags: Vec<_> = refs_of(RefKind::Tag)
-        .map(|r| ref_item(repo, r, r.name.clone(), 1))
+    // TAGS as a folder tree like the branches (M11-11).
+    let tag_refs: Vec<(usize, &str)> = repo
+        .snapshot
+        .refs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.kind == RefKind::Tag && matches(&r.name))
+        .map(|(index, r)| (index, r.name.as_str()))
         .collect();
+    let tag_count = tag_refs.len();
+    let tag_tree = crate::branch_tree::build(tag_refs);
+    let tags: Vec<_> = crate::branch_tree::rows(
+        &tag_tree,
+        &|path| repo.folders_collapsed.contains(&tag_folder_key(path)),
+        filtering,
+    )
+    .into_iter()
+    .map(|row| match row {
+        Row::Folder {
+            depth,
+            name,
+            path,
+            expanded,
+        } => folder_row(
+            name.to_owned(),
+            tag_folder_key(path),
+            expanded,
+            1 + u16::try_from(depth).unwrap_or(0),
+        ),
+        Row::Branch {
+            depth,
+            index,
+            label,
+        } => match repo.snapshot.refs.get(index) {
+            Some(reference) => ref_item(
+                repo,
+                reference,
+                label.to_owned(),
+                1 + u16::try_from(depth).unwrap_or(0),
+            ),
+            None => space::horizontal().width(0).into(),
+        },
+    })
+    .collect();
 
     // Click selects the stash row in the graph; right click opens its menu.
     let stashes: Vec<_> = repo
@@ -112,7 +146,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         repo,
         Section::Tags,
         "TAGS",
-        tags.len().to_string(),
+        tag_count.to_string(),
         tags,
     ));
     let mut submodules_section = Some(submodules());
@@ -449,14 +483,18 @@ fn ref_item<'a>(
     label: String,
     depth: u16,
 ) -> Element<'a, Message> {
-    // Branches carry a branch icon; the checked-out one a checkbox-style
-    // check on a highlighted row (M7-14). Tags keep their plain layout.
-    let marker: Element<'a, Message> = match reference.kind {
-        _ if reference.is_head => icons::tinted(Icon::CheckSquare, 13.0, |p| p.accent).into(),
-        RefKind::LocalBranch | RefKind::RemoteBranch => {
-            icons::tinted(Icon::Branch, 13.0, |p| p.text_muted).into()
-        }
-        RefKind::Tag => space::horizontal().width(0).into(),
+    // Branches carry a branch icon, tags a tag icon. Like GitKraken the
+    // checked-out branch keeps its icon and gets a check in the gutter to
+    // its left (the indent column of the parent level), so icons and
+    // labels of one depth stay aligned (M11-11).
+    let icon = match reference.kind {
+        RefKind::LocalBranch | RefKind::RemoteBranch => Icon::Branch,
+        RefKind::Tag => Icon::Tag,
+    };
+    let gutter: Element<'a, Message> = if reference.is_head {
+        icons::tinted(Icon::Check, 13.0, |p| p.accent).into()
+    } else {
+        space::horizontal().width(0).into()
     };
     // Branches not shown in the graph are dimmed (M5-08).
     let filter = &repo.ref_filter;
@@ -474,9 +512,13 @@ fn ref_item<'a>(
     } else {
         crate::ui::panel::with_tooltip_text(label.into(), reference.name.clone())
     };
-    let mut content = row![container(marker).width(INDENT), label, space::horizontal(),]
-        .spacing(4)
-        .align_y(iced::Center);
+    let mut content = row![
+        container(icons::tinted(icon, 13.0, |p| p.text_muted)).width(INDENT),
+        label,
+        space::horizontal(),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
     // Like GitKraken: commits ahead/behind the upstream as small badges.
     if let Some(badge) = ahead_behind_badge(reference.ahead_behind) {
         // Muted text is not AA on the highlight of the checked-out row.
@@ -494,8 +536,12 @@ fn ref_item<'a>(
     if hidden {
         content = content.push(icons::tinted(Icon::EyeOff, 13.0, |p| p.text_muted));
     }
-    let content = content.into();
+    let content = row![container(gutter).width(INDENT), content]
+        .align_y(iced::Center)
+        .into();
 
+    // One indent less: the gutter takes the parent level's column.
+    let depth = depth.saturating_sub(1);
     let message = Message::RefClicked(reference.name.clone());
     let item = if reference.is_head {
         head_button(content, depth, message)

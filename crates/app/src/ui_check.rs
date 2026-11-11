@@ -271,6 +271,52 @@ mod tests {
         snapshot(&app, "left-panel-after-clicks");
     }
 
+    /// Tree order, tag folders and the checked-out marker (M11-11): main
+    /// checked out at depth 0, then a branch inside a folder; branches
+    /// before folders; TAGS with a folder; both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_tree_order() {
+        use git_core::RefKind::Tag;
+        let mut app = crate::app::tests::sidebar_app();
+        let tag = |name: &str| git_core::Reference {
+            name: name.into(),
+            kind: Tag,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snap = (*view.snapshot).clone();
+        snap.refs
+            .extend([tag("release/1.0"), tag("release/2.0"), tag("v0.9")]);
+        view.snapshot = std::sync::Arc::new(snap);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("tree-order-head-top-{theme}"));
+        }
+        // The checked-out branch inside a folder.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snap = (*view.snapshot).clone();
+        for reference in &mut snap.refs {
+            reference.is_head = reference.name == "feature/ui/diff-modes";
+        }
+        view.snapshot = std::sync::Arc::new(snap);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("tree-order-head-in-folder-{theme}"));
+        }
+    }
+
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_diff_mode_toggle() {

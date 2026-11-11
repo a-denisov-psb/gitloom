@@ -193,12 +193,14 @@ Note: whole old and new files come from the full-context diff (Inline, Split) or
 
 Acceptance: docs reviewed; measurements recorded.
 
-### [ ] M11-11 Tree order, tag folders, checked-out marker
+### [x] M11-11 Tree order, tag folders, checked-out marker
 
 - `branch_tree` order: leaves before folders, both by `compare_names`, recursive; one rule for LOCAL, REMOTE, GITFLOW and TAGS. TAGS built as a tree. `sidebar::ref_item`: check in the gutter, branch icon kept.
 - UX-PARITY: left panel row and the new deviation; M7-14 and M9-06 notes point here.
 
 Acceptance: unit tests for the order (leaves first, case-insensitive, nested folders, ties); tree tests for tags with and without `/`; snapshots of LOCAL with the checked-out branch at depth 0 and inside a folder (both themes) with aligned icons and labels; `ui_check_gitflow_section` updated.
+
+Note: one `branch_tree::sort` for all trees (`sort_mixed` removed); ties differing only in case keep byte order. TAGS reuses `branch_tree::build` with collapse keys `tags:<path>`, tag rows show a tag icon and the full name as tooltip. Every ref row has a gutter one indent to the left (the parent level's column) for the check, so icon and label positions do not depend on the checked-out branch. Snapshots `ui_check_tree_order` (checked-out branch at depth 0 and inside `feature/ui`, tag folder, both themes) and `ui_check_gitflow_section` re-rendered and checked.
 
 ### [ ] M11-12 Start screen buttons
 

@@ -36,8 +36,9 @@ impl Node {
 
 /// Builds the folder tree of `branches` (index into the refs, name inside
 /// the group: `feature/ui/x` for a local branch, `feature/x` for
-/// `origin/feature/x`). Folders come before branches, both sorted
-/// case-insensitively.
+/// `origin/feature/x`). On every level the branches come first, then the
+/// folders, both sorted case-insensitively (maintainer decision 2026-11-11,
+/// M11-11). Tags use the same tree.
 pub fn build<'a>(branches: impl IntoIterator<Item = (usize, &'a str)>) -> Vec<Node> {
     let mut root = Vec::new();
     for (index, name) in branches {
@@ -83,8 +84,8 @@ fn insert(nodes: &mut Vec<Node>, parent: &str, index: usize, rest: &str) {
 
 fn sort(nodes: &mut [Node]) {
     nodes.sort_by(|a, b| {
-        b.is_folder()
-            .cmp(&a.is_folder())
+        a.is_folder()
+            .cmp(&b.is_folder())
             .then_with(|| compare_names(a.name(), b.name()))
     });
     for node in nodes {
@@ -102,8 +103,8 @@ fn compare_names(a: &str, b: &str) -> Ordering {
 
 /// GITFLOW section (M9-06): the production and development branches and
 /// every branch with a Git flow prefix, the prefix as a folder ("feature" ›
-/// "f2"). Like GitKraken, folders and branches are one case-insensitive
-/// alphabetical list. `branches` are (index into the refs, local branch
+/// "f2"). Branches before folders like every tree of the panel (M11-11).
+/// `branches` are (index into the refs, local branch
 /// name) after the text filter. Folder paths are the collapse keys
 /// (`gitflow:feature`). Returns the tree and the number of branches.
 pub fn gitflow<'a>(
@@ -147,18 +148,8 @@ pub fn gitflow<'a>(
             });
         }
     }
-    sort_mixed(&mut root);
+    sort(&mut root);
     (root, count)
-}
-
-/// Sorts folders and branches together, case-insensitively.
-fn sort_mixed(nodes: &mut [Node]) {
-    nodes.sort_by(|a, b| compare_names(a.name(), b.name()));
-    for node in nodes {
-        if let Node::Folder { children, .. } = node {
-            sort_mixed(children);
-        }
-    }
 }
 
 /// One visible row of a group.
@@ -228,11 +219,17 @@ fn push_rows<'t>(
 /// folder path (`local:feature`, `remote:origin:feature/ui`). The remote
 /// node itself is `remote:origin`.
 pub fn folder_key(remote: Option<&str>, path: &str) -> String {
+    // Tags use `tags:<path>` (`tag_folder_key`).
     match (remote, path.is_empty()) {
         (None, _) => format!("local:{path}"),
         (Some(remote), true) => format!("remote:{remote}"),
         (Some(remote), false) => format!("remote:{remote}:{path}"),
     }
+}
+
+/// Key of a TAGS folder in the stored collapse state (M11-11).
+pub fn tag_folder_key(path: &str) -> String {
+    format!("tags:{path}")
 }
 
 /// Branches shown in the graph out of all (hidden and soloed ones count
@@ -363,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn gitflow_mixes_folders_and_branches_alphabetically() {
+    fn gitflow_lists_branches_before_folders() {
         let names = [
             "master",
             "feature/f2",
@@ -377,8 +374,8 @@ mod tests {
         let (text, count) = flow_text(&names, &[], false);
         assert_eq!(
             text,
-            "develop#2\n▾feature\n  Alpha#4\n  f2#1\n  ui/toolbar#7\n▾hotfix\n  1.1.1#6\n\
-             master#0\n▾release\n  1.2.0#3"
+            "develop#2\nmaster#0\n▾feature\n  Alpha#4\n  f2#1\n  ui/toolbar#7\n▾hotfix\n  \
+             1.1.1#6\n▾release\n  1.2.0#3"
         );
         assert_eq!(count, 7, "topic is not a Git flow branch");
     }
@@ -445,24 +442,53 @@ mod tests {
         ]);
         assert_eq!(
             render(&nodes, &[], false),
-            "feature/\n  ui/\n    sidebar #2\n    toolbar #1\n  api #3\nmain #0"
+            "main #0\nfeature/\n  api #3\n  ui/\n    sidebar #2\n    toolbar #1"
         );
     }
 
     #[test]
-    fn folders_before_branches_case_insensitive() {
+    fn branches_before_folders_case_insensitive() {
         let nodes = tree(&["Zeta", "alpha", "beta/x", "Alpha/y", "Beta"]);
         assert_eq!(
             render(&nodes, &[], false),
-            "Alpha/\n  y #3\nbeta/\n  x #2\nalpha #1\nBeta #4\nZeta #0"
+            "alpha #1\nBeta #4\nZeta #0\nAlpha/\n  y #3\nbeta/\n  x #2"
         );
+        // Ties differing only in case: byte order, stable.
+        let nodes = tree(&["b", "B", "a/x", "A/y"]);
+        assert_eq!(
+            render(&nodes, &[], false),
+            "B #1\nb #0\nA/\n  y #3\na/\n  x #2"
+        );
+        // Every level of nested folders follows the rule.
+        let nodes = tree(&["f/z/1", "f/b", "f/a/2", "f/A"]);
+        assert_eq!(
+            render(&nodes, &[], false),
+            "f/\n  A #3\n  b #1\n  a/\n    2 #2\n  z/\n    1 #0"
+        );
+    }
+
+    #[test]
+    fn tags_with_and_without_folders() {
+        let nodes = tree(&[
+            "v1.0.0",
+            "release/2.0",
+            "v0.9",
+            "release/1.0",
+            "archive/old/x",
+        ]);
+        assert_eq!(
+            render(&nodes, &[], false),
+            "v0.9 #2\nv1.0.0 #0\narchive/\n  old/\n    x #4\nrelease/\n  1.0 #3\n  2.0 #1"
+        );
+        assert_eq!(render(&tree(&["b", "a"]), &[], false), "a #1\nb #0");
+        assert_eq!(tag_folder_key("release"), "tags:release");
     }
 
     #[test]
     fn a_branch_and_a_folder_with_the_same_name() {
         // Possible across groups and for odd names; both stay visible.
         let nodes = tree(&["x", "x/y"]);
-        assert_eq!(render(&nodes, &[], false), "x/\n  y #1\nx #0");
+        assert_eq!(render(&nodes, &[], false), "x #0\nx/\n  y #1");
     }
 
     #[test]
@@ -476,7 +502,7 @@ mod tests {
         let nodes = tree(&["feature/ui/a", "feature/b", "hotfix/c"]);
         assert_eq!(
             render(&nodes, &["feature/ui", "hotfix"], false),
-            "feature/\n  +ui/\n  b #1\n+hotfix/"
+            "feature/\n  b #1\n  +ui/\n+hotfix/"
         );
         assert_eq!(
             render(&nodes, &["feature"], false),
@@ -510,7 +536,7 @@ mod tests {
         );
         assert_eq!(
             render(&tree(&["main", "release/1.0"]), &[], false),
-            "release/\n  1.0 #1\nmain #0"
+            "main #0\nrelease/\n  1.0 #1"
         );
     }
 
@@ -567,13 +593,13 @@ mod tests {
         let groups = Groups::build(&sample(), &remotes, "", &Default::default());
         assert_eq!(
             render(&groups.local, &[], false),
-            "feature/\n  api #2\n  ui #1\nmain #0"
+            "main #0\nfeature/\n  api #2\n  ui #1"
         );
         let names: Vec<_> = groups.remotes.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["backup", "origin"], "remotes without branches too");
         assert_eq!(
             render(&groups.remotes[1].1, &[], false),
-            "feature/\n  ui #4\nmain #3"
+            "main #3\nfeature/\n  ui #4"
         );
         assert_eq!(
             groups.local_count,
