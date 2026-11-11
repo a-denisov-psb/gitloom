@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Builds the release packages of the local platform into dist/ (M6-08, ADR-031).
-#   Linux:  <Name>-<version>-x86_64.AppImage, <name>-<version>-linux-x86_64.tar.gz
+#   Linux:  <Name>-<version>-<arch>.AppImage, <name>-<version>-linux-<arch>.tar.gz,
+#           x86_64 also <name>_<version>_amd64.deb (<arch>: the machine's,
+#           x86_64 or aarch64)
 #   macOS:  <Name>-<version>-universal.dmg (arm64 + x86_64 via lipo)
 # Windows: scripts/package.ps1.
+# Builds with the `dist` profile (ADR-052).
 # Needs cargo-packager (`cargo install --locked cargo-packager`); Linux also
 # needs `file`; macOS also
 # needs both Rust targets (`rustup target add aarch64-apple-darwin x86_64-apple-darwin`).
@@ -26,21 +29,36 @@ dist="$root/dist"
 mkdir -p "$dist"
 
 package_linux() {
-    local target=x86_64-unknown-linux-gnu
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64 | aarch64) ;;
+        *) echo "Unsupported Linux architecture: $arch" >&2; exit 1 ;;
+    esac
+    local target="$arch-unknown-linux-gnu"
     # linuxdeploy and its plugins are AppImages themselves: run them without
     # FUSE (containers, WSL). appimagetool needs `file` on PATH.
     export APPIMAGE_EXTRACT_AND_RUN=1
-    cargo build --release --locked -p "$bin" --target "$target"
-    local bins="$root/target/$target/release"
+    cargo build --profile dist --locked -p "$bin" --target "$target"
+    local bins="$root/target/$target/dist"
 
     # AppImage (cargo-packager downloads linuxdeploy on first use).
     local work="$root/target/packager/linux"
     rm -rf "$work" && mkdir -p "$work"
-    cargo packager -p "$bin" --release --target "$target" -f appimage \
+    cargo packager -p "$bin" --profile dist --target "$target" -f appimage \
         --binaries-dir "$bins" --out-dir "$work"
     local appimage
     appimage=$(find "$work" -maxdepth 1 -name '*.AppImage' | head -n 1)
-    cp "$appimage" "$dist/$name-$version-x86_64.AppImage"
+    cp "$appimage" "$dist/$name-$version-$arch.AppImage"
+
+    # Debian package (x86_64 only, ADR-052).
+    if [[ "$arch" == x86_64 ]]; then
+        cargo packager -p "$bin" --profile dist --target "$target" -f deb \
+            --binaries-dir "$bins" --out-dir "$work"
+        local deb
+        deb=$(find "$work" -maxdepth 1 -name '*.deb' | head -n 1)
+        cp "$deb" "$dist/"
+    fi
 
     # Plain archive: binary, licenses, desktop entry, metainfo and icon.
     local stage="$work/$bin-$version"
@@ -48,20 +66,20 @@ package_linux() {
     cp "$bins/$bin" LICENSE THIRD-PARTY-LICENSES.md README.md "$stage/"
     cp "packaging/linux/$app_id.desktop" "packaging/linux/$app_id.metainfo.xml" "$stage/"
     cp crates/app/assets/app-icon/icon-256.png "$stage/$app_id.png"
-    tar -C "$work" -czf "$dist/$bin-$version-linux-x86_64.tar.gz" "$bin-$version"
+    tar -C "$work" -czf "$dist/$bin-$version-linux-$arch.tar.gz" "$bin-$version"
 }
 
 package_macos() {
     local arm=aarch64-apple-darwin intel=x86_64-apple-darwin
-    cargo build --release --locked -p "$bin" --target "$arm"
-    cargo build --release --locked -p "$bin" --target "$intel"
-    local universal="$root/target/universal-apple-darwin/release"
+    cargo build --profile dist --locked -p "$bin" --target "$arm"
+    cargo build --profile dist --locked -p "$bin" --target "$intel"
+    local universal="$root/target/universal-apple-darwin/dist"
     mkdir -p "$universal"
     lipo -create -output "$universal/$bin" \
-        "$root/target/$arm/release/$bin" "$root/target/$intel/release/$bin"
+        "$root/target/$arm/dist/$bin" "$root/target/$intel/dist/$bin"
     local work="$root/target/packager/macos"
     rm -rf "$work" && mkdir -p "$work"
-    cargo packager -p "$bin" --release --target universal-apple-darwin -f app \
+    cargo packager -p "$bin" --profile dist --target universal-apple-darwin -f app \
         --binaries-dir "$universal" --out-dir "$work"
     # Ad-hoc signature (ADR-016): no Developer ID, not notarized.
     codesign --force --deep --sign - "$work/$name.app"

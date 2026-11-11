@@ -147,6 +147,7 @@ Own ideas and deferred items. To be assigned to milestones with the maintainer.
 - **Desktop notifications**.
 - **Integrated terminal** instead of opening the system terminal.
 - **macOS notarization** with an Apple Developer ID.
-- **More packages**: Flatpak, `.deb`/`.rpm`, Homebrew cask, winget.
+- **More packages**: Flatpak, `.rpm`, an Arch package (cargo-packager's `pacman` format only makes a tarball with a PKGBUILD, ADR-052).
+- **winget, Scoop and Homebrew manifests** pointing to the release files.
 - **Automatic updates**: download and install instead of a notice.
 - **Screen reader support** once iced exposes an accessibility tree.

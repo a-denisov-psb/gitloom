@@ -575,3 +575,21 @@ Decision:
 - Undo: `update-ref` back to the old head with the new head as expected value; redo the reverse. One entry "Edit commit message" (ADR-043).
 
 Consequences: no conflicts, also across merges; works with a dirty working tree; signatures of rebuilt commits are renewed or dropped (dialog note when `commit.gpgSign` is false and a rebuilt commit was signed). The old commits stay reachable through the reflog until Git prunes them.
+
+## ADR-052 Task runner just and the dist profile
+
+Status: accepted (2026-11-11, maintainer planning update 2)
+
+Context: the maintainer builds on Windows and in WSL. Building a portable exe or the packages needed several commands that differ per platform, and the release builds used the `release` profile, which development uses too (thin LTO, many codegen units). The release workflow built Windows x64/x86, Linux x64 and macOS only.
+
+Decision:
+
+- [`just`](https://github.com/casey/just) is the task runner (`justfile` in the root). Recipes are thin; the logic lives in `scripts/build.sh`/`.ps1` and `scripts/ci-packages.sh`/`.ps1` next to the existing scripts, so it works without `just` too. Windows recipes run in Windows PowerShell (`windows-shell`) and call the scripts with `-ExecutionPolicy Bypass`, so no policy change is needed. `just` is a developer tool only, not a build dependency: CI keeps calling the scripts.
+- Cargo profile `dist` (`inherits = "release"`, `lto = "fat"`, `codegen-units = 1`; `strip = "debuginfo"` inherited, ADR-029) for everything that is shipped: `scripts/package.sh`, `scripts/package.ps1`, the release workflow and `just build`. `release` stays the quicker optimized build for development and the release-mode tests in CI.
+- `just build <alias>` copies only the binary to `dist/<bin>-<version>-<alias>[.exe]`. Windows from Linux uses the GNU targets with mingw-w64 (the MSVC ABI cannot be linked there); Linux ARM64 from x64 uses `cargo zigbuild` when installed. Targets that cannot be built on the machine print what is missing or point to `just ci-packages` instead of failing with a linker error.
+- Release workflow, best effort (`continue-on-error`, like Windows x86, ADR-016): Windows ARM64 (`aarch64-pc-windows-msvc` on `windows-latest`, cross-compiled; not started in CI because the runner is x64) and Linux ARM64 (`ubuntu-22.04-arm`: AppImage and tar.gz, glibc 2.35 like x64). Linux x64 also gets a `.deb` (cargo-packager, depends on `git`).
+- Windows ARM64 ships as portable zip only: cargo-packager uses WiX 3.11, which has no ARM64 platform, and an NSIS installer would be a second installer technology with its own upgrade logic. An ARM64 MSI waits for a cargo-packager release with WiX 4 or later.
+- No Arch package: cargo-packager's `pacman` format makes a tarball with a PKGBUILD for `makepkg`, not an installable package. Backlog: "More packages".
+- `SHA256SUMS` covers every file of the run; the draft release notes get a generated "Files" list, so missing best-effort files are visible.
+
+Consequences: release builds take longer (fat LTO, one codegen unit) and give a smaller, slightly faster binary. Packages of best-effort targets can be missing from a release without failing it. A cross-built Windows GNU exe from `just portable` is for testing; the published Windows packages stay MSVC builds from CI.
