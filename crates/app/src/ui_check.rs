@@ -648,6 +648,22 @@ mod tests {
         }
     }
 
+    /// Preferences → Repository → Commit (M10-06).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_commit_template() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Commit));
+        let _ = app.update(Message::TemplateLoaded(Ok(
+            git_core::commit_template::TemplateSettings {
+                file: None,
+                content: "feat(scope): \n\nWhy:\n# Explain the change\n".into(),
+                options: Default::default(),
+            },
+        )));
+        snapshot(&app, "commit-template");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

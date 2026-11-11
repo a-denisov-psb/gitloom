@@ -676,6 +676,19 @@ pub enum Message {
         id: String,
         result: Result<Option<git_core::signature::Signature>, String>,
     },
+    /// Preferences → Repository → Commit (M10-06).
+    TemplateLoaded(Result<git_core::commit_template::TemplateSettings, String>),
+    TemplateSummaryInput(String),
+    TemplateDescriptionEdited(iced::widget::text_editor::Action),
+    /// `true`: "Apply this template", `false`: "Remove comments".
+    TemplateOptionToggled {
+        apply: bool,
+        on: bool,
+    },
+    TemplateSave,
+    /// Save a template used by all repositories after the confirmation.
+    TemplateSaveConfirmed,
+    TemplateWritten(Result<(), String>),
     /// Preferences → Signing (M10-04).
     SigningLoaded(Result<settings::SigningPage, String>),
     /// Write one signing key of the global config (`None` removes it).
@@ -991,6 +1004,8 @@ pub struct App {
     pub clone_dialog: Option<crate::clone_dialog::CloneDialog>,
     /// "Start a local repository" (M10-03).
     pub init_dialog: Option<crate::clone_dialog::InitDialog>,
+    /// Description of the commit template being edited (M10-06).
+    pub template_description: iced::widget::text_editor::Content,
     pub context_menu: Option<ContextMenu>,
     /// Open keyboard shortcut list (Ctrl+/) with its filter text.
     pub shortcut_list: Option<String>,
@@ -1073,6 +1088,7 @@ impl App {
             message_dialog: None,
             clone_dialog: None,
             init_dialog: None,
+            template_description: iced::widget::text_editor::Content::new(),
             form: None,
             context_menu: None,
             shortcut_list: None,
@@ -4640,6 +4656,19 @@ impl App {
         )
     }
 
+    /// Loads the commit template of the active repository (M10-06).
+    fn load_template(&mut self) -> Task<Message> {
+        let Some(root) = self.active_repo_path().map(|(_, path)| path) else {
+            return Task::none();
+        };
+        Task::perform(
+            blocking(move || {
+                git_core::commit_template::read_template(&root).map_err(|e| e.to_string())
+            }),
+            Message::TemplateLoaded,
+        )
+    }
+
     /// Loads the Signing category in the background: global settings, the
     /// active repository's overrides, GPG and SSH keys (M10-04).
     fn load_signing(&mut self) -> Task<Message> {
@@ -5276,6 +5305,9 @@ impl App {
                     }
                     if category == settings::Category::Signing {
                         return self.load_signing();
+                    }
+                    if category == settings::Category::Commit {
+                        return self.load_template();
                     }
                     if category == settings::Category::SshKey {
                         page.ssh_replace = false;
@@ -7885,6 +7917,93 @@ impl App {
                 if self.init_dialog.as_ref().is_some_and(|d| !d.running) {
                     self.init_dialog = None;
                 }
+            }
+            Message::TemplateLoaded(result) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    if let Ok(settings) = &result {
+                        let (summary, description) =
+                            git_core::commit_template::split_template(&settings.content);
+                        page.template_summary = summary;
+                        self.template_description =
+                            iced::widget::text_editor::Content::with_text(&description);
+                    }
+                    page.template = Some(result);
+                }
+            }
+            Message::TemplateSummaryInput(summary) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.template_summary = summary;
+                }
+            }
+            Message::TemplateDescriptionEdited(action) => {
+                self.template_description.perform(action);
+            }
+            Message::TemplateOptionToggled { apply, on } => {
+                let Some(root) = self.active_repo_path().map(|(_, p)| p) else {
+                    return Task::none();
+                };
+                return Task::perform(
+                    blocking(move || {
+                        git_core::commit_template::set_template_option(&root, apply, on)
+                            .map_err(|e| e.to_string())
+                    }),
+                    Message::TemplateWritten,
+                );
+            }
+            Message::TemplateSave | Message::TemplateSaveConfirmed => {
+                let confirmed = matches!(message, Message::TemplateSaveConfirmed);
+                let shared = self
+                    .settings_page
+                    .as_ref()
+                    .and_then(|p| p.template.as_ref())
+                    .and_then(|t| t.as_ref().ok())
+                    .and_then(|t| t.file.as_ref())
+                    .is_some_and(git_core::commit_template::TemplateFile::shared);
+                if shared && !confirmed {
+                    self.modal = Some(Modal::confirm(
+                        "Change the shared commit template",
+                        "This template is used by all repositories. Change it?",
+                        "Change",
+                        false,
+                        Message::TemplateSaveConfirmed,
+                    ));
+                    return Task::none();
+                }
+                let (Some(root), Some(page)) = (
+                    self.active_repo_path().map(|(_, p)| p),
+                    self.settings_page.as_ref(),
+                ) else {
+                    return Task::none();
+                };
+                let summary = page.template_summary.clone();
+                let description = self.template_description.text();
+                return Task::perform(
+                    blocking(move || {
+                        git_core::commit_template::save_template(
+                            &root,
+                            &summary,
+                            &description,
+                            confirmed,
+                        )
+                        .map(drop)
+                        .map_err(|e| e.to_string())
+                    }),
+                    Message::TemplateWritten,
+                );
+            }
+            Message::TemplateWritten(result) => {
+                match result {
+                    Ok(()) => self.status = "Commit template saved".into(),
+                    Err(error) => {
+                        self.status = format!("Could not save the commit template: {error}")
+                    }
+                }
+                // The settings page and the tab's snapshot (prefill) follow.
+                let refresh = match self.active_repo_path() {
+                    Some((tab, _)) => self.refresh(tab),
+                    None => Task::none(),
+                };
+                return Task::batch([self.load_template(), refresh]);
             }
             Message::SignatureLoaded { tab, id, result } => {
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
@@ -10869,7 +10988,12 @@ pub(crate) mod tests {
         use settings::Category;
         assert_eq!(
             Category::REPOSITORY,
-            [Category::Identity, Category::SshKey, Category::Gitflow]
+            [
+                Category::Identity,
+                Category::SshKey,
+                Category::Commit,
+                Category::Gitflow
+            ]
         );
         assert!(Category::Gitflow.is_repository());
         assert!(!Category::GLOBAL.iter().any(|c| c.is_repository()));
@@ -13888,14 +14012,96 @@ pub(crate) mod tests {
         assert!(view.clear_message_after_write, "a successful retry clears");
     }
 
-    #[test]
-    fn template_fills_an_empty_description() {
+    /// Staging app whose snapshot has `template` and `options` (M10-06).
+    fn template_app(template: &str, options: git_core::commit_template::TemplateOptions) -> App {
         let mut app = staging_app(&[], &["a"]);
         let view = app.tabs[0].view_mut().unwrap();
         let mut snapshot = (*view.snapshot).clone();
-        snapshot.commit_template = Some("Ticket: \n# help text\n".into());
+        snapshot.commit_template = Some(template.into());
+        snapshot.template_options = options;
         view.apply_snapshot(Arc::new(snapshot));
-        assert_eq!(view.description.text().trim(), "Ticket:");
+        app
+    }
+
+    #[test]
+    fn template_prefills_summary_and_description() {
+        use git_core::commit_template::TemplateOptions;
+        let template = "Ticket: \n\nWhy:\n# help text\n";
+        let app = template_app(template, TemplateOptions::default());
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.summary, "Ticket:");
+        assert_eq!(view.description.text().trim(), "Why:");
+
+        // Comments kept when "Remove comments" is off.
+        let keep = TemplateOptions {
+            remove_comments: false,
+            ..TemplateOptions::default()
+        };
+        let app = template_app(template, keep);
+        assert_eq!(
+            app.tabs[0].view().unwrap().description.text().trim(),
+            "Why:\n# help text"
+        );
+
+        // "Apply" off: nothing is prefilled.
+        let off = TemplateOptions {
+            apply: false,
+            ..TemplateOptions::default()
+        };
+        let app = template_app(template, off);
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.summary.is_empty() && view.description.text().trim().is_empty());
+    }
+
+    #[test]
+    fn comments_are_removed_from_the_commit_message() {
+        use git_core::commit_template::TemplateOptions;
+        let options = TemplateOptions {
+            comment_char: ";".into(),
+            ..TemplateOptions::default()
+        };
+        let mut app = template_app("S\n", options);
+        let view = app.tabs[0].view_mut().unwrap();
+        view.summary = "Fix".into();
+        view.description = iced::widget::text_editor::Content::with_text("Body\n; hint\n# kept");
+        assert_eq!(view.commit_message(), "Fix\n\nBody\n# kept");
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.template_options.remove_comments = false;
+        view.apply_snapshot(Arc::new(snapshot));
+        assert_eq!(view.commit_message(), "Fix\n\nBody\n; hint\n# kept");
+    }
+
+    #[test]
+    fn commit_template_page_loads_saves_and_confirms_shared_files() {
+        use git_core::commit_template::{TemplateFile, TemplateOptions, TemplateSettings};
+        let mut app = staging_app(&[], &["a"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Commit));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::Commit
+        );
+        let settings = TemplateSettings {
+            file: Some(TemplateFile {
+                path: "/home/ana/.gittemplate".into(),
+                scope: "global".into(),
+            }),
+            content: "Fix: \n\nWhy:\n".into(),
+            options: TemplateOptions::default(),
+        };
+        let _ = app.update(Message::TemplateLoaded(Ok(settings)));
+        assert_eq!(app.settings_page.as_ref().unwrap().template_summary, "Fix:");
+        assert_eq!(app.template_description.text().trim(), "Why:");
+        // A template used by all repositories asks first.
+        let _ = app.update(Message::TemplateSave);
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(
+            modal.text,
+            "This template is used by all repositories. Change it?"
+        );
+        assert!(matches!(
+            modal.action(1),
+            Some(Message::TemplateSaveConfirmed)
+        ));
     }
 
     /// Staging app whose HEAD commit "c" has a message.

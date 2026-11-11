@@ -64,6 +64,8 @@ pub struct RepoSnapshot {
     pub merge_message: Option<String>,
     /// Configured `commit.template` content.
     pub commit_template: Option<String>,
+    /// Apply / remove comments / comment character (M10-06).
+    pub template_options: git_core::commit_template::TemplateOptions,
     /// The whole history when this snapshot shows only the commits of
     /// visible branches (hidden or soloed branches, M5-08).
     pub unfiltered: Option<Arc<RepoSnapshot>>,
@@ -150,6 +152,9 @@ impl RepoSnapshot {
         snapshot.flow_finish = backend.flow_finish().map_err(|e| e.to_string())?;
         snapshot.merge_message = backend.merge_message().map_err(|e| e.to_string())?;
         snapshot.commit_template = backend.commit_template().map_err(|e| e.to_string())?;
+        snapshot.template_options = backend
+            .commit_template_options()
+            .map_err(|e| e.to_string())?;
         Ok(snapshot)
     }
 
@@ -269,6 +274,7 @@ impl RepoSnapshot {
             flow_finish: None,
             merge_message: None,
             commit_template: None,
+            template_options: Default::default(),
             unfiltered: None,
             applied_filter: Default::default(),
         })
@@ -349,6 +355,7 @@ impl RepoSnapshot {
         filtered.flow_finish = base.flow_finish.clone();
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
+        filtered.template_options = base.template_options.clone();
         filtered.unfiltered = Some(Arc::new(base));
         filtered.applied_filter = filter.clone();
         Ok(filtered)

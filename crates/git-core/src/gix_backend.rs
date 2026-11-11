@@ -636,6 +636,17 @@ impl GitBackend for GixBackend {
         Ok(std::fs::read_to_string(path).ok())
     }
 
+    fn commit_template_options(&self) -> Result<crate::commit_template::TemplateOptions> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        let comment = config.string("core.commentChar").map(|v| v.to_string());
+        Ok(crate::commit_template::TemplateOptions::from_config(
+            config.boolean(crate::identity::config_key("applyCommitTemplate").as_str()),
+            config.boolean(crate::identity::config_key("removeComments").as_str()),
+            comment.as_deref(),
+        ))
+    }
+
     fn state(&self) -> Result<RepoState> {
         Ok(crate::state::detect(self.local().git_dir()))
     }

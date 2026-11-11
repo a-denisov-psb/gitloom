@@ -323,6 +323,8 @@ pub enum Category {
     Identity,
     /// SSH key of the active tab's repository (M8-06).
     SshKey,
+    /// Commit template of the active tab's repository (M10-06).
+    Commit,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
 }
@@ -339,7 +341,7 @@ impl Category {
     /// Categories of the active tab's repository, below the group header
     /// "Repository · <name>" (M8-01, like GitKraken's repo-specific
     /// preferences).
-    pub const REPOSITORY: [Self; 3] = [Self::Identity, Self::SshKey, Self::Gitflow];
+    pub const REPOSITORY: [Self; 4] = [Self::Identity, Self::SshKey, Self::Commit, Self::Gitflow];
 
     /// The category belongs to the repository group.
     pub fn is_repository(self) -> bool {
@@ -354,6 +356,7 @@ impl Category {
             Self::Signing => "Signing",
             Self::Identity => "Identity",
             Self::SshKey => "SSH key",
+            Self::Commit => "Commit",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
         }
@@ -393,6 +396,10 @@ pub struct Page {
     pub signing: Option<Result<SigningPage, String>>,
     /// Typed GPG program (saved with Save).
     pub gpg_program_input: String,
+    /// Commit template category (M10-06): `None` while loading; the typed
+    /// summary (the description lives in `App::template_description`).
+    pub template: Option<Result<git_core::commit_template::TemplateSettings, String>>,
+    pub template_summary: String,
 }
 
 /// What the Signing category shows (M10-04).
@@ -468,6 +475,8 @@ impl Page {
             default_branch_error: None,
             signing: None,
             gpg_program_input: String::new(),
+            template: None,
+            template_summary: String::new(),
         }
     }
 

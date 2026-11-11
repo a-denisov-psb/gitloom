@@ -8,6 +8,7 @@
 mod blame;
 mod cli_backend;
 pub mod clone;
+pub mod commit_template;
 mod conflict;
 mod diff;
 mod discard;
@@ -573,6 +574,11 @@ pub trait GitBackend: Send + Sync {
 
     /// Content of the configured `commit.template`, if any.
     fn commit_template(&self) -> Result<Option<String>>;
+
+    /// How the commit panel uses the template (M10-06).
+    fn commit_template_options(&self) -> Result<commit_template::TemplateOptions> {
+        Ok(commit_template::TemplateOptions::default())
+    }
 
     /// Operation in progress (merge, rebase, cherry-pick, revert).
     fn state(&self) -> Result<RepoState>;
