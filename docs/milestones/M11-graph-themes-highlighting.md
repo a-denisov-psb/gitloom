@@ -166,11 +166,13 @@ Acceptance: unit tests for the row-count model (prefix sums, resize, split align
 
 Note: `diff_wrap` (row characters, columns, prefix sums, visible rows). The view builds the layout per frame from the width `responsive` gives it (O(rows) over character counts cached at load and on style changes); iced reports the viewport width only while the content overflows, so the app uses the last reported width for scrolling (change navigation, first change) and the view never depends on it. Code text wraps at any glyph with a fixed width of whole characters and an absolute line height, so drawn and counted lines match. Performance: layout of 50,000 rows (≈ 2 MB) and the visible-row search take well under 25 ms in a debug build (unit test), far below the 50 ms frame budget; measured values go to `docs/PERFORMANCE.md` in M11-10. Snapshots `ui_check_word_wrap` (Hunk shows the wrapped line; Inline and Split open at the top in the simulator, Split alignment is covered by unit tests).
 
-### [ ] M11-08 Highlighting engine
+### [x] M11-08 Highlighting engine
 
 - Module `highlight` (pure), syntect + two-face, theme mapping, size limits, cache, background task API; dependencies per CLAUDE.md rules, ADR-047, cargo-deny, notices.
 
 Acceptance: unit tests: Rust and Python samples get keyword/string/comment spans; a multi-line comment spanning a hunk boundary keeps its style on every line; unknown extension → plain; size limit → plain; cache hit on the same blob.
+
+Note: module `crates/app/src/highlight.rs`; choices recorded in ADR-047 (regex-fancy, OneHalfDark / GitHub). The background task and the mapping to diff lines come with M11-09, which uses the module (until then it is test-only code).
 
 ### [ ] M11-09 Highlighting in all views
 
