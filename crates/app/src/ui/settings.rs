@@ -63,6 +63,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Identity => repository_identity(app),
         Category::SshKey => ssh_key(app, page),
         Category::Commit => commit_template(app, page),
+        Category::Editor => repository_editor(app, page),
         Category::Gitflow => gitflow(app, page),
     };
 
@@ -138,6 +139,7 @@ fn category_title(app: &App, category: Category) -> String {
         (Category::Identity, Some(name)) => format!("Identity · {name}"),
         (Category::SshKey, Some(name)) => format!("SSH key · {name}"),
         (Category::Commit, Some(name)) => format!("Commit · {name}"),
+        (Category::Editor, Some(name)) => format!("External editor · {name}"),
         _ => category.title().to_owned(),
     }
 }
@@ -422,6 +424,65 @@ fn field<'a>(
         content = content.push(muted(note).size(12));
     }
     content.into()
+}
+
+/// Preferences → Repository → External editor (M10-11): the global setting
+/// or the same presets and a custom command, stored in the repository config.
+fn repository_editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
+    use crate::settings::EditorPreset;
+    let global = &app.settings.tools.editor_command;
+    let global_label = crate::app::use_global_editor_label(global);
+    let current = app
+        .active_tab()
+        .and_then(crate::app::Tab::view)
+        .and_then(|v| v.snapshot.repo_editor.clone());
+    let selected = match (&current, page.repo_editor_custom) {
+        (_, true) => EditorPreset::Custom.label().to_owned(),
+        (None, false) => global_label.clone(),
+        (Some(command), false) => EditorPreset::of(command).label().to_owned(),
+    };
+    let options: Vec<String> = std::iter::once(global_label)
+        .chain(
+            EditorPreset::ALL
+                .into_iter()
+                .filter(|p| *p != EditorPreset::None)
+                .map(|p| p.label().to_owned()),
+        )
+        .collect();
+    let picker = iced::widget::pick_list(options, Some(selected), Message::RepoEditorChosen)
+        .width(Length::Fixed(320.0));
+    let mut content = column![picker].spacing(10);
+    if current.is_some() || page.repo_editor_custom {
+        let changed = page.repo_editor_input.trim() != current.as_deref().unwrap_or("");
+        content = content.push(
+            row![
+                text_input("code {path}", &page.repo_editor_input)
+                    .on_input(Message::RepoEditorInput)
+                    .on_submit(Message::RepoEditorSave)
+                    .padding(6)
+                    .style(theme::input)
+                    .width(Length::Fixed(320.0)),
+                button(text("Save"))
+                    .on_press_maybe(changed.then_some(Message::RepoEditorSave))
+                    .padding([5, 12])
+                    .style(button::secondary),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        );
+    }
+    column![
+        text("External editor"),
+        content,
+        muted(format!(
+            "Used for this repository by Alt+E, the toolbar, the palette and the file menus \
+             ({} in its Git config); {{path}} is the folder or file.",
+            git_core::identity::config_key("externalEditor")
+        ))
+        .size(12),
+    ]
+    .spacing(6)
+    .into()
 }
 
 /// Preferences → Repository → Commit (M10-06): like GitKraken's "Commit

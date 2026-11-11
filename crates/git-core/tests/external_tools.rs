@@ -124,3 +124,30 @@ fn tool_info_lists_configured_and_user_defined_tools() {
         Some("fakemerge")
     );
 }
+
+/// The repository's external editor is written to and removed from its
+/// config, and read by the gix backend (M10-11).
+#[test]
+fn repository_editor_round_trip() {
+    use git_core::{GitBackend, GixBackend};
+    let repo = support::TestRepo::new();
+    let cli = CliBackend::new(repo.path());
+    git_core::set_repository_editor(&cli, Some("zed {path}")).unwrap();
+    assert_eq!(
+        GixBackend::discover(repo.path())
+            .unwrap()
+            .external_editor()
+            .unwrap()
+            .as_deref(),
+        Some("zed {path}")
+    );
+    git_core::set_repository_editor(&cli, None).unwrap();
+    git_core::set_repository_editor(&cli, None).unwrap();
+    assert_eq!(
+        GixBackend::discover(repo.path())
+            .unwrap()
+            .external_editor()
+            .unwrap(),
+        None
+    );
+}

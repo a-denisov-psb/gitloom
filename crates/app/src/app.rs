@@ -223,7 +223,7 @@ impl Tab {
         }
     }
 
-    fn view_mut(&mut self) -> Option<&mut RepoView> {
+    pub(crate) fn view_mut(&mut self) -> Option<&mut RepoView> {
         match &mut self.state {
             TabState::Ready(view) => Some(view),
             _ => None,
@@ -715,6 +715,12 @@ pub enum Message {
     SigningProgramInput(String),
     SigningProgramSave,
     SigningRefresh,
+    /// Repository → External editor (M10-11): the global setting, a preset
+    /// label or "Custom".
+    RepoEditorChosen(String),
+    RepoEditorInput(String),
+    RepoEditorSave,
+    RepoEditorWritten(Result<(), String>),
     /// Stash message template (M10-10).
     StashTemplateToggled(bool),
     /// A preset or "Custom" picked from the dropdown.
@@ -4017,7 +4023,7 @@ impl App {
                 return Some("Stage changes first".to_owned());
             }
         }
-        if id == Shortcut::OpenEditor && self.settings.tools.editor_command.trim().is_empty() {
+        if id == Shortcut::OpenEditor && self.editor_command().is_empty() {
             return Some(crate::launch::NO_EDITOR.to_owned());
         }
         if id == Shortcut::CheckoutBranch {
@@ -4531,11 +4537,22 @@ impl App {
         }
     }
 
+    /// The editor command for the active tab: the repository's own
+    /// (M10-11), else the global one; empty when neither is set.
+    pub fn editor_command(&self) -> String {
+        resolve_editor(
+            self.active_tab()
+                .and_then(Tab::view)
+                .and_then(|v| v.snapshot.repo_editor.as_deref()),
+            &self.settings.tools.editor_command,
+        )
+    }
+
     /// Template and target of "open in editor" (M8-08): the repository root
     /// for `None`, else the absolute path of the file; an error without an
     /// editor, `None` without a repository.
     pub fn editor_request(&self, file: Option<&str>) -> Result<Option<(String, PathBuf)>, String> {
-        let template = self.settings.tools.editor_command.trim().to_owned();
+        let template = self.editor_command();
         if template.is_empty() {
             return Err(crate::launch::NO_EDITOR.to_owned());
         }
@@ -4692,6 +4709,28 @@ impl App {
                     .map_err(|e| e.to_string())
             }),
             Message::GlobalIdentityWritten,
+        )
+    }
+
+    /// Writes the repository's editor (`None`: use the global setting) and
+    /// reloads the tab (M10-11).
+    fn write_repo_editor(&mut self, command: Option<String>) -> Task<Message> {
+        let Some(writer) = self
+            .active_tab()
+            .and_then(Tab::view)
+            .map(|view| Arc::clone(&view.writer))
+        else {
+            return Task::none();
+        };
+        if let Some(page) = self.settings_page.as_mut() {
+            page.repo_editor_input = command.clone().unwrap_or_default();
+        }
+        Task::perform(
+            blocking(move || {
+                git_core::set_repository_editor(writer.as_ref(), command.as_deref())
+                    .map_err(|e| e.to_string())
+            }),
+            Message::RepoEditorWritten,
         )
     }
 
@@ -5123,6 +5162,43 @@ impl App {
                 }
             }
             Message::CrashReportDismissed => self.crash_notice = None,
+            Message::RepoEditorChosen(choice) => {
+                let global = self.settings.tools.editor_command.clone();
+                if choice == use_global_editor_label(&global) {
+                    return self.write_repo_editor(None);
+                }
+                let preset = settings::EditorPreset::ALL
+                    .into_iter()
+                    .find(|p| p.label() == choice)
+                    .unwrap_or(settings::EditorPreset::Custom);
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.repo_editor_custom = preset == settings::EditorPreset::Custom;
+                }
+                if let Some(template) = preset.template().filter(|t| !t.is_empty()) {
+                    return self.write_repo_editor(Some(template.to_owned()));
+                }
+            }
+            Message::RepoEditorInput(command) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.repo_editor_input = command;
+                }
+            }
+            Message::RepoEditorSave => {
+                let command = self
+                    .settings_page
+                    .as_ref()
+                    .map(|p| p.repo_editor_input.trim().to_owned())
+                    .filter(|c| !c.is_empty());
+                return self.write_repo_editor(command);
+            }
+            Message::RepoEditorWritten(result) => {
+                if let Err(error) = result {
+                    self.status = format!("Could not change the repository's editor: {error}");
+                }
+                if let Some((tab, _)) = self.active_repo_path() {
+                    return self.refresh(tab);
+                }
+            }
             Message::StashTemplateToggled(on) => {
                 self.settings.templates.stash_enabled = on;
                 return self.save_settings();
@@ -5427,6 +5503,10 @@ impl App {
                 // Repository categories need an open repository (the list
                 // shows them disabled otherwise).
                 let repo = self.active_repo_path();
+                let repo_editor = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.repo_editor.clone());
                 if category.is_repository() && repo.is_none() {
                     return Task::none();
                 }
@@ -5440,6 +5520,10 @@ impl App {
                     }
                     if category == settings::Category::Commit {
                         return self.load_template();
+                    }
+                    if category == settings::Category::Editor {
+                        page.repo_editor_input = repo_editor.clone().unwrap_or_default();
+                        page.repo_editor_custom = false;
                     }
                     if category == settings::Category::Templates {
                         self.prompt_instruction = iced::widget::text_editor::Content::with_text(
@@ -5818,7 +5902,7 @@ impl App {
                         },
                         MenuEntry::item("Show in graph", Message::FileHistoryShowInGraph),
                         editor_entry(
-                            &self.settings.tools.editor_command,
+                            &self.editor_command(),
                             history_path.as_deref().unwrap_or_default(),
                             false,
                         ),
@@ -5955,7 +6039,7 @@ impl App {
                     ));
                 }
                 entries.push(editor_entry(
-                    &self.settings.tools.editor_command,
+                    &self.editor_command(),
                     &file.path,
                     file.kind == git_core::ChangeKind::Deleted,
                 ));
@@ -9667,6 +9751,26 @@ fn global_event(event: Event, status: event::Status, window: window::Id) -> Opti
 }
 
 /// Why committing is not possible right now, if it is not.
+/// Repository editor over the global one; empty when neither is set (M10-11).
+pub fn resolve_editor(repository: Option<&str>, global: &str) -> String {
+    repository
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .unwrap_or(global.trim())
+        .to_owned()
+}
+
+/// First entry of the repository editor list (M10-11).
+pub fn use_global_editor_label(global: &str) -> String {
+    let preset = settings::EditorPreset::of(global);
+    let name = match preset {
+        settings::EditorPreset::None => "none".to_owned(),
+        settings::EditorPreset::Custom => global.trim().to_owned(),
+        preset => preset.label().to_owned(),
+    };
+    format!("Use global setting ({name})")
+}
+
 /// Dropdown entry for a custom stash message template (M10-10).
 pub const STASH_CUSTOM: &str = "Custom";
 
@@ -11245,6 +11349,7 @@ pub(crate) mod tests {
                 Category::Identity,
                 Category::SshKey,
                 Category::Commit,
+                Category::Editor,
                 Category::Gitflow
             ]
         );
@@ -13253,6 +13358,84 @@ pub(crate) mod tests {
             text: "Write a commit message.\n\nBranch: main\n".into(),
             notes: vec!["1 diff omitted (binary)".into()],
         }
+    }
+
+    #[test]
+    fn editor_resolution() {
+        assert_eq!(
+            resolve_editor(Some("zed {path}"), "code {path}"),
+            "zed {path}"
+        );
+        assert_eq!(resolve_editor(Some("  "), "code {path}"), "code {path}");
+        assert_eq!(resolve_editor(None, "code {path}"), "code {path}");
+        assert_eq!(resolve_editor(None, ""), "");
+        assert_eq!(
+            use_global_editor_label("code {path}"),
+            "Use global setting (VS Code)"
+        );
+        assert_eq!(use_global_editor_label(""), "Use global setting (none)");
+        assert_eq!(
+            use_global_editor_label("vim {path}"),
+            "Use global setting (vim {path})"
+        );
+    }
+
+    #[test]
+    fn repository_editor_is_used_by_every_entry_point() {
+        let mut app = staging_app(&["a"], &[]);
+        assert!(
+            app.action_block(Shortcut::OpenEditor).is_some(),
+            "no editor yet"
+        );
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.repo_editor = Some("zed {path}".into());
+        view.apply_snapshot(Arc::new(snapshot));
+        // Alt+E, toolbar button and palette.
+        assert_eq!(app.action_block(Shortcut::OpenEditor), None);
+        assert_eq!(app.editor_command(), "zed {path}");
+        let (template, _) = app.editor_request(None).unwrap().unwrap();
+        assert_eq!(template, "zed {path}");
+        // A file context menu.
+        let file = app.tabs[0].view().unwrap().snapshot.working_tree.unstaged[0].clone();
+        let _ = app.update(Message::FileContextMenu {
+            file,
+            area: FileArea::Unstaged,
+            position: iced::Point::ORIGIN,
+        });
+        assert_eq!(
+            menu_item_enabled(&app, "Open in external editor"),
+            Some(true)
+        );
+        // The repository wins over the global setting.
+        app.settings.tools.editor_command = "code {path}".into();
+        assert_eq!(app.editor_command(), "zed {path}");
+    }
+
+    #[test]
+    fn repository_editor_page_choices() {
+        let mut app = staging_app(&[], &[]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Editor));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::Editor
+        );
+        let _ = app.update(Message::RepoEditorChosen("Custom".into()));
+        assert!(app.settings_page.as_ref().unwrap().repo_editor_custom);
+        let _ = app.update(Message::RepoEditorInput("vim {path}".into()));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().repo_editor_input,
+            "vim {path}"
+        );
+        let _ = app.update(Message::RepoEditorChosen("Zed".into()));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().repo_editor_input,
+            "zed {path}"
+        );
+        let _ = app.update(Message::RepoEditorChosen(
+            "Use global setting (none)".into(),
+        ));
+        assert_eq!(app.settings_page.as_ref().unwrap().repo_editor_input, "");
     }
 
     #[test]

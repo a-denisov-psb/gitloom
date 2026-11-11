@@ -66,6 +66,8 @@ pub struct RepoSnapshot {
     pub commit_template: Option<String>,
     /// Apply / remove comments / comment character (M10-06).
     pub template_options: git_core::commit_template::TemplateOptions,
+    /// External editor of the repository (M10-11); `None`: global setting.
+    pub repo_editor: Option<String>,
     /// The whole history when this snapshot shows only the commits of
     /// visible branches (hidden or soloed branches, M5-08).
     pub unfiltered: Option<Arc<RepoSnapshot>>,
@@ -155,6 +157,7 @@ impl RepoSnapshot {
         snapshot.template_options = backend
             .commit_template_options()
             .map_err(|e| e.to_string())?;
+        snapshot.repo_editor = backend.external_editor().map_err(|e| e.to_string())?;
         Ok(snapshot)
     }
 
@@ -275,6 +278,7 @@ impl RepoSnapshot {
             merge_message: None,
             commit_template: None,
             template_options: Default::default(),
+            repo_editor: None,
             unfiltered: None,
             applied_filter: Default::default(),
         })
@@ -356,6 +360,7 @@ impl RepoSnapshot {
         filtered.merge_message = base.merge_message.clone();
         filtered.commit_template = base.commit_template.clone();
         filtered.template_options = base.template_options.clone();
+        filtered.repo_editor = base.repo_editor.clone();
         filtered.unfiltered = Some(Arc::new(base));
         filtered.applied_filter = filter.clone();
         Ok(filtered)

@@ -188,8 +188,10 @@ Acceptance: unit tests for rendering (every placeholder, detached HEAD, unknown 
 
 Note (2026-11-11): done. The Templates page itself came with M10-07; this task adds the "Stash message" section and `stash_template.rs` (pure rendering, presets, hints). Dates use the same UTC clock as the graph's date column. The toolbar/palette Stash (`Message::StashPush`) is the only stash without an entered message; "Stash and checkout/merge" keep their own messages ("an entered message wins"). While the switch is off the dropdown shows as a disabled field (iced 0.14's pick list has no disabled state). An unknown placeholder or an empty custom text falls back to Git's default message. Tests: unit tests in `stash_template.rs`, app `stash_template_gives_the_stash_message`, `stash_list_shows_the_rendered_message` (real repository), settings migration; snapshots `ui_check_stash_template` (off, preset, custom with unknown placeholder; dark/light) checked.
 
-### [ ] M10-11 External editor per repository
+### [x] M10-11 External editor per repository
 
 - Repository page entry and resolution per the decisions table.
 
 Acceptance: unit test for the resolution (repository over global, global only, none); app tests: Alt+E and a file context menu use the repository editor; the toolbar button shows with only a repository editor; snapshot of the repository page.
+
+Note (2026-11-11): done. `GitBackend::external_editor` (gix) feeds `RepoSnapshot::repo_editor`; `App::editor_command` resolves repository over global (`resolve_editor`) and replaces every direct use of the global command (action block of Alt+E/palette, `editor_request`, both file menus, the toolbar button). git-core `set_repository_editor` writes or unsets the key. The repository page lists "Use global setting (<name>)", the presets and Custom; a preset writes right away, a typed command with Save; the tab reloads so the snapshot follows. Tests: app `editor_resolution`, `repository_editor_is_used_by_every_entry_point`, `repository_editor_page_choices`; git-core `repository_editor_round_trip`; snapshot `ui_check_repository_editor` checked.
