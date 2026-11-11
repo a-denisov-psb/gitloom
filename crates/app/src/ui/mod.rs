@@ -75,6 +75,8 @@ pub(crate) fn draggable_branch<'a>(
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    // Icons snap to the physical pixel grid of this frame (M9-05).
+    crate::icons::set_scale(app.physical_scale());
     let mut layout = column![tabs::view(app)].spacing(1);
     if let Some(notice) = &app.notice {
         layout = layout.push(notice_banner(notice));

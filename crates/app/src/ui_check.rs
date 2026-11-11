@@ -58,6 +58,48 @@ pub fn snapshot_sized(app: &App, name: &str, size: (f32, f32)) -> PathBuf {
     path
 }
 
+/// Renders `app` at `scale` physical pixels per logical pixel (the
+/// simulator always uses 2), e.g. 1.1 for a zoom of 110 % on a 100 %
+/// display (M9-05). Writes `target/ui-snapshots/<name>.png`.
+pub fn snapshot_scaled(app: &App, name: &str, scale: f32) -> PathBuf {
+    use iced::advanced::renderer::Headless as _;
+    use iced::theme::Base as _;
+    use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+    // Loads the fonts like the app does at start.
+    drop(simulator(app));
+    let mut renderer = iced_test::futures::futures::executor::block_on(iced::Renderer::new(
+        iced::Font::with_name("Fira Sans"),
+        13.into(),
+        Some("tiny-skia"),
+    ))
+    .expect("headless renderer");
+    let theme = app.theme();
+    let base = theme.base();
+    let size = iced::Size::new(SIZE.0, SIZE.1);
+    let mut ui = UserInterface::build(app.view(), size, Cache::default(), &mut renderer);
+    ui.draw(
+        &mut renderer,
+        &theme,
+        &iced::advanced::renderer::Style {
+            text_color: base.text_color,
+        },
+        iced::mouse::Cursor::Unavailable,
+    );
+    let physical = iced::Size::new(
+        (SIZE.0 * scale).round() as u32,
+        (SIZE.1 * scale).round() as u32,
+    );
+    let rgba = renderer.screenshot(physical, scale, base.background_color);
+    let pixmap = resvg::tiny_skia::IntSize::from_wh(physical.width, physical.height)
+        .and_then(|size| resvg::tiny_skia::Pixmap::from_vec(rgba, size))
+        .expect("screenshot size");
+    let path = snapshot_dir().join(format!("{name}.png"));
+    std::fs::create_dir_all(snapshot_dir()).expect("snapshot dir");
+    pixmap.save_png(&path).expect("write snapshot");
+    path
+}
+
 /// Clicks the widget with `id` (focusing an input) and renders the result.
 pub fn snapshot_focused(app: &App, id: &'static str, name: &str) -> PathBuf {
     let path = fresh_path(name);
@@ -404,6 +446,28 @@ mod tests {
             orphaned.settings.appearance.theme = choice;
             with_conflicts(&mut orphaned, &["a.txt"]);
             snapshot(&orphaned, &format!("stash-conflict-2-orphaned-{theme}"));
+        }
+    }
+
+    /// Icons at fractional scales (M9-05): left panel headers (with the "+"
+    /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
+    /// 150 %, both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_sharp_icons() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::flow_app();
+            crate::app::tests::with_conflicts(&mut app, &["conflicted.txt"]);
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for percent in [100_u32, 110, 125, 150] {
+                let scale = percent as f32 / 100.0;
+                let _ = app.update(Message::SystemScaleChanged(scale));
+                snapshot_scaled(&app, &format!("sharp-icons-{percent}-{theme}"), scale);
+            }
         }
     }
 

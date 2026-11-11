@@ -130,11 +130,13 @@ Acceptance: menu tests (HEAD, during an operation, with conflicted files from a 
 
 Note (2026-11-11): done. `git write-tree` refuses unmerged entries, so the index is now recorded by `record_index`: unmerged entries entry by entry, the rest as a tree (the unmerged entries are taken out for `write-tree` and put back right away, so the reset itself runs on the untouched index); `restore_index` puts both back. Used by soft/mixed resets (`HistoryUndo::Reset.unmerged`) and hard resets (`ResetSnapshot.unmerged`), on any commit. Dialog buttons can now be disabled with a tooltip (`DialogButton.disabled`). Tests: app `reset_is_offered_on_the_head_commit`, `soft_reset_stays_available_on_other_commits`; git-core `mixed_reset_on_head_*`, `hard_reset_on_head_*`.
 
-### [ ] M9-05 Sharp icons at fractional scales
+### [x] M9-05 Sharp icons at fractional scales
 
 - Size rounding and position snapping in `icons.rs` per the decisions table; all icon call sites go through it.
 
 Acceptance: `iced_test` snapshots of the left panel headers (incl. the "+" of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and 150 %, checked by eye; unit tests for the rounding.
+
+Note (2026-11-11): done. Every helper in `icons.rs` returns the wrapper widget `Sharp`: the size is rounded by `snap_size` (whole physical pixels), and `draw` translates the SVG by `snap_offset` of its bounds. The scale is zoom × the window's scale factor from the operating system (`window::scale_factor` when the window opens, `window::Event::Rescaled` afterwards), set by `ui::view` before each frame. No call site needed changes; no other SVG is drawn outside the helpers. The `iced_test` simulator always renders at scale 2, so `ui_check::snapshot_scaled` renders the real view with the tiny-skia renderer at 1.0/1.1/1.25/1.5 (`ui_check_sharp_icons`, flow app with GITFLOW "+", REMOTE "+", toolbar and a conflicted file, both themes); compared by eye with unsnapped renders (temporary switch, not committed). tiny-skia draws SVGs as vectors, so the difference there is small; the blur the maintainer saw comes from wgpu rasterizing an SVG at a fractional size and sampling it at a fractional position, which snapping removes. To confirm on Windows at 110/125 % (release checklist, M9-08).
 
 ### [ ] M9-06 Left panel order and GITFLOW content
 
