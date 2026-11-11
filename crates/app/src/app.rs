@@ -846,6 +846,15 @@ pub enum Message {
     StashPush,
     StashPop(String),
     StashApply(String),
+    /// Close the banner of a resolved stash conflict without dropping it.
+    KeepStash,
+    /// Whether the files of the stash pop/apply to undo changed since.
+    StashUndoChecked {
+        tab: TabId,
+        result: Result<bool, String>,
+    },
+    /// Undo the stash pop/apply although its files changed.
+    StashUndoConfirmed(TabId),
     /// Ask before deleting a stash.
     StashDrop(String),
     StashDropConfirmed(String),
@@ -3180,16 +3189,54 @@ impl App {
     /// Undoes (or redoes) the most recent action of the active tab. A failed
     /// attempt drops the entry and explains why.
     fn undo_redo(&mut self, undo: bool) -> Task<Message> {
-        if let Some(reason) = self.write_block() {
-            self.status = reason;
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
-        }
+        };
+        self.undo_redo_in(tab, undo, false)
+    }
+
+    /// Pops or applies the stash `id` in the active tab and records it for
+    /// undo; a pop that stops in conflicts keeps the stash (M9-01, M9-02).
+    fn apply_stash(&mut self, id: String, pop: bool) -> Task<Message> {
         let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
         };
         let Some(view) = self.active_view_mut() else {
             return Task::none();
         };
+        let root = view.backend.path().to_path_buf();
+        let label = if pop { "Pop stash" } else { "Apply stash" };
+        self.run_undoable(tab, label, move |git| {
+            let record = git_core::apply_stash_recorded(git, &root, &id, pop)?;
+            Ok(Some(History::Push(UndoAction::Stash(Box::new(record)))))
+        })
+    }
+
+    /// Undo or redo in tab `tab`. Undoing a stash pop/apply whose files
+    /// changed since (a conflict partly resolved) asks first unless
+    /// `confirmed` (M9-02).
+    fn undo_redo_in(&mut self, tab: TabId, undo: bool, confirmed: bool) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            self.status = reason;
+            return Task::none();
+        }
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        if undo && !confirmed && view.busy.is_none() {
+            if let Some(UndoAction::Stash(record)) = view.undo.last() {
+                let record = record.clone();
+                let root = view.backend.path().to_path_buf();
+                let writer = Arc::clone(&view.writer);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::stash_changed_since(writer.as_ref(), &root, &record)
+                            .map_err(|e| e.to_string())
+                    }),
+                    move |result| Message::StashUndoChecked { tab, result },
+                );
+            }
+        }
         if view.busy.is_some() {
             return Task::none();
         }
@@ -3250,6 +3297,14 @@ impl App {
                         git_core::flow_finish::redo(git, &record)?;
                     }
                     UndoAction::FlowFinish(record)
+                }
+                UndoAction::Stash(record) => {
+                    if undo {
+                        git_core::undo_stash(git, &root, &record)?;
+                        UndoAction::Stash(record)
+                    } else {
+                        UndoAction::Stash(Box::new(git_core::redo_stash(git, &root, &record)?))
+                    }
                 }
                 UndoAction::Discard { label, snapshot } => {
                     // Restoring returns the replaced state, which reverts the restore.
@@ -5648,6 +5703,31 @@ impl App {
                         }
                     }
                     match &result {
+                        Ok(Some(
+                            History::Push(UndoAction::Stash(record))
+                            | History::Redone(UndoAction::Stash(record)),
+                        )) => {
+                            view.stash_conflict = (record.outcome
+                                == git_core::StashOutcome::Conflicts)
+                                .then(|| crate::repo_view::StashConflict {
+                                    id: record.stash.clone(),
+                                    label: view
+                                        .snapshot
+                                        .stashes
+                                        .iter()
+                                        .find(|s| s.id == record.stash)
+                                        .map_or_else(
+                                            || record.message.clone(),
+                                            |s| s.message.clone(),
+                                        ),
+                                });
+                        }
+                        Ok(Some(History::Undone(UndoAction::Stash(_)))) => {
+                            view.stash_conflict = None;
+                        }
+                        _ => {}
+                    }
+                    match &result {
                         Ok(Some(History::Push(action))) => {
                             view.undo.push(action.clone());
                             view.redo.clear();
@@ -6495,16 +6575,27 @@ impl App {
                     return self.run_write(tab, "Stash", |git| git.stash_push(None));
                 }
             }
-            Message::StashPop(id) => {
-                if let Some(tab) = self.active_tab().map(|t| t.id) {
-                    return self.run_write(tab, "Pop stash", move |git| git.stash_pop(&id));
+            Message::StashPop(id) => return self.apply_stash(id, true),
+            Message::StashApply(id) => return self.apply_stash(id, false),
+            Message::KeepStash => {
+                if let Some(view) = self.active_view_mut() {
+                    view.stash_conflict = None;
                 }
             }
-            Message::StashApply(id) => {
-                if let Some(tab) = self.active_tab().map(|t| t.id) {
-                    return self.run_write(tab, "Apply stash", move |git| git.stash_apply(&id));
+            Message::StashUndoChecked { tab, result } => match result {
+                Ok(true) => {
+                    self.modal = Some(Modal::confirm(
+                        "Undo stash",
+                        "Discard your conflict resolution and return to the state before the pop?",
+                        "Undo",
+                        true,
+                        Message::StashUndoConfirmed(tab),
+                    ));
                 }
-            }
+                Ok(false) => return self.undo_redo_in(tab, true, true),
+                Err(error) => self.status = format!("Undo failed: {error}"),
+            },
+            Message::StashUndoConfirmed(tab) => return self.undo_redo_in(tab, true, true),
             Message::StashDrop(id) => {
                 let name = self
                     .active_tab()
@@ -7227,7 +7318,7 @@ impl App {
                 let Some(view) = self.active_view_mut() else {
                     return Task::none();
                 };
-                let labels = conflict_labels(&view.snapshot);
+                let labels = conflict_labels(&view.snapshot, view.stash_conflict.as_ref());
                 view.center = CenterView::Conflict(Box::new(crate::conflict::ConflictView::new(
                     path.clone(),
                     labels,
@@ -8138,8 +8229,19 @@ fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut:
 
 /// Marker labels for ours and theirs in the conflict view: the checked-out
 /// branch (or HEAD) and the commit being merged, picked or reverted.
-fn conflict_labels(snapshot: &RepoSnapshot) -> (String, String) {
+/// A stash conflict uses Git's marker names: "Updated upstream" and
+/// "Stashed changes" (M9-01).
+fn conflict_labels(
+    snapshot: &RepoSnapshot,
+    stash: Option<&crate::repo_view::StashConflict>,
+) -> (String, String) {
     use git_core::RepoState;
+    if let (RepoState::Clean, Some(stash)) = (&snapshot.state, stash) {
+        return (
+            "Updated upstream".into(),
+            format!("Stashed changes · {}", stash.label),
+        );
+    }
     let ours = head_name(snapshot).to_owned();
     let theirs = match &snapshot.state {
         RepoState::Merging { merge_head } => snapshot.commit_name(merge_head),
@@ -11469,7 +11571,7 @@ pub(crate) mod tests {
     }
 
     /// Ready app with git available and the given unstaged/staged files.
-    fn staging_app(unstaged: &[&str], staged: &[&str]) -> App {
+    pub(crate) fn staging_app(unstaged: &[&str], staged: &[&str]) -> App {
         let mut app = ready_app(&["c"]);
         let _ = app.update(git_available());
         let tree = git_core::WorkingTree {
@@ -11676,7 +11778,7 @@ pub(crate) mod tests {
     }
 
     /// Marks `paths` as conflicted in the working tree of the first tab.
-    fn with_conflicts(app: &mut App, paths: &[&str]) {
+    pub(crate) fn with_conflicts(app: &mut App, paths: &[&str]) {
         let view = app.tabs[0].view_mut().unwrap();
         let mut tree = view.snapshot.working_tree.clone();
         for path in paths {
@@ -11714,6 +11816,231 @@ pub(crate) mod tests {
             assert_eq!(view.busy.as_deref(), Some(label));
             assert!(view.clear_message_after_write);
         }
+    }
+
+    /// Staging app with the stash "s1" listed (M9-01).
+    pub(crate) fn stash_app() -> App {
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.stashes = vec![git_core::Stash {
+            index: 0,
+            message: "WIP on main: c base".into(),
+            id: "s1".into(),
+            base: None,
+            time: 0,
+            author: String::new(),
+        }];
+        view.apply_snapshot(Arc::new(snapshot));
+        app
+    }
+
+    pub(crate) fn stash_record(outcome: git_core::StashOutcome) -> git_core::StashRecord {
+        git_core::StashRecord {
+            pop: true,
+            stash: "s1".into(),
+            message: "WIP on main: c base".into(),
+            position: 0,
+            head: "c".into(),
+            index_tree: "t".into(),
+            before: Vec::new(),
+            after: Vec::new(),
+            outcome,
+            dropped: outcome == git_core::StashOutcome::Applied,
+        }
+    }
+
+    /// Pops "s1" and finishes the write with `outcome`.
+    pub(crate) fn pop_stash(app: &mut App, outcome: git_core::StashOutcome) {
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::StashPop("s1".into()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Pop stash")
+        );
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Pop stash".into(),
+            result: Ok(Some(History::Push(UndoAction::Stash(Box::new(
+                stash_record(outcome),
+            ))))),
+        });
+    }
+
+    pub(crate) fn resolve_all(app: &mut App) {
+        let view = app.tabs[0].view_mut().unwrap();
+        let tree = git_core::WorkingTree {
+            unstaged: Vec::new(),
+            staged: vec![file("a.txt")],
+        };
+        view.snapshot = Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+    }
+
+    #[test]
+    fn stash_conflict_banner_before_and_after_resolving() {
+        use crate::repo_view::ConflictBanner;
+        let mut app = stash_app();
+        pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+        with_conflicts(&mut app, &["a.txt"]);
+        let view = app.tabs[0].view().unwrap();
+        let banner = view.conflict_banner().unwrap();
+        assert_eq!(
+            banner,
+            ConflictBanner::StashConflicts {
+                id: "s1".into(),
+                label: "WIP on main: c base".into(),
+                undo: true,
+            }
+        );
+        assert_eq!(
+            banner.text(),
+            "Stash 'WIP on main: c base' applied with conflicts. The stash was kept."
+        );
+        assert_eq!(view.undo.last().unwrap().label(), "Pop stash");
+        // Stashing again is blocked while files are conflicted.
+        assert_eq!(
+            view.state_block(Guarded::Stash).as_deref(),
+            Some("Cannot stash while files are conflicted: resolve or discard them first")
+        );
+
+        resolve_all(&mut app);
+        let banner = app.tabs[0].view().unwrap().conflict_banner().unwrap();
+        assert_eq!(
+            banner.text(),
+            "Conflicts resolved. The stash 'WIP on main: c base' is still in the list."
+        );
+        assert!(matches!(banner, ConflictBanner::StashResolved { .. }));
+
+        let _ = app.update(Message::KeepStash);
+        assert_eq!(app.tabs[0].view().unwrap().conflict_banner(), None);
+    }
+
+    #[test]
+    fn drop_stash_after_resolving_hides_the_banner() {
+        let mut app = stash_app();
+        let tab = app.tabs[0].id;
+        pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+        resolve_all(&mut app);
+        let _ = app.update(Message::StashDropConfirmed("s1".into()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Delete stash")
+        );
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Delete stash".into(),
+            result: Ok(None),
+        });
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.stashes.clear();
+        view.apply_snapshot(Arc::new(snapshot));
+        assert_eq!(view.conflict_banner(), None);
+    }
+
+    #[test]
+    fn clean_pop_shows_no_banner_and_is_undoable() {
+        let mut app = stash_app();
+        pop_stash(&mut app, git_core::StashOutcome::Applied);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.stash_conflict, None);
+        assert_eq!(view.conflict_banner(), None);
+        assert_eq!(view.undo.last().unwrap().label(), "Pop stash");
+    }
+
+    #[test]
+    fn conflicted_files_without_an_operation_get_the_generic_banner() {
+        let mut app = staging_app(&[], &[]);
+        with_conflicts(&mut app, &["a.txt"]);
+        let banner = app.tabs[0].view().unwrap().conflict_banner().unwrap();
+        assert_eq!(banner, crate::repo_view::ConflictBanner::Orphaned);
+        assert_eq!(
+            banner.text(),
+            "Conflicted files without a running operation"
+        );
+        // A running merge has its own banner.
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["a.txt"]);
+        assert_eq!(app.tabs[0].view().unwrap().conflict_banner(), None);
+    }
+
+    #[test]
+    fn banner_undo_only_while_the_pop_is_the_newest_entry() {
+        let mut app = stash_app();
+        pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+        with_conflicts(&mut app, &["a.txt"]);
+        let view = app.tabs[0].view_mut().unwrap();
+        view.undo.push(UndoAction::Commit {
+            amend: false,
+            before: None,
+            after: "d".into(),
+        });
+        assert!(matches!(
+            view.conflict_banner(),
+            Some(crate::repo_view::ConflictBanner::StashConflicts { undo: false, .. })
+        ));
+    }
+
+    #[test]
+    fn undo_of_a_stash_pop_checks_for_changes_first() {
+        let mut app = stash_app();
+        let tab = app.tabs[0].id;
+        pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+        with_conflicts(&mut app, &["a.txt"]);
+
+        // Ctrl+Z, the toolbar and the banner all send Undo: the entry stays
+        // until the check reports back.
+        let _ = app.update(Message::Undo);
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.busy.is_none());
+        assert_eq!(view.undo.len(), 1);
+
+        // A conflicted file was edited: ask first.
+        let _ = app.update(Message::StashUndoChecked {
+            tab,
+            result: Ok(true),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Undo stash");
+        assert!(matches!(
+            modal.action(1),
+            Some(Message::StashUndoConfirmed(t)) if t == tab
+        ));
+        app.modal = None;
+
+        // Unchanged: undo right away.
+        let _ = app.update(Message::StashUndoChecked {
+            tab,
+            result: Ok(false),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Undo Pop stash"));
+        assert!(view.undo.is_empty());
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Undo Pop stash".into(),
+            result: Ok(Some(History::Undone(UndoAction::Stash(Box::new(
+                stash_record(git_core::StashOutcome::Conflicts),
+            ))))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.stash_conflict, None);
+        assert_eq!(view.redo.last().unwrap().label(), "Pop stash");
+    }
+
+    #[test]
+    fn stash_conflicts_use_gits_marker_names() {
+        let mut app = stash_app();
+        pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            conflict_labels(&view.snapshot, view.stash_conflict.as_ref()),
+            (
+                "Updated upstream".to_owned(),
+                "Stashed changes · WIP on main: c base".to_owned()
+            )
+        );
+        assert_eq!(conflict_labels(&view.snapshot, None).1, "theirs");
     }
 
     #[test]

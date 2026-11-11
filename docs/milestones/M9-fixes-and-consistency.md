@@ -94,7 +94,7 @@ No release (ADR-042): when all tasks are done, continue with M10.
 
 ## Tasks
 
-### [ ] M9-01 Stash pop/apply with conflicts
+### [x] M9-01 Stash pop/apply with conflicts
 
 - git-core: `stash_pop`/`stash_apply` return an outcome (`Applied` / `Conflicts`) per the decisions table; unit and integration tests.
 - App: stash-conflict state per tab, banner with Drop stash/Keep stash, generic banner for conflicted files without an operation, conflict view side labels.
@@ -102,12 +102,16 @@ No release (ADR-042): when all tasks are done, continue with M10.
 
 Acceptance: integration tests: pop with conflict → `Conflicts`, stash still listed, unmerged path present; apply likewise; a non-conflict failure stays an error. App tests: banner texts and button states before and after resolving, Drop stash, Keep stash, generic banner. Snapshot of the banner in both themes.
 
-### [ ] M9-02 Undo and redo of stash pop/apply
+Note (2026-11-11): done together with M9-02 on one branch (`feature/M9-01-stash-conflicts`): the outcome reaches the app inside the new undo entry, so the two cannot be merged apart. git-core module `stash.rs` (`apply_stash`, `apply_stash_recorded`, `unmerged_paths`); `stash_pop`/`stash_apply` left the `GitWriter` trait. Cause of `error: could not write index`: the first pop stopped in conflicts and showed as an error, so the stash looked untouched and was popped again; Git refuses to apply a stash while the index has unmerged entries ("<file>: needs merge", newer Git versions add "could not write index" because refreshing the index fails). Gitloom now refuses that up front (Stash/Pop/Apply disabled with "Cannot stash while files are conflicted: resolve or discard them first") and never shows a conflicting pop as an error. The maintainer's sequence (staged change stashed, conflicting merge, pop) is the integration test fixture `stash_then_conflicting_merge`. The banner's Drop stash deletes without the "Delete stash" confirmation: the changes are in the working tree by then. Snapshots `ui_check_stash_conflict_banner` (conflicts, resolved, generic; dark/light) checked. Open GitKraken item (resolved files staged or unstaged) unanswered: resolved files are staged as for every conflict.
+
+### [x] M9-02 Undo and redo of stash pop/apply
 
 - Snapshot and undo per the decisions table; `UndoAction` entry; banner Undo; confirmation when touched paths changed; redo.
 - ADR-014 gets an extension paragraph.
 
 Acceptance: integration tests in git-core, each comparing working tree bytes, `git ls-files -s` and `git stash list` before and after undo: pop with conflict on a clean tree; pop with conflict while another file is modified and an untracked file exists; stash with untracked files; successful pop (stash restored by `stash store`); apply. Redo after undo; redo refused when the stash is gone. App tests: Ctrl+Z, toolbar and banner run the same entry; confirmation after editing a conflicted file.
+
+Note (2026-11-11): done (see M9-01). Only the paths the stash touches are recorded (its working tree, index and untracked changes against its base), which covers everything a pop or apply can change; other local changes are left alone. A successful pop of an older entry is restored at its old position (newer entries dropped and stored again in order), so `git stash list` matches exactly. Created folders are removed again. Ctrl+Z, the toolbar and the banner all send `Message::Undo`; for a stash entry the app first checks in the background whether touched files changed and then asks. ADR-014 extended. Tests: `crates/git-core/tests/stash_conflicts.rs` (13), app tests `stash_*`/`undo_of_a_stash_pop_*`.
 
 ### [ ] M9-03 Discard conflicted files
 

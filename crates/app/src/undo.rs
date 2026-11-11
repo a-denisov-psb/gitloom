@@ -21,6 +21,8 @@ pub enum UndoAction {
     History(git_core::HistoryChange),
     /// A whole Git flow finish (M7-11): refs and checked-out branch.
     FlowFinish(Box<git_core::flow_finish::FinishRecord>),
+    /// A stash pop or apply, with or without conflicts (M9-02).
+    Stash(Box<git_core::StashRecord>),
 }
 
 impl UndoAction {
@@ -48,6 +50,7 @@ impl UndoAction {
             Self::Ref(change) => change.label(),
             Self::History(change) => change.label.clone(),
             Self::FlowFinish(record) => record.label.clone(),
+            Self::Stash(record) => record.label().to_owned(),
         }
     }
 }

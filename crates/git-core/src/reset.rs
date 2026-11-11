@@ -116,19 +116,7 @@ pub fn hard_reset_with_snapshot(
         .stdout_text();
     let mut files = Vec::new();
     for path in affected_paths(git, id)? {
-        let full = root.join(&path);
-        let blob = if full.is_file() {
-            let data = std::fs::read(&full)
-                .map_err(|e| Error::Backend(format!("could not read {path}: {e}")))?;
-            Some(git.write_blob(&data)?)
-        } else {
-            None
-        };
-        files.push(RawFile {
-            executable: is_executable(&full),
-            path,
-            blob,
-        });
+        files.push(capture_file(git, root, &path)?);
     }
     reset(git, id, ResetMode::Hard)?;
     let head_after = head_commit(git)?.unwrap_or_default();
@@ -149,20 +137,47 @@ pub fn undo_hard_reset(git: &dyn GitWriter, root: &Path, snapshot: &ResetSnapsho
     reset(git, &snapshot.head_before, ResetMode::Soft)?;
     git.run(&["read-tree", &snapshot.index_tree], RunOptions::default())?;
     for file in &snapshot.files {
-        let full = root.join(&file.path);
-        match &file.blob {
-            Some(blob) => {
-                let data = git.run(&["cat-file", "blob", blob], read_only())?.stdout;
-                if let Some(parent) = full.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        Error::Backend(format!("could not create {}: {e}", parent.display()))
-                    })?;
-                }
-                std::fs::write(&full, data)
-                    .map_err(|e| Error::Backend(format!("could not write {}: {e}", file.path)))?;
-                set_executable(&full, file.executable)?;
+        restore_file(git, root, file)?;
+    }
+    Ok(())
+}
+
+/// Records the working tree content of `path` (byte for byte, as a blob
+/// without filters); `blob` is `None` if it is not a file.
+pub(crate) fn capture_file(git: &dyn GitWriter, root: &Path, path: &str) -> Result<RawFile> {
+    let full = root.join(path);
+    let blob = if full.is_file() {
+        let data = std::fs::read(&full)
+            .map_err(|e| Error::Backend(format!("could not read {path}: {e}")))?;
+        Some(git.write_blob(&data)?)
+    } else {
+        None
+    };
+    Ok(RawFile {
+        executable: blob.is_some() && is_executable(&full),
+        path: path.to_owned(),
+        blob,
+    })
+}
+
+/// Writes the content recorded by [`capture_file`] back, or deletes the
+/// file if it did not exist (empty parent folders are removed as well).
+pub(crate) fn restore_file(git: &dyn GitWriter, root: &Path, file: &RawFile) -> Result<()> {
+    let full = root.join(&file.path);
+    match &file.blob {
+        Some(blob) => {
+            let data = git.run(&["cat-file", "blob", blob], read_only())?.stdout;
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    Error::Backend(format!("could not create {}: {e}", parent.display()))
+                })?;
             }
-            None => match std::fs::remove_file(&full) {
+            std::fs::write(&full, data)
+                .map_err(|e| Error::Backend(format!("could not write {}: {e}", file.path)))?;
+            set_executable(&full, file.executable)
+        }
+        None => {
+            match std::fs::remove_file(&full) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
@@ -171,8 +186,24 @@ pub fn undo_hard_reset(git: &dyn GitWriter, root: &Path, snapshot: &ResetSnapsho
                         file.path
                     )))
                 }
-            },
+            }
+            remove_empty_parents(root, &full);
+            Ok(())
         }
     }
-    Ok(())
+}
+
+/// Removes folders left empty by a deleted file, up to (not including) `root`.
+fn remove_empty_parents(root: &Path, file: &Path) {
+    let mut dir = file.parent();
+    while let Some(current) = dir {
+        if current == root || !current.starts_with(root) {
+            break;
+        }
+        // Fails (and stops) as soon as a folder is not empty.
+        if std::fs::remove_dir(current).is_err() {
+            break;
+        }
+        dir = current.parent();
+    }
 }
