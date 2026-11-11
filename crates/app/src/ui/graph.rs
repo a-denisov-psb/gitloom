@@ -25,6 +25,8 @@ const LANE_WIDTH: f32 = 18.0;
 const GRAPH_PADDING: f32 = 6.0;
 const ROW_PADDING: u16 = 8;
 const SCROLLBAR_WIDTH: f32 = 12.0;
+/// Height of the horizontal scrollbar strip below the table (M11-16).
+const HBAR_HEIGHT: f32 = 10.0;
 /// Room the table needs besides its columns: row paddings and scrollbar.
 const FIXED_WIDTH: f32 = 2.0 * ROW_PADDING as f32 + SCROLLBAR_WIDTH;
 const MIN_LANES: u16 = 2;
@@ -70,35 +72,30 @@ pub fn view<'a>(
     let clipped = graph_width < lanes_width(lanes);
     let columns = Columns::shown(appearance);
     let table = responsive(move |size| {
-        let message = crate::graph_columns::message_width(
-            size.width,
+        // Every column has its own width (M11-16): the table is as wide as
+        // its columns, the message fills a wider viewport, and a wider
+        // table scrolls horizontally (header and rows together).
+        let viewport = size.width;
+        let layout = crate::graph_columns::layout(
+            viewport,
             FIXED_WIDTH,
             columns.sum(&widths, graph_width),
+            widths.message,
         );
-        let room = crate::graph_columns::room(message);
-        // A window too narrow for all columns clips the table at the right
-        // (M11-03); the message column keeps its minimum.
-        let message_width: Length = if message < crate::graph_columns::MIN_MESSAGE_WIDTH {
-            Length::Fixed(crate::graph_columns::MIN_MESSAGE_WIDTH)
-        } else {
-            Fill
-        };
+        let message_width = Length::Fixed(layout.message);
         let header_cell = |label: &'static str, column: ColumnId| -> Element<'_, Message> {
-            let width = widths.width(column, graph_width);
+            let width = match column {
+                ColumnId::Message => layout.message,
+                _ => widths.width(column, graph_width),
+            };
             let handle = crate::ui::column_handle::column_handle(
                 Message::ColumnDragStarted {
                     column,
                     origin: width,
-                    room,
                 },
                 Message::ColumnDragged,
                 Message::ColumnDragEnded,
-                Message::ColumnFit {
-                    column,
-                    origin: width,
-                    room,
-                    table: size.width,
-                },
+                Message::ColumnFit { column, viewport },
             );
             iced::widget::Stack::with_children([
                 cell(muted(label).size(HEADER_SIZE), width),
@@ -117,13 +114,7 @@ pub fn view<'a>(
         let mut header: iced::widget::Row<'_, Message> = row![
             header_cell("BRANCH / TAG", ColumnId::Refs),
             header_cell("GRAPH", ColumnId::Graph),
-            Element::from(
-                iced::widget::Stack::with_children([
-                    cell(muted("COMMIT MESSAGE").size(HEADER_SIZE), message_width),
-                    header_separator(message_width),
-                ])
-                .width(message_width)
-            ),
+            header_cell("COMMIT MESSAGE", ColumnId::Message),
         ];
         if columns.author {
             header = header.push(header_cell("AUTHOR", ColumnId::Author));
@@ -134,6 +125,8 @@ pub fn view<'a>(
         if columns.sha {
             header = header.push(header_cell("SHA", ColumnId::Sha));
         }
+        // Above the vertical scrollbar's room of the rows.
+        header = header.push(space::horizontal().width(SCROLLBAR_WIDTH));
         let mut buttons = row![].align_y(iced::Center);
         if repo.search.is_none() {
             let tip = match crate::actions::ActionId::SearchCommits.shortcut_text() {
@@ -160,11 +153,17 @@ pub fn view<'a>(
             ),
             "Columns".to_owned(),
         ));
-        let header = iced::widget::Stack::with_children([
+        // Header and rows move by the same offset (M11-16).
+        let offset = repo.graph_h_offset.min(layout.max_offset);
+        let header_row = crate::ui::shift::shift(
             container(header.padding([0, ROW_PADDING]).align_y(iced::Center))
+                .width(layout.table)
                 .height(24)
-                .align_y(alignment::Vertical::Center)
-                .into(),
+                .align_y(alignment::Vertical::Center),
+            offset,
+        );
+        let header = iced::widget::Stack::with_children([
+            header_row,
             container(
                 container(buttons)
                     .padding([0, 2])
@@ -211,18 +210,33 @@ pub fn view<'a>(
         }
         rows = rows.push(space::vertical().height((total - last) as f32 * ROW_HEIGHT));
 
+        // The vertical scrollbar keeps its room at the right edge of the
+        // viewport (M6-22) while the rows move sideways (M11-16).
+        let rows = crate::ui::shift::shift(
+            container(rows).width(layout.table - SCROLLBAR_WIDTH),
+            offset,
+        );
         let list = scrollable(rows)
             .id(repo.graph_scroll_id.clone())
+            .spacing(crate::ui::SCROLLBAR_GAP)
             .on_scroll(|viewport| Message::GraphScrolled {
                 offset: viewport.absolute_offset().y,
                 height: viewport.bounds().height,
             })
             .height(Fill);
-
-        match &repo.search {
-            Some(search) => column![search_bar(search), header, list].into(),
-            None => column![header, list].into(),
+        // Shift+wheel and a horizontal wheel scroll sideways like the diffs.
+        let list = crate::ui::context_area::wheel_observer(list, |delta, shift| {
+            crate::diff_hscroll::wheel_to_horizontal(delta, shift, cfg!(target_os = "macos"))
+                .map(Message::GraphWheel)
+        });
+        let mut table = match &repo.search {
+            Some(search) => column![search_bar(search), header, list],
+            None => column![header, list],
+        };
+        if layout.max_offset > 0.0 {
+            table = table.push(horizontal_bar(repo, viewport, layout.max_offset));
         }
+        table.into()
     });
 
     container(table)
@@ -230,6 +244,27 @@ pub fn view<'a>(
         .height(Fill)
         .style(theme::graph)
         .into()
+}
+
+/// Horizontal scrollbar below a table wider than its viewport (M11-16):
+/// it reports moves and follows wheel scrolling.
+fn horizontal_bar(repo: &RepoView, viewport: f32, max: f32) -> Element<'_, Message> {
+    scrollable(
+        space::horizontal()
+            .width(viewport + max)
+            .height(HBAR_HEIGHT),
+    )
+    .direction(scrollable::Direction::Horizontal(
+        scrollable::Scrollbar::new(),
+    ))
+    .id(repo.graph_hscroll_id.clone())
+    .on_scroll(|viewport| Message::GraphHScrolled {
+        offset: viewport.absolute_offset().x,
+        max: viewport.content_bounds().width - viewport.bounds().width,
+    })
+    .width(Fill)
+    .height(HBAR_HEIGHT)
+    .into()
 }
 
 /// Commit search above the graph (M5-07): query, "n of m", previous/next,
@@ -384,6 +419,7 @@ pub fn optimal_column_width(repo: &RepoView, column: ColumnId, table: f32) -> f3
                 TEXT_SIZE,
                 iced::Font::MONOSPACE,
             ),
+            ColumnId::Message => text_width(&commit.summary, TEXT_SIZE),
             ColumnId::Graph => 0.0,
         })
         .fold(0.0_f32, f32::max);

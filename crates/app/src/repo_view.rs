@@ -819,6 +819,11 @@ pub struct RepoView {
     /// Identifies this tab's graph scrollable for programmatic scrolling.
     pub graph_scroll_id: iced::widget::Id,
     pub scroll: Scroll,
+    /// Horizontal scroll of the graph table (M11-16): offset, the largest
+    /// offset the scrollbar reported, and the scrollbar's id.
+    pub graph_h_offset: f32,
+    pub graph_h_max: Option<f32>,
+    pub graph_hscroll_id: iced::widget::Id,
 }
 
 impl RepoView {
@@ -1076,6 +1081,9 @@ impl RepoView {
             undo: Vec::new(),
             redo: Vec::new(),
             graph_scroll_id: iced::widget::Id::unique(),
+            graph_h_offset: 0.0,
+            graph_h_max: None,
+            graph_hscroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
         };
         view.prefill_message();

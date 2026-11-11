@@ -178,8 +178,6 @@ pub struct ColumnDrag {
     pub column: crate::graph_columns::ColumnId,
     /// Width when the drag started.
     pub origin: f32,
-    /// How much wider the column may get (message column minimum).
-    pub room: f32,
 }
 
 #[cfg(test)]
@@ -266,12 +264,10 @@ pub enum Message {
     TabClosed(TabId),
     TabOpened,
     PaneResized(pane_grid::ResizeEvent),
-    /// A graph header border was pressed (M11-02): the column's width then
-    /// and how much wider it may get.
+    /// A graph header border was pressed (M11-02): the column's width then.
     ColumnDragStarted {
         column: crate::graph_columns::ColumnId,
         origin: f32,
-        room: f32,
     },
     /// Preferences → Editor (M11-06): font family ("" = Default), font size,
     /// tab size, line numbers.
@@ -313,12 +309,11 @@ pub enum Message {
     /// Cursor distance from the press while dragging a border.
     ColumnDragged(f32),
     ColumnDragEnded,
-    /// Double click on a border: optimal width (`table`: table width).
+    /// Double click on a border: optimal width (`viewport`: width of the
+    /// table's viewport); on the message border: back to "fill".
     ColumnFit {
         column: crate::graph_columns::ColumnId,
-        origin: f32,
-        room: f32,
-        table: f32,
+        viewport: f32,
     },
     FilterChanged(String),
     SectionToggled(Section),
@@ -398,6 +393,13 @@ pub enum Message {
     GraphScrolled {
         offset: f32,
         height: f32,
+    },
+    /// Horizontal wheel or Shift+wheel over the graph table (M11-16).
+    GraphWheel(f32),
+    /// The graph's horizontal scrollbar moved or reported its range.
+    GraphHScrolled {
+        offset: f32,
+        max: f32,
     },
     DiffClosed,
     /// A branch drag started on `name`.
@@ -5179,22 +5181,14 @@ impl App {
                 self.add_tab(TabState::Start);
             }
             Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
-            Message::ColumnDragStarted {
-                column,
-                origin,
-                room,
-            } => {
-                self.column_drag = Some(ColumnDrag {
-                    column,
-                    origin,
-                    room,
-                });
+            Message::ColumnDragStarted { column, origin } => {
+                self.column_drag = Some(ColumnDrag { column, origin });
             }
             Message::ColumnDragged(delta) => {
                 if let Some(drag) = self.column_drag {
                     let min =
                         crate::graph_columns::min_width(drag.column, crate::ui::MIN_GRAPH_WIDTH);
-                    let width = crate::graph_columns::dragged(drag.origin, delta, drag.room, min);
+                    let width = crate::graph_columns::dragged(drag.origin, delta, min);
                     self.settings
                         .appearance
                         .graph_columns
@@ -5233,7 +5227,7 @@ impl App {
                     ColumnId::Date => a.graph_date = shown,
                     ColumnId::Sha => a.graph_sha = shown,
                     // Always shown.
-                    ColumnId::Refs | ColumnId::Graph => return Task::none(),
+                    ColumnId::Refs | ColumnId::Graph | ColumnId::Message => return Task::none(),
                 }
                 return self.save_settings();
             }
@@ -5336,18 +5330,16 @@ impl App {
                     return self.save_settings();
                 }
             }
-            Message::ColumnFit {
-                column,
-                origin,
-                room,
-                table,
-            } => {
+            Message::ColumnFit { column, viewport } => {
                 let Some(view) = self.active_tab().and_then(Tab::view) else {
                     return Task::none();
                 };
-                let optimal = crate::ui::optimal_column_width(view, column, table);
                 let min = crate::graph_columns::min_width(column, crate::ui::MIN_GRAPH_WIDTH);
-                let width = crate::graph_columns::fitted(origin, optimal, room, min);
+                let width = match column {
+                    // The message border: back to "fill".
+                    crate::graph_columns::ColumnId::Message => min,
+                    _ => crate::ui::optimal_column_width(view, column, viewport).max(min),
+                };
                 self.settings.appearance.graph_columns.set(column, width);
                 return self.save_settings();
             }
@@ -8038,6 +8030,29 @@ impl App {
             Message::GraphScrolled { offset, height } => {
                 if let Some(view) = self.active_view_mut() {
                     view.scroll = crate::repo_view::Scroll { offset, height };
+                }
+            }
+            Message::GraphWheel(delta) => {
+                if let Some(view) = self.active_view_mut() {
+                    let max = view.graph_h_max.unwrap_or(0.0);
+                    let offset = crate::diff_hscroll::scrolled(view.graph_h_offset, delta, max);
+                    if offset != view.graph_h_offset {
+                        view.graph_h_offset = offset;
+                        // The scrollbar follows (it reports back the same offset).
+                        return iced::widget::operation::scroll_to(
+                            view.graph_hscroll_id.clone(),
+                            iced::widget::operation::AbsoluteOffset {
+                                x: Some(offset),
+                                y: None,
+                            },
+                        );
+                    }
+                }
+            }
+            Message::GraphHScrolled { offset, max } => {
+                if let Some(view) = self.active_view_mut() {
+                    view.graph_h_max = Some(max.max(0.0));
+                    view.graph_h_offset = offset.clamp(0.0, max.max(0.0));
                 }
             }
             Message::DiffClosed => {
@@ -11280,36 +11295,57 @@ pub(crate) mod tests {
 
     #[test]
     fn dragging_a_column_border_resizes_within_limits() {
-        use crate::graph_columns::{ColumnId, MIN_WIDTH};
+        use crate::graph_columns::{ColumnId, MIN_MESSAGE_WIDTH, MIN_WIDTH};
         let mut app = ready_app(&["c"]);
         // Without a press nothing changes.
         let _ = app.update(Message::ColumnDragged(40.0));
         assert_eq!(app.settings.appearance.graph_columns.refs, 200.0);
 
-        let _ = app.update(Message::ColumnDragStarted {
-            column: ColumnId::Refs,
-            origin: 200.0,
-            room: 100.0,
-        });
-        let _ = app.update(Message::ColumnDragged(30.0));
-        assert_eq!(app.settings.appearance.graph_columns.refs, 230.0);
-        let _ = app.update(Message::ColumnDragged(500.0));
-        assert_eq!(
-            app.settings.appearance.graph_columns.refs, 300.0,
-            "message keeps its minimum"
-        );
-        let _ = app.update(Message::ColumnDragged(-1000.0));
-        assert_eq!(app.settings.appearance.graph_columns.refs, MIN_WIDTH);
-        let _ = app.update(Message::ColumnDragEnded);
-        assert!(app.column_drag.is_none());
-        let _ = app.update(Message::ColumnDragged(40.0));
-        assert_eq!(app.settings.appearance.graph_columns.refs, MIN_WIDTH);
+        // Every handle, Commit message and SHA included, changes only its
+        // own column (M11-16).
+        for (column, origin) in [
+            (ColumnId::Refs, 200.0),
+            (ColumnId::Message, 400.0),
+            (ColumnId::Author, 130.0),
+            (ColumnId::Date, 135.0),
+            (ColumnId::Sha, 70.0),
+        ] {
+            let before = app.settings.appearance.graph_columns;
+            let _ = app.update(Message::ColumnDragStarted { column, origin });
+            let _ = app.update(Message::ColumnDragged(30.0));
+            let after = app.settings.appearance.graph_columns;
+            assert_eq!(after.width(column, 0.0), origin + 30.0, "{column:?}");
+            for other in ColumnId::ALL.into_iter().filter(|c| *c != column) {
+                assert_eq!(
+                    after.width(other, 0.0),
+                    before.width(other, 0.0),
+                    "{other:?}"
+                );
+            }
+            // No upper limit: the table scrolls.
+            let _ = app.update(Message::ColumnDragged(2000.0));
+            assert_eq!(
+                app.settings.appearance.graph_columns.width(column, 0.0),
+                origin + 2000.0
+            );
+            let _ = app.update(Message::ColumnDragged(-5000.0));
+            let min = if column == ColumnId::Message {
+                MIN_MESSAGE_WIDTH
+            } else {
+                MIN_WIDTH
+            };
+            assert_eq!(
+                app.settings.appearance.graph_columns.width(column, 0.0),
+                min
+            );
+            let _ = app.update(Message::ColumnDragEnded);
+            assert!(app.column_drag.is_none());
+        }
 
         // Graph: one lane at least, fixed after the drag.
         let _ = app.update(Message::ColumnDragStarted {
             column: ColumnId::Graph,
             origin: 48.0,
-            room: 100.0,
         });
         let _ = app.update(Message::ColumnDragged(-100.0));
         let _ = app.update(Message::ColumnDragEnded);
@@ -11317,6 +11353,30 @@ pub(crate) mod tests {
             app.settings.appearance.graph_columns.graph,
             Some(crate::ui::MIN_GRAPH_WIDTH)
         );
+    }
+
+    #[test]
+    fn horizontal_wheel_scrolls_the_graph_table() {
+        let mut app = graph_app();
+        // Before the scrollbar reported a range nothing moves.
+        let _ = app.update(Message::GraphWheel(80.0));
+        assert_eq!(app.tabs[0].view().unwrap().graph_h_offset, 0.0);
+        let _ = app.update(Message::GraphHScrolled {
+            offset: 0.0,
+            max: 300.0,
+        });
+        let _ = app.update(Message::GraphWheel(80.0));
+        assert_eq!(app.tabs[0].view().unwrap().graph_h_offset, 80.0);
+        let _ = app.update(Message::GraphWheel(1000.0));
+        assert_eq!(app.tabs[0].view().unwrap().graph_h_offset, 300.0);
+        let _ = app.update(Message::GraphWheel(-1000.0));
+        assert_eq!(app.tabs[0].view().unwrap().graph_h_offset, 0.0);
+        // The scrollbar moves it too (header and rows share the offset).
+        let _ = app.update(Message::GraphHScrolled {
+            offset: 120.0,
+            max: 300.0,
+        });
+        assert_eq!(app.tabs[0].view().unwrap().graph_h_offset, 120.0);
     }
 
     #[test]
@@ -11360,8 +11420,10 @@ pub(crate) mod tests {
         let before = app.settings.appearance.clone();
         let _ = app.update(Message::GraphColumnShown(ColumnId::Graph, false));
         assert_eq!(app.settings.appearance, before);
-        // "Reset column widths" restores the widths, not the visibility.
+        // "Reset column widths" restores the widths (the message's too),
+        // not the visibility.
         app.settings.appearance.graph_columns.refs = 90.0;
+        app.settings.appearance.graph_columns.message = 500.0;
         app.settings.appearance.graph_columns.graph = Some(200.0);
         let _ = app.update(Message::GraphColumnMenu(iced::Point::new(900.0, 90.0)));
         let _ = app.update(Message::MenuSelected(4));
@@ -11374,41 +11436,40 @@ pub(crate) mod tests {
 
     #[test]
     fn double_click_on_a_border_sets_the_optimal_width() {
-        use crate::graph_columns::ColumnId;
+        use crate::graph_columns::{ColumnId, MIN_MESSAGE_WIDTH};
         let mut app = graph_app();
-        let fit = |app: &mut App, column, origin| {
+        let fit = |app: &mut App, column| {
             let _ = app.update(Message::ColumnFit {
                 column,
-                origin,
-                room: 1000.0,
-                table: 1200.0,
+                viewport: 1200.0,
             });
             app.settings.appearance.graph_columns.width(column, 0.0)
         };
         // The widest pill group: "feature" (padding, border, cell padding).
-        let refs = fit(&mut app, ColumnId::Refs, 200.0);
+        let refs = fit(&mut app, ColumnId::Refs);
         let pill = crate::overlay::text_width("feature", 12.0) + 14.0;
         assert!(refs > pill && refs < 200.0, "{refs}");
         // Author: the longest name plus cell padding and slack.
-        let author = fit(&mut app, ColumnId::Author, 130.0);
+        let author = fit(&mut app, ColumnId::Author);
         let name = crate::overlay::text_width("Ana Lyst", 13.0);
         assert!(author > name + 8.0 && author < name + 12.0, "{author}");
         // SHA: 1-character ids, so the minimum.
         assert_eq!(
-            fit(&mut app, ColumnId::Sha, 70.0),
+            fit(&mut app, ColumnId::Sha),
             crate::graph_columns::MIN_WIDTH
         );
-        // Graph: the lanes of the layout, at most half the table.
+        // Commit message: back to "fill".
+        app.settings.appearance.graph_columns.message = 700.0;
+        assert_eq!(fit(&mut app, ColumnId::Message), MIN_MESSAGE_WIDTH);
+        // Graph: the lanes of the layout, at most half the viewport.
         let lanes = app.tabs[0].view().unwrap().snapshot.layout.max_width;
         assert_eq!(
-            fit(&mut app, ColumnId::Graph, 100.0),
+            fit(&mut app, ColumnId::Graph),
             crate::ui::lanes_width(lanes)
         );
         let _ = app.update(Message::ColumnFit {
             column: ColumnId::Graph,
-            origin: 100.0,
-            room: 1000.0,
-            table: 100.0,
+            viewport: 100.0,
         });
         assert_eq!(app.settings.appearance.graph_columns.graph, Some(50.0));
     }
