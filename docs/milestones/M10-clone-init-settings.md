@@ -110,12 +110,14 @@ Acceptance: integration tests: clone from a local bare repository (also with a s
 
 Note (2026-11-11): done. git-core `clone` module: `repo_name` (HTTPS, scp-like, `ssh://`, `file://`, local and Windows paths; a bare host gives no name), `target_problem`, `clone` through `run_network`; on failure or cancel a folder that did not exist before is removed. New `CliBackend::with_config` passes `git -c` settings (used by the tests: `protocol.file.allow` for the local submodule, `protocol.ext.allow` for a remote that never answers to test Cancel). App: `clone_dialog.rs` (pure state and validation; the target folder is checked by the clone in the background, no I/O on the UI thread), dialog in `overlays.rs`, progress stream like network operations, Esc cancels a running clone. The default folder is the parent of the most recent repository, else the home folder (the last clone becomes the most recent repository, so this covers "last clone" without extra state). Integration tests use a local non-bare source (the clone behaves the same; a bare source adds nothing). Tests: `crates/git-core/tests/clone.rs`, unit tests in `clone.rs` and `clone_dialog.rs`, app `clone_dialog_flow`, `failed_clone_shows_gits_error_in_the_dialog`; snapshots `ui_check_clone_dialog` checked.
 
-### [ ] M10-03 Init and default branch name
+### [x] M10-03 Init and default branch name
 
 - git-core: init with branch, files, initial commit; bundled `.gitignore` templates (CC0, notices).
 - App: dialog; Preferences → General "Default branch name"; empty repository display checked and fixed if needed.
 
 Acceptance: integration tests: init with and without files, with and without identity, branch name honored; empty repository loads (graph empty, WIP row, commit works); settings test for `init.defaultBranch`; snapshot of the dialog.
+
+Note (2026-11-11): done. git-core `init` module (`init`, `init_with` for a prepared backend, `GITIGNORE_TEMPLATES` via `include_str!` from `crates/git-core/assets/gitignore/` with the CC0 license; `scripts/third-party-licenses.sh` appends them to the notices and the About list). The identity check reads `user.name`/`user.email` like the commit panel (`identity_problem`), so Git's guessed identities do not count. New git-core helpers `global_config` / `set_global_config` (also used by `global_identity`). App: `InitDialog` next to `CloneDialog` (`clone_dialog.rs`), dialog in `overlays.rs`, the default branch is loaded in the background when the dialog opens; Preferences → General gets "Default branch name" with Save (validated with `check_branch_name`, empty unsets). The empty repository was already handled (`snapshot::tests::empty_repository`); `crates/git-core/tests/init.rs` checks that it loads and takes a first commit. Tests: `init.rs`, `global_config.rs`, app `init_dialog_flow`, `default_branch_name_preference`, `clone_dialog::init_tests`; snapshots `ui_check_init_dialog` checked.
 
 ### [ ] M10-04 Signing settings
 
