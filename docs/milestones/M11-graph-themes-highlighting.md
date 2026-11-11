@@ -202,11 +202,13 @@ Acceptance: unit tests for the order (leaves first, case-insensitive, nested fol
 
 Note: one `branch_tree::sort` for all trees (`sort_mixed` removed); ties differing only in case keep byte order. TAGS reuses `branch_tree::build` with collapse keys `tags:<path>`, tag rows show a tag icon and the full name as tooltip. Every ref row has a gutter one indent to the left (the parent level's column) for the check, so icon and label positions do not depend on the checked-out branch. Snapshots `ui_check_tree_order` (checked-out branch at depth 0 and inside `feature/ui`, tag folder, both themes) and `ui_check_gitflow_section` re-rendered and checked.
 
-### [ ] M11-12 Start screen buttons
+### [x] M11-12 Start screen buttons
 
 - Equal size, accent fill, states and contrast per the decisions table, in all three themes.
 
 Acceptance: contrast unit test (WCAG ratio) for label and shortcut line in Light, Dark and Classic Dark; snapshots of the start screen in all three themes at 100 and 125 %.
+
+Note: `theme::on_fill` picks white or near-black text, whichever contrasts more with the accent (dark text in Dark and Classic Dark, white in Light); hover and press move the fill away from the text color (12 % and 24 %), so label, shortcut line and icon keep one color and AA in every state (test `start_buttons_reach_wcag_aa`). Buttons are 60 px high with the content centered; the shortcut line uses the label color at 12 px. `luminance`/`contrast` moved from the tests into `theme`. Snapshots `ui_check_start_screen` (three themes × 100/125 %) checked.
 
 ### [ ] M11-13 Preferences in a modal
 

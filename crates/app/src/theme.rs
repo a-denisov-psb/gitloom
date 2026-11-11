@@ -382,6 +382,79 @@ pub fn panes(theme: &Theme) -> pane_grid::Style {
     }
 }
 
+/// WCAG relative luminance.
+pub(crate) fn luminance(c: Color) -> f32 {
+    let channel = |v: f32| {
+        if v <= 0.039_28 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+}
+
+/// WCAG contrast ratio of two colors.
+pub(crate) fn contrast(a: Color, b: Color) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `a` moved towards `b` by `t` (0 … 1).
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color::from_rgb(
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+    )
+}
+
+/// Dark text on light fills.
+const ON_LIGHT: Color = Color::from_rgb(0.067, 0.078, 0.094);
+
+/// Text on a filled background: white or near-black, whichever has more
+/// contrast.
+pub fn on_fill(fill: Color) -> Color {
+    if contrast(Color::WHITE, fill) >= contrast(ON_LIGHT, fill) {
+        Color::WHITE
+    } else {
+        ON_LIGHT
+    }
+}
+
+/// Fill of a start screen button (M11-12): the accent color (as the recent
+/// repository links); hover and press move it away from the text color,
+/// so the text keeps its contrast and color in every state.
+pub fn start_button_fill(p: &ThemePalette, status: button::Status) -> Color {
+    let away = if on_fill(p.accent) == Color::WHITE {
+        Color::BLACK
+    } else {
+        Color::WHITE
+    };
+    match status {
+        button::Status::Hovered => mix(p.accent, away, 0.12),
+        button::Status::Pressed => mix(p.accent, away, 0.24),
+        button::Status::Active | button::Status::Disabled => p.accent,
+    }
+}
+
+/// Large start screen buttons "Open a repo", "Clone a repo", "Start a
+/// local repo" (M11-12).
+pub fn start_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = palette(theme);
+    button::Style {
+        background: Some(Background::Color(start_button_fill(p, status))),
+        text_color: on_fill(p.accent),
+        border: Border::default().rounded(6),
+        ..button::Style::default()
+    }
+}
+
+/// Icon color on a start screen button.
+pub fn start_button_icon(theme: &Theme) -> Color {
+    on_fill(palette(theme).accent)
+}
+
 fn button_style(background: Option<Color>, text_color: Color) -> button::Style {
     button::Style {
         background: background.map(Background::Color),
@@ -826,21 +899,29 @@ pub fn menu_item(theme: &Theme, status: button::Status) -> button::Style {
 mod tests {
     use super::*;
 
-    /// WCAG relative luminance.
-    fn luminance(c: Color) -> f32 {
-        let channel = |v: f32| {
-            if v <= 0.039_28 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
+    #[test]
+    fn start_buttons_reach_wcag_aa() {
+        for (name, p) in [
+            ("dark", &DARK),
+            ("light", &LIGHT),
+            ("classic", &CLASSIC_DARK),
+        ] {
+            let icon = on_fill(p.accent);
+            for status in [
+                button::Status::Active,
+                button::Status::Hovered,
+                button::Status::Pressed,
+            ] {
+                let fill = start_button_fill(p, status);
+                let text = on_fill(p.accent);
+                // Label and shortcut line use the same color.
+                let ratio = contrast(text, fill);
+                assert!(ratio >= 4.5, "{name} {status:?}: {ratio:.2}");
+                // The icon has the text color.
+                assert_eq!(icon, text, "{name} {status:?}");
+                assert_eq!(on_fill(fill), text, "{name} {status:?}: best text color");
             }
-        };
-        0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
-    }
-
-    fn contrast(a: Color, b: Color) -> f32 {
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+        }
     }
 
     #[test]
