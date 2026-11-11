@@ -181,9 +181,13 @@ impl Cache {
 }
 
 /// The licenses of the bundled syntaxes and themes, as listed in the
-/// third-party notices (`crates/app/assets/syntax-acknowledgements.md`).
+/// third-party notices (`crates/app/assets/syntax-acknowledgements.md`),
+/// with LF line ends like every file in the repository.
 pub fn acknowledgements() -> String {
-    two_face::acknowledgement::listing().to_md()
+    two_face::acknowledgement::listing()
+        .to_md()
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
 }
 
 #[cfg(test)]
