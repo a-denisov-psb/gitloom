@@ -90,10 +90,9 @@ jobs:
           key: linux-${{ matrix.arch }}
 
       - name: Install dependencies
-        # The build links no X11/Wayland library (all are loaded at run
-        # time); a mirror outage must not block the job (2026-11-11).
-        continue-on-error: true
-        timeout-minutes: 4
+        # Required here: the AppImage start test loads libxkbcommon-x11 and
+        # needs xvfb (unlike the check job, whose apt step may fail).
+        timeout-minutes: 10
         run: |
           sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get -o Acquire::Retries=3 install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev file xvfb libxkbcommon-x11-0
