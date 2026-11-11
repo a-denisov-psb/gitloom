@@ -506,3 +506,17 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: no state may leave the user without a visible way back. Every state that blocks normal work (conflicts, a stopped operation, a partly applied command) shows a banner that explains it in plain language and offers Undo or Abort; discard and reset keep working in it. Raw Git output is shown only as details, never as the only explanation.
 - Why: a beginner stuck after a stash conflict could neither undo, discard nor reset (2026-11-11).
 - Consequences: M9 fixes the stash case and adds a generic banner for conflicted files without an operation; M12 turns error boxes into toasts with plain-language text.
+
+## ADR-045 Clone and init through the Git CLI
+
+- Status: accepted (M10 plan, 2026-11-11)
+- Decision: clone runs `git clone --progress` through the network path of M3 (progress, cancel, askpass); init runs `git init -b <branch>` and writes the chosen files, then commits them as "Initial commit" when an identity resolves. Bundled `.gitignore` templates come from github/gitignore (CC0) and are listed in the third-party notices.
+- Why: same credential, SSH and hook behavior as every other write (ADR-004 style); no second network stack.
+- Consequences: clone and init are not undoable (ADR-043); a failed or cancelled clone must not leave a folder that did not exist before.
+
+## ADR-046 Signing settings in the global Git config
+
+- Status: accepted (M10 plan, 2026-11-11)
+- Decision: Preferences → Signing reads and writes `gpg.format`, `user.signingkey`, `gpg.program`, `commit.gpgSign` and `tag.gpgSign` in the global Git config, like GitKraken's global GPG preferences. Repository-level values are shown read-only as overrides. Gitloom never stores or asks for passphrases: GPG uses its pinentry, SSH signing uses the agent. Signature status comes from `git log --format=%G?` in the background.
+- Why: Git's own config is the source of truth (ADR-041); the CLI signs every operation consistently.
+- Consequences: a signing key per identity or repository stays in the ideas backlog; Windows signing depends on a GUI pinentry (Gpg4win), covered by the release checklist.
