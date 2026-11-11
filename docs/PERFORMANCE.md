@@ -115,6 +115,22 @@ Target (milestone acceptance): no frame over 50 ms while scrolling a 2 MB file i
 
 M7-16 (horizontal scrolling, 2026-11-10, same container): the measurement now runs with the text scrolled 120 px to the right. Hunk open 51–58 ms, frame median 7.2–7.6 ms, max 10.0–11.2 ms; Inline open 57 ms, median 7.5–7.6 ms, max 9.2–19.4 ms; Split open 49–53 ms, median 8.0–10.6 ms, max 15.9–18.6 ms (two runs). The target of 50 ms per frame is met; the width of the longest line is measured once per load.
 
+## M11: syntax highlighting and word wrap (task M11-10)
+
+Release build in the Linux container (2026-11-11), `cargo test -p gitloom --release perf_highlight_and_wrap -- --ignored --nocapture`.
+
+| Metric | Target | Result |
+|---|---|---|
+| Highlight a 1 MB Rust file (11 554 lines of ≈ 88 characters), background task | – (UI never waits) | **3.4 s**; the diff shows plain at once and colors when it is done. Typical source files (< 100 KB) take well under 0.4 s. |
+| File over the limit (2 MB) | plain at once | **0.2 µs** to decide "Too large for syntax highlighting" |
+| Diff of a 2 MB file (every line changed), full context | – | **11 ms** |
+| Load the wrapped 2 MB diff (46 213 rows: rows, character counts) | – | **12 ms** |
+| Frame of the wrapped 2 MB diff (view + layout of the whole window), worst of 20 scroll positions | < 50 ms | **12 ms** |
+| Word-wrap layout of 50 000 rows (prefix sums + visible rows) | < 50 ms | < 25 ms in a debug build (unit test `large_files_stay_fast`) |
+| Binary size, `dist` profile, Linux x64 | – | SIZE_PLACEHOLDER |
+
+Highlighting uses syntect's pure Rust regex engine (`regex-fancy`, ADR-047), which is slower than oniguruma but needs no C library; whole files are highlighted once per content and theme and cached (64 entries).
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |

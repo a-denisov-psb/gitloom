@@ -44,7 +44,11 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - A stash pop or apply that conflicts can be undone completely (banner, Ctrl+Z); conflicted files can be discarded and the discard undone.
 - Merge, rebase or checkout blocked by local changes offers "Stash and …"; merge and rebase re-apply the stash automatically.
 - A Git lock file (`index.lock`) is never deleted; the operation offers **Retry** instead.
-- The author, date and SHA columns hide automatically when the commit message would get too narrow; columns cannot be resized yet (planned).
+- Every graph column, Commit message included, has its own width; a table wider than the window scrolls sideways instead of fitting it. The gear above the graph shows or hides Author, Date and SHA.
+- The left panel lists branches before folders on every level, also in GITFLOW and TAGS (tags have folders too).
+- **Preferences** open as a window over the app instead of a full view.
+- Two toolbar buttons at the right hide and show the side panels (GitKraken: shortcuts and the View menu only).
+- **Classic Dark** brings back the look of older GitKraken versions; Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
 - **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.

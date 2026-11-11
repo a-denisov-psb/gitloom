@@ -2,12 +2,15 @@
 
 ## The graph
 
-Every commit is a row: branch and tag pills, the lane graph, the message, author, date and SHA. Each branch keeps its lane and color; merges and forks are curved lines. Local and remote branches on the same commit share one pill (a cloud icon names the remotes in its tooltip); more references collapse into "+N". Local branches show how many commits they are ahead (↑) or behind (↓) their upstream. Stashes are square nodes attached to their base commit. Large histories are cut off at 100 000 commits ("History truncated").
+Every commit is a row: branch and tag pills, the lane graph, the message, author, date and SHA. Each branch keeps its lane and color; merges and forks are curved lines. Local and remote branches on the same commit share one pill (a cloud icon names the remotes in its tooltip); more references collapse into "+N". Local branches show how many commits they are ahead (↑) or behind (↓) their upstream. Stashes are dashed squares with a stash icon attached to their base commit, labelled "WIP on <branch>" (or the message you gave). Large histories are cut off at 100 000 commits ("History truncated").
 
 - Click a commit for its details on the right; click a file there to see its diff.
 - Ctrl+click and Shift+click (or Shift+↑/↓) select several commits; the right panel lists them.
 - ↓/J and ↑/K move the selection, Shift+J/K follow the branch, Ctrl+Home/Ctrl+End jump to the first/last commit.
-- Clicking a branch in the left panel jumps to its commit. Branch names with `/` are grouped into folders (click a folder or remote to collapse it; remembered per repository); the checked-out branch is highlighted.
+- Clicking a branch in the left panel jumps to its commit. Branch and tag names with `/` are grouped into folders (click a folder or remote to collapse it; remembered per repository); every level lists branches (or tags) first, then folders. The checked-out branch is highlighted and has a check next to its branch icon.
+- The buttons at the right end of the toolbar hide and show the left panel and the commit panel (also Ctrl+J and Ctrl+K).
+
+**Columns:** drag the border at the right of any column header to change that column's width (only that one changes); a double click sets the width that fits the visible rows, on the Commit message border it goes back to filling the free space. A table wider than the window scrolls sideways: the scrollbar below the rows, Shift+wheel or a horizontal wheel; the header moves along. The gear at the right end of the header shows or hides Author, Date and SHA and has **Reset column widths**. Widths are kept across restarts.
 
 **Search** (Ctrl+F or the magnifier above the graph): type part of a message, author, email or SHA. Other commits are dimmed, "n of m" counts the matches, Enter / Shift+Enter jump to the next / previous one, Esc closes the search.
 
@@ -16,6 +19,8 @@ Every commit is a row: branch and tag pills, the lane graph, the message, author
 ![Graph with the commit details](../screenshots/m5-graph-dark.png)
 
 ## Diffs
+
+Code is syntax highlighted (shown plain for a moment first); font, size, tabs, line numbers and word wrap are set in Preferences → Editor.
 
 Clicking a file shows its diff in the center. Three views, switched in the diff header (or the palette, "Diff: … view"); the choice is remembered:
 
@@ -54,7 +59,7 @@ With a detached HEAD, the commit panel reminds you to create a branch.
 
 ## Stashing
 
-**Stash** in the toolbar stashes all changes including untracked files (with the stash message template of Preferences → Templates when it is on); **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop** and **Delete**. Selecting a stash shows its staged, unstaged and untracked files. Pop and Apply can be undone; if they conflict, see [Stash conflicts](merge-rebase-conflicts.md#stash-conflicts).
+**Stash** in the toolbar stashes all changes including untracked files (with the stash message template of Preferences → Templates when it is on, else Git's default message, shown as "WIP on <branch>"); **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop** and **Delete**. Selecting a stash shows its staged, unstaged and untracked files. Pop and Apply can be undone; if they conflict, see [Stash conflicts](merge-rebase-conflicts.md#stash-conflicts).
 
 ## File history and blame
 
