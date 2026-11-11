@@ -127,7 +127,7 @@ Release build in the Linux container (2026-11-11), `cargo test -p gitloom --rele
 | Load the wrapped 2 MB diff (46 213 rows: rows, character counts) | – | **12 ms** |
 | Frame of the wrapped 2 MB diff (view + layout of the whole window), worst of 20 scroll positions | < 50 ms | **12 ms** |
 | Word-wrap layout of 50 000 rows (prefix sums + visible rows) | < 50 ms | < 25 ms in a debug build (unit test `large_files_stay_fast`) |
-| Binary size, `dist` profile, Linux x64 | – | SIZE_PLACEHOLDER |
+| Binary size, `dist` profile, Linux x64 | – | **31.5 MB** (28.3 MB before M11-08: +3.2 MB for syntect, the regex engine and the syntax and theme sets) |
 
 Highlighting uses syntect's pure Rust regex engine (`regex-fancy`, ADR-047), which is slower than oniguruma but needs no C library; whole files are highlighted once per content and theme and cached (64 entries).
 
