@@ -31,7 +31,7 @@ Clone and init cannot be undone with Ctrl+Z: delete the folder if you no longer 
 
 ## The main window
 
-![Main window](../screenshots/m5-main-dark-100.png)
+![Main window](../screenshots/main-dark.png)
 
 | Area | What it shows |
 |---|---|

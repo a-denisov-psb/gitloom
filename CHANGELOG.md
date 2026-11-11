@@ -45,6 +45,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- New README screenshot, rendered from a scripted example repository (`scripts/screenshot.sh`).
 - Two buttons at the right end of the toolbar show and hide the left panel and the commit panel (also Ctrl+J and Ctrl+K).
 - Preferences open as a centered window over the app (the whole window when it is small); "×" or Esc closes them, Tab stays inside.
 - The start screen buttons "Open a repo", "Clone a repo" and "Start a local repo" have one size and the accent color, with text chosen for good contrast in every theme.
