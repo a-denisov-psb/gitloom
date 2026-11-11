@@ -10409,6 +10409,11 @@ pub(crate) mod tests {
 
     /// Graph with a merge, a branch-off, a stash and the WIP row (M7-18).
     pub(crate) fn graph_app() -> App {
+        graph_app_with(Vec::new())
+    }
+
+    /// [`graph_app`] with `extra` references (remote branches, tags).
+    pub(crate) fn graph_app_with(extra: Vec<git_core::Reference>) -> App {
         use git_core::{Commit, Head, Log, WorkingTree};
 
         let (mut app, _) = App::new(Vec::new(), None);
@@ -10453,10 +10458,13 @@ pub(crate) mod tests {
                 name: "main".into(),
                 target: "m".into(),
             },
-            vec![
+            [
                 reference("main", "m", true),
                 reference("feature", "f", false),
-            ],
+            ]
+            .into_iter()
+            .chain(extra)
+            .collect(),
             vec![git_core::Stash {
                 index: 0,
                 message: "WIP on main: work in progress".into(),

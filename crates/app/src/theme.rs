@@ -452,6 +452,17 @@ pub fn section_header(theme: &Theme, status: button::Status) -> button::Style {
 }
 
 pub fn ref_pill(kind: RefKind, is_head: bool) -> impl Fn(&Theme) -> container::Style {
+    ref_pill_in(kind, is_head, None)
+}
+
+/// Ref pill of a graph row whose commit has the lane color `lane`: outline
+/// in the kind's color (Dark, Light), or filled with the lane color and
+/// white text (Classic Dark, M11-04).
+pub fn ref_pill_in(
+    kind: RefKind,
+    is_head: bool,
+    lane: Option<u32>,
+) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let p = palette(theme);
         let color = match kind {
@@ -460,10 +471,68 @@ pub fn ref_pill(kind: RefKind, is_head: bool) -> impl Fn(&Theme) -> container::S
             RefKind::RemoteBranch => p.text_muted,
             RefKind::Tag => p.warning,
         };
+        match p.ref_pill {
+            PillStyle::Outline => container::Style {
+                background: Some(Background::Color(color.scale_alpha(0.25))),
+                border: Border::default().rounded(3).width(1).color(color),
+                text_color: Some(p.text),
+                ..container::Style::default()
+            },
+            PillStyle::Filled => {
+                let fill = lane.map_or(color, |lane| lane_color(p, lane));
+                container::Style {
+                    background: Some(Background::Color(fill)),
+                    border: Border::default().rounded(3).width(1).color(fill),
+                    text_color: Some(p.node_text),
+                    ..container::Style::default()
+                }
+            }
+        }
+    }
+}
+
+/// Icons on a ref pill: the text color, white on filled pills.
+pub fn pill_icon(p: &ThemePalette) -> Color {
+    match p.ref_pill {
+        PillStyle::Outline => p.text,
+        PillStyle::Filled => p.node_text,
+    }
+}
+
+/// Muted icons on a ref pill (the remote cloud).
+pub fn pill_icon_muted(p: &ThemePalette) -> Color {
+    match p.ref_pill {
+        PillStyle::Outline => p.text_muted,
+        PillStyle::Filled => p.node_text.scale_alpha(0.8),
+    }
+}
+
+/// Line from a ref pill to its node (Classic Dark, M11-04).
+pub fn ref_connector(lane: u32) -> impl Fn(&Theme) -> container::Style {
+    move |theme| filled(lane_color(palette(theme), lane))
+}
+
+/// Line between two header cells (`column_separator`, transparent in Dark
+/// and Light).
+pub fn column_separator(theme: &Theme) -> container::Style {
+    filled(palette(theme).column_separator)
+}
+
+/// Shadow at an edge of the graph next to a side panel (`panel_shadow`):
+/// dark at the panel, fading into the graph.
+pub fn panel_shadow(left: bool) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        if !palette(theme).panel_shadow {
+            return container::Style::default();
+        }
+        let dark = Color::from_rgba(0.0, 0.0, 0.0, 0.35);
+        let clear = Color::from_rgba(0.0, 0.0, 0.0, 0.0);
+        let (from, to) = if left { (dark, clear) } else { (clear, dark) };
+        let gradient = iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
+            .add_stop(0.0, from)
+            .add_stop(1.0, to);
         container::Style {
-            background: Some(Background::Color(color.scale_alpha(0.25))),
-            border: Border::default().rounded(3).width(1).color(color),
-            text_color: Some(p.text),
+            background: Some(Background::Gradient(gradient.into())),
             ..container::Style::default()
         }
     }
@@ -482,7 +551,6 @@ pub fn lane_color(p: &ThemePalette, color: u32) -> Color {
     p.lanes[color as usize % p.lanes.len()]
 }
 
-/// Graph table row; the selected row is tinted with its lane color.
 /// Background of a selected graph row: the graph background tinted with
 /// the row's lane color.
 fn selected_row(p: &ThemePalette, lane: u32) -> Color {
@@ -494,6 +562,7 @@ fn selected_row(p: &ThemePalette, lane: u32) -> Color {
     )
 }
 
+/// Graph table row; the selected row is tinted with its lane color.
 pub fn graph_row(selected: bool, lane: u32) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let p = palette(theme);

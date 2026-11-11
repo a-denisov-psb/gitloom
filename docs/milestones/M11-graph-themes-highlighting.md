@@ -131,11 +131,13 @@ Acceptance: app tests for toggles from both places and reset; snapshot of the me
 
 Note: menu wording as planned (open GitKraken item stays for the maintainer); the menu closes after each choice like the other menus (checked entries are a new menu entry kind). The search and gear buttons lie over the right end of the header (header background behind them) instead of taking room, so the header cells line up with the rows; before, AUTHOR, DATE and SHA sat 25 px left of their columns. Reset restores the widths, not the visibility. Below 120 px for the message the table keeps that minimum and is clipped at the right.
 
-### [ ] M11-04 Classic Dark graph look
+### [x] M11-04 Classic Dark graph look
 
 - Row tint, filled pills with connector line, header band, column separators, panel depth, all driven by tokens.
 
 Acceptance: snapshots in Classic Dark (selected row, hover, several lanes, checked-out branch, tags, remote pills) checked by eye; Dark/Light unchanged.
+
+Note: tint drawn in the graph canvas from the node to the right edge of the Graph column, not on the selected row (its own tint stays). The connector runs from the pill to the refs cell edge and on in the canvas, which now starts at the column edge (no left cell padding; `lane_x` adds it). `NodeStyle::Ringed` draws a ring with a gap around initials and avatars. Separators only in the header (line at the right edge of every header cell); panel depth as 6 px gradients at both graph edges. Pills of a row use the lane color of its commit (also tags and remote branches); the Preferences "Default" badge keeps the kind color. Pixel comparison: all Dark/Light snapshots equal except one anti-aliased pixel at 150 % (`sharp-icons-150`) from the moved canvas origin; `stash-template-1-preset` shows the current time. Snapshot `ui_check_classic_dark_graph` checked.
 
 ### [ ] M11-05 Stash node and label
 
