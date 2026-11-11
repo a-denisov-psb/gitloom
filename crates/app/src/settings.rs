@@ -197,6 +197,9 @@ pub struct General {
     pub auto_fetch_minutes: u32,
     /// Opt-in update check (ADR-030); off by default.
     pub check_updates: bool,
+    /// Fetch, auto-fetch and the fetch of pull use `--prune` (GitKraken
+    /// "Auto-Prune", M10-08); on by default.
+    pub prune_on_fetch: bool,
 }
 
 impl Default for General {
@@ -204,6 +207,7 @@ impl Default for General {
         Self {
             auto_fetch_minutes: crate::fetch::DEFAULT_INTERVAL_MINUTES,
             check_updates: false,
+            prune_on_fetch: true,
         }
     }
 }
@@ -226,6 +230,8 @@ pub struct Appearance {
     pub zoom_percent: u32,
     /// Load avatars from Gravatar (ADR-026); off by default.
     pub avatars: bool,
+    /// Labels under the toolbar icons (M10-08); on by default.
+    pub toolbar_labels: bool,
 }
 
 impl Default for Appearance {
@@ -234,6 +240,7 @@ impl Default for Appearance {
             theme: ThemeChoice::Dark,
             zoom_percent: ZOOM_DEFAULT,
             avatars: false,
+            toolbar_labels: true,
         }
     }
 }
@@ -260,6 +267,9 @@ pub struct ExternalTools {
     /// External editor command template with `{path}`; empty means none
     /// (M8-07).
     pub editor_command: String,
+    /// "Delete .orig files after merging" (`mergetool.keepBackup=false`,
+    /// M10-08); off by default like GitKraken.
+    pub delete_orig: bool,
 }
 
 /// Presets of the external editor (M8-07); a preset fills the editable
@@ -419,6 +429,9 @@ pub struct Page {
     pub signing: Option<Result<SigningPage, String>>,
     /// Typed GPG program (saved with Save).
     pub gpg_program_input: String,
+    /// `core.longpaths` of the global config (Windows, M10-08); `None`
+    /// while loading.
+    pub long_paths: Option<bool>,
     /// Commit template category (M10-06): `None` while loading; the typed
     /// summary (the description lives in `App::template_description`).
     pub template: Option<Result<git_core::commit_template::TemplateSettings, String>>,
@@ -498,6 +511,7 @@ impl Page {
             default_branch_error: None,
             signing: None,
             gpg_program_input: String::new(),
+            long_paths: None,
             template: None,
             template_summary: String::new(),
         }
@@ -713,6 +727,20 @@ mod tests {
         // A default pointing nowhere is dropped.
         let broken = parse(r#"{"identities": {"list": [], "default": 3}}"#).unwrap();
         assert_eq!(broken.identities.default, None);
+    }
+
+    #[test]
+    fn small_options_load_from_older_files() {
+        // Files written before M10-08: prune on, labels on, .orig kept.
+        let old = parse(r#"{"version": 1, "general": {"auto_fetch_minutes": 3}}"#).unwrap();
+        assert!(old.general.prune_on_fetch);
+        assert!(old.appearance.toolbar_labels);
+        assert!(!old.tools.delete_orig);
+        let mut settings = Settings::default();
+        settings.general.prune_on_fetch = false;
+        settings.appearance.toolbar_labels = false;
+        settings.tools.delete_orig = true;
+        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
     }
 
     #[test]

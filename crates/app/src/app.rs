@@ -715,6 +715,12 @@ pub enum Message {
     SigningProgramInput(String),
     SigningProgramSave,
     SigningRefresh,
+    /// Small options (M10-08).
+    PruneToggled(bool),
+    DeleteOrigToggled(bool),
+    ToolbarLabelsToggled(bool),
+    LongPathsToggled(bool),
+    LongPathsLoaded(Result<Option<bool>, String>),
     /// Preferences → General "Default branch name" (M10-03).
     DefaultBranchLoaded(Result<Option<String>, String>),
     DefaultBranchInput(String),
@@ -1310,7 +1316,8 @@ impl App {
 
     /// Fetches all remotes of tab `tab`; `background` for auto-fetch.
     fn fetch(&mut self, tab: TabId, background: bool) -> Task<Message> {
-        let task = self.run_network(tab, crate::fetch::fetch_all(background));
+        let prune = self.settings.general.prune_on_fetch;
+        let task = self.run_network(tab, crate::fetch::fetch_all(background, prune));
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
             if view.network.is_some() || view.queued.is_some() {
                 view.last_fetch = std::time::Instant::now();
@@ -2223,7 +2230,7 @@ impl App {
         }
         let request = NetworkRequest {
             label: self.pull_mode.label().into(),
-            ..crate::fetch::pull(self.pull_mode)
+            ..crate::fetch::pull(self.pull_mode, self.settings.general.prune_on_fetch)
         };
         let task = self.run_network(tab, request);
         if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
@@ -4340,13 +4347,14 @@ impl App {
         view.busy = Some(label);
         let writer = Arc::clone(&view.writer);
         let merge_path = Some(path.clone());
+        let delete_orig = self.settings.tools.delete_orig;
         Task::perform(
             blocking(move || {
                 Ok(run_tool(
                     writer.as_ref(),
                     git_core::ToolKind::Merge,
                     tool.is_some(),
-                    |git| git_core::run_mergetool(git, tool.as_deref(), &path),
+                    |git| git_core::run_mergetool(git, tool.as_deref(), &path, delete_orig),
                 ))
             }),
             move |result: Result<_, String>| Message::ExternalToolFinished {
@@ -4737,6 +4745,21 @@ impl App {
                 }),
                 Message::DefaultBranchLoaded,
             ),
+            Task::perform(
+                blocking(|| {
+                    git_core::global_config("core.longpaths")
+                        .map(|value| {
+                            Some(value.is_some_and(|v| {
+                                matches!(
+                                    v.to_ascii_lowercase().as_str(),
+                                    "true" | "yes" | "on" | "1"
+                                )
+                            }))
+                        })
+                        .map_err(|e| e.to_string())
+                }),
+                Message::LongPathsLoaded,
+            ),
         ])
     }
 
@@ -5065,6 +5088,36 @@ impl App {
                 }
             }
             Message::CrashReportDismissed => self.crash_notice = None,
+            Message::PruneToggled(on) => {
+                self.settings.general.prune_on_fetch = on;
+                return self.save_settings();
+            }
+            Message::DeleteOrigToggled(on) => {
+                self.settings.tools.delete_orig = on;
+                return self.save_settings();
+            }
+            Message::ToolbarLabelsToggled(on) => {
+                self.settings.appearance.toolbar_labels = on;
+                return self.save_settings();
+            }
+            Message::LongPathsToggled(on) => {
+                return Task::perform(
+                    blocking(move || {
+                        git_core::set_global_config("core.longpaths", on.then_some("true"))
+                            .map(|()| Some(on))
+                            .map_err(|e| e.to_string())
+                    }),
+                    Message::LongPathsLoaded,
+                );
+            }
+            Message::LongPathsLoaded(result) => match result {
+                Ok(value) => {
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.long_paths = Some(value.unwrap_or(false));
+                    }
+                }
+                Err(error) => self.status = format!("Could not change core.longpaths: {error}"),
+            },
             Message::UpdatesToggled(on) => {
                 self.settings.general.check_updates = on;
                 if !on {
@@ -6539,7 +6592,10 @@ impl App {
                     let request = NetworkRequest {
                         label: format!("Fetch {name}"),
                         kind: NetworkKind::Fetch,
-                        args: git_core::fetch_remote_args(&name),
+                        args: git_core::fetch_remote_args(
+                            &name,
+                            self.settings.general.prune_on_fetch,
+                        ),
                         background: false,
                     };
                     return self.run_network(tab, request);
@@ -13140,6 +13196,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn small_options_are_saved() {
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(Message::PruneToggled(false));
+        let _ = app.update(Message::DeleteOrigToggled(true));
+        let _ = app.update(Message::ToolbarLabelsToggled(false));
+        assert!(!app.settings.general.prune_on_fetch);
+        assert!(app.settings.tools.delete_orig);
+        assert!(!app.settings.appearance.toolbar_labels);
+        let _ = app.update(Message::SettingsOpened);
+        let _ = app.update(Message::LongPathsLoaded(Ok(Some(true))));
+        assert_eq!(app.settings_page.as_ref().unwrap().long_paths, Some(true));
+        let _ = app.update(Message::LongPathsLoaded(Err("no git".into())));
+        assert!(app.status.contains("core.longpaths"));
+    }
+
+    #[test]
     fn copy_commit_prompt_needs_staged_changes() {
         let mut app = staging_app(&["a"], &[]);
         assert_eq!(
@@ -15168,7 +15240,7 @@ pub(crate) mod tests {
     }
 
     fn fetch_request(background: bool) -> NetworkRequest {
-        crate::fetch::fetch_all(background)
+        crate::fetch::fetch_all(background, true)
     }
 
     #[test]
