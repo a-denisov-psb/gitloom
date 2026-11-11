@@ -119,12 +119,14 @@ Acceptance: integration tests: init with and without files, with and without ide
 
 Note (2026-11-11): done. git-core `init` module (`init`, `init_with` for a prepared backend, `GITIGNORE_TEMPLATES` via `include_str!` from `crates/git-core/assets/gitignore/` with the CC0 license; `scripts/third-party-licenses.sh` appends them to the notices and the About list). The identity check reads `user.name`/`user.email` like the commit panel (`identity_problem`), so Git's guessed identities do not count. New git-core helpers `global_config` / `set_global_config` (also used by `global_identity`). App: `InitDialog` next to `CloneDialog` (`clone_dialog.rs`), dialog in `overlays.rs`, the default branch is loaded in the background when the dialog opens; Preferences → General gets "Default branch name" with Save (validated with `check_branch_name`, empty unsets). The empty repository was already handled (`snapshot::tests::empty_repository`); `crates/git-core/tests/init.rs` checks that it loads and takes a first commit. Tests: `init.rs`, `global_config.rs`, app `init_dialog_flow`, `default_branch_name_preference`, `clone_dialog::init_tests`; snapshots `ui_check_init_dialog` checked.
 
-### [ ] M10-04 Signing settings
+### [x] M10-04 Signing settings
 
 - git-core: read and write the signing keys of the global config with origin; GPG key listing (colon format parser, expiry); SSH key discovery reused.
 - Preferences → Signing per the decisions table; signing failure message with the hint.
 
 Acceptance: unit tests for the colon parser (fixtures with several keys, expired, no keys, gpg missing); integration tests with a temporary `GIT_CONFIG_GLOBAL`: format, key, default flags written and read back; a repository override shown read-only; SSH signing integration test where `ssh-keygen` is available (commit, then `%G?` is not `N`); snapshot of the category.
+
+Note (2026-11-11): done. git-core `signing` module (settings of the global config, `set_global_signing` limited to the five signing keys, `local_signing_overrides`, colon parser and `list_gpg_keys`, `signing_failed`). Deviation in the SSH test: without `gpg.ssh.allowedSignersFile` Git cannot verify SSH signatures and `%G?` reads `N` (with an error on stderr), so the test checks the `gpgsig` header instead; M10-05 must treat that case as "Signed (key not available)". The SSH part runs on Unix only (Windows OpenSSH refuses keys whose ACLs it finds too open). The GPG key picker selects by the configured id's suffix (short or long ids). Preferences → Signing sits between Identities and External tools; every change is written right away and the category reloads. A commit (or any write) whose error is a signing error shows "Signing failed" with the hint and Git's output as details. Tests: `signing.rs` unit tests, `crates/git-core/tests/signing.rs`, app `signing_preferences_and_failure_hint`; snapshots `ui_check_signing` checked.
 
 ### [ ] M10-05 Signature status in the commit details
 

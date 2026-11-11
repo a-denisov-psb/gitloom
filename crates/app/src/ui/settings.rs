@@ -57,6 +57,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
         Category::Identities => identities(app),
+        Category::Signing => signing(page),
         Category::ExternalTools => external_tools(&app.settings, page),
         Category::Identity => repository_identity(app),
         Category::SshKey => ssh_key(app, page),
@@ -416,6 +417,151 @@ fn field<'a>(
     let mut content = column![text(label), control].spacing(6);
     if let Some(note) = note.into() {
         content = content.push(muted(note).size(12));
+    }
+    content.into()
+}
+
+/// Preferences → Signing (M10-04): format, key, GPG program and the
+/// defaults, all in the global Git config; repository values are shown as
+/// read-only overrides.
+fn signing(page: &Page) -> Element<'_, Message> {
+    use git_core::signing::SigningFormat;
+    let signing = match &page.signing {
+        None => return muted("Loading…").into(),
+        Some(Err(error)) => {
+            return column![
+                text(format!("Could not read the Git config: {error}")).style(theme::text_danger),
+                button(text("Retry"))
+                    .on_press(Message::SigningRefresh)
+                    .padding([5, 12])
+                    .style(button::secondary),
+            ]
+            .spacing(8)
+            .into()
+        }
+        Some(Ok(signing)) => signing,
+    };
+    let global = &signing.global;
+    let format = segmented(
+        &[
+            (SigningFormat::Gpg, SigningFormat::Gpg.label()),
+            (SigningFormat::Ssh, SigningFormat::Ssh.label()),
+        ],
+        global.format,
+        |format| Message::SigningSet {
+            key: "gpg.format",
+            value: Some(format.config_value().to_owned()),
+        },
+    );
+    let refresh = button(text("Refresh"))
+        .on_press(Message::SigningRefresh)
+        .padding([5, 12])
+        .style(button::secondary);
+    let key: Element<'_, Message> = match global.format {
+        SigningFormat::Gpg => match &signing.gpg_keys {
+            Ok(keys) => {
+                let labels: Vec<String> = keys.iter().map(|k| k.label()).collect();
+                let selected = global
+                    .key
+                    .as_ref()
+                    .and_then(|id| keys.iter().find(|k| k.id.ends_with(id.as_str())))
+                    .map(|k| k.label());
+                let mut line =
+                    row![
+                        iced::widget::pick_list(labels, selected, Message::SigningGpgKeyChosen)
+                            .placeholder(if keys.is_empty() {
+                                "No secret keys found"
+                            } else {
+                                "Choose a key"
+                            })
+                            .width(Length::Fixed(420.0))
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Center);
+                line = line.push(refresh);
+                line.into()
+            }
+            Err(error) => column![
+                text(error.clone()).size(12).style(theme::text_danger),
+                row![refresh].spacing(8),
+            ]
+            .spacing(6)
+            .into(),
+        },
+        SigningFormat::Ssh => {
+            let labels: Vec<String> = signing
+                .ssh_keys
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect();
+            let selected = global.key.clone();
+            row![
+                iced::widget::pick_list(labels, selected, |path| Message::SigningSet {
+                    key: "user.signingkey",
+                    value: Some(path),
+                })
+                .placeholder("Choose a public key")
+                .width(Length::Fixed(420.0)),
+                button(text("Browse…"))
+                    .on_press(Message::SigningBrowseKey)
+                    .padding([5, 12])
+                    .style(button::secondary),
+            ]
+            .spacing(8)
+            .align_y(iced::Center)
+            .into()
+        }
+    };
+    let program_changed = page.gpg_program_input.trim() != global.program.as_deref().unwrap_or("");
+    let program = row![
+        text_input("gpg", &page.gpg_program_input)
+            .on_input(Message::SigningProgramInput)
+            .on_submit(Message::SigningProgramSave)
+            .padding(6)
+            .style(theme::input)
+            .width(Length::Fixed(420.0)),
+        button(text("Save"))
+            .on_press_maybe(program_changed.then_some(Message::SigningProgramSave))
+            .padding([5, 12])
+            .style(button::secondary),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    let toggle = |label: &'static str, on: bool, key: &'static str| {
+        iced::widget::toggler(on)
+            .label(label)
+            .on_toggle(move |on| Message::SigningSet {
+                key,
+                value: Some(on.to_string()),
+            })
+    };
+    let mut content = column![
+        field("Format", format, None),
+        field(
+            "Signing key",
+            key,
+            "Written to user.signingkey: a GPG key id, or the .pub file of an SSH key. \
+             Passphrases are asked by GPG's pinentry or the SSH agent.",
+        ),
+        field(
+            "GPG program",
+            program.into(),
+            "gpg.program; empty uses Git's default (gpg).",
+        ),
+        toggle(
+            "Sign commits by default",
+            global.sign_commits,
+            "commit.gpgSign"
+        ),
+        toggle("Sign tags by default", global.sign_tags, "tag.gpgSign"),
+    ]
+    .spacing(18);
+    if !signing.overrides.is_empty() {
+        let mut lines = column![text("Overridden in this repository").size(13)].spacing(4);
+        for (key, value) in &signing.overrides {
+            lines = lines.push(muted(format!("{key} = {value}")).size(12));
+        }
+        content = content.push(lines);
     }
     content.into()
 }

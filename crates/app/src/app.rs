@@ -670,6 +670,21 @@ pub enum Message {
     InitSubmit,
     InitFinished(Result<(PathBuf, git_core::init::InitOutcome), String>),
     InitClosed,
+    /// Preferences → Signing (M10-04).
+    SigningLoaded(Result<settings::SigningPage, String>),
+    /// Write one signing key of the global config (`None` removes it).
+    SigningSet {
+        key: &'static str,
+        value: Option<String>,
+    },
+    SigningWritten(Result<(), String>),
+    /// A GPG key picked by its label ("ID · user").
+    SigningGpgKeyChosen(String),
+    SigningBrowseKey,
+    SigningKeyPicked(Option<PathBuf>),
+    SigningProgramInput(String),
+    SigningProgramSave,
+    SigningRefresh,
     /// Preferences → General "Default branch name" (M10-03).
     DefaultBranchLoaded(Result<Option<String>, String>),
     DefaultBranchInput(String),
@@ -4596,6 +4611,37 @@ impl App {
         )
     }
 
+    /// Loads the Signing category in the background: global settings, the
+    /// active repository's overrides, GPG and SSH keys (M10-04).
+    fn load_signing(&mut self) -> Task<Message> {
+        let repo = self.active_repo_path().map(|(_, path)| path);
+        Task::perform(
+            blocking(move || {
+                let global = git_core::signing::global_signing().map_err(|e| e.to_string())?;
+                let overrides = match &repo {
+                    Some(root) => git_core::signing::local_signing_overrides(root)
+                        .map_err(|e| e.to_string())?,
+                    None => Vec::new(),
+                };
+                let gpg_keys = git_core::signing::list_gpg_keys(global.program.as_deref())
+                    .map_err(|e| e.to_string());
+                let ssh_keys = directories::BaseDirs::new()
+                    .map(|dirs| git_core::ssh::find_keys(&dirs.home_dir().join(".ssh")))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|key| PathBuf::from(format!("{}.pub", key.display())))
+                    .collect();
+                Ok(settings::SigningPage {
+                    global,
+                    overrides,
+                    gpg_keys,
+                    ssh_keys,
+                })
+            }),
+            Message::SigningLoaded,
+        )
+    }
+
     fn open_settings(&mut self) -> Task<Message> {
         self.context_menu = None;
         self.settings_page = Some(settings::Page::new(&self.settings));
@@ -5198,6 +5244,9 @@ impl App {
                     page.category = category;
                     if category.is_repository() {
                         page.repo = repo;
+                    }
+                    if category == settings::Category::Signing {
+                        return self.load_signing();
                     }
                     if category == settings::Category::SshKey {
                         page.ssh_replace = false;
@@ -5972,6 +6021,13 @@ impl App {
                             .unwrap_or_default();
                         self.modal = Some(match git_core::locked_file(&error) {
                             Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
+                            // ADR-044: say what to check, Git's output as details.
+                            None if git_core::signing::signing_failed(&error) => {
+                                Modal::error("Signing failed", error).with_text(
+                                    "Git could not sign. Check Preferences → Signing (key, \
+                                     GPG program, agent).",
+                                )
+                            }
                             None => match auth_hint_with_key(&error, &ssh) {
                                 Some(hint) => {
                                     Modal::error(format!("{label} failed"), error).with_text(hint)
@@ -7801,6 +7857,72 @@ impl App {
                     self.init_dialog = None;
                 }
             }
+            Message::SigningLoaded(result) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    if let Ok(signing) = &result {
+                        page.gpg_program_input = signing.global.program.clone().unwrap_or_default();
+                    }
+                    page.signing = Some(result);
+                }
+            }
+            Message::SigningSet { key, value } => {
+                return Task::perform(
+                    blocking(move || {
+                        git_core::signing::set_global_signing(key, value.as_deref())
+                            .map_err(|e| e.to_string())
+                    }),
+                    Message::SigningWritten,
+                );
+            }
+            Message::SigningWritten(result) => {
+                if let Err(error) = result {
+                    self.status = format!("Could not change the signing settings: {error}");
+                }
+                return self.load_signing();
+            }
+            Message::SigningGpgKeyChosen(label) => {
+                let id = label.split(" · ").next().unwrap_or_default().to_owned();
+                return self.update(Message::SigningSet {
+                    key: "user.signingkey",
+                    value: Some(id),
+                });
+            }
+            Message::SigningBrowseKey => {
+                let start = directories::BaseDirs::new().map(|d| d.home_dir().join(".ssh"));
+                let mut dialog = rfd::AsyncFileDialog::new()
+                    .set_title("Public SSH key")
+                    .add_filter("Public key", &["pub"]);
+                if let Some(start) = start {
+                    dialog = dialog.set_directory(start);
+                }
+                return Task::perform(dialog.pick_file(), |file| {
+                    Message::SigningKeyPicked(file.map(|f| f.path().to_path_buf()))
+                });
+            }
+            Message::SigningKeyPicked(Some(path)) => {
+                return self.update(Message::SigningSet {
+                    key: "user.signingkey",
+                    value: Some(path.display().to_string()),
+                });
+            }
+            Message::SigningKeyPicked(None) => {}
+            Message::SigningProgramInput(value) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.gpg_program_input = value;
+                }
+            }
+            Message::SigningProgramSave => {
+                let value = self
+                    .settings_page
+                    .as_ref()
+                    .map(|p| p.gpg_program_input.trim().to_owned())
+                    .filter(|v| !v.is_empty());
+                return self.update(Message::SigningSet {
+                    key: "gpg.program",
+                    value,
+                });
+            }
+            Message::SigningRefresh => return self.load_signing(),
             Message::DefaultBranchLoaded(result) => {
                 if let Some(page) = self.settings_page.as_mut() {
                     match result {
@@ -12680,6 +12802,63 @@ pub(crate) mod tests {
             &app.tabs[0].state,
             TabState::Loading { path: p } if *p == path
         ));
+    }
+
+    #[test]
+    fn signing_preferences_and_failure_hint() {
+        use git_core::signing::{GpgKey, SigningFormat, SigningSettings};
+        let mut app = staging_app(&[], &["a"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Signing));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::Signing
+        );
+        let page = settings::SigningPage {
+            global: SigningSettings {
+                format: SigningFormat::Gpg,
+                key: Some("AAAABBBBCCCCDDDD".into()),
+                program: Some("gpg2".into()),
+                sign_commits: true,
+                sign_tags: false,
+            },
+            overrides: vec![("commit.gpgSign".into(), "false".into())],
+            gpg_keys: Ok(vec![GpgKey {
+                id: "AAAABBBBCCCCDDDD".into(),
+                user: "Ana <ana@example.com>".into(),
+                expires: None,
+                unusable: false,
+            }]),
+            ssh_keys: Vec::new(),
+        };
+        let _ = app.update(Message::SigningLoaded(Ok(page)));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().gpg_program_input,
+            "gpg2"
+        );
+        // Picking a key by its label writes its id (the write runs in the
+        // background; the task is not executed here).
+        let _ = app.update(Message::SigningGpgKeyChosen(
+            "AAAABBBBCCCCDDDD · Ana <ana@example.com>".into(),
+        ));
+
+        // A commit that fails to sign names the cause.
+        let _ = app.update(Message::SettingsClosed);
+        app.tabs[0].view_mut().unwrap().busy = Some("Commit".into());
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Commit".into(),
+            result: Err(
+                "error: gpg failed to sign the data\nfatal: failed to write commit object".into(),
+            ),
+        });
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Signing failed");
+        assert!(
+            modal.text.contains("Preferences → Signing"),
+            "{}",
+            modal.text
+        );
     }
 
     #[test]

@@ -583,6 +583,49 @@ mod tests {
         snapshot(&app, "preferences-general-default-branch");
     }
 
+    /// Preferences → Signing (M10-04): GPG with keys and a repository
+    /// override, then SSH.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_signing() {
+        use git_core::signing::{GpgKey, SigningFormat, SigningSettings};
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Signing,
+        ));
+        let mut page = crate::settings::SigningPage {
+            global: SigningSettings {
+                format: SigningFormat::Gpg,
+                key: Some("AAAABBBBCCCCDDDD".into()),
+                program: None,
+                sign_commits: true,
+                sign_tags: false,
+            },
+            overrides: vec![("commit.gpgSign".into(), "false".into())],
+            gpg_keys: Ok(vec![
+                GpgKey {
+                    id: "AAAABBBBCCCCDDDD".into(),
+                    user: "Ana Lyst <ana@example.com>".into(),
+                    expires: None,
+                    unusable: false,
+                },
+                GpgKey {
+                    id: "EEEEFFFF00001111".into(),
+                    user: "Old <old@example.com>".into(),
+                    expires: Some(1),
+                    unusable: true,
+                },
+            ]),
+            ssh_keys: vec!["/home/ana/.ssh/id_ed25519.pub".into()],
+        };
+        let _ = app.update(Message::SigningLoaded(Ok(page.clone())));
+        snapshot(&app, "signing-gpg");
+        page.global.format = SigningFormat::Ssh;
+        page.global.key = Some("/home/ana/.ssh/id_ed25519.pub".into());
+        let _ = app.update(Message::SigningLoaded(Ok(page)));
+        snapshot(&app, "signing-ssh");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

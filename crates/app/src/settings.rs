@@ -316,6 +316,8 @@ pub enum Category {
     Appearance,
     /// Saved commit identities and the default (M8-03).
     Identities,
+    /// Commit and tag signing in the global Git config (M10-04).
+    Signing,
     ExternalTools,
     /// Identity of the active tab's repository (M8-04).
     Identity,
@@ -327,10 +329,11 @@ pub enum Category {
 
 impl Category {
     /// Categories that apply everywhere, at the top of the list.
-    pub const GLOBAL: [Self; 4] = [
+    pub const GLOBAL: [Self; 5] = [
         Self::General,
         Self::Appearance,
         Self::Identities,
+        Self::Signing,
         Self::ExternalTools,
     ];
     /// Categories of the active tab's repository, below the group header
@@ -348,6 +351,7 @@ impl Category {
             Self::General => "General",
             Self::Appearance => "Appearance",
             Self::Identities => "Identities",
+            Self::Signing => "Signing",
             Self::Identity => "Identity",
             Self::SshKey => "SSH key",
             Self::ExternalTools => "External tools",
@@ -385,6 +389,22 @@ pub struct Page {
     pub default_branch: Option<Option<String>>,
     pub default_branch_input: String,
     pub default_branch_error: Option<String>,
+    /// Signing category (M10-04): `None` while loading.
+    pub signing: Option<Result<SigningPage, String>>,
+    /// Typed GPG program (saved with Save).
+    pub gpg_program_input: String,
+}
+
+/// What the Signing category shows (M10-04).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SigningPage {
+    pub global: git_core::signing::SigningSettings,
+    /// Signing keys the active repository sets itself (read-only).
+    pub overrides: Vec<(String, String)>,
+    /// Secret keys of the GPG program, or why they could not be listed.
+    pub gpg_keys: Result<Vec<git_core::signing::GpgKey>, String>,
+    /// Public SSH keys in `~/.ssh` (`.pub` next to a private key).
+    pub ssh_keys: Vec<std::path::PathBuf>,
 }
 
 /// Fields of the Gitflow category, in [`FlowForm::values`] order.
@@ -446,6 +466,8 @@ impl Page {
             default_branch: None,
             default_branch_input: String::new(),
             default_branch_error: None,
+            signing: None,
+            gpg_program_input: String::new(),
         }
     }
 
