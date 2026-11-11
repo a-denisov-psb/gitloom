@@ -58,6 +58,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let form = match page.category {
         Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
+        Category::Editor => editor(app, page),
         Category::Identities => identities(app),
         Category::Signing => signing(page),
         Category::Templates => templates(app),
@@ -65,7 +66,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Identity => repository_identity(app),
         Category::SshKey => ssh_key(app, page),
         Category::Commit => commit_template(app, page),
-        Category::Editor => repository_editor(app, page),
+        Category::RepoEditor => repository_editor(app, page),
         Category::Gitflow => gitflow(app, page),
     };
 
@@ -141,7 +142,7 @@ fn category_title(app: &App, category: Category) -> String {
         (Category::Identity, Some(name)) => format!("Identity · {name}"),
         (Category::SshKey, Some(name)) => format!("SSH key · {name}"),
         (Category::Commit, Some(name)) => format!("Commit · {name}"),
-        (Category::Editor, Some(name)) => format!("External editor · {name}"),
+        (Category::RepoEditor, Some(name)) => format!("External editor · {name}"),
         _ => category.title().to_owned(),
     }
 }
@@ -426,6 +427,112 @@ fn field<'a>(
         content = content.push(muted(note).size(12));
     }
     content.into()
+}
+
+/// Label of the default font in the font list.
+const DEFAULT_FONT: &str = "Default";
+
+/// Preferences → Editor (M11-06, GitKraken "Editor"): the code views.
+fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
+    use crate::editor_style::{MAX_FONT_SIZE, MAX_TAB_SIZE, MIN_FONT_SIZE, MIN_TAB_SIZE};
+    let editor = &app.settings.editor;
+    let mut fonts = vec![DEFAULT_FONT.to_owned()];
+    fonts.extend(page.fonts.iter().cloned());
+    if !editor.font.is_empty() && !fonts.contains(&editor.font) {
+        // A font from the settings that is not installed (any more).
+        fonts.push(editor.font.clone());
+    }
+    let selected = if editor.font.is_empty() {
+        DEFAULT_FONT.to_owned()
+    } else {
+        editor.font.clone()
+    };
+    let font = iced::widget::pick_list(fonts, Some(selected), |font: String| {
+        Message::EditorFontChosen(if font == DEFAULT_FONT {
+            String::new()
+        } else {
+            font
+        })
+    })
+    .width(280);
+    let stepper = |value: u32, min: u32, max: u32, unit: &str, message: fn(u32) -> Message| {
+        let step = |icon, target: u32, enabled: bool| -> Element<'a, Message> {
+            button(crate::icons::icon(icon, 14.0))
+                .on_press_maybe(enabled.then_some(message(target)))
+                .padding([5, 12])
+                .style(button::secondary)
+                .into()
+        };
+        row![
+            step(
+                crate::icons::Icon::Minus,
+                value.saturating_sub(1),
+                value > min
+            ),
+            text(format!("{value}{unit}"))
+                .width(60)
+                .align_x(iced::Center),
+            step(crate::icons::Icon::Plus, value + 1, value < max),
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into()
+    };
+    // Word wrap (M11-07) and highlighting (M11-09) come later.
+    let later = |label: &'a str, on: bool| -> Element<'a, Message> {
+        field(
+            label,
+            crate::ui::panel::with_tooltip(
+                iced::widget::toggler(on)
+                    .label(if on { "On" } else { "Off" })
+                    .into(),
+            ),
+            None,
+        )
+    };
+    column![
+        field(
+            "Font",
+            font.into(),
+            "Monospace fonts installed on this computer; Default is the system's monospace font.",
+        ),
+        field(
+            "Font size",
+            stepper(
+                editor.font_size,
+                MIN_FONT_SIZE,
+                MAX_FONT_SIZE,
+                " px",
+                Message::EditorFontSize
+            ),
+            None,
+        ),
+        field(
+            "Tab size",
+            stepper(
+                editor.tab_size,
+                MIN_TAB_SIZE,
+                MAX_TAB_SIZE,
+                "",
+                Message::EditorTabSize
+            ),
+            "Tabs are shown as this many columns; files are not changed.",
+        ),
+        field(
+            "Show line numbers",
+            iced::widget::toggler(editor.line_numbers)
+                .on_toggle(Message::EditorLineNumbersToggled)
+                .label(if editor.line_numbers { "On" } else { "Off" })
+                .into(),
+            None,
+        ),
+        later("Word wrap", editor.word_wrap),
+        later("Syntax highlighting", editor.syntax_highlighting),
+        muted("Applies to diffs, blame, file history and the conflict view; the commit message fields keep their font.")
+            .size(12),
+    ]
+    .spacing(18)
+    .into()
 }
 
 /// Preferences → Repository → External editor (M10-11): the global setting

@@ -364,7 +364,9 @@ mod tests {
             // redraw before drawing), at 60 positions over the whole file.
             let mut frames = Vec::new();
             for step in 0..60 {
-                let offset = step as f32 / 59.0 * rows as f32 * crate::ui::diff::ROW_HEIGHT;
+                let offset = step as f32 / 59.0
+                    * rows as f32
+                    * crate::editor_style::EditorStyle::default().line_height();
                 crate::app::tests::scroll_diff(&mut app, offset);
                 let start = std::time::Instant::now();
                 let sim = simulator(&app);
@@ -748,7 +750,9 @@ mod tests {
         let mut repo = (*view.snapshot).clone();
         repo.repo_editor = Some("idea {path}".into());
         view.apply_snapshot(std::sync::Arc::new(repo));
-        let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Editor));
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::RepoEditor,
+        ));
         snapshot(&app, "repository-editor");
     }
 
@@ -823,6 +827,19 @@ mod tests {
             app.settings.appearance.theme = choice;
             snapshot(&app, &format!("stash-node-{name}"));
         }
+    }
+
+    /// Preferences → Editor (M11-06) and a diff with a larger font and
+    /// without line numbers.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_editor_settings() {
+        let mut app = crate::app::tests::wide_diff_app(crate::settings::DiffMode::Hunk);
+        let _ = app.update(Message::EditorFontSize(16));
+        let _ = app.update(Message::EditorLineNumbersToggled(false));
+        snapshot(&app, "editor-diff-16-no-numbers");
+        let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Editor));
+        snapshot(&app, "editor-preferences");
     }
 
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.

@@ -88,9 +88,14 @@ pub struct DiffView {
     /// Largest offset, as the horizontal scrollbar last reported it
     /// (`None` until it did).
     pub h_max: Option<f32>,
-    /// Width of the longest line, measured when the diff loaded.
+    /// Width of the longest line, measured when the diff loaded or the
+    /// editor settings changed.
     pub text_width: f32,
+    /// The longest line as shown (tabs expanded).
+    pub longest: String,
     pub hscroll_id: iced::widget::Id,
+    /// Preferences → Editor values the diff is drawn with (M11-06).
+    pub style: crate::editor_style::EditorStyle,
 }
 
 /// A branch being dragged: its name and kind, and the branch under the
@@ -246,8 +251,25 @@ impl DiffView {
             h_offset: 0.0,
             h_max: None,
             text_width: 0.0,
+            longest: String::new(),
             hscroll_id: iced::widget::Id::unique(),
+            style: crate::editor_style::EditorStyle::default(),
         }
+    }
+
+    /// Applies new editor settings: tabs, the measured text width and the
+    /// horizontal range change with them.
+    pub fn restyle(&mut self, style: crate::editor_style::EditorStyle) {
+        if style == self.style {
+            return;
+        }
+        self.style = style;
+        if let Loadable::Ready(diff) = &self.diff {
+            self.longest = crate::diff_hscroll::longest_line(diff, style.tab);
+        }
+        self.text_width = crate::diff_hscroll::text_width(&self.longest, &style);
+        self.h_max = None;
+        self.h_offset = self.h_offset.min(self.text_width);
     }
 
     /// Why hunks, blocks and lines of this diff cannot be staged, unstaged
@@ -384,7 +406,8 @@ impl DiffView {
         self.anchor = None;
         match diff {
             Ok(diff) => {
-                self.text_width = crate::diff_hscroll::text_width(&diff);
+                self.longest = crate::diff_hscroll::longest_line(&diff, self.style.tab);
+                self.text_width = crate::diff_hscroll::text_width(&self.longest, &self.style);
                 if self.layout.has_blocks() {
                     self.blocks = crate::diff_blocks::blocks(&diff);
                 }
@@ -444,6 +467,15 @@ pub enum CenterView {
     Rebase(Box<crate::rebase_panel::RebasePanel>),
     /// History of one file (M5-09), replacing the graph.
     FileHistory(Box<crate::file_history::FileHistoryView>),
+}
+
+impl RepoView {
+    /// Applies new editor settings to the diff shown in the center (M11-06).
+    pub fn restyle(&mut self, style: crate::editor_style::EditorStyle) {
+        if let Some(diff) = self.center.diff_mut() {
+            diff.restyle(style);
+        }
+    }
 }
 
 impl CenterView {
