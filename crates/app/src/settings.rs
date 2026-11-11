@@ -362,6 +362,8 @@ pub enum Category {
     SshKey,
     /// Commit template of the active tab's repository (M10-06).
     Commit,
+    /// External editor of the active tab's repository (M10-11).
+    Editor,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
 }
@@ -379,7 +381,13 @@ impl Category {
     /// Categories of the active tab's repository, below the group header
     /// "Repository · <name>" (M8-01, like GitKraken's repo-specific
     /// preferences).
-    pub const REPOSITORY: [Self; 4] = [Self::Identity, Self::SshKey, Self::Commit, Self::Gitflow];
+    pub const REPOSITORY: [Self; 5] = [
+        Self::Identity,
+        Self::SshKey,
+        Self::Commit,
+        Self::Editor,
+        Self::Gitflow,
+    ];
 
     /// The category belongs to the repository group.
     pub fn is_repository(self) -> bool {
@@ -396,6 +404,7 @@ impl Category {
             Self::Identity => "Identity",
             Self::SshKey => "SSH key",
             Self::Commit => "Commit",
+            Self::Editor => "External editor",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
         }
@@ -435,6 +444,10 @@ pub struct Page {
     pub signing: Option<Result<SigningPage, String>>,
     /// Typed GPG program (saved with Save).
     pub gpg_program_input: String,
+    /// The repository's editor command being typed, and "Custom" picked
+    /// while it matches a preset (M10-11).
+    pub repo_editor_input: String,
+    pub repo_editor_custom: bool,
     /// "Custom" was picked for the stash template while its text still
     /// matches a preset (M10-10).
     pub stash_custom: bool,
@@ -522,6 +535,8 @@ impl Page {
             gpg_program_input: String::new(),
             long_paths: None,
             stash_custom: false,
+            repo_editor_input: String::new(),
+            repo_editor_custom: false,
             template: None,
             template_summary: String::new(),
         }

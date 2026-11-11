@@ -738,6 +738,20 @@ mod tests {
         }
     }
 
+    /// Preferences → Repository → External editor (M10-11).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_repository_editor() {
+        let mut app = ready_app(&["c"]);
+        app.settings.tools.editor_command = "code {path}".into();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut repo = (*view.snapshot).clone();
+        repo.repo_editor = Some("idea {path}".into());
+        view.apply_snapshot(std::sync::Arc::new(repo));
+        let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Editor));
+        snapshot(&app, "repository-editor");
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
