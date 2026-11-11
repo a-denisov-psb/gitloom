@@ -359,10 +359,24 @@ pub enum MenuEntry {
         /// Tooltip, e.g. "Not available yet" on disabled future actions.
         hint: Option<String>,
     },
+    /// Item with a check mark in front when `checked` (M11-03).
+    Check {
+        label: String,
+        checked: bool,
+        message: Box<Message>,
+    },
     Separator,
 }
 
 impl MenuEntry {
+    pub fn check(label: impl Into<String>, checked: bool, message: Message) -> Self {
+        Self::Check {
+            label: label.into(),
+            checked,
+            message: Box::new(message),
+        }
+    }
+
     pub fn item(label: impl Into<String>, message: Message) -> Self {
         Self::Item {
             label: label.into(),
@@ -397,6 +411,8 @@ pub const MENU_SHORTCUT_SIZE: f32 = 11.0;
 /// Horizontal space of an item besides its texts: button padding (2 × 10),
 /// menu padding (2 × 4), a little slack for rounding.
 const MENU_ITEM_CHROME: f32 = 20.0 + 8.0 + 4.0;
+/// Room of the check mark column of a [`MenuEntry::Check`] (icon and gap).
+pub const MENU_CHECK_WIDTH: f32 = 20.0;
 /// Gap between a label and its shortcut.
 const MENU_SHORTCUT_GAP: f32 = 16.0;
 
@@ -447,6 +463,7 @@ pub fn menu_width(entries: &[MenuEntry]) -> f32 {
             MenuEntry::Item {
                 label, shortcut, ..
             } => Some(item_width(label, shortcut.as_deref())),
+            MenuEntry::Check { label, .. } => Some(item_width(label, None) + MENU_CHECK_WIDTH),
             MenuEntry::Separator => None,
         })
         .fold(MENU_MIN_WIDTH, f32::max)
@@ -525,7 +542,7 @@ impl ContextMenu {
     fn enabled(&self, index: usize) -> bool {
         matches!(
             self.entries.get(index),
-            Some(MenuEntry::Item { enabled: true, .. })
+            Some(MenuEntry::Item { enabled: true, .. } | MenuEntry::Check { .. })
         )
     }
 
@@ -563,6 +580,7 @@ impl ContextMenu {
                 message,
                 ..
             } => Some(message.as_ref().clone()),
+            MenuEntry::Check { message, .. } => Some(message.as_ref().clone()),
             _ => None,
         }
     }
@@ -571,7 +589,7 @@ impl ContextMenu {
         self.entries
             .iter()
             .map(|e| match e {
-                MenuEntry::Item { .. } => MENU_ITEM_HEIGHT,
+                MenuEntry::Item { .. } | MenuEntry::Check { .. } => MENU_ITEM_HEIGHT,
                 MenuEntry::Separator => MENU_SEPARATOR_HEIGHT,
             })
             .sum::<f32>()

@@ -662,6 +662,36 @@ pub fn context_menu(menu: &ContextMenu, window: iced::Size) -> Element<'_, Messa
     let origin = menu.origin(window);
     let entries = Column::with_children(menu.entries.iter().enumerate().map(|(index, entry)| {
         match entry {
+            MenuEntry::Check { label, checked, .. } => {
+                let mark: Element<'_, Message> = if *checked {
+                    crate::icons::icon(crate::icons::Icon::Check, 13.0).into()
+                } else {
+                    space::horizontal().width(13).into()
+                };
+                let line = row![
+                    mark,
+                    text(label)
+                        .size(MENU_LABEL_SIZE)
+                        .wrapping(text::Wrapping::None),
+                ]
+                .spacing(crate::overlay::MENU_CHECK_WIDTH - 13.0)
+                .align_y(iced::Center);
+                let highlighted = menu.highlighted == Some(index);
+                button(line)
+                    .on_press(Message::MenuSelected(index))
+                    .height(MENU_ITEM_HEIGHT)
+                    .padding([4, 10])
+                    .width(Fill)
+                    .style(move |theme, status| {
+                        let status = if highlighted && status == button::Status::Active {
+                            button::Status::Hovered
+                        } else {
+                            status
+                        };
+                        theme::menu_item(theme, status)
+                    })
+                    .into()
+            }
             MenuEntry::Separator => container(space::horizontal())
                 .height(1)
                 .width(Fill)

@@ -273,6 +273,12 @@ pub enum Message {
         origin: f32,
         room: f32,
     },
+    /// Gear at the right end of the graph header: column menu (M11-03).
+    GraphColumnMenu(iced::Point),
+    /// Show or hide the Author, Date or SHA column.
+    GraphColumnShown(crate::graph_columns::ColumnId, bool),
+    /// "Reset column widths".
+    GraphColumnsReset,
     /// Cursor distance from the press while dragging a border.
     ColumnDragged(f32),
     ColumnDragEnded,
@@ -4951,6 +4957,47 @@ impl App {
                         .graph_columns
                         .set(drag.column, width);
                 }
+            }
+            Message::GraphColumnMenu(position) => {
+                use crate::graph_columns::ColumnId;
+                let a = &self.settings.appearance;
+                let entries = vec![
+                    MenuEntry::check(
+                        "Author",
+                        a.graph_author,
+                        Message::GraphColumnShown(ColumnId::Author, !a.graph_author),
+                    ),
+                    MenuEntry::check(
+                        "Date",
+                        a.graph_date,
+                        Message::GraphColumnShown(ColumnId::Date, !a.graph_date),
+                    ),
+                    MenuEntry::check(
+                        "SHA",
+                        a.graph_sha,
+                        Message::GraphColumnShown(ColumnId::Sha, !a.graph_sha),
+                    ),
+                    MenuEntry::Separator,
+                    MenuEntry::item("Reset column widths", Message::GraphColumnsReset),
+                ];
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::GraphColumnShown(column, shown) => {
+                use crate::graph_columns::ColumnId;
+                let a = &mut self.settings.appearance;
+                match column {
+                    ColumnId::Author => a.graph_author = shown,
+                    ColumnId::Date => a.graph_date = shown,
+                    ColumnId::Sha => a.graph_sha = shown,
+                    // Always shown.
+                    ColumnId::Refs | ColumnId::Graph => return Task::none(),
+                }
+                return self.save_settings();
+            }
+            Message::GraphColumnsReset => {
+                self.settings.appearance.graph_columns =
+                    crate::graph_columns::ColumnWidths::default();
+                return self.save_settings();
             }
             Message::ColumnDragEnded => {
                 if self.column_drag.take().is_some() {
@@ -10917,6 +10964,59 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn column_menu_and_preferences_toggle_columns() {
+        use crate::graph_columns::ColumnId;
+        let mut app = graph_app();
+        let _ = app.update(Message::GraphColumnMenu(iced::Point::new(900.0, 90.0)));
+        let menu = app.context_menu.clone().unwrap();
+        let checks: Vec<(String, bool)> = menu
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                MenuEntry::Check { label, checked, .. } => Some((label.clone(), *checked)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            checks,
+            [
+                ("Author".to_owned(), true),
+                ("Date".to_owned(), true),
+                ("SHA".to_owned(), true)
+            ]
+        );
+        // "Date" from the menu hides the column.
+        let _ = app.update(Message::MenuSelected(1));
+        assert!(app.context_menu.is_none());
+        assert!(!app.settings.appearance.graph_date);
+        let _ = app.update(Message::GraphColumnMenu(iced::Point::new(900.0, 90.0)));
+        assert!(matches!(
+            &app.context_menu.as_ref().unwrap().entries[1],
+            MenuEntry::Check { checked: false, .. }
+        ));
+        let _ = app.update(Message::MenuSelected(1));
+        assert!(app.settings.appearance.graph_date);
+        // Preferences → Appearance sends the same message.
+        let _ = app.update(Message::GraphColumnShown(ColumnId::Sha, false));
+        let _ = app.update(Message::GraphColumnShown(ColumnId::Author, false));
+        assert!(!app.settings.appearance.graph_sha && !app.settings.appearance.graph_author);
+        // Branch/Tag and Graph cannot be hidden.
+        let before = app.settings.appearance.clone();
+        let _ = app.update(Message::GraphColumnShown(ColumnId::Graph, false));
+        assert_eq!(app.settings.appearance, before);
+        // "Reset column widths" restores the widths, not the visibility.
+        app.settings.appearance.graph_columns.refs = 90.0;
+        app.settings.appearance.graph_columns.graph = Some(200.0);
+        let _ = app.update(Message::GraphColumnMenu(iced::Point::new(900.0, 90.0)));
+        let _ = app.update(Message::MenuSelected(4));
+        assert_eq!(
+            app.settings.appearance.graph_columns,
+            crate::graph_columns::ColumnWidths::default()
+        );
+        assert!(!app.settings.appearance.graph_sha);
+    }
+
+    #[test]
     fn double_click_on_a_border_sets_the_optimal_width() {
         use crate::graph_columns::ColumnId;
         let mut app = graph_app();
@@ -15143,7 +15243,7 @@ pub(crate) mod tests {
             .entries
             .iter()
             .map(|e| match e {
-                MenuEntry::Item { label, .. } => label.as_str(),
+                MenuEntry::Item { label, .. } | MenuEntry::Check { label, .. } => label.as_str(),
                 MenuEntry::Separator => "-",
             })
             .collect();
