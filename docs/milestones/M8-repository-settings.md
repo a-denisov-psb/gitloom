@@ -1,8 +1,8 @@
 # M8 – Repository settings and tools
 
-Target version: **1.2.0**
+Target version: **1.0.0** (planned as 1.2.0; ADR-042)
 
-Starts on `develop` once `release/1.1.0` is branched off (ADR-040); released after `v1.1.0`.
+Ran on `develop`; ships with 1.0.0 (ADR-042).
 
 ## Goal
 
@@ -44,12 +44,12 @@ Out of scope (later):
 
 Answer what you can in GitKraken before or during M8. Claude Code decides the rest conservatively (ADR-034) and records it in UX-PARITY.
 
-| Item | Used in |
-|---|---|
-| Does GitKraken show the committing identity in the commit panel? Where, and is it clickable? | M8-04 |
-| Order and labels of the repo-specific categories in a current GitKraken | M8-01 |
-| External editor: setting label, presets, text of the file context menu entry, shortcut (if any) | M8-07, M8-08 |
-| SSH: GitKraken has one global key (Preferences → SSH); confirm there is no per-repository key | M8-06 |
+| Item | Used in | Answer (2026-11-11, GitKraken 7.5.2) |
+|---|---|---|
+| Does GitKraken show the committing identity in the commit panel? Where, and is it clickable? | M8-04 | No (Commit Message, Summary, Description only): Gitloom extension |
+| Order and labels of the repo-specific categories in a current GitKraken | M8-01 | Gitflow, Commit Template, LFS, Issue Tracker |
+| External editor: setting label, presets, text of the file context menu entry, shortcut (if any) | M8-07, M8-08 | Preferences → General → "External Editor" dropdown; no shortcut seen |
+| SSH: GitKraken has one global key (Preferences → SSH); confirm there is no per-repository key | M8-06 | Confirmed: one global key pair, "Use local SSH agent", "Generate"; per-repository key stays a Gitloom extension |
 
 ## Milestone acceptance
 
@@ -61,7 +61,7 @@ Answer what you can in GitKraken before or during M8. Claude Code decides the re
 - [x] The repository and single files open in the configured editor from every entry point, also with `code.cmd` on Windows.
 - [x] Changes to `user.*` or `core.sshCommand` made outside Gitloom appear without a restart.
 - [x] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
-- [ ] Released as `v1.2.0` after `v1.1.0`.
+- [x] ~~Released as `v1.2.0`~~ – dropped, ships with 1.0.0 (ADR-042).
 
 ## Task overview
 
@@ -179,6 +179,6 @@ Acceptance: docs reviewed against the implemented behavior; checklist section pr
 
 Note (2026-11-10): done. `settings.md` (Identities, the Repository group with Identity, SSH key, Gitflow, External editor), `daily-workflow.md` ("Committing as", editor entry points), `branches-and-remotes.md` (SSH key per repository), `troubleshooting.md` (key named in auth errors, `GIT_SSH_COMMAND` wins, editor not found), `coming-from-gitkraken.md` (identities instead of profiles, SSH key per repository, Editor button), `docs/RELEASE-CHECKLIST.md` section 7b. UX-PARITY rows were set to done in M8-03 … M8-08; the deviations of the plan stay as written (GitKraken checks open). The CHANGELOG entries were added per task.
 
-### [ ] M8-10 Release v1.2.0
+### [x] M8-10 Release v1.2.0
 
-`/release` (ADR-034), only after `v1.1.0`.
+Dropped (ADR-042): M8 ships with 1.0.0.

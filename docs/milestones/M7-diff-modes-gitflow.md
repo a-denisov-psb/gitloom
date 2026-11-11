@@ -1,6 +1,6 @@
 # M7 – Diff view modes and Git flow
 
-Target version: **1.1.0**
+Target version: **1.0.0** (planned as 1.1.0; ADR-042)
 
 Starts after `v1.0.0` (M6-15). Changed by the maintainer (2026-11-09): M7 starts on `develop` right after `v1.0.0-rc.2`; 1.0 fixes come from `master` (ADR-039).
 
@@ -51,18 +51,18 @@ Out of scope (later):
 
 Answer what you can in GitKraken before or during M7. Claude Code decides the rest conservatively (ADR-034) and records it in UX-PARITY.
 
-| Item | Used in |
-|---|---|
-| Left panel: are folders sorted before branches? Are tags grouped into folders as well? | M7-14 |
-| Left panel: does a folder have a context menu (e.g. hide/solo all branches in it)? | M7-14 |
-| Diff: is the mode remembered globally, per file or not at all? | M7-01 |
-| Diff: staging controls in Inline/Split (hunk buttons, line selection, which buttons per block)? | M7-03, M7-04 |
-| Diff: how Split aligns a changed block (padding, pairing) and where the change arrows sit | M7-04 |
-| Gitflow: fields and defaults of the initialization in Preferences; is there a "Reset/Remove Gitflow"? | M7-07 |
-| Gitflow: position of the left panel section; are Git flow branches also listed in LOCAL? | M7-08 |
-| Gitflow: start dialog fields; "Start …" entries in the menus of develop/main or of commits? | M7-08 |
-| Gitflow: finish dialog options (delete branch, rebase, tag name editable, tag message); behavior with local changes | M7-10 |
-| Gitflow: hotfix finish while a release branch exists (merge into release instead of develop?) | M7-09 |
+| Item | Used in | Answer |
+|---|---|---|
+| Left panel: are folders sorted before branches? Are tags grouped into folders as well? | M7-14 | GITFLOW: folders and branches mixed alphabetically (M9-06); LOCAL/REMOTE and tags still open |
+| Left panel: does a folder have a context menu (e.g. hide/solo all branches in it)? | M7-14 | open |
+| Diff: is the mode remembered globally, per file or not at all? | M7-01 | open |
+| Diff: staging controls in Inline/Split (hunk buttons, line selection, which buttons per block)? | M7-03, M7-04 | open |
+| Diff: how Split aligns a changed block (padding, pairing) and where the change arrows sit | M7-04 | open |
+| Gitflow: fields and defaults of the initialization in Preferences; is there a "Reset/Remove Gitflow"? | M7-07 | open (GitKraken 7.5.2 has a repo-specific Gitflow category) |
+| Gitflow: position of the left panel section; are Git flow branches also listed in LOCAL? | M7-08 | answered 2026-11-11 (`M9-fixes-and-consistency.md`): GITFLOW is the first section, above LOCAL; content is a tree of develop, master and the prefixed branches, folders mixed alphabetically with branches → M9-06. Listing in LOCAL: open |
+| Gitflow: start dialog fields; "Start …" entries in the menus of develop/main or of commits? | M7-08 | open |
+| Gitflow: finish dialog options (delete branch, rebase, tag name editable, tag message); behavior with local changes | M7-10 | open |
+| Gitflow: hotfix finish while a release branch exists (merge into release instead of develop?) | M7-09 | open |
 
 ## Milestone acceptance
 
@@ -75,8 +75,8 @@ Answer what you can in GitKraken before or during M7. Claude Code decides the re
 - [x] A finish that hits a conflict can be resolved and continues automatically, also after a restart; Abort leaves a consistent state and says what was done.
 - [x] Start and finish are undoable and redoable.
 - [x] User guide, UX-PARITY and CHANGELOG updated; `./scripts/check.sh` green; CI green on all platforms.
-- [ ] Follow-ups after the first review (M7-15 … M7-18): GITFLOW between LOCAL and REMOTE; diffs scroll horizontally in all modes; UTF-16 text files with a BOM are shown as text; graph lines drawn like GitKraken's.
-- [ ] Released as `v1.1.0`.
+- [x] Follow-ups after the first review (M7-15 … M7-18): GITFLOW between LOCAL and REMOTE; diffs scroll horizontally in all modes; UTF-16 text files with a BOM are shown as text; graph lines drawn like GitKraken's.
+- [x] ~~Released as `v1.1.0`~~ – dropped, ships with 1.0.0 (ADR-042).
 
 ## Task overview
 
@@ -296,6 +296,8 @@ Acceptance: `iced_test` graph snapshots (merges, branch-offs, a stash, WIP; dark
 
 Note (2026-11-10): done. Values from the maintainer's two reference screenshots (dark theme): `LINE_WIDTH` 1.5 px (was 2 px), `CORNER_RADIUS` 6 px (limited to the lane distance), `DASH` 2 px dash / 2 px gap (dotted, was 4/3) for WIP and stash edges. Edges into or out of a node from another lane run horizontally at the node's height and turn 90° with a rounded corner (quadratic curve through the corner point) instead of an S-curve; vertical parts keep M6-23's overlap past the row edges and the global dash phase, so corners and lines join across rows. Nodes unchanged: the reference shows the same shapes (avatar or initials circle, small merge dot, dashed WIP circle); GitKraken's row tint in the lane color and the branch-label connector lines are not part of this task. Snapshots `ui_check_graph_lines` (new `graph_app` with merges, a branch-off, a stash and WIP; dark/light, 100 %/200 %) compared by eye with the reference; geometry tested in `edges_turn_with_rounded_corners`.
 
-### [ ] M7-13 Release v1.1.0
+### [x] M7-13 Release v1.1.0
 
 `/release` (ADR-034) on `release/1.1.0` (ADR-040), only after `v1.0.0`; merge `release/1.1.0` into `master` and back into `develop`.
+
+Note (2026-11-11): Dropped (ADR-042): M7 ships with 1.0.0.

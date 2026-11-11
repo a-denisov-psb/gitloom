@@ -6,19 +6,6 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
-- Preferences → Identities: saved commit identities (name and email) with a default that can keep the global Git config up to date; on first use the global identity is imported. "Manage identities" in the command palette.
-- Commit panel: "Committing as <name> <email>" shows the identity the next commit uses; a click (or "Choose identity…" in the palette, or Preferences → Repository → Identity) uses a saved identity in the repository, returns to the global one or saves the current one. Without an identity, Commit, Amend and Continue are disabled with "Choose an identity first".
-- Preferences → Repository → SSH key: use a key from `~/.ssh` (or any key file) for fetch, pull and push of a repository (`core.sshCommand` in its Git config), or the system default; a custom SSH command is only replaced after confirmation. Authentication errors name the key.
-- Preferences → External tools → External editor: presets for VS Code, VSCodium, Sublime Text, IntelliJ IDEA and Zed or a custom command with `{path}`. "Open repository in editor" (Alt+E, command palette, toolbar button "Editor" while an editor is set) and "Open in external editor" in the file context menus.
-
-### Changed
-
-- Preferences: the settings of the active tab's repository sit in a group "Repository · <name>" below the global categories (Gitflow for now); on the start screen the group is disabled.
-
-## [1.1.0] - unreleased
-
-### Added
-
 - The left panel groups local and remote branches into folders at `/` like GitKraken: folders and remotes collapse with a click (remembered per repository), branch rows show a branch icon and the last name segment (full name in the tooltip), the checked-out branch is highlighted.
 - Diff header: Hunk / Inline / Split toggle, also in the command palette; the choice is remembered.
 - Inline diff view: the whole file with each change block marked by a bar with "Stage block" / "Unstage block" / "Discard block"; line selection works as in the Hunk view; "Previous change" / "Next change" arrows in the header, and opening a file shows its first change.
@@ -26,11 +13,16 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Git flow (git-flow compatible): Preferences → Gitflow initializes, edits or removes it for the active repository; a GITFLOW section in the left panel lists features, releases and hotfixes; start them with the green "+", the menu of the development or production branch, or the command palette; finish them from their branch menu or the palette (merge commits, tag for releases and hotfixes, optional rebase and branch deletion). A finish that hits a conflict continues by itself after the conflict is resolved, also after a restart ("Continue finishing"). A finish is one Undo/Redo step.
 - Diff views scroll horizontally (Shift+wheel, horizontal wheel, touchpad, scrollbar below the text) in Hunk, Inline and Split; line numbers and markers stay in place.
 - While branches are hidden or soloed, "Viewing x/y · Show All" above the filter tells how many are shown and shows all again; LOCAL and REMOTE count "shown/total".
+- Preferences → Identities: saved commit identities (name and email) with a default that can keep the global Git config up to date; on first use the global identity is imported. "Manage identities" in the command palette.
+- Commit panel: "Committing as <name> <email>" shows the identity the next commit uses; a click (or "Choose identity…" in the palette, or Preferences → Repository → Identity) uses a saved identity in the repository, returns to the global one or saves the current one. Without an identity, Commit, Amend and Continue are disabled with "Choose an identity first".
+- Preferences → Repository → SSH key: use a key from `~/.ssh` (or any key file) for fetch, pull and push of a repository (`core.sshCommand` in its Git config), or the system default; a custom SSH command is only replaced after confirmation. Authentication errors name the key.
+- Preferences → External tools → External editor: presets for VS Code, VSCodium, Sublime Text, IntelliJ IDEA and Zed or a custom command with `{path}`. "Open repository in editor" (Alt+E, command palette, toolbar button "Editor" while an editor is set) and "Open in external editor" in the file context menus.
 
 ### Changed
 
 - The GITFLOW section sits between LOCAL and REMOTE.
 - Graph lines are thinner and turn with rounded 90° corners like GitKraken's instead of curves; WIP and stash edges are dotted.
+- Preferences: the settings of the active tab's repository sit in a group "Repository · <name>" below the global categories (Gitflow for now); on the start screen the group is disabled.
 
 ### Fixed
 
