@@ -1130,6 +1130,37 @@ mod tests {
         assert!((header - row).abs() < 0.5, "{header} vs {row}");
     }
 
+    /// Preferences modal (M11-13): a click on the backdrop does not close it,
+    /// and the app behind is out of reach for focus and Tab. Layout only.
+    #[test]
+    fn preferences_modal_keeps_clicks_and_focus_inside() {
+        let mut app = crate::app::tests::sidebar_app();
+        // Without the modal the sidebar filter is reachable.
+        assert!(simulator(&app)
+            .find(iced::widget::Id::new(crate::app::FILTER_INPUT))
+            .is_ok());
+        let _ = app.update(Message::SettingsOpened);
+        let mut sim = simulator(&app);
+        assert!(
+            sim.find(iced::widget::Id::new(crate::app::FILTER_INPUT))
+                .is_err(),
+            "the app behind is skipped by focus operations"
+        );
+        assert!(sim
+            .find(iced::widget::Id::new(crate::ui::settings::AUTO_FETCH_INPUT))
+            .is_ok());
+        // A click on the backdrop (left of the 960 px dialog) does nothing.
+        sim.point_at(iced::Point::new(40.0, 400.0));
+        let _ = sim.simulate(iced_test::simulator::click());
+        let messages: Vec<Message> = sim.into_messages().collect();
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, Message::SettingsClosed | Message::RefClicked(_))),
+            "{messages:?}"
+        );
+    }
+
     /// The section counts of a scrolling left panel end left of its
     /// scrollbar (M6-22). Layout only, so part of every test run.
     #[test]
