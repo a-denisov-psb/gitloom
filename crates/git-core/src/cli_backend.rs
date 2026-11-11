@@ -1039,7 +1039,7 @@ fn finish(command: String, output: std::process::Output) -> Result<GitOutput> {
 }
 
 /// `git` command with the fixed, non-interactive environment.
-fn command(git: &Path) -> Command {
+pub(crate) fn command(git: &Path) -> Command {
     let mut cmd = Command::new(git);
     cmd.env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")

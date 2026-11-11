@@ -32,6 +32,7 @@ mod refname;
 mod reset;
 mod resolve;
 mod rewrite;
+pub mod signing;
 pub mod ssh;
 mod stash;
 mod state;
