@@ -21,8 +21,11 @@ mod editor_style;
 mod fetch;
 mod file_history;
 mod format;
+// Wired into the views in M11-09.
 mod fuzzy;
 mod graph_columns;
+#[allow(dead_code)]
+mod highlight;
 mod icons;
 mod launch;
 mod menus;
