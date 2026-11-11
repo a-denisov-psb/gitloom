@@ -520,3 +520,17 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: Preferences → Signing reads and writes `gpg.format`, `user.signingkey`, `gpg.program`, `commit.gpgSign` and `tag.gpgSign` in the global Git config, like GitKraken's global GPG preferences. Repository-level values are shown read-only as overrides. Gitloom never stores or asks for passphrases: GPG uses its pinentry, SSH signing uses the agent. Signature status comes from `git log --format=%G?` in the background.
 - Why: Git's own config is the source of truth (ADR-041); the CLI signs every operation consistently.
 - Consequences: a signing key per identity or repository stays in the ideas backlog; Windows signing depends on a GUI pinentry (Gpg4win), covered by the release checklist.
+
+## ADR-047 Syntax highlighting with syntect and two-face
+
+- Status: accepted (M11 plan, 2026-11-11)
+- Decision: syntax highlighting uses `syntect` with the `two-face` syntax and theme sets in a pure app module (`highlight`) that runs in background tasks. Whole old and new files are highlighted and mapped to diff lines; results are cached per blob id and theme; files over 1 MB or 20,000 lines stay plain. Each Gitloom theme maps to one embedded syntect theme (recorded here when M11-08 picks them); Gitloom keeps its own diff backgrounds.
+- Why: syntect is the de-facto Rust highlighter (also behind iced's highlighter); two-face adds the broad language set of bat without hand-maintained grammars.
+- Consequences: binary size grows by the syntax set (measured in M11-10); licenses of the bundled syntaxes go into the third-party notices; highlighting never blocks the UI thread.
+
+## ADR-048 Theme style tokens and Classic Dark
+
+- Status: accepted (M11 plan, 2026-11-11)
+- Decision: `ThemePalette` carries style tokens (row tint, pill style, connector line, header band, column separators, panel shadow, node style) in addition to colors. Dark and Light keep their look through token values; "Classic Dark" uses them for the look of GitKraken 7.5 with own colors (no GitKraken assets).
+- Why: one rendering path for all themes instead of theme-specific branches in the views.
+- Consequences: new visual details are added as tokens; snapshot tests guard the existing themes.
