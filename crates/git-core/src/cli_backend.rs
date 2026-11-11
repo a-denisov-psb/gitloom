@@ -633,7 +633,7 @@ pub trait GitWriter: Send + Sync {
 
 /// Runs `args` with `paths` passed NUL-separated on stdin, which avoids
 /// command line length limits; no-op without paths.
-fn with_pathspecs<W: GitWriter + ?Sized>(
+pub(crate) fn with_pathspecs<W: GitWriter + ?Sized>(
     writer: &W,
     args: &[&str],
     paths: &[String],

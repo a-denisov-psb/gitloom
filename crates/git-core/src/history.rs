@@ -67,12 +67,7 @@ pub fn restore_snapshot(
     if !snapshot.index.is_empty() {
         let index_paths: Vec<String> = snapshot.index.iter().map(|e| e.path.clone()).collect();
         current.index = crate::discard::index_snapshot(writer, &index_paths)?;
-        let entries: Vec<(String, Option<(String, String)>)> = snapshot
-            .index
-            .iter()
-            .map(|e| (e.path.clone(), e.entry.clone()))
-            .collect();
-        writer.set_index_entries(&entries)?;
+        crate::discard::write_index_snapshot(writer, &snapshot.index)?;
     }
     for file in &snapshot.files {
         restore_file(writer, root, file)?;

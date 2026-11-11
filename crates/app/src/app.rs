@@ -67,6 +67,8 @@ pub enum DiscardTarget {
     Lines,
     /// Change block `index` of the shown Inline diff (M7-03).
     Block(usize),
+    /// Every conflicted file (banner without a running operation, M9-03).
+    Conflicted,
 }
 
 /// An entry of the identity menu (commit panel, palette, Preferences;
@@ -3336,8 +3338,10 @@ impl App {
             DiscardTarget::File(file) => {
                 let label = format!("Discard {}", file.path);
                 let undo_label = label.clone();
-                // A discarded file whose diff is open closes the diff.
-                if matches!(&view.center, CenterView::Diff(d) if d.request.path == file.path) {
+                // A discarded file whose diff or conflict view is open closes it.
+                if matches!(&view.center, CenterView::Diff(d) if d.request.path == file.path)
+                    || matches!(&view.center, CenterView::Conflict(c) if c.path == file.path)
+                {
                     view.center = CenterView::Graph;
                 }
                 self.run_undoable(tab, label, move |git| {
@@ -3371,6 +3375,26 @@ impl App {
                     let snapshot = git_core::discard_everything(git, &root, &tree)?;
                     Ok(Some(History::Push(UndoAction::Discard {
                         label: "Discard all changes".into(),
+                        snapshot,
+                    })))
+                })
+            }
+            DiscardTarget::Conflicted => {
+                let files: Vec<git_core::FileChange> = view
+                    .snapshot
+                    .working_tree
+                    .unstaged
+                    .iter()
+                    .filter(|f| f.kind == git_core::ChangeKind::Conflicted)
+                    .cloned()
+                    .collect();
+                if matches!(&view.center, CenterView::Conflict(_)) {
+                    view.center = CenterView::Graph;
+                }
+                self.run_undoable(tab, "Discard conflicted files", move |git| {
+                    let snapshot = git_core::discard_files(git, &root, &files)?;
+                    Ok(Some(History::Push(UndoAction::Discard {
+                        label: "Discard conflicted files".into(),
                         snapshot,
                     })))
                 })
@@ -6527,6 +6551,20 @@ impl App {
                     }
                 }
                 let (title, text) = match &target {
+                    DiscardTarget::File(file) if file.kind == git_core::ChangeKind::Conflicted => (
+                        "Discard changes".to_string(),
+                        format!(
+                            "Discard {}? Both sides and any resolution are lost.",
+                            file.path
+                        ),
+                    ),
+                    DiscardTarget::Conflicted => (
+                        "Discard conflicted files".to_string(),
+                        match self.active_tab().and_then(Tab::view) {
+                            Some(view) => conflicted_discard_text(&view.conflicted_files()),
+                            None => return Task::none(),
+                        },
+                    ),
                     DiscardTarget::File(file) => (
                         "Discard changes".to_string(),
                         format!(
@@ -8225,6 +8263,18 @@ fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut:
         _ => return false,
     }
     true
+}
+
+/// Confirmation text for discarding the conflicted files `paths` (M9-03).
+fn conflicted_discard_text(paths: &[&str]) -> String {
+    match paths {
+        [path] => format!("Discard {path}? Both sides and any resolution are lost."),
+        paths => format!(
+            "Discard {} conflicted files ({})? Both sides and any resolution are lost.",
+            paths.len(),
+            paths.join(", ")
+        ),
+    }
 }
 
 /// Marker labels for ours and theirs in the conflict view: the checked-out
@@ -12026,6 +12076,43 @@ pub(crate) mod tests {
         let view = app.tabs[0].view().unwrap();
         assert_eq!(view.stash_conflict, None);
         assert_eq!(view.redo.last().unwrap().label(), "Pop stash");
+    }
+
+    #[test]
+    fn discarding_a_conflicted_file_warns_that_both_sides_are_lost() {
+        let mut app = staging_app(&[], &[]);
+        with_conflicts(&mut app, &["a.txt"]);
+        let file = app.tabs[0].view().unwrap().snapshot.working_tree.unstaged[0].clone();
+        let _ = app.update(Message::Discard(DiscardTarget::File(file.clone())));
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Discard changes");
+        assert_eq!(
+            modal.text,
+            "Discard a.txt? Both sides and any resolution are lost."
+        );
+        let _ = app.update(Message::DiscardConfirmed(DiscardTarget::File(file)));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Discard a.txt")
+        );
+    }
+
+    #[test]
+    fn banner_discards_all_conflicted_files_after_confirmation() {
+        let mut app = staging_app(&["b.txt"], &[]);
+        with_conflicts(&mut app, &["a.txt", "c.txt"]);
+        let _ = app.update(Message::Discard(DiscardTarget::Conflicted));
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Discard conflicted files");
+        assert_eq!(
+            modal.text,
+            "Discard 2 conflicted files (a.txt, c.txt)? Both sides and any resolution are lost."
+        );
+        let _ = app.update(Message::DiscardConfirmed(DiscardTarget::Conflicted));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Discard conflicted files")
+        );
     }
 
     #[test]

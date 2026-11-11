@@ -20,7 +20,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - A stash pop or apply that stops in conflicts is no longer an error: a banner says the stash was kept, offers Undo and, once the conflicts are resolved, "Drop stash" / "Keep stash"; the conflict view names the sides "Updated upstream" and "Stashed changes".
 - Stash pop and apply can be undone (Ctrl+Z, toolbar, banner) and redone, with and without conflicts: files, index and stash list return exactly to the state before.
-- Conflicted files without a running operation show a banner that explains how to get out.
+- Conflicted files without a running operation show a banner that explains how to get out, with "Discard conflicted files…".
+- Conflicted files can be discarded (context menu, "Discard all", the banner) after a confirmation; undo brings back both sides and the conflict.
 
 ### Changed
 
