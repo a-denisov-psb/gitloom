@@ -114,6 +114,16 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Extension (M4 plan): a hard reset is undoable by snapshot: before the reset the index
   tree (`git write-tree`) and every changed worktree file (blob, `--no-filters`) are
   recorded; undo restores HEAD, index and files.
+- Extension (M9-02, ADR-043): stash pop and apply are undoable by snapshot, with and
+  without conflicts. Before the command: HEAD, the index tree, the files the stash
+  touches (its working tree, index and untracked paths against its base; blobs without
+  filters), the stash commit, its reflog message and list position. Undo requires HEAD
+  unchanged, runs `git read-tree` (which also clears unmerged entries), writes the files
+  back, deletes files the stash created (and folders left empty), and if the command
+  dropped the stash puts it back at its old position (`git stash drop` of the newer
+  entries, `git stash store` of all of them in order). If a touched file changed after the
+  command, the user confirms first. Redo pops/applies the same stash commit again and is
+  refused when it is no longer listed.
 
 ## ADR-015 Context menus and modals in M2
 
