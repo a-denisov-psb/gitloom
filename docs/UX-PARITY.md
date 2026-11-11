@@ -13,7 +13,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Repo tabs | Top row, one tab per repo, `+` opens a new tab with the start screen | done (M1) |
 | Toolbar | Repo + branch pickers left; Undo/Redo, Pull/Push, Branch, Stash/Pop centered; Terminal right | done (M2–M4 actions; M5-13 Terminal; M5-02 a Settings gear next to it); M6-17 pickers open the palette lists (see deviations); M8 external editor button next to Terminal |
 | Left panel | Gitflow (when initialized), Local, Remote (grouped by remote), Stashes, Tags, Submodules (GitKraken also has Issues, Boards and GitHub Actions: non-goals); collapsible; filter on top; counts; branches grouped into folders at `/` with icons; checked-out branch highlighted; "Viewing x/y · Show All" when branches are hidden; GITFLOW is a tree of the development and production branches and the prefixed branches, the prefix as a folder, folders and branches mixed alphabetically | done (M0), real data M1; folders, icons, highlight and counter M7-14 (LOCAL/REMOTE: folders before branches until the GitKraken check answers whether they are mixed like in GITFLOW; tags flat, no folder menu); order and GITFLOW tree M9-06 (maintainer check 2026-11-11) |
-| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top; resizable columns and a column menu | done (M1); straight lines with rounded 90° corners and dotted WIP/stash edges since M7-18; resizable columns and column menu M9 |
+| Graph | Columns: branch/tag, graph, commit message (+ author, date, SHA); WIP row on top; resizable columns and a column menu | done (M1); straight lines with rounded 90° corners and dotted WIP/stash edges since M7-18; resizable columns and column menu M11 |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
 | Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); inline and split M7 (ADR-038) |
 | Status bar | Bottom line | done |
@@ -56,7 +56,10 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Banner in the tab with Continue/Abort (Skip for rebase and cherry-pick); the commit button becomes "Continue <operation>" | done (M2-09, M2-13, M4-03); also rebase, cherry-pick, revert; Continue is disabled while conflicts are unresolved (tooltip lists the files) |
-| Reset | Commit menu "Reset <branch> to this commit" → Soft / Mixed / Hard | done (M4-10) as a dialog with three buttons instead of GitKraken's submenu (the context menu has no submenus); Hard is always confirmed and lists the files whose changes are lost |
+| Reset | Commit menu "Reset <branch> to this commit" → Soft / Mixed / Hard | done (M4-10) as a dialog with three buttons instead of GitKraken's submenu (see deviations); Hard is always confirmed and lists the files whose changes are lost; also on the HEAD commit since M9-04 (Soft disabled there, Mixed/Hard clear conflicts, undoable) |
+| Stash pop/apply with conflicts | Conflicted files, the stash is kept | done (M9-01, M9-02): banner "Stash '<name>' applied with conflicts. The stash was kept." with Undo and, once resolved, Drop stash / Keep stash; conflict view sides "Updated upstream" / "Stashed changes"; Undo returns to the exact state before (extension, ADR-043) |
+| Discard conflicted file | Context menu Discard on a conflicted file | done (M9-03): back to HEAD in index and working tree after a confirmation; undoable |
+| Commit summary counter | Remaining characters inside the summary field, right aligned | done (M9-07): muted, warning color at 10 or fewer, error color below 0 (commit not blocked) |
 | Cherry-pick and revert | Commit menu "Cherry-pick commit" / "Revert commit"; multi-selection "Cherry-pick N commits" (oldest first) | done (M4-09); a merge commit asks for the parent to revert against; an empty result opens "Skip" / "Commit empty" (verify wording in GitKraken) |
 | Conflicted files | "Conflicted Files" section above "Unstaged Files" | done (M4-03) |
 | Local + remote branch on same commit | One combined pill | done (M1; since M5-05 a cloud icon, the remote names in its tooltip) |
@@ -94,7 +97,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+J (first parent), Shift+K (child on the same branch) | done (M1; Shift+↑/↓ extend the selection since M4-01) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reset, reword, squash (M4-12); history operations are undone with `git reset --keep`, which refuses to overwrite local changes |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reset, reword, squash (M4-12), stash pop/apply, discard of conflicted files, reset on HEAD (M9); history operations are undone with `git reset --keep`, which refuses to overwrite local changes; what cannot be undone is listed in `docs/user/undo.md` (ADR-043) |
 
 ### Command palette and search
 
@@ -140,7 +143,9 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | A hotfix finished while a release branch exists is merged into the development branch | GitKraken's documentation; the `git-flow` CLI merges into the release branch instead (M7-09, GitKraken check open) |
 | Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |
-| Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow in M9; until then the message stays readable on wide graphs |
+| Author, date and SHA columns hide automatically (SHA first) when the commit message would get narrower than 200 px | Column resizing and a column menu like GitKraken's follow in M11; until then the message stays readable on wide graphs |
+| Reset is a dialog (Soft / Mixed / Hard) instead of GitKraken's submenu | The maintainer prefers the dialog (2026-11-11); it also explains the three modes |
+| Conflicted files without a running Git operation show a banner with "Discard conflicted files…" | ADR-044 (no dead ends): after a stash conflict and a restart nothing else explains them |
 | The repository and branch pickers open the centered palette lists ("Open recent repository", "Checkout branch") instead of a dropdown below the picker | M6-17: reuses the existing lists before 1.0; a real dropdown is a backlog item |
 | Start screen has a path input next to "Open repository" | Fallback where no native folder dialog is available (Linux without XDG desktop portal, e.g. WSL) |
 | "Discard all" with staged changes asks whether to discard them too ("Keep staged" is the default) | Maintainer decision (HANDOVER question 8); staged work is never lost by accident |

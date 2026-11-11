@@ -17,7 +17,7 @@ Gitloom supports Git flow like GitKraken: feature, release and hotfix branches w
 
 ## The GITFLOW section
 
-Once Git flow is set up, the left panel shows a **GITFLOW** section with Features, Releases and Hotfixes (names without the prefix). The branches are listed in LOCAL as well and behave the same in both places: click, double click to check out, right click for the menu, drag onto another branch.
+Once Git flow is set up, the left panel shows a **GITFLOW** section at the top, like GitKraken: the development and production branches and the folders "feature", "release" and "hotfix" (named after the prefixes) with the branches inside, all in alphabetical order. The branches are listed in LOCAL as well and behave the same in both places: click, double click to check out, right click for the menu, drag onto another branch.
 
 ## Start
 

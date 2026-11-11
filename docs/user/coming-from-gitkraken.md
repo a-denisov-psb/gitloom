@@ -40,10 +40,11 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - **Shift+F10** opens the context menu of the selected commit; ↑/↓ and Enter pick an entry.
 - **Terminal** (Alt+T) opens your system terminal in the repository instead of a terminal inside the app.
 - Discarding a hunk or selected lines asks first (GitKraken asks only for files and "discard all"). "Discard all" with staged changes asks whether to discard those too.
-- **Reset** opens a dialog with Soft / Mixed / Hard instead of a submenu; Hard lists the changes that will be lost.
+- **Reset** opens a dialog with Soft / Mixed / Hard instead of a submenu; Hard lists the changes that will be lost. It is also offered on the checked-out commit.
+- A stash pop or apply that conflicts can be undone completely (banner, Ctrl+Z); conflicted files can be discarded and the discard undone.
 - Merge, rebase or checkout blocked by local changes offers "Stash and …"; merge and rebase re-apply the stash automatically.
 - A Git lock file (`index.lock`) is never deleted; the operation offers **Retry** instead.
-- The author, date and SHA columns hide automatically when the commit message would get too narrow; columns cannot be resized yet.
+- The author, date and SHA columns hide automatically when the commit message would get too narrow; columns cannot be resized yet (planned).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
 - **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.

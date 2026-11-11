@@ -81,7 +81,6 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] A repository initialized with the `git-flow` CLI (Git for Windows ships it) shows the GITFLOW section; one initialized by Gitloom works with `git flow feature start` in a terminal.
 - [ ] Diff with a line longer than the view: Shift+wheel and the horizontal scrollbar scroll it in Hunk, Inline and Split; line selection still works after scrolling.
 - [ ] A file created in PowerShell 5 with `echo test > utf16.txt` shows its text; line staging is disabled with the hint, staging the whole file works.
-- [ ] Left panel order: GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES; GITFLOW is a tree (develop, feature, master, release) (M9-06).
 - [ ] Graph lines at 125 % Windows scaling look like GitKraken's (corners, width, dashes) and have no gaps.
 
 ## 7b. New in 1.2 (M8; Windows required, Linux checked in CI)
@@ -91,6 +90,18 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Without any identity (empty global config): the commit panel shows "No Git identity set", Commit is disabled with "Choose an identity first".
 - [ ] SSH key with a passphrase: choose it in Preferences → Repository → SSH key, fetch an SSH remote: the passphrase prompt appears, the fetch works; "System default" restores the previous behavior; a hand-written `core.sshCommand` is only replaced after "Replace…".
 - [ ] External editor VS Code (`code.cmd`): Alt+E, the toolbar button "Editor", the palette and "Open in external editor" on a file in a folder with spaces open VS Code; no console window flashes up.
+
+## 7c. New in M9 (Windows required, Linux checked in CI)
+
+- [ ] Stash conflict: stash a staged change, merge a branch that changes the same lines, Pop: the banner "Stash '…' applied with conflicts. The stash was kept." appears, no error dialog; the conflict view says "Updated upstream" / "Stashed changes"; Stash, Pop and Apply are disabled with the reason.
+- [ ] Undo in the banner (and Ctrl+Z) after that pop: files, staged changes and the stash list are exactly as before (`git status`, `git stash list`); Ctrl+Y applies it again. Edit a conflicted file first: Undo asks before discarding the edit.
+- [ ] Resolve the stash conflict and stage it: the banner offers Drop stash / Keep stash; Drop stash removes the stash.
+- [ ] Undo of a clean Pop of an older stash (`stash@{1}`): it is back at its position in the list.
+- [ ] Discard a conflicted file (context menu) and "Discard conflicted files…" in the banner after a restart: the confirmation names both sides; Ctrl+Z brings the conflict back.
+- [ ] Reset on the HEAD commit with conflicted files: Soft disabled with "HEAD is already at this commit"; Mixed keeps the files and clears the conflicts; Ctrl+Z restores them; Hard likewise.
+- [ ] Icons at 110 % and 125 % (Windows scaling and Gitloom zoom): toolbar, left panel headers (the "+" of REMOTE and GITFLOW) and file lists are sharp, not blurry.
+- [ ] Left panel order: GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES; GITFLOW is a tree (develop, feature, master, release) like GitKraken.
+- [ ] Commit summary counter inside the field at the right edge; yellow at 10 left, red below 0; a long summary never runs under it.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
