@@ -203,6 +203,8 @@ Note (2026-11-09): done. Preferences → "Gitflow" (title "Gitflow · <repositor
 
 Acceptance: `iced_test` snapshot of the section; tests for start from all entry points; undo removes the started branch and returns to the previous branch.
 
+Note (2026-11-11): position and content replaced by M9-06 (first section; tree of develop, production and prefixed branches, folders mixed alphabetically).
+
 Note (2026-11-09): done. GITFLOW section between STASHES and SUBMODULES with the groups Features/Releases/Hotfixes (a group is listed only when it has branches, like GitKraken; collapse keys `gitflow:<type>` stored with the folders), names without prefix, the same branch rows as LOCAL, total count, text filter on full names. Green "+" opens Start feature/release/hotfix at the pointer; the development branch menu offers Start feature/release, the production branch menu Start hotfix; the palette has "Start feature/release/hotfix" (disabled with "Initialize Gitflow first" without Git flow). The start dialog validates like Ctrl+B (plus: empty name, base branch missing, operation in progress) and creates and checks out the branch with the existing undoable path (undo deletes it and returns to the previous branch). Snapshot `ui_check_gitflow_section`.
 
 ### [x] M7-09 Finish engine (git-core)
@@ -254,6 +256,8 @@ Maintainer decision (2026-11-10): the GITFLOW section moves from below STASHES t
 - `docs/UX-PARITY.md`: left panel row and a new deviation row (see below); user guide `git-flow.md` if it names the position.
 
 Acceptance: snapshot `ui_check_gitflow_section` and the left panel snapshots updated; keyboard focus order follows the new order.
+
+Note (2026-11-11): replaced by M9-06: GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES like GitKraken.
 
 Note (2026-11-10): done. The sidebar column is built LOCAL, GITFLOW (when initialized), REMOTE, TAGS, STASHES, SUBMODULES; widget order is the focus order, so keyboard focus follows. `gitflow_section_between_local_and_remote` checks the header positions (layout, runs always); `ui_check_gitflow_section` re-rendered and checked by eye; the other left panel snapshots have no Git flow and are unchanged. `docs/user/git-flow.md` does not name the position.
 

@@ -26,7 +26,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
-- The GITFLOW section sits between LOCAL and REMOTE.
+- Left panel sections in GitKraken's order: GITFLOW (when initialized), LOCAL, REMOTE, STASHES, TAGS, SUBMODULES. GITFLOW shows a tree like GitKraken: the development and production branches and folders "feature", "release", "hotfix", listed alphabetically.
 - Graph lines are thinner and turn with rounded 90° corners like GitKraken's instead of curves; WIP and stash edges are dotted.
 - Preferences: the settings of the active tab's repository sit in a group "Repository · <name>" below the global categories (Gitflow for now); on the start screen the group is disabled.
 
