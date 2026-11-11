@@ -208,13 +208,16 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                     app.theme_kind().palette(),
                 )),
                 CenterView::Diff(diff) => diff::view(view, diff, app.settings.diff.view_mode),
-                CenterView::Conflict(conflict) => with_background(conflict::view(view, conflict)),
+                CenterView::Conflict(conflict) => {
+                    with_background(conflict::view(view, conflict, &app.editor_style()))
+                }
                 CenterView::Rebase(panel) => with_background(rebase::view(view, panel)),
                 CenterView::FileHistory(history) => with_background(file_history::view(
                     view,
                     history,
                     &app.avatars,
                     app.settings.diff.view_mode,
+                    &app.editor_style(),
                 )),
             },
             PaneKind::Panel => panel::view(view, &app.avatars),

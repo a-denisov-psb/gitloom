@@ -150,11 +150,13 @@ Acceptance: unit tests for the label rule (default message, empty, custom, other
 
 Note: `git_core::stash_label` (branch names cannot contain `:`, so the first `:` ends the branch; `WIP on (no branch)` for a detached HEAD; other messages, e.g. `autostash`, stay). The label replaces the stash's summary in the snapshot, so graph row, details title and search use it; STASHES filters on the full message. Square 16 px, dashed, Lucide `archive` (the toolbar's Stash icon) 10 px in the lane color. `stash_push` drops a blank message. Snapshot `ui_check_stash_node` (three themes) checked.
 
-### [ ] M11-06 Preferences → Editor
+### [x] M11-06 Preferences → Editor
 
 - Category and settings per the decisions table; font list from the font database; font, size, tab size and line numbers applied to diffs, blame, file history and conflict view.
 
 Acceptance: settings migration test; app tests that the views use the settings (row height follows font size, tabs expanded, numbers hidden); snapshots with a different font size and without line numbers.
+
+Note: `editor_style::EditorStyle` (font, size, tab, numbers) with the derived sizes; at the default 12 px they equal the former constants (diff row 20, blame row 18, number column 52, marker 16), so all existing diff and conflict snapshots are pixel-equal. Diffs carry the style (set when a diff loads, `restyle` on a change re-measures the longest line); blame and the conflict view get it from the app. Font and tab size use steppers like Zoom. The font list comes from the font database iced loaded (`monospaced` faces), read when the category opens; a font from the settings that is not installed stays in the list and renders with the fallback. iced needs `'static` family names: each chosen name is kept once (`font_named`). The global "Editor" category sits after Appearance; the repository's "External editor" is `Category::RepoEditor` internally. Word wrap and Syntax highlighting are stored but shown disabled ("Not available yet") until M11-07 and M11-09. The conflict output editor keeps its tabs (it edits the file).
 
 ### [ ] M11-07 Word wrap in diff views
 

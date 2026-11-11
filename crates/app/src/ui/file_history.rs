@@ -5,6 +5,7 @@ use iced::widget::{button, column, container, row, scrollable, space, text, Colu
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
+use crate::editor_style::EditorStyle;
 use crate::file_history::{BlameView, FileHistoryView, HistoryMode};
 use crate::format;
 use crate::icons::{self, Icon};
@@ -14,8 +15,6 @@ use crate::ui::muted;
 use crate::ui::panel::with_tooltip_text;
 
 const LIST_WIDTH: f32 = 420.0;
-/// Blame rows have a fixed height so only the visible ones are built.
-const BLAME_ROW: f32 = 18.0;
 const BLAME_OVERSCAN: usize = 20;
 const GUTTER_WIDTH: f32 = 300.0;
 
@@ -24,7 +23,9 @@ pub fn view<'a>(
     history: &'a FileHistoryView,
     avatars: &'a crate::avatars::Avatars,
     mode: crate::settings::DiffMode,
+    style: &EditorStyle,
 ) -> Element<'a, Message> {
+    let style = *style;
     let has_selection = history.selected_entry().is_some();
     let header = container(
         row![
@@ -118,7 +119,7 @@ pub fn view<'a>(
 
     if history.mode == HistoryMode::Blame {
         let body = match &history.blame {
-            Some(blame) => blame_view(blame),
+            Some(blame) => blame_view(blame, style),
             None => centered("Loading blame…"),
         };
         return column![header, body].spacing(1).into();
@@ -163,7 +164,10 @@ fn mode_toggle<'a>(mode: HistoryMode) -> Element<'a, Message> {
 /// author and age (alternating shading, full summary as tooltip; a click
 /// selects the commit in the history), then line number and content.
 /// Only the visible rows are built.
-fn blame_view(view: &BlameView) -> Element<'_, Message> {
+/// Blame rows have a fixed height (from the editor font size, M11-06) so
+/// only the visible ones are built.
+fn blame_view(view: &BlameView, style: EditorStyle) -> Element<'_, Message> {
+    let row_height = style.blame_row();
     let blame = match &view.blame {
         Loadable::Loading => return centered("Loading blame…"),
         Loadable::Failed(error) => {
@@ -191,12 +195,13 @@ fn blame_view(view: &BlameView) -> Element<'_, Message> {
         view.scroll.offset,
         view.scroll.height,
         total,
-        BLAME_ROW,
+        row_height,
         BLAME_OVERSCAN,
     );
-    let number_width = (total.to_string().len() as f32) * 8.0 + 12.0;
+    // Digits of the largest number in the editor font, plus padding.
+    let number_width = (total.to_string().len() as f32) * (style.size * 2.0 / 3.0) + 12.0;
     let mut rows = Column::with_capacity(last - first + 2)
-        .push(space::vertical().height(first as f32 * BLAME_ROW));
+        .push(space::vertical().height(first as f32 * row_height));
     for (line_index, (commit_index, content)) in
         blame.lines.iter().enumerate().take(last).skip(first)
     {
@@ -205,7 +210,7 @@ fn blame_view(view: &BlameView) -> Element<'_, Message> {
             .partition_point(|g| g.start <= line_index)
             .saturating_sub(1);
         // The first fully visible row of a group repeats its label.
-        let first_visible = (view.scroll.offset.max(0.0) / BLAME_ROW).ceil() as usize;
+        let first_visible = (view.scroll.offset.max(0.0) / row_height).ceil() as usize;
         let starts_group = line_index == first_visible
             || blame
                 .groups
@@ -232,7 +237,7 @@ fn blame_view(view: &BlameView) -> Element<'_, Message> {
                         .then(|| Message::BlameCommitClicked(commit.id.clone())),
                 )
                 .padding([0, 8])
-                .height(BLAME_ROW)
+                .height(row_height)
                 .width(Fill)
                 .style(theme::flat);
             if commit.is_uncommitted() {
@@ -243,30 +248,35 @@ fn blame_view(view: &BlameView) -> Element<'_, Message> {
         } else {
             space::horizontal().into()
         };
-        let line = row![
-            container(gutter).width(GUTTER_WIDTH).height(BLAME_ROW),
-            text((line_index + 1).to_string())
-                .size(11)
-                .font(iced::Font::MONOSPACE)
-                .style(theme::text_muted)
-                .width(number_width)
-                .align_x(iced::Right),
-            text(content.replace('\t', "    "))
-                .size(12)
-                .font(iced::Font::MONOSPACE)
-                .wrapping(text::Wrapping::None),
-        ]
-        .spacing(10)
-        .height(BLAME_ROW)
-        .align_y(iced::Center)
-        .clip(true);
+        let mut line = row![container(gutter).width(GUTTER_WIDTH).height(row_height)];
+        if style.numbers {
+            line = line.push(
+                text((line_index + 1).to_string())
+                    .size(style.size - 1.0)
+                    .font(style.font)
+                    .style(theme::text_muted)
+                    .width(number_width)
+                    .align_x(iced::Right),
+            );
+        }
+        let line = line
+            .push(
+                text(style.expand(content).into_owned())
+                    .size(style.size)
+                    .font(style.font)
+                    .wrapping(text::Wrapping::None),
+            )
+            .spacing(10)
+            .height(row_height)
+            .align_y(iced::Center)
+            .clip(true);
         rows = rows.push(
             container(line)
                 .width(Fill)
                 .style(theme::blame_band(group % 2 == 1)),
         );
     }
-    rows = rows.push(space::vertical().height((total - last) as f32 * BLAME_ROW));
+    rows = rows.push(space::vertical().height((total - last) as f32 * row_height));
     column![
         container(muted(target).size(11)).padding([4, 12]),
         scrollable(rows)

@@ -28,6 +28,39 @@ pub struct Settings {
     pub identities: Identities,
     /// Preferences → Templates (M10-07, M10-10).
     pub templates: Templates,
+    /// Preferences → Editor (M11-06).
+    pub editor: EditorSettings,
+}
+
+/// Preferences → Editor (M11-06): the code views (diffs, blame, file
+/// history, conflict view); the commit message fields are not affected.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EditorSettings {
+    /// Font family; empty is "Default" (the platform monospace).
+    pub font: String,
+    /// 8 … 24.
+    pub font_size: u32,
+    /// 1 … 8; tabs are expanded for display only.
+    pub tab_size: u32,
+    pub line_numbers: bool,
+    /// Word wrap in the diff views (M11-07).
+    pub word_wrap: bool,
+    /// Syntax highlighting (M11-08, M11-09).
+    pub syntax_highlighting: bool,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            font: String::new(),
+            font_size: 12,
+            tab_size: 4,
+            line_numbers: true,
+            word_wrap: false,
+            syntax_highlighting: true,
+        }
+    }
 }
 
 /// Preferences → Templates (M10-07): texts shared by all repositories.
@@ -192,6 +225,7 @@ impl Default for Settings {
             diff: DiffSettings::default(),
             identities: Identities::default(),
             templates: Templates::default(),
+            editor: EditorSettings::default(),
         }
     }
 }
@@ -375,6 +409,9 @@ pub enum Category {
     /// Commit template of the active tab's repository (M10-06).
     Commit,
     /// External editor of the active tab's repository (M10-11).
+    RepoEditor,
+    /// Font, sizes and options of the code views (M11-06, GitKraken
+    /// "Editor").
     Editor,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
@@ -382,9 +419,10 @@ pub enum Category {
 
 impl Category {
     /// Categories that apply everywhere, at the top of the list.
-    pub const GLOBAL: [Self; 6] = [
+    pub const GLOBAL: [Self; 7] = [
         Self::General,
         Self::Appearance,
+        Self::Editor,
         Self::Identities,
         Self::Signing,
         Self::Templates,
@@ -397,7 +435,7 @@ impl Category {
         Self::Identity,
         Self::SshKey,
         Self::Commit,
-        Self::Editor,
+        Self::RepoEditor,
         Self::Gitflow,
     ];
 
@@ -416,7 +454,8 @@ impl Category {
             Self::Identity => "Identity",
             Self::SshKey => "SSH key",
             Self::Commit => "Commit",
-            Self::Editor => "External editor",
+            Self::RepoEditor => "External editor",
+            Self::Editor => "Editor",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
         }
@@ -470,6 +509,9 @@ pub struct Page {
     /// summary (the description lives in `App::template_description`).
     pub template: Option<Result<git_core::commit_template::TemplateSettings, String>>,
     pub template_summary: String,
+    /// Monospace font families for Preferences → Editor (M11-06), read
+    /// from the font database when the category opens.
+    pub fonts: Vec<String>,
 }
 
 /// What the Signing category shows (M10-04).
@@ -551,6 +593,7 @@ impl Page {
             repo_editor_custom: false,
             template: None,
             template_summary: String::new(),
+            fonts: Vec::new(),
         }
     }
 
@@ -946,6 +989,21 @@ mod tests {
             parse(r#"{"version": 7}"#),
             Err(ParseError::UnknownVersion(7))
         );
+    }
+
+    #[test]
+    fn editor_settings_default_when_missing() {
+        // A file written before M11-06 has no "editor".
+        let settings = parse(r#"{"version": 1, "general": {"auto_fetch_minutes": 5}}"#).unwrap();
+        assert_eq!(settings.editor, EditorSettings::default());
+        assert_eq!(settings.editor.font_size, 12);
+        assert!(settings.editor.line_numbers && settings.editor.syntax_highlighting);
+        assert!(!settings.editor.word_wrap);
+        // Partial: the rest falls back.
+        let settings = parse(r#"{"editor": {"font": "Fira Code", "tab_size": 2}}"#).unwrap();
+        assert_eq!(settings.editor.font, "Fira Code");
+        assert_eq!(settings.editor.tab_size, 2);
+        assert_eq!(settings.editor.font_size, 12);
     }
 
     #[test]

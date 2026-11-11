@@ -273,6 +273,12 @@ pub enum Message {
         origin: f32,
         room: f32,
     },
+    /// Preferences → Editor (M11-06): font family ("" = Default), font size,
+    /// tab size, line numbers.
+    EditorFontChosen(String),
+    EditorFontSize(u32),
+    EditorTabSize(u32),
+    EditorLineNumbersToggled(bool),
     /// Gear at the right end of the graph header: column menu (M11-03).
     GraphColumnMenu(iced::Point),
     /// Show or hide the Author, Date or SHA column.
@@ -4505,6 +4511,22 @@ impl App {
         )
     }
 
+    /// Style of the code views from Preferences → Editor (M11-06).
+    pub fn editor_style(&self) -> crate::editor_style::EditorStyle {
+        crate::editor_style::EditorStyle::from_settings(&self.settings.editor)
+    }
+
+    /// Applies changed editor settings to the open diffs (their text width
+    /// and row height depend on them).
+    fn restyle_code_views(&mut self) {
+        let style = self.editor_style();
+        for tab in &mut self.tabs {
+            if let Some(view) = tab.view_mut() {
+                view.restyle(style);
+            }
+        }
+    }
+
     /// Window scale from the zoom setting (M5-04).
     pub fn scale_factor(&self) -> f32 {
         self.settings.appearance.zoom_percent as f32 / 100.0
@@ -4992,6 +5014,32 @@ impl App {
                     // Always shown.
                     ColumnId::Refs | ColumnId::Graph => return Task::none(),
                 }
+                return self.save_settings();
+            }
+            Message::EditorFontChosen(font) => {
+                self.settings.editor.font = font;
+                self.restyle_code_views();
+                return self.save_settings();
+            }
+            Message::EditorFontSize(size) => {
+                self.settings.editor.font_size = size.clamp(
+                    crate::editor_style::MIN_FONT_SIZE,
+                    crate::editor_style::MAX_FONT_SIZE,
+                );
+                self.restyle_code_views();
+                return self.save_settings();
+            }
+            Message::EditorTabSize(size) => {
+                self.settings.editor.tab_size = size.clamp(
+                    crate::editor_style::MIN_TAB_SIZE,
+                    crate::editor_style::MAX_TAB_SIZE,
+                );
+                self.restyle_code_views();
+                return self.save_settings();
+            }
+            Message::EditorLineNumbersToggled(on) => {
+                self.settings.editor.line_numbers = on;
+                self.restyle_code_views();
                 return self.save_settings();
             }
             Message::GraphColumnsReset => {
@@ -5651,7 +5699,10 @@ impl App {
                     if category == settings::Category::Commit {
                         return self.load_template();
                     }
-                    if category == settings::Category::Editor {
+                    if category == settings::Category::Editor && page.fonts.is_empty() {
+                        page.fonts = crate::editor_style::monospace_families();
+                    }
+                    if category == settings::Category::RepoEditor {
                         page.repo_editor_input = repo_editor.clone().unwrap_or_default();
                         page.repo_editor_custom = false;
                     }
@@ -6236,7 +6287,7 @@ impl App {
                 let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) else {
                     return Task::none();
                 };
-                let height = crate::ui::diff::ROW_HEIGHT;
+                let height = diff.style.line_height();
                 let top = (diff.scroll.offset / height).round() as usize;
                 let visible = (diff.scroll.height / height).floor() as usize;
                 if let Some(target) = diff.change_target(top, visible, next) {
@@ -7586,6 +7637,7 @@ impl App {
                     return Task::none();
                 }
                 let layout = DiffLayout::of(self.settings.diff.view_mode);
+                let style = self.editor_style();
                 let can_fetch = self.write_block().is_none();
                 let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
                     return Task::none();
@@ -7617,11 +7669,12 @@ impl App {
                     }
                     result => {
                         diff.layout = layout;
+                        diff.style = style;
                         diff.set_diff(result.map_err(|e| e.to_string()));
                         // Opening a file (or switching the mode) shows its
                         // first change; reloads after staging keep the place.
                         if std::mem::take(&mut diff.scroll_to_change) {
-                            let height = crate::ui::diff::ROW_HEIGHT;
+                            let height = diff.style.line_height();
                             let visible = (diff.scroll.height / height).floor() as usize;
                             let offset = diff
                                 .change_target(0, visible, true)
@@ -11541,6 +11594,63 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn editor_settings_apply_to_the_open_diff() {
+        let mut app = wide_diff_app(settings::DiffMode::Hunk);
+        let before = open_diff(&app).text_width;
+        assert_eq!(open_diff(&app).style.line_height(), 20.0);
+        // Font size: rows get taller, the text wider.
+        let _ = app.update(Message::EditorFontSize(18));
+        assert_eq!(app.settings.editor.font_size, 18);
+        let diff = open_diff(&app);
+        assert_eq!(diff.style.line_height(), 30.0);
+        assert!(
+            diff.text_width > before * 1.4,
+            "{} vs {before}",
+            diff.text_width
+        );
+        // Change navigation scrolls in rows of the new height.
+        let _ = app.update(Message::DiffJumpChange { next: true });
+        let offset = open_diff(&app).scroll.offset;
+        assert_eq!(offset % 30.0, 0.0, "{offset}");
+        // Limits.
+        let _ = app.update(Message::EditorFontSize(99));
+        assert_eq!(app.settings.editor.font_size, 24);
+        // Line numbers off: no number columns.
+        let _ = app.update(Message::EditorLineNumbersToggled(false));
+        let style = open_diff(&app).style;
+        assert_eq!(style.number_width(), 0.0);
+        assert_eq!(
+            crate::diff_hscroll::gutter(DiffLayout::Hunks, &style),
+            style.marker_width()
+        );
+        // Font and tab size.
+        let _ = app.update(Message::EditorFontChosen("Fira Code".into()));
+        assert_eq!(
+            open_diff(&app).style.font,
+            crate::editor_style::font_named("Fira Code")
+        );
+        let _ = app.update(Message::EditorTabSize(0));
+        assert_eq!(app.settings.editor.tab_size, 1);
+        // A diff loaded later uses the settings too.
+        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
+        assert_eq!(open_diff(&app).style.size, 24.0);
+    }
+
+    #[test]
+    fn editor_page_lists_fonts_once() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Editor));
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, settings::Category::Editor);
+        // The test font database has at least the bundled fonts; the list
+        // is sorted and without duplicates.
+        let mut sorted = page.fonts.clone();
+        sorted.sort_by_key(|f| f.to_lowercase());
+        sorted.dedup();
+        assert_eq!(page.fonts, sorted);
+    }
+
+    #[test]
     fn horizontal_offset_survives_reloads_but_not_another_file() {
         let mut app = wide_diff_app(settings::DiffMode::Split);
         let _ = app.update(Message::DiffWheel(90.0));
@@ -11565,7 +11675,10 @@ pub(crate) mod tests {
         assert_eq!(diff.blocks.len(), 2);
         // Bar of block 0 at row 59, 3 rows of margin above.
         assert_eq!(diff.block_rows[0], 59);
-        assert_eq!(diff.scroll.offset, 56.0 * crate::ui::diff::ROW_HEIGHT);
+        assert_eq!(
+            diff.scroll.offset,
+            56.0 * crate::editor_style::EditorStyle::default().line_height()
+        );
         assert!(!diff.scroll_to_change, "only once");
     }
 
@@ -11587,7 +11700,7 @@ pub(crate) mod tests {
     #[test]
     fn change_navigation_scrolls_between_blocks() {
         let mut app = app_with_inline_diff();
-        let height = crate::ui::diff::ROW_HEIGHT;
+        let height = crate::editor_style::EditorStyle::default().line_height();
         // 123 rows, 60 visible (default viewport): scrolling stops at 63.
         assert_eq!(open_diff(&app).rows.len(), 123);
         assert_eq!(open_diff(&app).block_rows[1], 101);
@@ -11622,7 +11735,7 @@ pub(crate) mod tests {
                 Category::Identity,
                 Category::SshKey,
                 Category::Commit,
-                Category::Editor,
+                Category::RepoEditor,
                 Category::Gitflow
             ]
         );
@@ -13688,10 +13801,10 @@ pub(crate) mod tests {
     #[test]
     fn repository_editor_page_choices() {
         let mut app = staging_app(&[], &[]);
-        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Editor));
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::RepoEditor));
         assert_eq!(
             app.settings_page.as_ref().unwrap().category,
-            settings::Category::Editor
+            settings::Category::RepoEditor
         );
         let _ = app.update(Message::RepoEditorChosen("Custom".into()));
         assert!(app.settings_page.as_ref().unwrap().repo_editor_custom);

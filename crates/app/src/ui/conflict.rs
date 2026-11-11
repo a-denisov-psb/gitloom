@@ -6,18 +6,22 @@ use git_core::{Chunk, ConflictContent, ConflictText, PickState, Side, WholeFileR
 use iced::widget::{
     button, checkbox, column, container, row, scrollable, space, text, text_editor, Column,
 };
-use iced::{Element, Fill, FillPortion, Font};
+use iced::{Element, Fill, FillPortion};
 
 use crate::app::Message;
 use crate::conflict::ConflictView;
+use crate::editor_style::EditorStyle;
 use crate::repo_view::{Loadable, RepoView};
 use crate::theme;
 use crate::ui::muted;
 use crate::ui::panel::{with_tooltip_text, write_tooltip};
 
-const TEXT_SIZE: f32 = 12.0;
-
-pub fn view<'a>(repo: &'a RepoView, conflict: &'a ConflictView) -> Element<'a, Message> {
+pub fn view<'a>(
+    repo: &'a RepoView,
+    conflict: &'a ConflictView,
+    style: &EditorStyle,
+) -> Element<'a, Message> {
+    let style = *style;
     let idle = repo.write_block.is_none() && repo.busy.is_none();
     let idle_tool = repo.write_block.is_none() && repo.busy.is_none();
     let merge_tool = crate::ui::panel::with_tooltip_text(
@@ -45,7 +49,7 @@ pub fn view<'a>(repo: &'a RepoView, conflict: &'a ConflictView) -> Element<'a, M
         Loadable::Failed(error) => text(error).style(theme::text_danger).into(),
         Loadable::Ready(loaded) => match &loaded.content {
             ConflictContent::Text(conflict_text) => {
-                return text_view(repo, conflict, conflict_text, title, close, idle);
+                return text_view(repo, conflict, conflict_text, title, close, idle, style);
             }
             ConflictContent::WholeFile(reason) => whole_file(repo, *reason, idle),
         },
@@ -80,6 +84,7 @@ fn text_view<'a>(
     title: iced::widget::Row<'a, Message>,
     close: iced::widget::Row<'a, Message>,
     idle: bool,
+    style: EditorStyle,
 ) -> Element<'a, Message> {
     let save_blocker = conflict.save_blocker();
     let toolbar = row![
@@ -106,8 +111,8 @@ fn text_view<'a>(
 
     let (ours_label, theirs_label) = &conflict.labels;
     let sides = row![
-        side_panel(conflict, conflict_text, Side::Ours, ours_label),
-        side_panel(conflict, conflict_text, Side::Theirs, theirs_label),
+        side_panel(conflict, conflict_text, Side::Ours, ours_label, style),
+        side_panel(conflict, conflict_text, Side::Theirs, theirs_label, style),
     ]
     .spacing(8)
     .height(FillPortion(3));
@@ -137,8 +142,8 @@ fn text_view<'a>(
     }
     let output = text_editor(&conflict.output)
         .on_action(Message::ConflictOutputEdited)
-        .font(Font::MONOSPACE)
-        .size(TEXT_SIZE)
+        .font(style.font)
+        .size(style.size)
         .height(Fill)
         .style(theme::editor);
 
@@ -164,6 +169,7 @@ fn side_panel<'a>(
     conflict_text: &'a ConflictText,
     side: Side,
     label: &'a str,
+    style: EditorStyle,
 ) -> Element<'a, Message> {
     let ours = side == Side::Ours;
     let mut rows = Column::new().spacing(0);
@@ -174,9 +180,9 @@ fn side_panel<'a>(
                 for line in lines {
                     rows = rows.push(
                         container(
-                            text(display(line))
-                                .font(Font::MONOSPACE)
-                                .size(TEXT_SIZE)
+                            text(style.expand(display(line)).into_owned())
+                                .font(style.font)
+                                .size(style.size)
                                 .style(theme::text_muted),
                         )
                         .padding([0, 26]),
@@ -226,7 +232,9 @@ fn side_panel<'a>(
                                         line: line_index,
                                     }
                                 }),
-                                text(display(line)).font(Font::MONOSPACE).size(TEXT_SIZE),
+                                text(style.expand(display(line)).into_owned())
+                                    .font(style.font)
+                                    .size(style.size),
                             ]
                             .spacing(8)
                             .align_y(iced::Center),
