@@ -20,7 +20,9 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (single release line to 1.0.0, ADR-042; M10 done, M11 current, 2026-11-11)
+## Current state (single release line to 1.0.0, ADR-042; M11 done, M12 current, 2026-11-11)
+
+- M11 (2026-11-11, on `develop`): done. Style tokens and the Classic Dark theme with its graph look (row tint, filled pills with connector, ringed nodes, header separators, panel shadows); graph columns with own widths for every column, double click to fit, gear menu and Preferences options, horizontal scrolling with the header; stash node and "WIP on <branch>" label; Preferences → Editor (font, size, tab size, line numbers, word wrap, syntax highlighting); syntax highlighting with syntect/two-face in diffs, blame, file history and the conflict view; tree order branches before folders and tag folders; accent start buttons; Preferences as a modal; panel toggles; README screenshot from a fixture (`scripts/screenshot.sh`); docs, performance and release checklist 7e. Also: tooling (`just`, `dist` profile, more release targets, ADR-052), CI Linux jobs on `ubuntu-24.04` with a tolerant apt step, planning update 3 (M11-16, M12-13, M12-14, ADR-053).
 
 - M10 (2026-11-11, on `develop`): done. Start screen like GitKraken's New Tab; clone with progress and cancel; init with default branch, README and bundled `.gitignore` templates; Preferences → Signing (GPG/SSH) and the signature badge; commit template (Repository → Commit); "Copy commit message prompt…" and Preferences → Templates with the stash message template; prune on fetch, `.orig` files, long paths, toolbar labels; external editor per repository; docs and release checklist 7d. Planning update 1 (2026-11-11) added M10-10/M10-11, M11-11 … M11-15, M12-10 … M12-12, M14 and ADR-051.
 

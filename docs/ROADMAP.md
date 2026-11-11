@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M11 – Graph columns, themes and syntax highlighting** → [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-themes-highlighting.md)
+**M12 – Workflow polish** → [`milestones/M12-workflow-polish.md`](milestones/M12-workflow-polish.md)
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M14 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -27,8 +27,8 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M8 | 1.0.0 | Repository settings and tools | Done |
 | M9 | 1.0.0 | Fixes and consistency | Done |
 | M10 | 1.0.0 | Clone, init and Git settings | Done |
-| M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Current |
-| M12 | 1.0.0 | Workflow polish | Planned |
+| M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Done |
+| M12 | 1.0.0 | Workflow polish | Current |
 | M13 | 1.0.0 | Git flow graph layout | Planned |
 | M14 | 1.0.0 | Commit details like GitKraken | Planned |
 
@@ -85,7 +85,7 @@ Stash pop/apply that stops in conflicts becomes a normal conflict with a banner,
 
 Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md).
 
-### M11 – Graph columns, themes and syntax highlighting (current)
+### M11 – Graph columns, themes and syntax highlighting (done)
 
 - Graph columns: drag column borders, double click for optimal width, column menu (gear in the header) to show/hide branch/tag, graph, message, author, date, SHA; replaces the automatic hiding of columns.
 - Theme "Classic Dark": the palette gains style tokens (row tint in the lane color, filled ref pills with a line to the node, header bands, column separators, panel depth); Dark and Light keep their current look through token values.
@@ -95,7 +95,7 @@ Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-set
 
 Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-themes-highlighting.md).
 
-### M12 – Workflow polish (planned)
+### M12 – Workflow polish (current)
 
 - File lists: a click on the selected file deselects it (the diff closes); hover shows only Stage/Unstage, per-file Discard moves to the context menu (deviation, maintainer decision 2026-11-10).
 - Remotes: "Open on GitHub/GitLab/Bitbucket" (other hosts "Open in browser") in the remote context menu and the palette; repository start page only, URL derived offline.
