@@ -171,6 +171,39 @@ pub(crate) fn write_index_snapshot(writer: &dyn GitWriter, index: &[IndexSnapsho
         .map(drop)
 }
 
+/// Records the index before a reset so undo can restore it (M9-04):
+/// `git write-tree` refuses unmerged entries, so they are recorded entry by
+/// entry and taken out for the moment; the rest is written as a tree, then
+/// the unmerged entries go back (the index is unchanged afterwards).
+/// Restore with [`restore_index`].
+pub fn record_index(writer: &dyn GitWriter) -> Result<(String, Vec<IndexSnapshot>)> {
+    let paths = crate::unmerged_paths(writer)?;
+    let unmerged = index_snapshot(writer, &paths)?;
+    if !paths.is_empty() {
+        let mut input = Vec::new();
+        for path in &paths {
+            input.extend_from_slice(path.as_bytes());
+            input.push(0);
+        }
+        writer.run(
+            &["update-index", "--force-remove", "-z", "--stdin"],
+            crate::RunOptions {
+                stdin: Some(&input),
+                read_only: false,
+            },
+        )?;
+    }
+    let tree = writer.run(&["write-tree"], crate::RunOptions::default());
+    write_index_snapshot(writer, &unmerged)?;
+    Ok((tree?.stdout_text().trim().to_owned(), unmerged))
+}
+
+/// Puts back an index recorded by [`record_index`].
+pub fn restore_index(writer: &dyn GitWriter, tree: &str, unmerged: &[IndexSnapshot]) -> Result<()> {
+    writer.run(&["read-tree", tree], crate::RunOptions::default())?;
+    write_index_snapshot(writer, unmerged)
+}
+
 /// Discards conflicted `paths` completely (M9-03): back to HEAD in index and
 /// working tree; a path that is not in HEAD leaves index and working tree.
 fn discard_conflicted(writer: &dyn GitWriter, root: &Path, paths: &[String]) -> Result<()> {

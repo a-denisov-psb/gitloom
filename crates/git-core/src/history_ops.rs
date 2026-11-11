@@ -13,8 +13,13 @@ pub enum HistoryUndo {
     /// HEAD moved and the working tree followed (merge, rebase, cherry-pick,
     /// …): `git reset --keep`, which refuses to overwrite local changes.
     Keep,
-    /// Soft or mixed reset; `index_tree` is the index before it.
-    Reset { mode: ResetMode, index_tree: Oid },
+    /// Soft or mixed reset; `index_tree` is the index before it, without
+    /// the `unmerged` entries recorded separately (M9-04).
+    Reset {
+        mode: ResetMode,
+        index_tree: Oid,
+        unmerged: Vec<crate::IndexSnapshot>,
+    },
     /// Hard reset with everything it overwrote.
     HardReset(ResetSnapshot),
     /// A branch that is not checked out was fast-forwarded.
@@ -102,11 +107,6 @@ fn move_branch(git: &dyn GitWriter, name: &str, from: &str, to: &str) -> Result<
     .map(drop)
 }
 
-fn read_tree(git: &dyn GitWriter, tree: &str) -> Result<()> {
-    git.run(&["read-tree", tree], RunOptions::default())
-        .map(drop)
-}
-
 /// Undoes `change`; returns the entry for the redo stack.
 pub fn undo_history(
     git: &dyn GitWriter,
@@ -116,9 +116,13 @@ pub fn undo_history(
     check(git, change, &change.after)?;
     match &change.kind {
         HistoryUndo::Keep => reset_keep(git, &change.before)?,
-        HistoryUndo::Reset { index_tree, .. } => {
+        HistoryUndo::Reset {
+            index_tree,
+            unmerged,
+            ..
+        } => {
             reset(git, &change.before, ResetMode::Soft)?;
-            read_tree(git, index_tree)?;
+            crate::restore_index(git, index_tree, unmerged)?;
         }
         HistoryUndo::HardReset(snapshot) => undo_hard_reset(git, root, snapshot)?,
         HistoryUndo::MoveBranch { name } => move_branch(git, name, &change.after, &change.before)?,

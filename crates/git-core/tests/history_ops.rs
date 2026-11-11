@@ -133,6 +133,7 @@ fn soft_and_mixed_resets_restore_the_index() {
         let entry = change(
             &repo,
             HistoryUndo::Reset {
+                unmerged: Vec::new(),
                 mode,
                 index_tree: tree,
             },
