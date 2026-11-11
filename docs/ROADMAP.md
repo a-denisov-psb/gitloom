@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M10 – Clone, init and Git settings** → [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md)
+**M11 – Graph columns, themes and syntax highlighting** → [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-themes-highlighting.md)
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M14 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -26,8 +26,8 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M7 | 1.0.0 | Left panel tree, diff view modes and Git flow | Done |
 | M8 | 1.0.0 | Repository settings and tools | Done |
 | M9 | 1.0.0 | Fixes and consistency | Done |
-| M10 | 1.0.0 | Clone, init and Git settings | Current |
-| M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Planned |
+| M10 | 1.0.0 | Clone, init and Git settings | Done |
+| M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Current |
 | M12 | 1.0.0 | Workflow polish | Planned |
 | M13 | 1.0.0 | Git flow graph layout | Planned |
 | M14 | 1.0.0 | Commit details like GitKraken | Planned |
@@ -74,7 +74,7 @@ Preferences group "Repository · <name>" (Identity, SSH key, Gitflow); identitie
 
 Stash pop/apply that stops in conflicts becomes a normal conflict with a banner, "Drop stash" and Undo back to the exact state before; discard and reset work while files are conflicted; reset on the HEAD commit; sharp icons at fractional zoom; left panel order and GITFLOW content like GitKraken; character counter inside the summary field. Details: [`milestones/M9-fixes-and-consistency.md`](milestones/M9-fixes-and-consistency.md).
 
-### M10 – Clone, init and Git settings (current)
+### M10 – Clone, init and Git settings (done)
 
 - Start screen like GitKraken's New Tab: Open a repo, Clone a repo, Start a local repo; recent repositories with name and path; Customize (Preferences, Manage identities); Resources (user guide, report an issue; links open the browser). No hosted-repo creation, no boards.
 - Clone: URL, parent folder, name, full path preview, progress and cancel, askpass, submodules recursive; opens in a tab.
@@ -85,7 +85,7 @@ Stash pop/apply that stops in conflicts becomes a normal conflict with a banner,
 
 Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-settings.md).
 
-### M11 – Graph columns, themes and syntax highlighting (planned)
+### M11 – Graph columns, themes and syntax highlighting (current)
 
 - Graph columns: drag column borders, double click for optimal width, column menu (gear in the header) to show/hide branch/tag, graph, message, author, date, SHA; replaces the automatic hiding of columns.
 - Theme "Classic Dark": the palette gains style tokens (row tint in the lane color, filled ref pills with a line to the node, header bands, column separators, panel depth); Dark and Light keep their current look through token values.

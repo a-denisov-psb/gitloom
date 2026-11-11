@@ -20,7 +20,9 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (single release line to 1.0.0, ADR-042; M9 done, M10 current, 2026-11-11)
+## Current state (single release line to 1.0.0, ADR-042; M10 done, M11 current, 2026-11-11)
+
+- M10 (2026-11-11, on `develop`): done. Start screen like GitKraken's New Tab; clone with progress and cancel; init with default branch, README and bundled `.gitignore` templates; Preferences → Signing (GPG/SSH) and the signature badge; commit template (Repository → Commit); "Copy commit message prompt…" and Preferences → Templates with the stash message template; prune on fetch, `.orig` files, long paths, toolbar labels; external editor per repository; docs and release checklist 7d. Planning update 1 (2026-11-11) added M10-10/M10-11, M11-11 … M11-15, M12-10 … M12-12, M14 and ADR-051.
 
 - M9 (2026-11-11, on `develop`): done. Stash pop/apply that conflicts is a normal conflict with a banner, Undo back to the exact state before and Drop/Keep stash (M9-01, M9-02; also undo/redo of clean pops and applies); conflicted files can be discarded, undoably (M9-03); reset on the HEAD commit, resets record unmerged index entries (M9-04); icons snap to whole physical pixels (M9-05); left panel order and GITFLOW tree like GitKraken (M9-06); summary counter inside the field (M9-07); docs and release checklist section 7c (M9-08). Also: the fetch-cancel test counts zombie helpers as stopped (containers whose PID 1 does not reap). Windows checks of M9 are in section 7c.
 
