@@ -67,13 +67,13 @@ Open:
 
 ## Milestone acceptance
 
-- [ ] A stash pop or apply that conflicts shows the banner, the conflicted files and the conflict view with "Updated upstream"/"Stashed changes"; no error dialog; "Drop stash" after resolving.
-- [ ] Undo after a stash pop or apply (with and without conflicts, on a clean tree and on a tree with other local and untracked changes) restores the working tree byte for byte, `git ls-files -s` and the stash list exactly; redo applies again.
-- [ ] Conflicted files can be discarded (single and all) after confirmation; undo restores content and unmerged state.
-- [ ] Reset is offered on the HEAD commit; Mixed and Hard on HEAD leave no unmerged entries; undoable.
-- [ ] Icons are sharp at 100, 110, 125 and 150 % (snapshots checked by eye).
-- [ ] Left panel order and GITFLOW content like GitKraken; counter inside the summary field.
-- [ ] `docs/user/undo.md`, user guide, UX-PARITY, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] A stash pop or apply that conflicts shows the banner, the conflicted files and the conflict view with "Updated upstream"/"Stashed changes"; no error dialog; "Drop stash" after resolving.
+- [x] Undo after a stash pop or apply (with and without conflicts, on a clean tree and on a tree with other local and untracked changes) restores the working tree byte for byte, `git ls-files -s` and the stash list exactly; redo applies again.
+- [x] Conflicted files can be discarded (single and all) after confirmation; undo restores content and unmerged state.
+- [x] Reset is offered on the HEAD commit; Mixed and Hard on HEAD leave no unmerged entries; undoable.
+- [x] Icons are sharp at 100, 110, 125 and 150 % (snapshots checked by eye).
+- [x] Left panel order and GITFLOW content like GitKraken; counter inside the summary field.
+- [x] `docs/user/undo.md`, user guide, UX-PARITY, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 No release (ADR-042): when all tasks are done, continue with M10.
 
@@ -155,7 +155,7 @@ Acceptance: snapshots of the commit panel with 69, 5 and −3 characters left in
 
 Note (2026-11-11): done. The counter is a layer over the summary field (`stack`), right aligned with 8 px margin; the field has 40 px right padding, enough for "-999" at 11 px. Levels in `counter_level` (unit test). Summary and description have the same width now. Snapshots `ui_check_summary_counter` (69, 5, −3; dark/light) checked: text is clipped before the counter.
 
-### [ ] M9-08 Documentation
+### [x] M9-08 Documentation
 
 - `docs/user/undo.md`: stash pop/apply, discard of conflicted files, reset on HEAD; a "Cannot be undone" list with reasons (ADR-043).
 - User guide `merge-rebase-conflicts.md`: stash conflicts, Undo, Drop stash; `settings.md`/`daily-workflow.md` where affected.
@@ -164,3 +164,5 @@ Note (2026-11-11): done. The counter is a layer over the summary field (`stack`)
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed against the implemented behavior.
+
+Note (2026-11-11): done. `docs/user/undo.md` rewritten with the new entries and a "Cannot be undone" table with reasons (push/remote deletions, fetch; stash push/drop, stage/unstage, mark resolved, remotes/upstream as "not yet, M12"; settings). User guide: "Stash conflicts" and "Discarding conflicted files" in `merge-rebase-conflicts.md`, reset on HEAD, counter and stash undo in `daily-workflow.md`, the GITFLOW tree in `git-flow.md`, `coming-from-gitkraken.md`; `settings.md` is not affected. UX-PARITY: rows for stash conflicts, discard of conflicted files, summary counter, undo; deviations for the Reset dialog (maintainer prefers it, 2026-11-11) and the generic conflict banner; the column references point to M11 now. `docs/RELEASE-CHECKLIST.md` section 7c (the left panel item moved there from 7a). CHANGELOG entries were added per task.

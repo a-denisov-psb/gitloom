@@ -33,9 +33,25 @@ Commit menu → **Cherry-pick commit** or **Revert commit**. With several select
 
 Commit menu → **Reset <branch> to this commit** → **Soft** (keep changes staged), **Mixed** (keep changes unstaged) or **Hard** (discard changes). Hard always asks and lists the files whose changes will be lost; it can be undone.
 
+Reset is also offered on the checked-out commit itself (while no merge, rebase, cherry-pick or revert runs): **Mixed** unstages everything and clears conflicts while keeping the files, **Hard** throws away all uncommitted changes (untracked files stay). **Soft** is disabled there ("HEAD is already at this commit"). Both can be undone, conflicts included.
+
 ## Operations in progress
 
 While a merge, rebase, cherry-pick or revert is running, a banner shows it ("Rebasing topic onto main (step 2 of 5)") with **Continue**, **Skip** (rebase and cherry-pick) and **Abort**. The commit button becomes "Continue rebase" and so on; you can edit the commit message before continuing. Actions that would break the operation (amend, stash, undo of commits) are disabled with the reason in the tooltip. Continue stays disabled while files still have conflicts; its tooltip lists them.
+
+## Stash conflicts
+
+Popping or applying a stash can conflict with changes made after it was stashed. Gitloom then shows the conflicted files and a banner: "Stash '<name>' applied with conflicts. The stash was kept." Git keeps the stash so nothing is lost.
+
+- **Undo** (in the banner, the toolbar or Ctrl+Z) returns to exactly the state before the pop or apply: files, staged changes and the stash list. If you already edited a conflicted file, Gitloom asks first.
+- Or resolve the files in the conflict view; its sides are called **Updated upstream** (your current files) and **Stashed changes** (the stash). Once nothing is conflicted, the banner offers **Drop stash** (the stash is no longer needed) and **Keep stash**.
+- Stash, Pop and Apply are disabled while files are conflicted: Git cannot apply a stash on top of conflicts.
+
+Conflicted files without a running operation (for example after closing Gitloom during a stash conflict) show the banner "Conflicted files without a running operation": resolve them in the conflict view or **Discard conflicted files…**.
+
+## Discarding conflicted files
+
+Right click a conflicted file → **Discard changes**, "Discard all" or the banner action reset conflicted files to the checked-out commit (a file that is not in it is removed). Gitloom asks first, since both sides and any resolution are lost; Ctrl+Z brings the conflict back.
 
 ## Resolving conflicts
 
