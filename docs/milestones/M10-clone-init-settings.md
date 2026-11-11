@@ -67,16 +67,16 @@ Open:
 
 ## Milestone acceptance
 
-- [ ] The start screen looks and works like GitKraken's New Tab (without hosted repos and boards).
-- [ ] Clone over HTTPS (askpass) and SSH works with progress and cancel; the repository opens; a failed or cancelled clone leaves no new folder.
-- [ ] Init creates the repository with the chosen branch, README and `.gitignore` and an initial commit; an empty repository displays without errors.
-- [ ] Signing settings write the Git config; signed commits and tags work with GPG and SSH; the commit details show the signature status.
-- [ ] The commit template prefills empty messages and is stored as Git's `commit.template`; comments are removed when chosen.
-- [ ] "Copy commit message prompt…" copies the documented content within the limits.
-- [ ] Prune, `.orig`, long paths and toolbar labels work as described.
-- [ ] Preferences → Templates holds the commit message prompt and the stash message template; quick stashes use the template when enabled.
-- [ ] A repository can override the external editor; all entry points use it.
-- [ ] User guide, UX-PARITY, `docs/user/undo.md`, release checklist and CHANGELOG updated; third-party notices list the `.gitignore` templates; `./scripts/check.sh` green; CI green.
+- [x] The start screen looks and works like GitKraken's New Tab (without hosted repos and boards).
+- [x] Clone over HTTPS (askpass) and SSH works with progress and cancel; the repository opens; a failed or cancelled clone leaves no new folder.
+- [x] Init creates the repository with the chosen branch, README and `.gitignore` and an initial commit; an empty repository displays without errors.
+- [x] Signing settings write the Git config; signed commits and tags work with GPG and SSH; the commit details show the signature status.
+- [x] The commit template prefills empty messages and is stored as Git's `commit.template`; comments are removed when chosen.
+- [x] "Copy commit message prompt…" copies the documented content within the limits.
+- [x] Prune, `.orig`, long paths and toolbar labels work as described.
+- [x] Preferences → Templates holds the commit message prompt and the stash message template; quick stashes use the template when enabled.
+- [x] A repository can override the external editor; all entry points use it.
+- [x] User guide, UX-PARITY, `docs/user/undo.md`, release checklist and CHANGELOG updated; third-party notices list the `.gitignore` templates; `./scripts/check.sh` green; CI green.
 
 No release (ADR-042): when all tasks are done, continue with M11.
 
@@ -170,7 +170,7 @@ Acceptance: unit tests for the fetch and mergetool arguments; settings migration
 
 Note (2026-11-11): done. `fetch_all`, `pull` and `fetch_remote_args` take the prune flag (also the remote's context menu fetch); `mergetool_args`/`run_mergetool` take `delete_orig` (`-c mergetool.keepBackup=false` before the subcommand). "Show toolbar labels" off uses the existing compact toolbar (icons with the names as tooltips). "Support long paths" is shown on Windows only and reads/writes the global `core.longpaths` in the background (unset when off). Tests: `fetch::tests`, `external_tools` unit test, settings migration `small_options_load_from_older_files`, app `small_options_are_saved`; snapshot `ui_check_toolbar_without_labels` checked.
 
-### [ ] M10-09 Documentation
+### [x] M10-09 Documentation
 
 - User guide: `getting-started.md` (start screen, clone, init), `settings.md` (General, Signing, Repository → Commit, Templates, external editor per repository), `daily-workflow.md` (template, prompt, stash template), `coming-from-gitkraken.md`.
 - UX-PARITY rows; extensions: commit message prompt, signature status texts, stash message template; deviation "commit message prompt on a global Templates page".
@@ -179,6 +179,8 @@ Note (2026-11-11): done. `fetch_all`, `pull` and `fetch_remote_args` take the pr
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed against the implemented behavior.
+
+Note (2026-11-11): done. `getting-started.md` (start screen, clone, init), `settings.md` (General, Appearance, Signing, Templates, External tools, Repository → Commit and External editor), `daily-workflow.md` (template prefill, signing hint, prompt, stash template), `coming-from-gitkraken.md`, `undo.md` (clone, init and the settings under "Cannot be undone"), `docs/RELEASE-CHECKLIST.md` section 7d. UX-PARITY rows and the CHANGELOG were updated per task; the third-party notices list the `.gitignore` templates (M10-03).
 
 ### [x] M10-10 Templates page and stash message template
 
