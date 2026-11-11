@@ -99,13 +99,19 @@ fn cancelling_a_slow_fetch_stops_the_whole_process_tree() {
         .trim()
         .to_owned();
     std::thread::sleep(Duration::from_millis(200));
-    let alive = std::process::Command::new("kill")
-        .args(["-0", &pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap()
-        .success();
-    assert!(!alive, "upload-pack helper {pid} survived the cancel");
+    // `ps` prints nothing for a reaped process and "Z…" for a zombie: an
+    // orphaned helper is reparented to PID 1, which does not reap it in some
+    // containers, and `kill -0` still succeeds on a zombie.
+    let state = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid])
+        .output()
+        .unwrap();
+    let state = String::from_utf8_lossy(&state.stdout).trim().to_owned();
+    let alive = !state.is_empty() && !state.starts_with('Z');
+    assert!(
+        !alive,
+        "upload-pack helper {pid} survived the cancel (state {state})"
+    );
 }
 
 #[test]
