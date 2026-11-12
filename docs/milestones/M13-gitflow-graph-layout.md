@@ -55,12 +55,12 @@ Open:
 
 ## Milestone acceptance
 
-- [ ] On the scripted classic Git flow history (v1.0, two features, release 2.0, hotfix for 2.0 → v2.1, all branches deleted) every commit lands in the expected group with the expected name.
-- [ ] Live, deleted, pull-merge, nested-feature, fast-forward and wrongly based hotfix cases behave as in the decisions table; unknown commits are neutral.
-- [ ] The toggle works from all entry points, persists per repository and is disabled without Git flow; the default layout is unchanged when off.
-- [ ] Faded labels and tooltips for deleted branches.
-- [ ] No frame over 50 ms; measurements in `docs/PERFORMANCE.md`.
-- [ ] User guide, UX-PARITY (extension), release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] On the scripted classic Git flow history (v1.0, two features, release 2.0, hotfix for 2.0 → v2.1, all branches deleted) every commit lands in the expected group with the expected name.
+- [x] Live, deleted, pull-merge, nested-feature, fast-forward and wrongly based hotfix cases behave as in the decisions table; unknown commits are neutral.
+- [x] The toggle works from all entry points, persists per repository and is disabled without Git flow; the default layout is unchanged when off.
+- [x] Faded labels and tooltips for deleted branches.
+- [x] No frame over 50 ms; measurements in `docs/PERFORMANCE.md`.
+- [x] User guide, UX-PARITY (extension), release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
