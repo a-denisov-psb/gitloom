@@ -31,6 +31,8 @@ pub enum UndoAction {
     StashDrop(git_core::work_undo::StashDropRecord),
     /// Remote added, removed, renamed or edited; upstream set or unset (M12-08).
     Remote(git_core::remote_undo::RemoteChange),
+    /// Edited message of an unpushed commit (M14-05, ADR-051).
+    Reword(git_core::reword::Reworded),
     /// Several branches and tags deleted in one step (M12-11). `merge`:
     /// the forced part, joined to the step before; `report` travels to
     /// `WriteFinished` only and is never stored.
@@ -81,6 +83,7 @@ impl UndoAction {
             Self::StashRename(_) => "Rename stash".to_owned(),
             Self::Refs { label, .. } => label.clone(),
             Self::Remote(change) => change.label(),
+            Self::Reword(_) => "Edit commit message".to_owned(),
             Self::Submodules { label, .. } => label.clone(),
         }
     }

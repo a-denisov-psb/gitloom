@@ -104,11 +104,13 @@ Acceptance: integration tests: HEAD; a commit three back on a linear branch; a c
 
 Note (M14-04): `git_core::reword` (`edit_block`, `edit_facts`, `reword_unpushed`, `Reworded::apply` for undo/redo). The author is passed to `git commit-tree` through `GIT_AUTHOR_*` with the new `GitWriter::run_with_env`; the encoding header is kept for rebuilt descendants and dropped for the target (its new message is UTF-8). "The branch moved meanwhile" is guarded by `update-ref <new> <old>` and tested through undo after a new commit. Tests: `crates/git-core/tests/reword.rs`.
 
-### [ ] M14-05 Edit message in the details
+### [x] M14-05 Edit message in the details
 
 - Inline editor, disabled states with tooltips, note about other refs, undo entry.
 
 Acceptance: app tests: click opens the editor only when allowed; Ctrl+Enter saves, Esc cancels; tooltips for each blocked reason; the note lists other refs; Ctrl+Z restores; the graph selects the rewritten commit after saving; snapshots of the editor in both themes.
+
+Note (M14-05): An editable message is shown as plain text so a click opens the editor (text selection is available in the editor); blocked messages stay selectable and carry the reason as tooltip. Enter in the summary also saves (like Ctrl+Enter). A write block (read-only, Git missing) and an operation started after the check also block, with their own reason. After saving the rewritten commit is selected; Ctrl+Z moves the branch back. Stashes cannot be edited ("Stashes cannot be edited").
 
 ### [ ] M14-06 Time markers in the graph
 

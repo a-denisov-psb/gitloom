@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Edit the message of a commit that was not pushed yet by clicking it in the commit details (also further back on the checked-out branch, across merges): Save with Ctrl+Enter, Cancel with Esc, one Undo step. The working tree and index stay untouched; other branches and tags that contain the commit keep the old one (the editor says which). Pushed commits, commits of other branches and running operations say why they cannot be edited.
+
 - Gitflow layout (graph column menu, command palette "Toggle Gitflow layout", Preferences → Repository → Gitflow): with Git flow initialized, the graph groups its lanes like the classic Git flow diagram, production left, then hotfix, release, development and features, one color per branch type, also for branches that were deleted long ago. Stored per repository.
 
 - Clone a repository from the start screen: URL, where to clone to, folder name (derived from the URL), full path preview and "Clone submodules"; progress and Cancel in the dialog, credentials asked like for fetch; the clone opens in the tab. A failed or cancelled clone leaves no new folder behind.

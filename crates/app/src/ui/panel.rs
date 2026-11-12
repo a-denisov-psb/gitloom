@@ -586,40 +586,151 @@ fn details_header(id: &str) -> Element<'_, Message> {
 
 /// Summary (larger) and description in a framed, scrollable box whose text
 /// can be selected and copied (M14-01).
+/// Focus target of the message editor's summary (M14-05).
+pub const MESSAGE_EDIT_SUMMARY: &str = "message-edit-summary";
+
 fn message_box<'a>(
     view: &'a RepoView,
     commit: &'a Commit,
     max_height: f32,
 ) -> Element<'a, Message> {
-    let inner: Element<'a, Message> = match view.message_box.as_ref().filter(|m| m.id == commit.id)
-    {
-        Some(message) => {
-            let summary = text_editor(&message.summary)
-                .size(16)
-                .padding(0)
-                .style(theme::message_text)
-                .on_action(|action| Message::DetailsTextInput {
-                    body: false,
-                    action,
-                });
-            let body = (!commit.body.is_empty()).then(|| {
-                text_editor(&message.body)
-                    .padding(0)
-                    .style(theme::message_text)
-                    .on_action(|action| Message::DetailsTextInput { body: true, action })
-            });
-            column![summary].push(body).spacing(8).into()
-        }
-        None => column![text(&commit.summary).size(16)]
+    if let Some(edit) = view.message_edit.as_ref().filter(|e| e.id == commit.id) {
+        return message_editor(edit);
+    }
+    let block = view.message_edit_block(&commit.id);
+    let editable = block == Some(None) && view.busy.is_none();
+    let plain = || -> Element<'a, Message> {
+        column![text(&commit.summary).size(16)]
             .push((!commit.body.is_empty()).then(|| text(&commit.body)))
             .spacing(8)
-            .into(),
+            .into()
     };
-    container(crate::ui::vscroll(container(inner).padding(10).width(Fill)))
-        .max_height(max_height.max(60.0))
-        .width(Fill)
-        .style(theme::message_box)
-        .into()
+    let inner: Element<'a, Message> = if editable {
+        // A click opens the editor (M14-05); plain text so the click is
+        // not taken by the selection.
+        plain()
+    } else {
+        match view.message_box.as_ref().filter(|m| m.id == commit.id) {
+            Some(message) => {
+                let summary = text_editor(&message.summary)
+                    .size(16)
+                    .padding(0)
+                    .style(theme::message_text)
+                    .on_action(|action| Message::DetailsTextInput {
+                        body: false,
+                        action,
+                    });
+                let body = (!commit.body.is_empty()).then(|| {
+                    text_editor(&message.body)
+                        .padding(0)
+                        .style(theme::message_text)
+                        .on_action(|action| Message::DetailsTextInput { body: true, action })
+                });
+                column![summary].push(body).spacing(8).into()
+            }
+            None => plain(),
+        }
+    };
+    let framed: Element<'a, Message> =
+        container(crate::ui::vscroll(container(inner).padding(10).width(Fill)))
+            .max_height(max_height.max(60.0))
+            .width(Fill)
+            .style(theme::message_box)
+            .into();
+    if editable {
+        let clickable = iced::widget::mouse_area(framed)
+            .on_press(Message::CommitEditStart)
+            .interaction(iced::mouse::Interaction::Text);
+        with_tooltip_text(clickable.into(), "Click to edit the message".into())
+    } else {
+        match block {
+            Some(Some(reason)) => with_tooltip_text(framed, reason),
+            _ => framed,
+        }
+    }
+}
+
+/// Inline message editor (M14-05): summary with the commit panel's
+/// counter, description, the note about other refs, Save and Cancel.
+fn message_editor(edit: &crate::repo_view::MessageEdit) -> Element<'_, Message> {
+    let remaining = SUMMARY_LIMIT as i64 - edit.summary.chars().count() as i64;
+    let summary = text_input("Summary", &edit.summary)
+        .id(MESSAGE_EDIT_SUMMARY)
+        .padding(iced::Padding::new(6.0).right(COUNTER_ROOM))
+        .style(theme::input)
+        .on_input(Message::CommitEditSummary)
+        .on_submit(Message::CommitEditSave);
+    let counter = text(remaining.to_string())
+        .size(11)
+        .style(match counter_level(remaining) {
+            CounterLevel::Normal => theme::text_muted,
+            CounterLevel::Warning => theme::text_warning,
+            CounterLevel::Over => theme::text_danger,
+        });
+    let summary = iced::widget::stack![
+        summary,
+        container(counter)
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::Right)
+            .align_y(iced::Center)
+            .padding(iced::Padding::ZERO.right(8)),
+    ];
+    let body = text_editor(&edit.body)
+        .placeholder("Description")
+        .padding(6)
+        .style(theme::editor)
+        .height(120)
+        .on_action(Message::CommitEditBody)
+        // Ctrl+Enter saves instead of inserting a line break.
+        .key_binding(|press| {
+            let enter = matches!(
+                press.key.as_ref(),
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
+            );
+            if enter && press.modifiers.command() {
+                return Some(text_editor::Binding::Custom(Message::CommitEditSave));
+            }
+            text_editor::Binding::from_key_press(press)
+        });
+    let mut notes = column![].spacing(2);
+    if let Loadable::Ready(facts) = &edit.facts {
+        for name in &facts.keep_old {
+            notes = notes.push(muted(format!("{name} keeps the old commit")).size(12));
+        }
+        if facts.drops_signature {
+            notes = notes.push(
+                muted("Signatures of the rewritten commits are removed (signing is off)").size(12),
+            );
+        }
+    }
+    let error = edit
+        .error
+        .as_ref()
+        .map(|e| text(e.clone()).size(12).style(theme::text_danger));
+    let buttons = row![
+        space::horizontal(),
+        button(text("Cancel").size(12))
+            .padding([4, 10])
+            .style(button::secondary)
+            .on_press(Message::CommitEditCancel),
+        button(text("Save").size(12))
+            .padding([4, 10])
+            .style(button::primary)
+            .on_press(Message::CommitEditSave),
+    ]
+    .spacing(8);
+    container(
+        column![summary, body]
+            .push(error)
+            .push(notes)
+            .push(buttons)
+            .spacing(8),
+    )
+    .padding(10)
+    .width(Fill)
+    .style(theme::message_box)
+    .into()
 }
 
 fn details_content<'a>(
