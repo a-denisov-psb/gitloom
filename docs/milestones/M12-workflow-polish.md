@@ -115,11 +115,13 @@ No release (ADR-042): when all tasks are done, continue with M13.
 
 ## Tasks
 
-### [ ] M12-01 Deselect on click and Stage/Unstage-only hover
+### [x] M12-01 Deselect on click and Stage/Unstage-only hover
 
 - Per the decisions table; UX-PARITY deviation for the hover.
 
 Acceptance: app tests for deselect in every list (diff/conflict view closes); snapshots of hovered rows.
+
+Note: the selected row sends `DiffClosed` (like Esc) in every list built by `file_row` (Unstaged, Staged, Conflicted, commit and stash files). Hover labels keep GitKraken's "Stage File" / "Unstage File". Tests: layout test `second_click_on_a_file_deselects_it` (unstaged, staged, conflicted), snapshot test `ui_check_file_row_hover` (no Discard on hover).
 
 ### [ ] M12-02 Toasts and plain-language errors
 

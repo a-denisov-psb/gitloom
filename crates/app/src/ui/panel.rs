@@ -573,7 +573,11 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         ]
         .align_y(iced::Center),
     )
-    .on_press(if file.kind == git_core::ChangeKind::Conflicted {
+    // A click on the selected file deselects it and closes its diff or
+    // conflict view, like Esc (M12-01).
+    .on_press(if selected {
+        Message::DiffClosed
+    } else if file.kind == git_core::ChangeKind::Conflicted {
         Message::ConflictOpened(file.path.clone())
     } else {
         Message::DiffOpened(request)
@@ -583,18 +587,13 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
     .clip(true)
     .style(theme::list_item(selected));
 
-    // Like GitKraken: the stage/unstage button appears while hovering the row.
+    // The stage/unstage button appears while hovering the row; Discard is
+    // in the context menu only (M12-01, maintainer decision).
     let quick_actions = match area {
-        FileArea::Unstaged => Some(row![
-            button(text("Discard").size(11))
-                .on_press(Message::Discard(DiscardTarget::File(file.clone())))
-                .padding([2, 8])
-                .style(button::danger),
-            button(text("Stage File").size(11))
-                .on_press(Message::Stage(file.clone()))
-                .padding([2, 8])
-                .style(button::secondary),
-        ]),
+        FileArea::Unstaged => Some(row![button(text("Stage File").size(11))
+            .on_press(Message::Stage(file.clone()))
+            .padding([2, 8])
+            .style(button::secondary)]),
         FileArea::Staged => Some(row![button(text("Unstage File").size(11))
             .on_press(Message::Unstage(file.clone()))
             .padding([2, 8])

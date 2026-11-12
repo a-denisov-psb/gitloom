@@ -1464,6 +1464,69 @@ mod tests {
         snapshot(&app, "panels-hidden");
     }
 
+    /// A click on the selected file deselects it and closes its view
+    /// (M12-01): unstaged, staged and conflicted lists. Layout only.
+    #[test]
+    fn second_click_on_a_file_deselects_it() {
+        use crate::repo_view::CenterView;
+        let shown = |app: &App| match &app.tabs[0].view().unwrap().center {
+            CenterView::Diff(diff) => Some(diff.request.path.clone()),
+            CenterView::Conflict(conflict) => Some(conflict.path.clone()),
+            _ => None,
+        };
+        let mut app = crate::app::tests::staging_app(&["unstaged.txt"], &["staged.txt"]);
+        crate::app::tests::with_conflicts(&mut app, &["conflicted.txt"]);
+        let _ = app.update(Message::WipSelected);
+        for name in ["unstaged.txt", "staged.txt", "conflicted.txt"] {
+            // The row's position (the diff header shows the name too).
+            let row = {
+                let mut sim = simulator(&app);
+                let target = sim.find(name).unwrap_or_else(|e| panic!("{e}"));
+                iced_test::selector::Bounded::bounds(&target).center()
+            };
+            let press = |app: &mut App| {
+                let messages: Vec<Message> = {
+                    let mut sim = simulator(app);
+                    sim.point_at(row);
+                    let _ = sim.simulate(iced_test::simulator::click());
+                    sim.into_messages().collect()
+                };
+                for message in messages {
+                    let _ = app.update(message);
+                }
+            };
+            press(&mut app);
+            assert_eq!(shown(&app).as_deref(), Some(name), "{name} opens");
+            press(&mut app);
+            assert_eq!(shown(&app), None, "{name} closes on the second click");
+        }
+    }
+
+    /// The hover shows only "Stage File" / "Unstage File" (M12-01).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_file_row_hover() {
+        let mut app = crate::app::tests::staging_app(&["unstaged.txt"], &["staged.txt"]);
+        let _ = app.update(Message::WipSelected);
+        for (name, label) in [
+            ("unstaged.txt", "Stage File"),
+            ("staged.txt", "Unstage File"),
+        ] {
+            let mut sim = simulator(&app);
+            let target = sim.find(name).unwrap_or_else(|e| panic!("{e}"));
+            sim.point_at(iced_test::selector::Bounded::bounds(&target).center());
+            let _ = sim.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: iced_test::selector::Bounded::bounds(&target).center(),
+            })]);
+            assert!(sim.find(label).is_ok(), "{label} on hover");
+            assert!(sim.find("Discard").is_err(), "no Discard on hover");
+            let snap = sim.snapshot(&app.theme()).unwrap();
+            assert!(snap
+                .matches_image(fresh_path(&format!("file-hover-{label}")))
+                .unwrap());
+        }
+    }
+
     /// Preferences modal (M11-13): a click on the backdrop does not close it,
     /// and the app behind is out of reach for focus and Tab. Layout only.
     #[test]
