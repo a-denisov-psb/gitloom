@@ -131,6 +131,14 @@ const CATALOG: &[(&[&str], Explanation)] = &[
         },
     ),
     (
+        &["detected dubious ownership"],
+        Explanation {
+            title: "Repository not trusted",
+            explanation: "Git refuses to work in this folder because it belongs to another user.",
+            hint: "Trust the repository if you know the folder (Trust this repository…).",
+        },
+    ),
+    (
         &[
             "you are not currently on a branch",
             "head detached",
@@ -181,6 +189,7 @@ mod tests {
             ("fatal: not a git repository (or any of the parent directories): .git", "Not a Git repository"),
             ("error: gpg failed to sign the data", "Signing failed"),
             ("fatal: You are not currently on a branch.", "No branch checked out"),
+            ("fatal: detected dubious ownership in repository at '/r'", "Repository not trusted"),
         ];
         for (stderr, title) in samples {
             assert_eq!(explain(stderr).map(|e| e.title), Some(title), "{stderr}");

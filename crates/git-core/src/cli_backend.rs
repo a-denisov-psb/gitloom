@@ -167,6 +167,38 @@ pub fn write_global_identity(identity: &crate::Identity) -> Result<()> {
     Ok(())
 }
 
+/// The path Git prints in its "detected dubious ownership in repository at
+/// '<path>'" error (M12-14), if `stderr` is that error.
+pub fn dubious_ownership(stderr: &str) -> Option<&str> {
+    const START: &str = "detected dubious ownership in repository at '";
+    let start = stderr.find(START)? + START.len();
+    let rest = &stderr[start..];
+    rest.find('\'').map(|end| &rest[..end])
+}
+
+/// Fails with Git's error if Git refuses to work in the repository at
+/// `root` (e.g. dubious ownership); cheap (`git rev-parse --git-dir`).
+pub fn check_repository_access(root: &Path) -> Result<()> {
+    let output = command(Path::new("git"))
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(root)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()
+        .map_err(|e| Error::Backend(format!("Could not run git: {e}")))?;
+    finish("git rev-parse --git-dir".into(), output).map(drop)
+}
+
+/// Trusts the repository at `path` (as Git printed it) by adding it to
+/// `safe.directory` in the global Git config (M12-14).
+pub fn trust_directory(path: &str) -> Result<()> {
+    let output = command(Path::new("git"))
+        .args(["config", "--global", "--add", "safe.directory", path])
+        .current_dir(std::env::temp_dir())
+        .output()
+        .map_err(|e| Error::Backend(format!("Could not run git: {e}")))?;
+    finish("git config --global --add safe.directory".into(), output).map(drop)
+}
+
 /// Output of a successful command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitOutput {
@@ -1060,6 +1092,20 @@ pub(crate) fn command(git: &Path) -> Command {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dubious_ownership_message() {
+        let stderr = "fatal: detected dubious ownership in repository at '/srv/repo'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory /srv/repo";
+        assert_eq!(super::dubious_ownership(stderr), Some("/srv/repo"));
+        assert_eq!(
+            super::dubious_ownership("fatal: detected dubious ownership in repository at '%(prefix)///wsl.localhost/Ubuntu/home/me'"),
+            Some("%(prefix)///wsl.localhost/Ubuntu/home/me")
+        );
+        assert_eq!(
+            super::dubious_ownership("fatal: not a git repository"),
+            None
+        );
+    }
     use super::*;
 
     #[test]

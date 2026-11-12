@@ -18,6 +18,14 @@ If authentication fails, the error dialog shows Git's output with a hint; with a
 
 Another Git process (an IDE, a terminal, a crashed tool) holds `index.lock` or a ref lock. Gitloom never deletes locks; finish or close the other program and choose **Retry**. Remove the lock file yourself only if you are sure no Git process is running.
 
+## "Git does not trust this repository"
+
+Git refuses to work in a repository whose folder belongs to another user ("detected dubious ownership"), for example on a shared drive, an external disk or a WSL folder opened from Windows. Gitloom shows this in plain words with **Trust this repository…**: after you confirm, it adds the folder to `safe.directory` in your global Git config (exactly what Git's own message suggests) and opens the repository. Only trust folders you know. To undo it, remove the `safe.directory` line from the global Git config.
+
+## Repositories inside WSL
+
+A repository opened from Windows through `\\wsl$\<distro>\…` or `\\wsl.localhost\<distro>\…` works, but slowly: Gitloom uses Windows Git, which reads every file over the network share and can see file modes and line endings differently from the Git inside WSL. A notice in the tab says so (**Don't show again** hides it for that repository); recent repositories inside WSL show a "WSL: <distro>" badge. Changes are detected by checking every 2 seconds, since Windows does not report changes in WSL folders reliably. A WSL mode that runs Git inside WSL is planned after 1.0.
+
 ## External tools
 
 - **Diff and merge tools** come from Git (`git difftool --tool-help`). If none is configured, choose one in Preferences → External tools. Gitloom waits for the tool and refreshes when it closes. Only graphical tools work; terminal tools such as `vimdiff` get no window.
