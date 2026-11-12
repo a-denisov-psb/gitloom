@@ -29,6 +29,13 @@ pub enum UndoAction {
     StashPush(Box<git_core::work_undo::StashPushRecord>),
     /// "Delete stash" (M12-07).
     StashDrop(git_core::work_undo::StashDropRecord),
+    /// Remote added, removed, renamed or edited; upstream set or unset (M12-08).
+    Remote(git_core::remote_undo::RemoteChange),
+    /// Checkouts of a submodule update (M12-08).
+    Submodules {
+        label: String,
+        record: git_core::submodule::UpdateRecord,
+    },
 }
 
 impl UndoAction {
@@ -60,6 +67,8 @@ impl UndoAction {
             Self::Work(change) => change.label.clone(),
             Self::StashPush(_) => "Stash".to_owned(),
             Self::StashDrop(_) => "Delete stash".to_owned(),
+            Self::Remote(change) => change.label(),
+            Self::Submodules { label, .. } => label.clone(),
         }
     }
 }
@@ -109,6 +118,12 @@ mod tests {
             position: 0,
         });
         assert_eq!(drop.label(), "Delete stash");
+        let unset = UndoAction::Remote(git_core::remote_undo::RemoteChange::Upstream {
+            branch: "main".into(),
+            before: Some(("origin".into(), "refs/heads/main".into())),
+            after: None,
+        });
+        assert_eq!(unset.label(), "Unset upstream of main");
         assert!(!drop.moves_head());
     }
 }

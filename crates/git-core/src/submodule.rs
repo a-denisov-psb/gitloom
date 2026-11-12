@@ -140,6 +140,171 @@ pub fn update_args(paths: &[String]) -> Vec<String> {
     args
 }
 
+/// Checked-out commit per submodule path (`None`: not initialized).
+pub type Heads = Vec<(String, Option<Oid>)>;
+
+/// The checked-out commits of all submodules (M12-08).
+pub fn heads(git: &dyn GitWriter, root: &Path) -> Result<Heads> {
+    if !root.join(".gitmodules").is_file() {
+        return Ok(Vec::new());
+    }
+    let read = RunOptions {
+        read_only: true,
+        ..RunOptions::default()
+    };
+    let output = git.run(&["submodule", "status", "--recursive"], read)?;
+    Ok(parse_status(&output.stdout_text())
+        .into_iter()
+        .map(|s| {
+            let head = (s.state != SubmoduleState::NotInitialized).then_some(s.commit);
+            (s.path, head)
+        })
+        .collect())
+}
+
+/// What a submodule update changed: `(path, before, after)` of every
+/// submodule whose checkout moved (M12-08).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateRecord {
+    pub changes: Vec<(String, Option<Oid>, Option<Oid>)>,
+}
+
+/// Compares the heads before and after an update; `None` when nothing moved.
+pub fn update_record(before: &Heads, after: &Heads) -> Option<UpdateRecord> {
+    let changes: Vec<_> = after
+        .iter()
+        .filter_map(|(path, now)| {
+            let was = before
+                .iter()
+                .find(|(p, _)| p == path)
+                .and_then(|(_, head)| head.clone());
+            (was != *now).then(|| (path.clone(), was, now.clone()))
+        })
+        .collect();
+    (!changes.is_empty()).then_some(UpdateRecord { changes })
+}
+
+/// The submodule's working tree has local changes (or cannot be read).
+fn dirty(git: &dyn GitWriter, path: &str) -> bool {
+    let read = RunOptions {
+        read_only: true,
+        ..RunOptions::default()
+    };
+    git.run(&["-C", path, "status", "--porcelain"], read)
+        .map_or(true, |s| !s.stdout.is_empty())
+}
+
+/// The innermost other changed submodule containing `path`, as (parent,
+/// path relative to it); `None` for a submodule of the repository itself.
+fn parent_of<'a>(
+    path: &'a str,
+    all: &'a [(String, Option<Oid>, Option<Oid>)],
+) -> Option<(&'a str, &'a str)> {
+    all.iter()
+        .filter_map(|(other, _, _)| {
+            let rest = path.strip_prefix(other.as_str())?.strip_prefix('/')?;
+            Some((other.as_str(), rest))
+        })
+        .max_by_key(|(other, _)| other.len())
+}
+
+/// Undoes (`undo`) or redoes a submodule update: checks the recorded
+/// commits out again (detached, as Git leaves submodules), and
+/// de-initializes submodules that were not initialized before. Refuses
+/// without changes when a submodule moved or has local changes since.
+pub fn switch_update(
+    git: &dyn GitWriter,
+    root: &Path,
+    record: &UpdateRecord,
+    undo: bool,
+) -> Result<()> {
+    let current = heads(git, root)?;
+    let head_of = |path: &str| {
+        current
+            .iter()
+            .find(|(p, _)| p == path)
+            .and_then(|(_, head)| head.clone())
+    };
+    for (path, before, after) in &record.changes {
+        let (expected, _) = if undo {
+            (after, before)
+        } else {
+            (before, after)
+        };
+        if head_of(path) != *expected || (expected.is_some() && dirty(git, path)) {
+            return Err(crate::Error::Backend(format!(
+                "Cannot {}: the submodule {path} changed",
+                if undo { "undo" } else { "redo" }
+            )));
+        }
+    }
+    // Undo works from the innermost submodule outwards, redo the other way.
+    let mut order: Vec<&(String, Option<Oid>, Option<Oid>)> = record.changes.iter().collect();
+    order.sort_by_key(|(path, _, _)| path.matches('/').count());
+    if undo {
+        order.reverse();
+    }
+    for (path, before, after) in order {
+        let target = if undo { before } else { after };
+        let parent = parent_of(path, &record.changes);
+        // A nested submodule whose parent goes away with a deinit needs nothing.
+        if undo
+            && parent.is_some_and(|(p, _)| {
+                record
+                    .changes
+                    .iter()
+                    .any(|(q, before, _)| q == p && before.is_none())
+            })
+        {
+            continue;
+        }
+        let (dir, rel) = match parent {
+            Some((parent, rel)) => (parent.to_owned(), rel.to_owned()),
+            None => (".".to_owned(), path.clone()),
+        };
+        match target {
+            Some(commit) if head_of(path).is_some() || !undo => {
+                if head_of(path).is_none() {
+                    git.run(
+                        &[
+                            "-C",
+                            &dir,
+                            "submodule",
+                            "update",
+                            "--init",
+                            "--quiet",
+                            "--",
+                            &rel,
+                        ],
+                        RunOptions::default(),
+                    )?;
+                }
+                git.run(
+                    &["-C", path, "checkout", "--quiet", "--detach", commit],
+                    RunOptions::default(),
+                )?;
+            }
+            Some(_) => {}
+            None => {
+                git.run(
+                    &[
+                        "-C",
+                        &dir,
+                        "submodule",
+                        "deinit",
+                        "--quiet",
+                        "--force",
+                        "--",
+                        &rel,
+                    ],
+                    RunOptions::default(),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

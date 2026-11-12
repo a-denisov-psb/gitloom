@@ -675,6 +675,25 @@ pub struct NetworkRequest {
     pub kind: NetworkKind,
     pub args: Vec<String>,
     pub background: bool,
+    /// What to record for undo (M12-08).
+    pub undo: NetworkUndo,
+}
+
+/// Undo recording of a network request (M12-08): the local part of a pull
+/// and a submodule update are undoable; fetch and push are not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkUndo {
+    None,
+    /// `git pull` of the checked-out branch.
+    Pull,
+    /// Fast-forward of a branch that is not checked out (`fetch r b:b`).
+    PullBranch {
+        branch: String,
+    },
+    /// `git submodule update` in the repository at `root`.
+    SubmoduleUpdate {
+        root: std::path::PathBuf,
+    },
 }
 
 /// Inline input for a new branch in the graph (toolbar Branch, Ctrl+B).

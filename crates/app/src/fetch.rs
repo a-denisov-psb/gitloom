@@ -23,6 +23,7 @@ pub fn fetch_all(background: bool, prune: bool) -> NetworkRequest {
         kind: NetworkKind::Fetch,
         args,
         background,
+        undo: crate::repo_view::NetworkUndo::None,
     }
 }
 
@@ -37,6 +38,7 @@ pub fn pull(mode: git_core::PullMode, prune: bool) -> NetworkRequest {
         kind: NetworkKind::Pull,
         args,
         background: false,
+        undo: crate::repo_view::NetworkUndo::Pull,
     }
 }
 

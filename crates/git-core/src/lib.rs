@@ -32,6 +32,7 @@ mod patch;
 mod pick;
 pub mod prompt;
 mod refname;
+pub mod remote_undo;
 pub mod remote_web;
 mod reset;
 mod resolve;
@@ -78,8 +79,8 @@ pub use history::{
     tag_message, unreachable_from_branches, HeadPosition, RefChange,
 };
 pub use history_ops::{
-    current_branch, current_state, index_tree, redo_history, undo_history, HistoryChange,
-    HistoryUndo,
+    current_branch, current_state, index_tree, record_branch_move, record_pull, redo_history,
+    undo_history, HistoryChange, HistoryUndo,
 };
 pub use identity::{ASKPASS_ENV, EDITOR_DIR_ENV, EDITOR_ENV};
 pub use merge::{
