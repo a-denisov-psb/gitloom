@@ -45,6 +45,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- A second click on the selected file in the right panel deselects it and closes its diff or conflict view (like Esc). Hovering a file shows only "Stage File" / "Unstage File"; Discard is in the file's context menu.
 - New README screenshot, rendered from a scripted example repository (`scripts/screenshot.sh`).
 - Two buttons at the right end of the toolbar show and hide the left panel and the commit panel (also Ctrl+J and Ctrl+K).
 - Preferences open as a centered window over the app (the whole window when it is small); "×" or Esc closes them, Tab stays inside.
