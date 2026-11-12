@@ -45,6 +45,8 @@ Out of scope:
 
 Answered (maintainer, 2026-11-10/11): order production, hotfix, release, development, features; derive deleted branches from where they fork off and where they are merged; never limit the width calculation to the visible area; unknown segments may be shown in a neutral color.
 
+Context menus (GitKraken 7.5.2 screenshots, 2026-11-12): local branch, remote branch, tag, graph pill, unstaged/staged/commit file, stash and remote menus; commit, stash and remote menus need no change.
+
 Open:
 
 | Item | Used in |
@@ -69,6 +71,8 @@ Open:
 | M13-03 | Toggle and persistence | M13-02 |
 | M13-04 | Labels and tooltips | M13-02 |
 | M13-05 | Performance, documentation, wrap-up | M13-01 … M13-04 |
+| M13-06 | Branch, remote branch and tag menus like GitKraken | – |
+| M13-07 | File menus like GitKraken | – |
 
 ---
 
@@ -105,6 +109,114 @@ Acceptance: app tests for label texts per source; snapshot with deleted feature,
 - User guide `git-flow.md` (the layout, how types are inferred, limits), `coming-from-gitkraken.md`; UX-PARITY extension row; `docs/RELEASE-CHECKLIST.md` section "7g. New in M13"; CHANGELOG `[Unreleased]`; `docs/ARCHITECTURE.md` "Lane groups" extended by the classifier; ROADMAP backlog entry "cap lanes per group" only if the verification item asks for it.
 
 Acceptance: measurements recorded; docs reviewed.
+
+### [ ] M13-06 Branch, remote branch and tag menus like GitKraken
+
+Found by the maintainer while testing (2026-11-12, GitKraken 7.5.2 screenshots of the local branch, remote branch, tag and graph pill menus). GitKraken's ref menus carry the most used actions of the ref's commit; ours only had ref actions. Not everything is taken over: only what is used often on a ref (see "Not taken over").
+
+Menus (same builder for left panel and graph pills; separators as shown by "---"; `<head>` = checked-out branch or "HEAD"):
+
+Local branch `<b>`:
+- Checkout `<b>` (not shown for the checked-out branch, like GitKraken)
+- ---
+- Pull, Push, Set upstream…, Unset upstream (unchanged)
+- ---
+- Merge / Rebase / Fast-forward entries (unchanged)
+- ---
+- Create branch here, Reset `<head>` to this commit…
+- ---
+- Rename `<b>`…, Delete `<b>` (disabled for the checked-out branch, hint "Checked-out branch")
+- ---
+- Copy branch name, Copy commit sha
+- ---
+- Hide, Solo (unchanged)
+- ---
+- Create tag here
+
+Remote branch `<r>`:
+- Merge / Rebase / Fast-forward entries incl. "Fast-forward <local> to <r>" (unchanged, moved to the top like GitKraken)
+- ---
+- Checkout `<r>`, Create branch here, Reset `<head>` to this commit…, Delete `<r>` (deletes on the remote, confirmation unchanged)
+- ---
+- Copy branch name, Copy commit sha
+- ---
+- Hide, Solo (unchanged)
+- ---
+- Create tag here
+
+Tag `<t>`:
+- Push `<t>` to `<remote>` (remote name in the label when the push goes to one known remote; otherwise "Push `<t>`…"; behavior unchanged)
+- ---
+- Merge / Rebase / Fast-forward entries for the tag's commit (same rules as for branches, using `refs/tags/<t>` peeled)
+- ---
+- Create branch here, Reset `<head>` to this commit…
+- ---
+- Delete `<t>` locally, Delete `<t>` from `<remote>` (same label rule as Push)
+- ---
+- Copy tag name, Copy commit sha
+
+Behavior:
+- "Create branch here": start point is the commit the ref points to (tags peeled); no upstream (`git switch --create <name> <sha>`); "Checkout" of a remote branch stays the way to get a tracking branch. Same flow as the commit menu (M3-07): select the commit, scroll it into view, inline input in its branch/tag column, same validation, Enter creates and checks out, Esc cancels. No dead end (ADR-044): if the commit has no visible row (hidden or soloed away, beyond the loaded commits), a small dialog "Create branch at <ref>" with the same name field, validation and "Create branch" / "Cancel".
+- "Reset `<head>` to this commit…": the existing reset dialog (Soft/Mixed/Hard) for the ref's commit, same enable rules as the commit menu (`CommitFacts`), undo unchanged.
+- "Copy commit sha": full sha of the ref's commit (peeled for tags).
+- Long names: labels follow the existing menu width rules (M6-19); names are not shortened.
+- Disabled states and hints as for the other write items (read-only, running operation).
+
+Not taken over (documented in UX-PARITY as deliberate deviations): Cherry pick commit, Revert commit and Edit commit message in ref menus (they stay in the commit menu), Create annotated tag here (our tag form covers both), Push and start a pull request (no provider APIs), tag Hide/Solo, Hide/Show all tags, Annotate tag.
+
+Acceptance:
+- `menus.rs` tests: order and labels of all three menus; Checkout absent for the checked-out branch; enable rules for Create branch here, Reset and Copy commit sha (incl. read-only); peeled target for annotated tags; merge entries for tags.
+- App tests: Create branch here from a local branch, a remote branch (no upstream afterwards) and a tag; fallback dialog for a hidden branch; reset dialog opens for the ref's commit; undo deletes a created branch.
+- `docs/UX-PARITY.md`: row "Right click commit/branch" and "Branch button / Ctrl+B" updated (M13-06); deviations listed in the deviations table.
+- User guide (branches and tags pages) updated; CHANGELOG `[Unreleased]` → Changed: "Branch, remote branch and tag menus are ordered like GitKraken's and name the branch or tag; they also offer Create branch here, Reset to this commit and Copy commit sha."
+- `docs/RELEASE-CHECKLIST.md`: checks in this milestone's section (left panel and graph pill menus; hidden branch → dialog).
+- `./scripts/check.sh` green.
+
+### [ ] M13-07 File menus like GitKraken
+
+Found by the maintainer while testing (2026-11-12, GitKraken 7.5.2 screenshots of the unstaged, staged and commit file menus).
+
+Menus ("---" = separator):
+
+Unstaged file:
+- Stage, Discard changes, Ignore
+- ---
+- Open in merge tool (conflicted files only, unchanged), File history, File blame
+- ---
+- Open in external diff tool, Open in external editor, Open file location
+- ---
+- Copy file path
+
+Staged file:
+- Unstage, Discard changes, Copy commit message prompt…
+- ---
+- File history, File blame
+- ---
+- Open in external diff tool, Open in external editor, Open file location
+- ---
+- Copy file path
+
+File in the commit details (and multi-commit file list):
+- File history, File blame
+- ---
+- Open in external diff tool, Open in external editor, Open file location
+- ---
+- Copy file path
+
+Behavior:
+- File blame: opens the history/blame view in Blame mode (M5-10). Unstaged/staged: the working copy file; commit files: blame at that commit. Disabled for untracked and added-only files with the hint "Untracked files have no history" / "Added in this commit" where blame has nothing to show; deleted files: blame at the parent.
+- Open in external diff tool: the configured diff tool (M5/M8 External tools). Unstaged: index vs. working tree; staged: HEAD vs. index; commit files: first parent vs. commit (temporary files from `git show <rev>:<path>`, cleaned up afterwards). Not configured → disabled with hint "Set a diff tool in Preferences → External tools".
+- Open file location in commit lists: the file in the working tree; disabled with hint "Not in the working tree" when it does not exist there.
+- Discard changes in the staged menu: discards the staged and unstaged changes of that file (back to HEAD) after the existing confirmation; undoable like the unstaged discard (ADR-043).
+
+Not taken over (deliberate deviations in UX-PARITY): Ignore submenu (file / extension / folder), Edit file and Delete file (no in-app editor), Open file in default program (external editor and Open file location cover it).
+
+Acceptance:
+- Tests for the menu contents per area (incl. conflicted, untracked, deleted files and read-only).
+- App tests: File blame opens Blame mode at the right revision; staged Discard + undo restores index and working tree; external diff of a commit file passes the parent and commit versions (fake tool).
+- `docs/UX-PARITY.md` row "Right click file in staging" updated, deviations listed; user guide updated; CHANGELOG `[Unreleased]` → Changed: "File menus are ordered like GitKraken's and add File blame, Open in external diff tool (also for files of a commit), Open file location for commit files and Discard changes for staged files."
+- `docs/RELEASE-CHECKLIST.md`: checks in this milestone's section (external diff from a commit file on Windows).
+- `./scripts/check.sh` green.
 
 ## After M13
 
