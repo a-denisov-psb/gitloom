@@ -50,11 +50,11 @@ Open:
 
 ## Milestone acceptance
 
-- [ ] Header, message box and author block look like GitKraken's; co-authors and parent links work.
-- [ ] File list summary, sort, Path/Tree, "View all files" and expand/collapse work and are remembered.
-- [ ] The message of an unpushed commit on the checked-out branch can be edited by a click, also with merges after it; the working tree and index stay untouched; undo and redo restore the branch exactly; pushed commits and commits of other branches are not editable and say why.
-- [ ] Time markers appear like GitKraken's.
-- [ ] User guide, UX-PARITY, `docs/user/undo.md`, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] Header, message box and author block look like GitKraken's; co-authors and parent links work.
+- [x] File list summary, sort, Path/Tree, "View all files" and expand/collapse work and are remembered.
+- [x] The message of an unpushed commit on the checked-out branch can be edited by a click, also with merges after it; the working tree and index stay untouched; undo and redo restore the branch exactly; pushed commits and commits of other branches are not editable and say why.
+- [x] Time markers appear like GitKraken's.
+- [x] User guide, UX-PARITY, `docs/user/undo.md`, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
