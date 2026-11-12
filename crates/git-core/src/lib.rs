@@ -67,7 +67,7 @@ pub use discard::{
 pub use editor::{editor_call, editor_main, EditorInput, EditorKind};
 pub use external_tools::{
     configured_tool, difftool_args, mergetool_args, parse_tool_help, run_difftool, run_mergetool,
-    set_repository_editor, tool_info, DiffTarget, ToolInfo, ToolKind,
+    set_flow_layout, set_repository_editor, tool_info, DiffTarget, ToolInfo, ToolKind,
 };
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use flow::{FlowBranch, FlowConfig, FlowKind};
@@ -594,6 +594,12 @@ pub trait GitBackend: Send + Sync {
     /// How the commit panel uses the template (M10-06).
     fn commit_template_options(&self) -> Result<commit_template::TemplateOptions> {
         Ok(commit_template::TemplateOptions::default())
+    }
+
+    /// The graph uses the Git flow layout (`gitloom.flowLayout` in the
+    /// repository config, M13-03); off by default.
+    fn flow_layout(&self) -> Result<bool> {
+        Ok(false)
     }
 
     /// Operation in progress (merge, rebase, cherry-pick, revert).

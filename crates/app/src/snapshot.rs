@@ -163,6 +163,10 @@ impl RepoSnapshot {
             .commit_template_options()
             .map_err(|e| e.to_string())?;
         snapshot.repo_editor = backend.external_editor().map_err(|e| e.to_string())?;
+        // The Git flow layout stored per repository (M13-03).
+        if backend.flow_layout().map_err(|e| e.to_string())? {
+            snapshot = snapshot.with_flow_layout(true)?;
+        }
         Ok(snapshot)
     }
 
@@ -1484,6 +1488,22 @@ pub(crate) mod flow_tests {
                 "v1.0 → production/main",
             ]
         );
+    }
+
+    #[test]
+    fn flow_layout_is_stored_in_the_repository() {
+        let (repo, _) = classic_snapshot();
+        let git = git_core::CliBackend::new(repo.path());
+        git_core::flow::write(&git, &git_core::FlowConfig::defaults(&["main"])).unwrap();
+        let load = || {
+            let backend = git_core::GixBackend::discover(repo.path()).unwrap();
+            super::RepoSnapshot::load(&backend).unwrap()
+        };
+        assert!(!load().flow_layout, "off by default");
+        git_core::set_flow_layout(&git, true).unwrap();
+        assert!(load().flow_layout);
+        git_core::set_flow_layout(&git, false).unwrap();
+        assert!(!load().flow_layout);
     }
 
     #[test]

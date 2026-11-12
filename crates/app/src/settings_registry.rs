@@ -440,6 +440,13 @@ pub const SETTINGS: &[Setting] = &[
         F,
         &["git flow", "feature", "release", "hotfix"],
     ),
+    setting(
+        "Gitflow layout",
+        C::Gitflow,
+        "Show the graph in the Gitflow layout",
+        F,
+        &["graph", "lanes", "git flow"],
+    ),
     Setting {
         label: "Diff view",
         category: None,

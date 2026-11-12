@@ -108,6 +108,8 @@ pub enum ActionId {
     FlowStart(git_core::FlowKind),
     /// Finish the checked-out Git flow branch (M7-10).
     FlowFinish,
+    /// The graph in the Git flow layout, on or off (M13-03).
+    ToggleFlowLayout,
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -741,6 +743,13 @@ fn table() -> Vec<Action> {
         Global,
         &[],
     );
+    add(
+        A::ToggleFlowLayout,
+        "Toggle Gitflow layout",
+        Interface,
+        Global,
+        &[],
+    );
     for kind in git_core::FlowKind::ALL {
         add(
             A::FlowStart(kind),
@@ -904,6 +913,7 @@ fn table() -> Vec<Action> {
                 | A::InitializeGitflow
                 | A::FlowStart(_)
                 | A::FlowFinish
+                | A::ToggleFlowLayout
         ) {
             action.requires = Requires::Repository;
         }

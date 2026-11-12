@@ -143,6 +143,17 @@ pub fn mergetool_args(tool: Option<&str>, path: &str, delete_orig: bool) -> Vec<
     args
 }
 
+/// Turns the Git flow layout of the repository on or off
+/// (`gitloom.flowLayout` in its config, M13-03).
+pub fn set_flow_layout(git: &dyn GitWriter, on: bool) -> Result<()> {
+    let key = crate::identity::config_key("flowLayout");
+    git.run(
+        &["config", "--local", &key, if on { "true" } else { "false" }],
+        RunOptions::default(),
+    )
+    .map(drop)
+}
+
 /// Sets the repository's external editor (`gitloom.externalEditor` in its
 /// config, M10-11); `None` removes it (the global setting applies).
 pub fn set_repository_editor(git: &dyn GitWriter, command: Option<&str>) -> Result<()> {
