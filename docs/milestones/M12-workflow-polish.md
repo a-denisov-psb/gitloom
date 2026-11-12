@@ -131,11 +131,13 @@ Acceptance: unit tests for the catalog (one stderr sample per entry, unknown fal
 
 Note: see ADR-049 "Implementation". Timeouts are tasks that send `ToastExpired { id, seq }`; tests send it directly (simulated time). A fourth toast pushes out the oldest. `App::notify` and `Toast::with_action` are first used by M12-06. Existing tests that expected error dialogs now check the toast. Snapshots `ui_check_toasts` (error with details, warning, success, info; three themes) checked.
 
-### [ ] M12-03 Remote website links
+### [x] M12-03 Remote website links
 
 - URL derivation in git-core, menu and palette entries per the decisions table, browser via `open_target`.
 
 Acceptance: unit tests for all URL forms (with user, password, ports, trailing slash, `.git`, uppercase host, local paths); app tests for labels per host and the palette choice.
+
+Note: `git_core::remote_web` (`web_url`, `web_label`); the entry follows "Fetch" in the remote menu; palette action "Open remote in browser" (origin, the only remote, else the list `Mode::RemoteWebsites`; disabled "No remote with a website"). A host without a dot (except `localhost`) counts as local. Opens with the existing `OpenLink` (`launch::open_target`).
 
 ### [ ] M12-04 Conflict view navigation and headers
 

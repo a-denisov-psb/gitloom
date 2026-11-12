@@ -74,6 +74,8 @@ pub enum ActionId {
     /// Alt+E: the repository in the external editor (M8-08).
     OpenEditor,
     OpenFileManager,
+    /// The website of a remote (M12-03).
+    OpenRemoteWebsite,
     ExternalDiff,
     Fullscreen,
     ZoomIn,
@@ -697,6 +699,13 @@ fn table() -> Vec<Action> {
         Global,
         &[ch('o').alt()],
     );
+    add(
+        A::OpenRemoteWebsite,
+        "Open remote in browser",
+        PaletteAndSearch,
+        Global,
+        &[],
+    );
 
     add(
         A::InitializeGitflow,
@@ -870,6 +879,7 @@ fn table() -> Vec<Action> {
                 | A::OpenTerminal
                 | A::OpenEditor
                 | A::OpenFileManager
+                | A::OpenRemoteWebsite
                 | A::ExternalDiff
                 | A::InitializeGitflow
                 | A::FlowStart(_)

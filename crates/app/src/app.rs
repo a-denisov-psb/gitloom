@@ -2809,6 +2809,19 @@ impl App {
             Shortcut::FileHistory => return self.open_file_list(),
             Shortcut::ExternalDiff => return self.external_diff(),
             Shortcut::OpenTerminal => return self.update(Message::OpenTerminal),
+            // origin, else the only remote, else a list (M12-03).
+            Shortcut::OpenRemoteWebsite => {
+                let sites = self.remote_websites();
+                let chosen = sites
+                    .iter()
+                    .find(|(name, _)| name == "origin")
+                    .or_else(|| (sites.len() == 1).then(|| &sites[0]));
+                return match chosen {
+                    Some((_, url)) => self.update(Message::OpenLink(url.clone())),
+                    None if sites.is_empty() => Task::none(),
+                    None => self.open_palette(palette::Mode::RemoteWebsites),
+                };
+            }
             Shortcut::OpenEditor => return self.update(Message::OpenInEditor(None)),
             Shortcut::OpenFileManager => return self.update(Message::OpenFileManager),
             Shortcut::ZoomIn => {
@@ -4121,6 +4134,9 @@ impl App {
                 return Some("Stage changes first".to_owned());
             }
         }
+        if id == Shortcut::OpenRemoteWebsite && self.remote_websites().is_empty() {
+            return Some("No remote with a website".to_owned());
+        }
         if id == Shortcut::OpenEditor && self.editor_command().is_empty() {
             return Some(crate::launch::NO_EDITOR.to_owned());
         }
@@ -4251,7 +4267,30 @@ impl App {
                     .collect()
             }
             Mode::Files => Vec::new(),
+            Mode::RemoteWebsites => self
+                .remote_websites()
+                .into_iter()
+                .map(|(name, url)| Entry::new(name, Target::Link(url.clone())).detail(url))
+                .collect(),
         }
+    }
+
+    /// Remotes of the active repository with a website (M12-03), sorted by
+    /// name.
+    fn remote_websites(&self) -> Vec<(String, String)> {
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Vec::new();
+        };
+        let mut sites: Vec<(String, String)> = view
+            .snapshot
+            .remote_urls
+            .iter()
+            .filter_map(|(name, url)| {
+                git_core::remote_web::web_url(url).map(|web| (name.clone(), web))
+            })
+            .collect();
+        sites.sort();
+        sites
     }
 
     /// Runs the selected palette entry (disabled entries do nothing).
@@ -4277,6 +4316,7 @@ impl App {
             Target::Checkout(target) => self.update(Message::Checkout(target)),
             Target::File(path) => self.update(Message::FileHistoryOpened { path, start: None }),
             Target::Identity(choice) => self.update(Message::IdentityChosen(choice)),
+            Target::Link(url) => self.update(Message::OpenLink(url)),
             Target::Mode(_) => Task::none(),
         }
     }
@@ -7202,13 +7242,20 @@ impl App {
             }
             Message::RemoteContextMenu { name, position } => {
                 let writable = self.write_block().is_none();
-                let (external, has_url) =
+                let (external, has_url, website) =
                     self.active_tab()
                         .and_then(Tab::view)
-                        .map_or((None, false), |view| {
+                        .map_or((None, false, None), |view| {
+                            let url = view
+                                .snapshot
+                                .remote_urls
+                                .iter()
+                                .find(|(n, _)| *n == name)
+                                .map(|(_, url)| url.as_str());
                             (
                                 view.snapshot.external_remote(&name),
-                                view.snapshot.remote_urls.iter().any(|(n, _)| *n == name),
+                                url.is_some(),
+                                url.and_then(git_core::remote_web::web_url),
                             )
                         });
                 let (any_shown, any_hidden) =
@@ -7242,6 +7289,7 @@ impl App {
                             any_hidden,
                             external,
                             has_url,
+                            website,
                         },
                     ),
                 ));
@@ -11095,6 +11143,8 @@ pub(crate) mod tests {
             .filter(|a| a.id != Shortcut::OpenEditor)
             // The commit message prompt needs staged changes (M10-07).
             .filter(|a| a.id != Shortcut::CopyCommitPrompt)
+            // A remote website needs a remote with one (M12-03).
+            .filter(|a| a.id != Shortcut::OpenRemoteWebsite)
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
@@ -18361,6 +18411,75 @@ pub(crate) mod tests {
         let mut app = tag_app(&["origin"]);
         let _ = app.update(Message::FetchRemote("origin".into()));
         assert_eq!(running_args(&app), ["Fetch origin"]);
+    }
+
+    #[test]
+    fn remote_websites_in_the_menu_and_the_palette() {
+        let menu_labels = |app: &mut App, name: &str| -> Vec<String> {
+            let _ = app.update(Message::RemoteContextMenu {
+                name: name.into(),
+                position: iced::Point::ORIGIN,
+            });
+            app.context_menu
+                .take()
+                .unwrap()
+                .entries
+                .iter()
+                .filter_map(|e| match e {
+                    MenuEntry::Item { label, .. } => Some(label.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let with_urls = |urls: &[(&str, &str)]| {
+            let names: Vec<&str> = urls.iter().map(|(n, _)| *n).collect();
+            let mut app = tag_app(&names);
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            snapshot.remote_urls = urls
+                .iter()
+                .map(|(n, u)| ((*n).to_owned(), (*u).to_owned()))
+                .collect();
+            view.snapshot = Arc::new(snapshot);
+            app
+        };
+        let mut app = with_urls(&[
+            ("origin", "git@github.com:owner/repo.git"),
+            ("lab", "https://gitlab.com/group/repo.git"),
+            ("bb", "ssh://git@bitbucket.org/team/repo.git"),
+            ("own", "https://git.example.org/x/repo.git"),
+            ("disk", "/srv/git/repo.git"),
+        ]);
+        for (name, label) in [
+            ("origin", Some("Open on GitHub")),
+            ("lab", Some("Open on GitLab")),
+            ("bb", Some("Open on Bitbucket")),
+            ("own", Some("Open in browser")),
+            ("disk", None),
+        ] {
+            let labels = menu_labels(&mut app, name);
+            match label {
+                Some(label) => assert_eq!(labels[1], label, "{name}"),
+                None => assert!(!labels.iter().any(|l| l.starts_with("Open")), "{name}"),
+            }
+        }
+        // The palette entry: origin directly.
+        assert_eq!(app.action_block(Shortcut::OpenRemoteWebsite), None);
+        let _ = app.update(checked(Shortcut::OpenRemoteWebsite, false));
+        assert!(app.palette.is_none(), "origin opens directly");
+        // Without origin and several remotes: a list.
+        let mut app = with_urls(&[
+            ("lab", "https://gitlab.com/group/repo.git"),
+            ("own", "https://git.example.org/x/repo.git"),
+        ]);
+        let _ = app.update(checked(Shortcut::OpenRemoteWebsite, false));
+        assert_eq!(palette_labels(&app), ["lab", "own"]);
+        // Only local remotes: disabled with a reason.
+        let app = with_urls(&[("disk", "/srv/git/repo.git")]);
+        assert_eq!(
+            app.action_block(Shortcut::OpenRemoteWebsite).as_deref(),
+            Some("No remote with a website")
+        );
     }
 
     #[test]

@@ -32,6 +32,7 @@ mod patch;
 mod pick;
 pub mod prompt;
 mod refname;
+pub mod remote_web;
 mod reset;
 mod resolve;
 mod rewrite;
