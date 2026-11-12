@@ -63,7 +63,6 @@ pub fn view<'a>(
     repo: &'a RepoView,
     avatars: &'a crate::avatars::Avatars,
     appearance: &crate::settings::Appearance,
-    palette: &'static theme::ThemePalette,
 ) -> Element<'a, Message> {
     let lanes = repo.snapshot.layout.max_width;
     let widths = appearance.graph_columns.sanitized(MIN_GRAPH_WIDTH);
@@ -99,7 +98,6 @@ pub fn view<'a>(
             );
             iced::widget::Stack::with_children([
                 cell(muted(label).size(HEADER_SIZE), width),
-                header_separator(width),
                 container(handle)
                     .width(width)
                     .height(Fill)
@@ -201,7 +199,6 @@ pub fn view<'a>(
                         clipped,
                         columns,
                         message_width,
-                        palette,
                     },
                 )
             } else {
@@ -513,8 +510,6 @@ pub struct RowLayout<'w> {
     pub columns: Columns,
     /// Fill, or the minimum when the window is too narrow.
     pub message_width: Length,
-    /// Palette of the active theme (style tokens, M11-04).
-    pub palette: &'static theme::ThemePalette,
 }
 
 /// One table row: the WIP row or a commit row.
@@ -530,7 +525,6 @@ pub fn graph_row<'a>(
         clipped,
         columns,
         message_width,
-        palette,
     } = *layout;
     let snapshot = &repo.snapshot;
     let Some(layout_row) = snapshot.layout.row(row_index) else {
@@ -562,7 +556,7 @@ pub fn graph_row<'a>(
         let content = row![
             cell(refs, widths.refs),
             graph_column(
-                graph_cell(layout_row, row_index, Node::Wip, false, CellLook::default()),
+                graph_cell(layout_row, row_index, Node::Wip, false),
                 graph_width,
                 clipped,
                 repo.selection == Some(Selection::Wip),
@@ -607,37 +601,16 @@ pub fn graph_row<'a>(
         repo.selected_commit() == Some(commit.id.as_str()) || repo.multi.contains(&commit.id);
     let refs: Vec<&Reference> = snapshot.refs_at(index).collect();
     let labels = ref_labels(&refs, &snapshot.head, commit);
-    let look = CellLook {
-        tint: !selected,
-        connector: !labels.is_empty(),
-    };
     let refs_cell: Element<'_, Message> = match &repo.new_branch {
         Some(input) if input.row.as_deref() == Some(commit.id.as_str()) => {
             cell(new_branch_input(input), widths.refs)
         }
-        _ if look.connector && palette.ref_connector => {
-            // Classic Dark: the pill's line continues to the column edge
-            // and on in the graph cell to the node (M11-04).
-            let connector = container(space::horizontal())
-                .width(Fill)
-                .height(LINE_WIDTH)
-                .style(theme::ref_connector(color));
-            container(
-                row![ref_pills(labels, repo.drag.as_ref(), color), connector].align_y(iced::Center),
-            )
-            .width(widths.refs)
-            .height(Fill)
-            .padding(iced::Padding::default().left(CELL_PADDING))
-            .align_y(alignment::Vertical::Center)
-            .clip(true)
-            .into()
-        }
-        _ => cell(ref_pills(labels, repo.drag.as_ref(), color), widths.refs),
+        _ => cell(ref_pills(labels, repo.drag.as_ref()), widths.refs),
     };
     let mut content = row![
         refs_cell,
         graph_column(
-            graph_with_avatar(layout_row, row_index, node, dimmed, look),
+            graph_with_avatar(layout_row, row_index, node, dimmed),
             graph_width,
             clipped,
             selected,
@@ -810,12 +783,11 @@ pub fn ref_labels(refs: &[&Reference], head: &Head, commit: &Commit) -> Vec<RefL
 fn ref_pills<'a>(
     labels: Vec<RefLabel>,
     drag: Option<&crate::repo_view::BranchDrag>,
-    lane: u32,
 ) -> Element<'a, Message> {
     let Some(first) = labels.first() else {
         return text("").into();
     };
-    let mut pills = row![pill(first, drag, lane)]
+    let mut pills = row![pill(first, drag)]
         .spacing(PILL_SPACING)
         .align_y(iced::Center);
     if labels.len() > 1 {
@@ -834,11 +806,7 @@ fn ref_pills<'a>(
     pills.into()
 }
 
-fn pill<'a>(
-    label: &RefLabel,
-    drag: Option<&crate::repo_view::BranchDrag>,
-    lane: u32,
-) -> Element<'a, Message> {
+fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> Element<'a, Message> {
     let kind = match label.kind {
         LabelKind::Local => RefKind::LocalBranch,
         LabelKind::Remote => RefKind::RemoteBranch,
@@ -847,7 +815,7 @@ fn pill<'a>(
     };
     let mut content = row![].spacing(PILL_SPACING).align_y(iced::Center);
     if label.head && label.kind == LabelKind::Local {
-        content = content.push(icons::tinted(Icon::Check, PILL_ICON_SIZE, theme::pill_icon));
+        content = content.push(icons::tinted(Icon::Check, PILL_ICON_SIZE, |p| p.text));
     }
     content = content.push(
         text(label.text.clone())
@@ -858,7 +826,7 @@ fn pill<'a>(
         // GitKraken shows a remote icon on combined pills; the names are
         // in the tooltip.
         content = content.push(tooltip(
-            icons::tinted(Icon::Cloud, REMOTE_ICON_SIZE, theme::pill_icon_muted),
+            icons::tinted(Icon::Cloud, REMOTE_ICON_SIZE, |p| p.text_muted),
             container(text(label.remotes.join(", ")).size(12))
                 .padding([4, 8])
                 .style(theme::tooltip),
@@ -868,7 +836,7 @@ fn pill<'a>(
     let pill = container(content)
         .padding([1.0, PILL_PADDING])
         .clip(true)
-        .style(theme::ref_pill_in(kind, label.head, Some(lane)));
+        .style(theme::ref_pill(kind, label.head));
     let pill: Element<'_, Message> = match &label.checkout {
         Some(target) => {
             crate::ui::context_area::double_click_area(pill, Message::Checkout(target.clone()))
@@ -906,22 +874,6 @@ fn pill<'a>(
     }
 }
 
-/// Line at the right edge of a header cell `width` wide (the
-/// `column_separator` token: Classic Dark only, M11-04).
-fn header_separator<'a>(width: impl Into<Length>) -> Element<'a, Message> {
-    container(
-        container(space::vertical())
-            .width(1)
-            .height(14)
-            .style(theme::column_separator),
-    )
-    .width(width)
-    .height(Fill)
-    .align_x(alignment::Horizontal::Right)
-    .align_y(alignment::Vertical::Center)
-    .into()
-}
-
 /// Graph cell `width` wide, with a fade at its right edge when it clips the
 /// lanes (M11-02).
 fn graph_column(
@@ -931,8 +883,8 @@ fn graph_column(
     selected: bool,
     lane_color: u32,
 ) -> Element<'_, Message> {
-    // No left padding: the canvas starts at the column edge, so a ref
-    // connector (Classic Dark) can reach it; `lane_x` adds the padding.
+    // No left padding: the canvas starts at the column edge and `lane_x`
+    // adds the padding (kept from M11-04; same pixels either way).
     let graph: Element<'_, Message> = container(graph)
         .width(width)
         .height(Fill)
@@ -1009,30 +961,11 @@ struct GraphCell {
     node: Node,
     /// The commit does not match the search: faint node.
     dimmed: bool,
-    /// Classic Dark extras (M11-04, drawn only when the palette asks).
-    look: CellLook,
-}
-
-/// What a graph cell may add in themes with the style tokens on (M11-04).
-#[derive(Debug, Clone, Copy, Default)]
-struct CellLook {
-    /// Tint the row from the node to the right edge (`row_tint_alpha`);
-    /// off for the selected row, whose own color stays on top.
-    tint: bool,
-    /// The row has ref pills: a line from the left edge to the node
-    /// (`ref_connector`).
-    connector: bool,
 }
 
 /// Graph cell; an avatar is an image widget on top of the node, because the
 /// canvas does not round images (M5-11).
-fn graph_with_avatar<'a>(
-    row: Row,
-    index: usize,
-    node: Node,
-    dimmed: bool,
-    look: CellLook,
-) -> Element<'a, Message> {
+fn graph_with_avatar<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> Element<'a, Message> {
     let avatar = match &node {
         Node::Commit {
             avatar: Some(handle),
@@ -1043,7 +976,7 @@ fn graph_with_avatar<'a>(
     let x = lane_x(row.lane);
     let lane = row.color.0;
     let stash = matches!(node, Node::Stash);
-    let cell = graph_cell(row, index, node, dimmed, look);
+    let cell = graph_cell(row, index, node, dimmed);
     if stash {
         let alpha = if dimmed { 0.3 } else { 1.0 };
         let icon = icons::colored(Icon::Stash, STASH_ICON, move |theme| {
@@ -1079,33 +1012,20 @@ fn graph_with_avatar<'a>(
     .into()
 }
 
-fn graph_cell<'a>(
-    row: Row,
-    index: usize,
-    node: Node,
-    dimmed: bool,
-    look: CellLook,
-) -> Element<'a, Message> {
+fn graph_cell<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> Element<'a, Message> {
     canvas::Canvas::new(GraphCell {
         row,
         index,
         node,
         dimmed,
-        look,
     })
     .width(Fill)
     .height(Fill)
     .into()
 }
 
-/// Radius of the ring around an avatar (and, Classic Dark, around
-/// initials, with a gap like GitKraken's).
-fn ring_radius(p: &theme::ThemePalette) -> f32 {
-    match p.node_style {
-        theme::NodeStyle::Standard => NODE_RADIUS + 1.0,
-        theme::NodeStyle::Ringed => NODE_RADIUS + 2.5,
-    }
-}
+/// Radius of the ring around an avatar.
+const RING_RADIUS: f32 = NODE_RADIUS + 1.0;
 
 /// Center of `lane` in the graph canvas (which starts at the column edge).
 fn lane_x(lane: u16) -> f32 {
@@ -1128,21 +1048,6 @@ impl canvas::Program<Message> for GraphCell {
         let height = bounds.height;
         let mid = height / 2.0;
         let node = Point::new(lane_x(self.row.lane), mid);
-        let lane = theme::lane_color(p, self.row.color.0);
-
-        // Classic Dark (M11-04): row tint from the node to the right edge,
-        // and the line from the ref pill (left edge) to the node.
-        if self.look.tint && p.row_tint_alpha > 0.0 && node.x < bounds.width {
-            frame.fill_rectangle(
-                Point::new(node.x, 0.0),
-                iced::Size::new(bounds.width - node.x, height),
-                lane.scale_alpha(p.row_tint_alpha),
-            );
-        }
-        if self.look.connector && p.ref_connector {
-            let path = Path::line(Point::new(0.0, mid), node);
-            frame.stroke(&path, line(lane, false));
-        }
 
         for segment in &self.row.segments {
             let (ops, color, dashed) = match *segment {
@@ -1206,13 +1111,10 @@ impl canvas::Program<Message> for GraphCell {
             } => {
                 // The avatar itself is an image on top (`graph_with_avatar`);
                 // a ring in the lane color frames it.
-                frame.stroke(&Path::circle(node, ring_radius(p)), line(color, false));
+                frame.stroke(&Path::circle(node, RING_RADIUS), line(color, false));
             }
             Node::Commit { initials, .. } => {
                 frame.fill(&Path::circle(node, NODE_RADIUS), color);
-                if p.node_style == theme::NodeStyle::Ringed {
-                    frame.stroke(&Path::circle(node, ring_radius(p)), line(color, false));
-                }
                 // Canvas text escapes the cell's clip: a node cut off by a
                 // narrow Graph column (M11-02) shows no initials.
                 if node.x + NODE_RADIUS > bounds.width {

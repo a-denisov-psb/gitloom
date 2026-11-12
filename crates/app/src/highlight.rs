@@ -20,8 +20,8 @@ pub const MAX_BYTES: usize = 1024 * 1024;
 /// Files with more lines than this stay plain.
 pub const MAX_LINES: usize = 20_000;
 
-/// The syntect theme family of a Gitloom theme (ADR-047): Dark and Classic
-/// Dark use "OneHalfDark", Light uses "GitHub". Gitloom keeps its own
+/// The syntect theme family of a Gitloom theme (ADR-047): Dark uses
+/// "OneHalfDark", Light uses "GitHub". Gitloom keeps its own
 /// backgrounds; only the text color and style come from the theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodeTheme {

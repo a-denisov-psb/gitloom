@@ -119,7 +119,6 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 
 ## 7e. New in M11 (Windows required, Linux checked in CI)
 
-- [ ] Classic Dark: rows tinted in the lane color, filled branch and tag labels joined to their commit by a line, ringed nodes, header separators, panel shadows; selected and hovered rows stay readable.
 - [ ] Columns: resize every column incl. Commit message; only that column changes; a double click fits it (Commit message: back to filling); a horizontal scrollbar appears when the table is wider than the window, Shift+wheel and a horizontal touchpad gesture scroll it and the header moves along; the gear menu hides Author/Date/SHA and resets the widths; widths survive a restart.
 - [ ] Stashes: dashed square with the stash icon, "WIP on <branch>" in the graph, STASHES and the details; "Stash" without a template writes Git's default message.
 - [ ] Preferences → Editor: Consolas (and Cascadia Mono if installed) in the font list and applied to diffs, blame, file history and the conflict view; font size, tab size, line numbers, word wrap and syntax highlighting take effect at once.
@@ -141,7 +140,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Undo/Redo: stash, delete stash, rename stash (rename one in the middle of the list, undo, the list is exactly as before), stage/unstage (file, lines, all), mark resolved, pull (fast-forward, merge, rebase), add/remove/rename remote and URL, set/unset upstream, submodule update; each refuses after an outside change.
 - [ ] STASHES: names with `/` form folders, "WIP on feature/x" is not split, folders stay collapsed after a restart.
 - [ ] Ctrl/Shift+click several local and remote branches and a tag, Delete …: grouped dialog with the checked-out branch skipped, unmerged ones asked again, remote branches deleted with one push per remote (progress), Undo restores the local ones in one step.
-- [ ] Palette (Ctrl+P and Ctrl+Shift+P): "Toggle: Word wrap", "Set: Theme › Classic Dark", "Preferences: Default branch name" opens the Preferences with the field highlighted; repository entries only with a repository tab.
+- [ ] Palette (Ctrl+P and Ctrl+Shift+P): "Toggle: Word wrap", "Set: Theme › Light", "Preferences: Default branch name" opens the Preferences with the field highlighted; repository entries only with a repository tab.
 - [ ] The sparkle button right of "Committing as …" opens the commit message prompt; disabled without staged changes.
 - [ ] Open a repository from `\\wsl.localhost\<distro>\…`: notice with "Don't show again", "WSL: <distro>" badge in the recent list, a change made inside WSL appears within a few seconds.
 - [ ] A repository owned by another user (e.g. on another drive or after `takeown`): "Git does not trust this repository" with "Trust this repository…"; after confirming it opens and `safe.directory` is in the global Git config.

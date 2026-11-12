@@ -54,7 +54,7 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - Several branches and tags can be selected (Ctrl/Shift+click) and deleted in one step.
 - The command palette also toggles settings and opens any Preferences setting; Ctrl+Shift+P opens it too.
 - A sparkle button next to "Committing as …" copies a commit message prompt for a tool of your choice (no AI inside Gitloom).
-- **Classic Dark** brings back the look of older GitKraken versions; Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
+- Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
 - **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.

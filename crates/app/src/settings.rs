@@ -259,13 +259,13 @@ impl Default for General {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeChoice {
+    /// Also read for the removed "classic-dark" (ADR-054).
     #[default]
+    #[serde(alias = "classic-dark")]
     Dark,
     Light,
     /// Follow the operating system.
     System,
-    /// GitKraken 7.5 look (M11-01).
-    ClassicDark,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -817,13 +817,13 @@ mod tests {
     }
 
     #[test]
-    fn classic_dark_is_stored_by_name() {
+    fn classic_dark_loads_as_dark() {
+        // The theme was removed (ADR-054); saved settings open in Dark.
         let parsed = parse(r#"{"appearance": {"theme": "classic-dark"}}"#).unwrap();
-        assert_eq!(parsed.appearance.theme, ThemeChoice::ClassicDark);
-        let mut settings = Settings::default();
-        settings.appearance.theme = ThemeChoice::ClassicDark;
-        assert!(to_json(&settings).contains("classic-dark"));
-        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
+        assert_eq!(parsed.appearance.theme, ThemeChoice::Dark);
+        let json = to_json(&parsed);
+        assert!(json.contains("\"dark\""), "{json}");
+        assert!(!json.contains("classic-dark"), "{json}");
     }
 
     #[test]

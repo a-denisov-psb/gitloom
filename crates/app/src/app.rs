@@ -2678,7 +2678,6 @@ impl App {
         match self.settings.appearance.theme {
             settings::ThemeChoice::Dark => ThemeKind::Dark,
             settings::ThemeChoice::Light => ThemeKind::Light,
-            settings::ThemeChoice::ClassicDark => ThemeKind::ClassicDark,
             settings::ThemeChoice::System if self.system_theme == iced::theme::Mode::Light => {
                 ThemeKind::Light
             }
@@ -4583,7 +4582,6 @@ impl App {
             Choice::Theme => match self.settings.appearance.theme {
                 settings::ThemeChoice::Dark => "Dark",
                 settings::ThemeChoice::Light => "Light",
-                settings::ThemeChoice::ClassicDark => "Classic Dark",
                 settings::ThemeChoice::System => "System",
             }
             .to_owned(),
@@ -5155,9 +5153,7 @@ impl App {
         crate::editor_style::EditorStyle {
             code_theme: match self.theme_kind() {
                 crate::theme::ThemeKind::Light => crate::highlight::CodeTheme::Light,
-                crate::theme::ThemeKind::Dark | crate::theme::ThemeKind::ClassicDark => {
-                    crate::highlight::CodeTheme::Dark
-                }
+                crate::theme::ThemeKind::Dark => crate::highlight::CodeTheme::Dark,
             },
             ..crate::editor_style::EditorStyle::from_settings(&self.settings.editor)
         }
@@ -19485,11 +19481,8 @@ pub(crate) mod tests {
             app.palette.as_ref().unwrap().mode,
             palette::Mode::Choice(crate::settings_registry::Choice::Theme)
         );
-        palette_choose(&mut app, "Classic Dark");
-        assert_eq!(
-            app.settings.appearance.theme,
-            settings::ThemeChoice::ClassicDark
-        );
+        palette_choose(&mut app, "Light");
+        assert_eq!(app.settings.appearance.theme, settings::ThemeChoice::Light);
         let _ = app.update(checked(Shortcut::CommandPalette, false));
         palette_choose(&mut app, "Set: Diff view");
         palette_choose(&mut app, "Split");

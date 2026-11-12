@@ -599,11 +599,7 @@ mod tests {
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_operation_state() {
         use crate::settings::ThemeChoice;
-        for (choice, theme) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             let mut app = crate::app::tests::app_in_state(git_core::RepoState::Merging {
                 merge_head: "x".into(),
             });
@@ -1131,74 +1127,16 @@ mod tests {
         snapshot(&app, "repository-editor");
     }
 
-    /// Classic Dark (M11-01): main window, Preferences and a dialog.
-    #[test]
-    #[ignore = "renders the UI; run with --ignored"]
-    fn ui_check_classic_dark() {
-        let mut app = crate::app::tests::flow_app();
-        app.settings.appearance.theme = crate::settings::ThemeChoice::ClassicDark;
-        snapshot(&app, "classic-dark-0-main");
-        let _ = app.update(Message::SettingsOpenedAt(
-            crate::settings::Category::Appearance,
-        ));
-        snapshot(&app, "classic-dark-1-preferences");
-        let _ = app.update(Message::SettingsClosed);
-        app.modal = Some(crate::overlay::Modal::confirm(
-            "Delete branch",
-            "Delete feature/login? It is merged into main.",
-            "Delete",
-            true,
-            Message::DismissNotice,
-        ));
-        snapshot(&app, "classic-dark-2-dialog");
-    }
-
-    /// Classic Dark graph look (M11-04): row tint, filled pills with their
-    /// connector (checked-out branch, remote and tag), a selected and a
-    /// hovered row, several lanes, header separators and panel shadows.
-    #[test]
-    #[ignore = "renders the UI; run with --ignored"]
-    fn ui_check_classic_dark_graph() {
-        let reference = |name: &str, kind, target: &str| git_core::Reference {
-            name: name.into(),
-            kind,
-            target: target.into(),
-            is_head: false,
-            upstream: None,
-            ahead_behind: None,
-        };
-        let mut app = crate::app::tests::graph_app_with(vec![
-            reference("origin/main", git_core::RefKind::RemoteBranch, "a"),
-            reference("v1.0.0", git_core::RefKind::Tag, "b"),
-        ]);
-        app.settings.appearance.theme = crate::settings::ThemeChoice::ClassicDark;
-        let _ = app.update(Message::CommitSelected("f".into()));
-        let mut sim = simulator(&app);
-        // Hover over the "Main work" row.
-        let target = sim
-            .find("Main work")
-            .unwrap_or_else(|e| panic!("no row: {e}"));
-        sim.point_at(iced_test::selector::Bounded::bounds(&target).center());
-        let snap = sim.snapshot(&app.theme()).unwrap();
-        assert!(snap
-            .matches_image(fresh_path("classic-dark-graph"))
-            .unwrap());
-    }
-
     /// Stash node and label (M11-05): dashed square with the archive icon,
-    /// "WIP on main" in the graph, STASHES and the details title; all three
-    /// themes.
+    /// "WIP on main" in the graph, STASHES and the details title; Dark and
+    /// Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_stash_node() {
         use crate::settings::ThemeChoice;
         let mut app = crate::app::tests::graph_app();
         let _ = app.update(Message::CommitSelected("s".into()));
-        for (choice, name) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, name) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             app.settings.appearance.theme = choice;
             snapshot(&app, &format!("stash-node-{name}"));
         }
@@ -1240,11 +1178,7 @@ mod tests {
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_highlighting() {
         use crate::settings::{DiffMode, ThemeChoice};
-        for (choice, theme) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             for (mode, name) in [
                 (DiffMode::Hunk, "hunk"),
                 (DiffMode::Inline, "inline"),
@@ -1263,11 +1197,7 @@ mod tests {
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_start_screen() {
         use crate::settings::ThemeChoice;
-        for (choice, theme) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             let mut app = start_app();
             app.settings.appearance.theme = choice;
             for percent in [100_u32, 125] {
@@ -1835,16 +1765,12 @@ mod tests {
     }
 
     /// Commit panel with the sparkle button (M12-13): enabled with staged
-    /// changes, disabled without; all three themes.
+    /// changes, disabled without; Dark and Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_prompt_button() {
         use crate::settings::ThemeChoice;
-        for (choice, theme) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             for (staged, name) in [(&["s.txt"][..], "staged"), (&[][..], "none")] {
                 let mut app = crate::app::tests::staging_app(&["a.txt"], staged);
                 app.settings.appearance.theme = choice;
@@ -1912,11 +1838,7 @@ mod tests {
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_status_bar_toggles() {
         use crate::settings::ThemeChoice;
-        for (choice, theme) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             for (left, right, name) in [
                 (true, true, "both"),
                 (false, false, "none"),
@@ -1972,11 +1894,7 @@ mod tests {
     fn ui_check_toasts() {
         use crate::settings::ThemeChoice;
         use crate::toast::{Toast, ToastKind};
-        for (choice, theme) in [
-            (ThemeChoice::Dark, "dark"),
-            (ThemeChoice::Light, "light"),
-            (ThemeChoice::ClassicDark, "classic-dark"),
-        ] {
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             let mut app = crate::app::tests::graph_app();
             app.settings.appearance.theme = choice;
             app.toasts.push(Toast::git_error(

@@ -8,6 +8,8 @@ Runs on `develop` after M10.
 
 The graph table behaves like GitKraken's (resizable columns, a column menu), a "Classic Dark" theme brings back the look of older GitKraken versions, stashes look like GitKraken's, and code in diffs, blame, file history and the conflict view is syntax highlighted with the editor settings GitKraken offers.
 
+Note (2026-11-12): Classic Dark was removed again, see ADR-054.
+
 ## Scope
 
 In scope:

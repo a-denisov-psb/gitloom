@@ -88,7 +88,7 @@ Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-set
 ### M11 – Graph columns, themes and syntax highlighting (done)
 
 - Graph columns: drag column borders, double click for optimal width, column menu (gear in the header) to show/hide branch/tag, graph, message, author, date, SHA; replaces the automatic hiding of columns.
-- Theme "Classic Dark": the palette gains style tokens (row tint in the lane color, filled ref pills with a line to the node, header bands, column separators, panel depth); Dark and Light keep their current look through token values.
+- Style tokens in the palette (header band); the extra theme built here was removed again (ADR-054): Dark and Light only.
 - Stash node like GitKraken: dashed square with a stash icon in its own lane right of the base commit, dotted connector; an empty stash message shows as "WIP on <branch>" (graph and STASHES section).
 - Syntax highlighting in diffs, blame, file history and the conflict view: syntect with the `two-face` syntax set; whole old/new files highlighted in the background and mapped to diff lines, cached per blob, size limit, colors per theme.
 - Preferences → Editor like GitKraken: font, font size, tab size, line numbers, word wrap, syntax highlighting on/off.
