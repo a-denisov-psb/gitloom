@@ -120,7 +120,7 @@ Acceptance: unit tests for the buckets around every boundary (with a fixed clock
 
 Note (M14-06): Buckets count calendar days in UTC like the date column ("yesterday" starts at midnight; 7–34 days are weeks, 35–364 days months as days/30, then years as days/365). The pill uses the hover background with the normal text color: muted text on it measured 4.1:1 (below WCAG AA). Two themes since ADR-054. Commit rows have no hover actions over the message, so the pill is never hidden. Measured in `docs/PERFORMANCE.md`.
 
-### [ ] M14-07 Documentation
+### [x] M14-07 Documentation
 
 - User guide `daily-workflow.md` (commit details, edit message), `coming-from-gitkraken.md`; `docs/user/undo.md`: "Edit commit message" (and why pushed commits are excluded).
 - UX-PARITY rows; deviation if GitKraken edits pushed commits.
