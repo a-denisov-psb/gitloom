@@ -78,6 +78,8 @@ pub struct RepoSnapshot {
     /// Lane groups and colors of the Git flow layout, kept for re-layouts
     /// (WIP row appears or disappears).
     flow_hints: Option<Arc<Vec<Option<git_graph::LaneHint>>>>,
+    /// Branch types of the Git flow layout, for labels and tooltips (M13-04).
+    flow_types: Option<Arc<git_graph::flow::Classification>>,
 }
 
 /// The remotes part of a snapshot.
@@ -292,6 +294,7 @@ impl RepoSnapshot {
             applied_filter: Default::default(),
             flow_layout: false,
             flow_hints: None,
+            flow_types: None,
         })
     }
 
@@ -299,18 +302,54 @@ impl RepoSnapshot {
     /// the default one. Without Git flow configuration the default layout
     /// stays. No history is reloaded.
     pub fn with_flow_layout(&self, on: bool) -> Result<Self, String> {
-        let hints = if on {
-            self.flow_classification().map(|c| Arc::new(c.lane_hints()))
+        let types = if on {
+            self.flow_classification().map(Arc::new)
         } else {
             None
         };
+        let hints = types.as_ref().map(|c| Arc::new(c.lane_hints()));
         let layout = Arc::new(self.compute_layout(self.has_wip, hints.as_deref())?);
         Ok(Self {
             layout,
             flow_layout: hints.is_some(),
             flow_hints: hints,
+            flow_types: types,
             ..self.clone()
         })
+    }
+
+    /// Git flow segment of the commit at `index` while the layout is on.
+    pub fn flow_segment(&self, index: usize) -> Option<&git_graph::flow::FlowSegment> {
+        let types = self.flow_types.as_ref()?;
+        let id = *self.graph.order.get(index)?;
+        types.segment_of(id)
+    }
+
+    /// Faded label at the tip of a deleted branch (M13-04): its name, or
+    /// its type when no name is known; none for live branches and unknown
+    /// commits.
+    pub fn flow_label(&self, index: usize) -> Option<String> {
+        use git_graph::flow::{FlowKind, FlowSource};
+        let segment = self.flow_segment(index)?;
+        let id = *self.graph.order.get(index)?;
+        if segment.tip != id
+            || segment.source == FlowSource::LiveRef
+            || segment.kind == FlowKind::Unknown
+            || self.is_stash(&self.commits.get(index)?.id)
+        {
+            return None;
+        }
+        Some(
+            segment
+                .name
+                .clone()
+                .unwrap_or_else(|| segment.kind.label().to_owned()),
+        )
+    }
+
+    /// Tooltip of a node or faded label in the Git flow layout (M13-04).
+    pub fn flow_tooltip(&self, index: usize) -> Option<String> {
+        self.flow_segment(index).map(flow_tooltip)
     }
 
     fn compute_layout(
@@ -1392,6 +1431,22 @@ mod perf {
     }
 }
 
+/// "<type> · <name> (from the merge message)", "… (inferred from the
+/// history)", "Branch type unknown" (M13-04).
+pub fn flow_tooltip(segment: &git_graph::flow::FlowSegment) -> String {
+    use git_graph::flow::FlowSource;
+    let what = match &segment.name {
+        Some(name) => format!("{} · {name}", segment.kind.label()),
+        None => segment.kind.label().to_owned(),
+    };
+    match segment.source {
+        FlowSource::LiveRef => what,
+        FlowSource::MergeMessage => format!("{what} (from the merge message)"),
+        FlowSource::Topology => format!("{what} (inferred from the history)"),
+        FlowSource::Unknown => "Branch type unknown".to_owned(),
+    }
+}
+
 /// The Git flow classification on a real repository (M13-01): the classic
 /// diagram built with the `git` CLI, topic branches deleted after
 /// finishing.
@@ -1487,6 +1542,59 @@ pub(crate) mod flow_tests {
                 "fix 2.1 → hotfix/hotfix/2.1",
                 "v1.0 → production/main",
             ]
+        );
+    }
+
+    #[test]
+    fn faded_labels_and_tooltips() {
+        use git_graph::flow::{FlowKind, FlowSegment, FlowSource};
+        let (_repo, snapshot) = classic_snapshot();
+        let flow = snapshot.with_flow_layout(true).unwrap();
+        let at = |summary: &str| {
+            flow.commits
+                .iter()
+                .position(|c| c.summary == summary)
+                .unwrap()
+        };
+        // Tips of deleted branches get their name; live branches none.
+        assert_eq!(
+            flow.flow_label(at("feature a")).as_deref(),
+            Some("feature/a")
+        );
+        assert_eq!(
+            flow.flow_label(at("bump 2.0")).as_deref(),
+            Some("release/2.0")
+        );
+        assert_eq!(
+            flow.flow_label(at("fix 2.1")).as_deref(),
+            Some("hotfix/2.1")
+        );
+        assert_eq!(flow.flow_label(at("develop work")), None);
+        assert_eq!(
+            flow.flow_tooltip(at("feature a")).as_deref(),
+            Some("feature · feature/a (from the merge message)")
+        );
+        assert_eq!(
+            flow.flow_tooltip(at("develop work")).as_deref(),
+            Some("development · develop")
+        );
+        // Off: nothing.
+        assert_eq!(snapshot.flow_label(at("feature a")), None);
+        assert_eq!(snapshot.flow_tooltip(at("feature a")), None);
+        // Topology and unknown texts.
+        let segment = |kind, name: Option<&str>, source| FlowSegment {
+            tip: git_graph::Id(0),
+            kind,
+            name: name.map(str::to_owned),
+            source,
+        };
+        assert_eq!(
+            super::flow_tooltip(&segment(FlowKind::Hotfix, None, FlowSource::Topology)),
+            "hotfix (inferred from the history)"
+        );
+        assert_eq!(
+            super::flow_tooltip(&segment(FlowKind::Unknown, None, FlowSource::Unknown)),
+            "Branch type unknown"
         );
     }
 

@@ -543,13 +543,15 @@ pub fn reveal_offset(row: usize, offset: f32, height: f32) -> Option<f32> {
 
 /// Width of the graph column for `lanes` lanes (clamped to 2..=12).
 pub fn graph_width(lanes: u16) -> f32 {
-    let lanes = lanes.clamp(MIN_LANES, MAX_LANES);
-    GRAPH_PADDING * 2.0 + LANE_WIDTH * f32::from(lanes)
+    lanes_width(lanes.clamp(MIN_LANES, MAX_LANES))
 }
 
-/// Width all `lanes` need (at least one): the optimal Graph width.
+/// Width all `lanes` need (at least one): the optimal Graph width. The
+/// canvas starts at the column edge and `lane_x` adds `CELL_PADDING`, so
+/// it counts here too; without it the node in the last lane lost 2 px
+/// (fix with M13-04).
 pub fn lanes_width(lanes: u16) -> f32 {
-    GRAPH_PADDING * 2.0 + LANE_WIDTH * f32::from(lanes.max(1))
+    CELL_PADDING + GRAPH_PADDING * 2.0 + LANE_WIDTH * f32::from(lanes.max(1))
 }
 
 /// Column geometry shared by all rows of one frame.
@@ -657,17 +659,36 @@ pub fn graph_row<'a>(
         Some(input) if input.row.as_deref() == Some(commit.id.as_str()) => {
             cell(new_branch_input(input), widths.refs)
         }
-        _ => cell(ref_pills(labels, repo.drag.as_ref()), widths.refs),
+        _ => match snapshot.flow_label(index) {
+            // The tip of a deleted branch in the Git flow layout (M13-04).
+            Some(label) => cell(
+                row![
+                    ref_pills(labels, repo.drag.as_ref()),
+                    flow_pill(label, snapshot.flow_tooltip(index).unwrap_or_default())
+                ]
+                .spacing(PILL_SPACING)
+                .align_y(iced::Center),
+                widths.refs,
+            ),
+            None => cell(ref_pills(labels, repo.drag.as_ref()), widths.refs),
+        },
+    };
+    let graph = graph_with_avatar(layout_row, row_index, node, dimmed);
+    // The node's branch type in the Git flow layout (M13-04).
+    let graph = match snapshot.flow_tooltip(index) {
+        Some(tip) => tooltip(
+            graph,
+            container(text(tip).size(12))
+                .padding([4, 8])
+                .style(theme::tooltip),
+            tooltip::Position::Bottom,
+        )
+        .into(),
+        None => graph,
     };
     let mut content = row![
         refs_cell,
-        graph_column(
-            graph_with_avatar(layout_row, row_index, node, dimmed),
-            graph_width,
-            clipped,
-            selected,
-            color,
-        ),
+        graph_column(graph, graph_width, clipped, selected, color,),
         cell(summary.wrapping(text::Wrapping::None), message_width),
     ];
     if columns.author {
@@ -961,6 +982,27 @@ fn graph_column(
         .into(),
     ])
     .width(width)
+    .into()
+}
+
+/// Faded label of a deleted branch (M13-04): muted text in a muted
+/// outline, no fill; the tooltip names its type and source.
+fn flow_pill<'a>(label: String, tip: String) -> Element<'a, Message> {
+    tooltip(
+        container(
+            text(label)
+                .size(PILL_TEXT_SIZE)
+                .wrapping(text::Wrapping::None)
+                .style(theme::text_muted),
+        )
+        .padding([1.0, PILL_PADDING])
+        .clip(true)
+        .style(theme::flow_pill),
+        container(text(tip).size(12))
+            .padding([4, 8])
+            .style(theme::tooltip),
+        tooltip::Position::Bottom,
+    )
     .into()
 }
 
@@ -1555,6 +1597,16 @@ mod tests {
             let view = app.tabs[0].view().unwrap();
             assert_eq!(optimal_column_width(view, ColumnId::Date, 1200.0), date);
             assert_eq!(optimal_column_width(view, ColumnId::Sha, 1200.0), sha);
+        }
+    }
+
+    #[test]
+    fn the_last_lane_fits_its_column() {
+        for lanes in [1_u16, 2, 5, 12] {
+            // Content width: the column minus its right padding.
+            let content = lanes_width(lanes) - CELL_PADDING;
+            let last = lane_x(lanes - 1) + NODE_RADIUS;
+            assert!(last <= content, "{lanes}: {last} > {content}");
         }
     }
 

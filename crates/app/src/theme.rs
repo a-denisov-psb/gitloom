@@ -464,6 +464,20 @@ pub fn section_header(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// Faded label of a deleted branch in the Git flow layout (M13-04): a
+/// thin muted outline without fill (iced draws no dashed borders).
+pub fn flow_pill(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        border: Border::default()
+            .rounded(3)
+            .width(1)
+            .color(p.text_muted.scale_alpha(0.6)),
+        text_color: Some(p.text_muted),
+        ..container::Style::default()
+    }
+}
+
 /// Ref pill (branch or tag label): outline in the kind's color.
 pub fn ref_pill(kind: RefKind, is_head: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
