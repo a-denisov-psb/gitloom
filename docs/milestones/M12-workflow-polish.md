@@ -163,11 +163,13 @@ Acceptance: integration tests with a local superproject and submodule (not initi
 
 Note: `git_core::submodule` parses `git submodule status --recursive`; initialized submodules with output from `git -C <path> status --porcelain --ignore-submodules=dirty` are "modified" (a dirty nested submodule marks only itself). The list is read in the background after every refresh (cheap without `.gitmodules`). The toast fires when HEAD changed since the previous read and a submodule is out of date (covers checkout, pull, merge, rebase and reset; the first read after opening stays quiet). Update is a network request (`NetworkKind::SubmoduleUpdate`) like fetch, so progress, Cancel and askpass apply. Opening a submodule matches tab roots exactly; the duplicate-tab check after opening now compares roots for equality (it closed nested repositories as "subfolders" before). The section is no longer collapsed by default; the old inactive header and its "Not available yet" tooltip are gone. Double click uses the same `double_click_area` as branch rows (tested via `OpenSubmodule`). Tests: git-core `status_lines`, `update_arguments`, integration `nested_submodules_modified_and_out_of_date`, `not_initialized_until_updated`, `no_gitmodules_no_submodules`; app `out_of_date_submodules_raise_a_toast_after_head_moved`, `submodule_menus_update_and_open`; snapshot `ui_check_submodules` (dark, light) checked.
 
-### [ ] M12-07 Undo: stash push/drop, stage/unstage, mark resolved
+### [x] M12-07 Undo: stash push/drop, stage/unstage, mark resolved
 
 - Undo entries per the decisions table.
 
 Acceptance: integration tests per entry comparing working tree, `git ls-files -s` and stash list before/after undo and redo, including a refused undo after an outside change.
+
+Note: `git_core::work_undo`. Stage/unstage of files, lines, hunks and blocks record the index entries of the affected paths (`Scope::Paths`, incl. the old path of a rename); "Stage/Unstage all changes" record the whole index (`Scope::Whole`: tree plus unmerged entries, like reset M9-04), since untracked folders are not listed path by path. Redo writes the recorded "after" entries (equivalent to repeating the action under the precondition). Mark resolved ("Save and mark resolved", take one side, "Mark all resolved", staging a conflicted file) records index entries and file content. An action that changed nothing adds no entry. Stash push precondition: HEAD and `git status --porcelain -uall` as right after the push. Tests: `stage_and_unstage_paths_undo_and_redo`, `unstage_all_undo_restores_the_whole_index`, `mark_resolved_restores_conflict_stages_and_content`, `stash_push_undo_and_redo`, `stash_drop_undo_keeps_the_position` (each with refusal where applicable).
 
 ### [ ] M12-08 Undo: pull, remotes, upstream, submodule update
 

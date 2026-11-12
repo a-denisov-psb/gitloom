@@ -23,6 +23,12 @@ pub enum UndoAction {
     FlowFinish(Box<git_core::flow_finish::FinishRecord>),
     /// A stash pop or apply, with or without conflicts (M9-02).
     Stash(Box<git_core::StashRecord>),
+    /// Stage, unstage or mark resolved (M12-07).
+    Work(Box<git_core::work_undo::WorkChange>),
+    /// "Stash" (M12-07).
+    StashPush(Box<git_core::work_undo::StashPushRecord>),
+    /// "Delete stash" (M12-07).
+    StashDrop(git_core::work_undo::StashDropRecord),
 }
 
 impl UndoAction {
@@ -51,6 +57,9 @@ impl UndoAction {
             Self::History(change) => change.label.clone(),
             Self::FlowFinish(record) => record.label.clone(),
             Self::Stash(record) => record.label().to_owned(),
+            Self::Work(change) => change.label.clone(),
+            Self::StashPush(_) => "Stash".to_owned(),
+            Self::StashDrop(_) => "Delete stash".to_owned(),
         }
     }
 }
@@ -94,5 +103,12 @@ mod tests {
         assert_eq!(rename.label(), "Rename branch a → b");
         assert!(!rename.moves_head());
         assert!(commit.moves_head());
+        let drop = UndoAction::StashDrop(git_core::work_undo::StashDropRecord {
+            stash: "s".into(),
+            message: "On main: x".into(),
+            position: 0,
+        });
+        assert_eq!(drop.label(), "Delete stash");
+        assert!(!drop.moves_head());
     }
 }

@@ -44,6 +44,7 @@ mod state;
 pub mod submodule;
 mod todo;
 mod watch;
+pub mod work_undo;
 
 pub use blame::{blame, parse_porcelain, Blame, BlameCommit, BlameGroup, UNCOMMITTED};
 pub use cli_backend::{
