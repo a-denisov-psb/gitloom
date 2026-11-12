@@ -501,21 +501,21 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
 
 /// Small sparkle button at the right end of "Committing as …" (M12-13):
 /// opens "Commit message prompt" (M10-07); disabled without staged
-/// changes. Gitloom only copies the prompt.
+/// changes. Gitloom only copies the prompt. A muted 13 px icon like the
+/// branch icons in the left panel, with the same look enabled and
+/// disabled; the tooltip tells why it is disabled (maintainer request
+/// 2026-11-12).
 fn prompt_button(view: &RepoView) -> Element<'_, Message> {
     let (enabled, tip) = prompt_button_state(view);
+    let icon = crate::icons::tinted(crate::icons::Icon::Sparkles, 13.0, |p| p.text_muted);
     with_tooltip_text(
-        button(crate::icons::button_icon(
-            crate::icons::Icon::Sparkles,
-            14.0,
-            enabled,
-        ))
-        .on_press_maybe(enabled.then_some(Message::CopyPromptRequested))
-        .padding(3)
-        .width(22)
-        .height(22)
-        .style(theme::flat)
-        .into(),
+        button(container(icon).center(Fill))
+            .on_press_maybe(enabled.then_some(Message::CopyPromptRequested))
+            .padding(0)
+            .width(22)
+            .height(22)
+            .style(theme::flat)
+            .into(),
         tip.to_owned(),
     )
 }
