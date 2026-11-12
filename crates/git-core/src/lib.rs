@@ -13,6 +13,7 @@ mod conflict;
 mod diff;
 mod discard;
 mod editor;
+pub mod explain;
 mod external_tools;
 mod file_history;
 pub mod flow;

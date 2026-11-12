@@ -163,6 +163,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | The graph table scrolls horizontally instead of fitting the window: every column, Commit message included, has its own width and handle, and dragging changes only that column | Maintainer decision 2026-11-11 (M11-16): resizing that narrowed the message felt odd and the message had no handle; a narrower table lets the message fill |
 | Preferences → Editor has no "End of Line Character" | Gitloom has no in-app file editor; line endings stay as Git writes them |
 | Hovering a file shows only "Stage File" / "Unstage File"; Discard is in the context menu | Maintainer decision 2026-11-10 (M12-01): tidier, no accidental discard; "Discard all" in the header stays |
+| Notifications are always at the bottom left | GitKraken lets you choose the location; one fixed place keeps the UI simple (ADR-049) |
 | Reset is a dialog (Soft / Mixed / Hard) instead of GitKraken's submenu | The maintainer prefers the dialog (2026-11-11); it also explains the three modes |
 | Conflicted files without a running Git operation show a banner with "Discard conflicted files…" | ADR-044 (no dead ends): after a stash conflict and a restart nothing else explains them |
 | The repository and branch pickers open the centered palette lists ("Open recent repository", "Checkout branch") instead of a dropdown below the picker | M6-17: reuses the existing lists before 1.0; a real dropdown is a backlog item |

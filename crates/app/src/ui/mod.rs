@@ -31,6 +31,7 @@ mod sidebar;
 pub(crate) mod start;
 pub(crate) mod statusbar;
 mod tabs;
+mod toasts;
 pub(crate) mod toolbar;
 
 pub use graph::reveal_offset;
@@ -107,6 +108,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut layers = vec![base];
     if let Some(page) = &app.settings_page {
         layers.push(preferences(app, page));
+    }
+    // Toasts sit above the app and the Preferences, below menus and dialogs.
+    if let Some(toasts) = toasts::view(&app.toasts) {
+        layers.push(toasts);
     }
     if let Some(menu) = &app.context_menu {
         layers.push(overlays::context_menu(menu, app.window_size()));

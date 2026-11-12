@@ -35,31 +35,6 @@ pub struct Modal {
 }
 
 impl Modal {
-    /// Failed operation: summary plus the full Git output.
-    pub fn error(title: impl Into<String>, details: impl Into<String>) -> Self {
-        let details = details.into();
-        Self {
-            title: title.into(),
-            text: "Git reported an error. The full output is shown below.".into(),
-            details: Some(details.clone()),
-            buttons: vec![
-                DialogButton {
-                    label: "Copy".into(),
-                    kind: ButtonKind::Secondary,
-                    message: Some(Message::CopyToClipboard(details)),
-                    disabled: None,
-                },
-                DialogButton {
-                    label: "Close".into(),
-                    kind: ButtonKind::Primary,
-                    message: None,
-                    disabled: None,
-                },
-            ],
-            default: Some(1),
-        }
-    }
-
     /// Plain message with a Close button.
     pub fn info(title: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
@@ -74,12 +49,6 @@ impl Modal {
             }],
             default: Some(0),
         }
-    }
-
-    /// Replaces the summary line, e.g. with a hint how to fix the error.
-    pub fn with_text(mut self, text: impl Into<String>) -> Self {
-        self.text = text.into();
-        self
     }
 
     /// Operation failed because another process holds a Git lock. The lock
@@ -706,15 +675,5 @@ mod tests {
         assert_eq!(modal.buttons[1].kind, ButtonKind::Danger);
         assert!(matches!(modal.default_action(), Some(Message::Refresh)));
         assert!(modal.action(0).is_none(), "cancel only closes");
-    }
-
-    #[test]
-    fn error_dialog_offers_copy() {
-        let modal = Modal::error("Stage failed", "fatal: boom");
-        assert_eq!(modal.details.as_deref(), Some("fatal: boom"));
-        assert!(
-            matches!(modal.action(0), Some(Message::CopyToClipboard(text)) if text == "fatal: boom")
-        );
-        assert!(modal.default_action().is_none(), "Enter closes");
     }
 }

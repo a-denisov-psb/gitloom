@@ -300,6 +300,16 @@ pub enum Message {
     },
     /// Nothing to do (an optional background result that did not come).
     Noop,
+    /// Toasts (M12-02): close, timer ran out, pointer entered/left,
+    /// "Details" toggled, the toast's button pressed.
+    ToastDismissed(u64),
+    ToastExpired(crate::toast::Timer),
+    ToastHovered {
+        id: u64,
+        hovered: bool,
+    },
+    ToastDetails(u64),
+    ToastAction(u64),
     /// Gear at the right end of the graph header: column menu (M11-03).
     GraphColumnMenu(iced::Point),
     /// Show or hide the Author, Date or SHA column.
@@ -1066,6 +1076,8 @@ pub struct App {
     pub panes: Panes,
     /// Graph column border being dragged (M11-02).
     pub column_drag: Option<ColumnDrag>,
+    /// Notifications at the bottom left (M12-02).
+    pub toasts: crate::toast::Toasts,
     /// Highlighted files, shared with the background tasks (M11-09).
     highlight_cache: Arc<std::sync::Mutex<crate::highlight::Cache>>,
     pub status: String,
@@ -1168,6 +1180,7 @@ impl App {
             active: 0,
             panes: Panes::new(Default::default()),
             column_drag: None,
+            toasts: crate::toast::Toasts::default(),
             highlight_cache: Arc::default(),
             status: String::new(),
             start_path: String::new(),
@@ -4543,6 +4556,25 @@ impl App {
         )
     }
 
+    /// Shows a dialog or a toast.
+    fn report(&mut self, report: Report) {
+        match report {
+            Report::Dialog(modal) => self.modal = Some(modal),
+            Report::Toast(toast) => {
+                self.toasts.push(toast);
+            }
+        }
+    }
+
+    /// Shows a toast (M12-02); info and success close by themselves.
+    #[allow(dead_code)] // first used by the submodule notice (M12-06)
+    pub fn notify(&mut self, toast: crate::toast::Toast) -> Task<Message> {
+        match self.toasts.push(toast) {
+            Some(timer) => toast_timer(timer),
+            None => Task::none(),
+        }
+    }
+
     /// Style of the code views from Preferences → Editor (M11-06) and the
     /// code theme of the active theme (M11-09).
     pub fn editor_style(&self) -> crate::editor_style::EditorStyle {
@@ -5253,6 +5285,25 @@ impl App {
                 return self.save_settings();
             }
             Message::Noop => {}
+            Message::ToastDismissed(id) => self.toasts.dismiss(id),
+            Message::ToastExpired(timer) => self.toasts.expired(timer),
+            Message::ToastHovered { id, hovered } => {
+                if let Some(timer) = self.toasts.hover(id, hovered) {
+                    return toast_timer(timer);
+                }
+            }
+            Message::ToastDetails(id) => self.toasts.toggle_details(id),
+            Message::ToastAction(id) => {
+                let action = self
+                    .toasts
+                    .get(id)
+                    .and_then(|t| t.action.as_ref())
+                    .map(|(_, message)| message.as_ref().clone());
+                self.toasts.dismiss(id);
+                if let Some(message) = action {
+                    return self.update(message);
+                }
+            }
             Message::ConflictHighlighted {
                 tab,
                 path,
@@ -5371,7 +5422,7 @@ impl App {
                         self.status = format!("Global Git identity: {}", identity.label());
                     }
                     Err(error) => {
-                        self.modal = Some(Modal::error(
+                        self.toasts.push(crate::toast::Toast::git_error(
                             "Could not update the global Git identity",
                             error,
                         ));
@@ -5893,7 +5944,8 @@ impl App {
                         } else {
                             "Diff tool failed"
                         };
-                        self.modal = Some(Modal::error(title, error));
+                        self.toasts
+                            .push(crate::toast::Toast::git_error(title, error));
                     }
                 }
                 if merge {
@@ -6747,7 +6799,7 @@ impl App {
                         }
                     }
                     Err(error) if push && git_core::push_rejection(&error).is_some() => {
-                        self.modal = Some(push_rejected_dialog(error));
+                        self.report(push_rejected_dialog(error));
                     }
                     // Decided after the refresh: conflict dialog or error dialog.
                     Err(error) if pull => {
@@ -6767,22 +6819,32 @@ impl App {
                             .and_then(|t| t.view())
                             .map(|v| v.snapshot.ssh.clone())
                             .unwrap_or_default();
-                        self.modal = Some(match git_core::locked_file(&error) {
-                            Some(lock) => Modal::locked(&label, lock, Message::RetryWrite(tab)),
-                            // ADR-044: say what to check, Git's output as details.
+                        // A lock needs a decision (Retry): a dialog. Everything
+                        // else informs: a toast with Git's output as details
+                        // (ADR-044, ADR-049).
+                        match git_core::locked_file(&error) {
+                            Some(lock) => {
+                                self.modal =
+                                    Some(Modal::locked(&label, lock, Message::RetryWrite(tab)));
+                            }
                             None if git_core::signing::signing_failed(&error) => {
-                                Modal::error("Signing failed", error).with_text(
+                                self.toasts.push(crate::toast::Toast::error_with(
+                                    "Signing failed",
                                     "Git could not sign. Check Preferences → Signing (key, \
                                      GPG program, agent).",
-                                )
+                                    error,
+                                ));
                             }
-                            None => match auth_hint_with_key(&error, &ssh) {
-                                Some(hint) => {
-                                    Modal::error(format!("{label} failed"), error).with_text(hint)
-                                }
-                                None => Modal::error(format!("{label} failed"), error),
-                            },
-                        });
+                            None => {
+                                let title = format!("{label} failed");
+                                self.toasts.push(match auth_hint_with_key(&error, &ssh) {
+                                    Some(hint) => {
+                                        crate::toast::Toast::error_with(title, hint, error)
+                                    }
+                                    None => crate::toast::Toast::git_error(title, error),
+                                });
+                            }
+                        }
                     }
                     Ok(_) => {
                         if let Some(status) = success_status {
@@ -6894,7 +6956,8 @@ impl App {
                     }
                     (Ok(_), None) => return self.update(Message::CheckoutChecked(target)),
                     (Err(error), _) => {
-                        self.modal = Some(Modal::error("Checkout failed", error));
+                        self.toasts
+                            .push(crate::toast::Toast::git_error("Checkout failed", error));
                     }
                 }
             }
@@ -7993,7 +8056,10 @@ impl App {
                             partial_clone: true,
                         }
                         .to_string()));
-                        self.modal = Some(Modal::error("Fetching missing content failed", error));
+                        self.toasts.push(crate::toast::Toast::git_error(
+                            "Fetching missing content failed",
+                            error,
+                        ));
                     }
                 }
             }
@@ -8677,7 +8743,10 @@ impl App {
             }
             Message::PromptReady(Ok(prompt)) => self.prompt_dialog = Some(prompt),
             Message::PromptReady(Err(error)) => {
-                self.modal = Some(Modal::error("Could not build the prompt", error));
+                self.toasts.push(crate::toast::Toast::git_error(
+                    "Could not build the prompt",
+                    error,
+                ));
             }
             Message::PromptCopy => {
                 if let Some(prompt) = self.prompt_dialog.take() {
@@ -9168,7 +9237,7 @@ impl App {
                     }
                 }
                 if let Some((error, state, ssh)) = pull_failure {
-                    self.modal = Some(pull_failed_dialog(error, &state, &ssh));
+                    self.report(pull_failed_dialog(error, &state, &ssh));
                 }
                 if let Some(dialog) = empty_pick.flatten() {
                     self.modal = Some(dialog);
@@ -9832,14 +9901,16 @@ fn behind_local<'a>(snapshot: &'a RepoSnapshot, name: &str, target: &str) -> Opt
 
 /// Dialog for a rejected push: the remote has commits we do not have
 /// (offer Pull or a force push), or a force push lost its lease.
-fn push_rejected_dialog(error: String) -> Modal {
+fn push_rejected_dialog(error: String) -> Report {
     if git_core::push_rejection(&error) == Some(git_core::PushRejection::StaleLease) {
-        return Modal::error("Force push refused", error).with_text(
+        return Report::Toast(crate::toast::Toast::error_with(
+            "Force push refused",
             "The remote branch changed since your last fetch, so the force push was refused \
              to keep those commits. Fetch and check the changes first.",
-        );
+            error,
+        ));
     }
-    Modal {
+    Report::Dialog(Modal {
         title: "Push rejected".into(),
         text: "The remote branch has commits that you do not have. Pull them first, or \
                overwrite the remote branch with a force push."
@@ -9866,7 +9937,7 @@ fn push_rejected_dialog(error: String) -> Modal {
             },
         ],
         default: Some(2),
-    }
+    })
 }
 
 /// Why the current branch cannot be pulled, if it cannot.
@@ -9897,18 +9968,18 @@ fn pull_failed_dialog(
     error: String,
     state: &git_core::RepoState,
     ssh: &git_core::SshConfig,
-) -> Modal {
+) -> Report {
     let operation = match state {
         git_core::RepoState::Merging { .. } => "merge",
         git_core::RepoState::Rebasing { .. } => "rebase",
         _ => {
-            return match auth_hint_with_key(&error, ssh) {
-                Some(hint) => Modal::error("Pull failed", error).with_text(hint),
-                None => Modal::error("Pull failed", error),
-            }
+            return Report::Toast(match auth_hint_with_key(&error, ssh) {
+                Some(hint) => crate::toast::Toast::error_with("Pull failed", hint, error),
+                None => crate::toast::Toast::git_error("Pull failed", error),
+            })
         }
     };
-    Modal {
+    Report::Dialog(Modal {
         title: "Pull stopped with conflicts".into(),
         text: format!(
             "The {operation} stopped because of conflicting changes. Resolve the \
@@ -9931,7 +10002,7 @@ fn pull_failed_dialog(
             },
         ],
         default: Some(0),
-    }
+    })
 }
 
 /// Updates the multi-selection for a click (or keyboard move) on commit
@@ -9977,6 +10048,21 @@ fn auto_fetch_state(view: &RepoView) -> crate::fetch::TabState {
 /// Hint for authentication failures in Git's output (ADR-019).
 /// [`auth_hint`], plus which key the repository uses when Gitloom set one
 /// (M8-06).
+/// How a result is shown: a dialog that asks for a decision, or a toast
+/// that informs (ADR-049).
+enum Report {
+    Dialog(Modal),
+    Toast(crate::toast::Toast),
+}
+
+/// The timeout of an info or success toast (M12-02).
+fn toast_timer(timer: crate::toast::Timer) -> Task<Message> {
+    Task::perform(
+        async { tokio::time::sleep(crate::toast::TIMEOUT).await },
+        move |()| Message::ToastExpired(timer),
+    )
+}
+
 fn auth_hint_with_key(error: &str, ssh: &git_core::SshConfig) -> Option<String> {
     let hint = auth_hint(error)?;
     match (&ssh.setting, ssh.origin) {
@@ -12277,6 +12363,45 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn informational_errors_become_toasts_decisions_stay_dialogs() {
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        // A failed checkout informs: a toast with the catalog text.
+        let _ = app.update(Message::DetachedChecked {
+            tab,
+            target: CheckoutTarget::Local("x".into()),
+            result: Err(
+                "error: Your local changes to the following files would be overwritten by checkout"
+                    .into(),
+            ),
+        });
+        let toast = app.toasts.list.last().cloned();
+        assert!(app.modal.is_none());
+        let toast = toast.expect("a toast");
+        assert_eq!(toast.title, "Checkout failed");
+        assert!(
+            toast.text.contains("would be overwritten"),
+            "{}",
+            toast.text
+        );
+        // Details toggle; errors do not time out.
+        let _ = app.update(Message::ToastDetails(toast.id));
+        assert!(app.toasts.get(toast.id).unwrap().expanded);
+        let _ = app.update(Message::ToastExpired(crate::toast::Timer {
+            id: toast.id,
+            seq: 0,
+        }));
+        assert!(app.toasts.get(toast.id).is_some(), "errors stay");
+        let _ = app.update(Message::ToastDismissed(toast.id));
+        assert!(app.toasts.get(toast.id).is_none());
+    }
+
+    /// The newest toast (tests of errors that became toasts, M12-02).
+    fn last_toast(app: &App) -> crate::toast::Toast {
+        app.toasts.list.last().cloned().expect("a toast")
+    }
+
+    #[test]
     fn editor_page_lists_fonts_once() {
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::SettingsOpenedAt(settings::Category::Editor));
@@ -12519,10 +12644,9 @@ pub(crate) mod tests {
         assert!(app.identity_writing);
         let _ = app.update(Message::GlobalIdentityWritten(Err("locked".into())));
         assert_eq!(
-            app.modal.as_ref().unwrap().title,
+            last_toast(&app).title,
             "Could not update the global Git identity"
         );
-        let _ = app.update(Message::ModalClosed);
 
         // Sync off: nothing is written, not even for a new default.
         let _ = app.update(Message::IdentitySyncToggled(false));
@@ -13638,8 +13762,7 @@ pub(crate) mod tests {
             request,
             result: Err("fatal: unable to access remote".into()),
         });
-        let modal = app.modal.clone().unwrap();
-        assert_eq!(modal.title, "Fetching missing content failed");
+        assert_eq!(last_toast(&app).title, "Fetching missing content failed");
         assert!(matches!(shown_diff_view(&app).diff, Loadable::Failed(_)));
     }
 
@@ -13729,9 +13852,10 @@ pub(crate) mod tests {
         let view = app.tabs[0].view().unwrap();
         assert!(view.busy.is_none());
         assert!(view.refreshing, "a write is followed by a refresh");
-        let modal = app.modal.as_ref().expect("error dialog");
-        assert_eq!(modal.title, "Stage file failed");
-        assert_eq!(modal.details.as_deref(), Some("boom"));
+        let toast = last_toast(&app);
+        assert_eq!(toast.title, "Stage file failed");
+        assert_eq!(toast.details.as_deref(), Some("boom"));
+        assert!(app.modal.is_none());
     }
 
     fn file(path: &str) -> git_core::FileChange {
@@ -13877,8 +14001,7 @@ pub(crate) mod tests {
             result: Err("pre-commit hook failed".into()),
         });
         assert_eq!(app.tabs[0].view().unwrap().summary, "Add feature");
-        assert!(app.modal.is_some());
-        app.modal = None;
+        assert_eq!(last_toast(&app).title, "Commit failed");
 
         let _ = app.update(Message::Shortcut(Shortcut::Commit));
         let _ = app.update(Message::WriteFinished {
@@ -14678,7 +14801,7 @@ pub(crate) mod tests {
                 "error: gpg failed to sign the data\nfatal: failed to write commit object".into(),
             ),
         });
-        let modal = app.modal.clone().unwrap();
+        let modal = last_toast(&app);
         assert_eq!(modal.title, "Signing failed");
         assert!(
             modal.text.contains("Preferences → Signing"),
@@ -15934,7 +16057,7 @@ pub(crate) mod tests {
         });
         let view = app.tabs[0].view().unwrap();
         assert!(view.undo.is_empty() && view.redo.is_empty());
-        let modal = app.modal.as_ref().unwrap();
+        let modal = last_toast(&app);
         assert!(modal
             .details
             .as_deref()
@@ -16417,7 +16540,13 @@ pub(crate) mod tests {
             path: "f".into(),
             old_path: None,
         }));
-        app.modal = Some(Modal::error("Failed", "details"));
+        app.modal = Some(Modal::confirm(
+            "Delete?",
+            "Really?",
+            "Delete",
+            true,
+            Message::Noop,
+        ));
         let _ = app.update(Message::Shortcut(Shortcut::Close));
         assert!(app.modal.is_none());
         assert!(matches!(
@@ -16771,7 +16900,7 @@ pub(crate) mod tests {
             label: "Fetch".into(),
             result: Err("fatal: Authentication failed for 'https://x/'".into()),
         });
-        let modal = app.modal.unwrap();
+        let modal = last_toast(&app);
         assert!(modal.text.contains("credential helper"));
         assert_eq!(
             modal.details.as_deref(),
@@ -16938,13 +17067,14 @@ pub(crate) mod tests {
                 generation,
                 result: Ok(Arc::new(snapshot)),
             });
-            let modal = app.modal.clone().unwrap();
             if conflict {
+                let modal = app.modal.clone().unwrap();
                 assert_eq!(modal.title, "Pull stopped with conflicts");
                 assert!(matches!(modal.action(1), Some(Message::AbortOperation)));
                 assert!(modal.default_action().is_none(), "Enter only closes");
             } else {
-                assert_eq!(modal.title, "Pull failed");
+                assert!(app.modal.is_none());
+                assert_eq!(last_toast(&app).title, "Pull failed");
             }
         }
     }
@@ -17029,7 +17159,7 @@ pub(crate) mod tests {
             label: "Force push".into(),
             result: Err(" ! [rejected]        main -> main (stale info)".into()),
         });
-        assert_eq!(app.modal.unwrap().title, "Force push refused");
+        assert_eq!(last_toast(&app).title, "Force push refused");
     }
 
     /// Upstream app with an extra local branch `topic` and remote branch `origin/feature`.
@@ -18267,13 +18397,13 @@ pub(crate) mod tests {
         assert_eq!(app.status, "Remote github-fc no longer exists");
         assert!(app.tabs[0].view().unwrap().refreshing, "repository reloads");
 
-        // Other errors still show the dialog.
+        // Other errors still show the error (as a toast, M12-02).
         let _ = app.update(Message::WriteFinished {
             tab,
             label: "Remove remote github-fc".into(),
             result: Err("error: could not remove config section".into()),
         });
-        assert!(app.modal.is_some());
+        assert_eq!(last_toast(&app).title, "Remove remote github-fc failed");
     }
 
     #[test]

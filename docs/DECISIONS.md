@@ -553,6 +553,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: errors that only inform appear as toasts at the bottom left (like GitKraken), stacked up to three; errors and warnings stay until closed, info and success close after 6 seconds. Each error toast has a plain-language title and explanation from a catalog in git-core that maps Git's stderr patterns; Git's command and output are available under "Details" and "Copy". Dialogs that need a decision stay modal. The notification location is fixed (GitKraken's setting is not adopted).
 - Why: modal error boxes with raw Git output block the work and confuse beginners (ADR-044).
 - Consequences: new error cases add a catalog entry with a test; status bar confirmations stay for successful actions.
+- Implementation (M12-02): catalog `git_core::explain` (10 entries: lock, unmerged, local changes, rejected push, authentication, network, nothing to commit, not a repository, signing, detached HEAD); `crate::toast` (state, at most three, a fourth pushes out the oldest; timers carry a sequence so hover pauses them) and `ui::toasts` (layer above the app and the Preferences, below menus and dialogs). Informational `Modal::error` dialogs are gone; specific hints (authentication with the SSH key, signing, stale lease) replace the catalog text. The locked index (Retry), rejected push (Pull / Force push) and pull conflicts stay dialogs.
 
 ## ADR-050 Git flow graph layout by classification
 
