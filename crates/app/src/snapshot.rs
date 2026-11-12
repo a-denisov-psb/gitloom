@@ -73,6 +73,11 @@ pub struct RepoSnapshot {
     pub unfiltered: Option<Arc<RepoSnapshot>>,
     /// Filter this snapshot was built with.
     pub applied_filter: crate::ref_filter::RefFilter,
+    /// The Git flow layout is on (M13-02): lanes grouped by branch type.
+    pub flow_layout: bool,
+    /// Lane groups and colors of the Git flow layout, kept for re-layouts
+    /// (WIP row appears or disappears).
+    flow_hints: Option<Arc<Vec<Option<git_graph::LaneHint>>>>,
 }
 
 /// The remotes part of a snapshot.
@@ -281,12 +286,46 @@ impl RepoSnapshot {
             repo_editor: None,
             unfiltered: None,
             applied_filter: Default::default(),
+            flow_layout: false,
+            flow_hints: None,
         })
     }
 
+    /// The same history laid out in the Git flow layout (`on`, M13-02) or
+    /// the default one. Without Git flow configuration the default layout
+    /// stays. No history is reloaded.
+    pub fn with_flow_layout(&self, on: bool) -> Result<Self, String> {
+        let hints = if on {
+            self.flow_classification().map(|c| Arc::new(c.lane_hints()))
+        } else {
+            None
+        };
+        let layout = Arc::new(self.compute_layout(self.has_wip, hints.as_deref())?);
+        Ok(Self {
+            layout,
+            flow_layout: hints.is_some(),
+            flow_hints: hints,
+            ..self.clone()
+        })
+    }
+
+    fn compute_layout(
+        &self,
+        has_wip: bool,
+        hints: Option<&Vec<Option<git_graph::LaneHint>>>,
+    ) -> Result<Layout, String> {
+        let options = git_graph::LayoutOptions {
+            wip: has_wip.then_some(Wip {
+                head: self.graph.head,
+            }),
+            dashed: &self.graph.dashed,
+            hints: hints.map(|h| git_graph::LaneHints { commits: h }),
+        };
+        git_graph::layout_with(&self.graph.commits, &self.graph.order, &options)
+            .map_err(|e| e.to_string())
+    }
+
     /// Git flow type of every loaded commit (M13-01), indexed by graph id;
-    // Drawn by the Git flow layout (M13-02).
-    #[allow(dead_code)]
     /// `None` without Git flow configuration. Stash rows take the segment
     /// of their base commit.
     pub fn flow_classification(&self) -> Option<git_graph::flow::Classification> {
@@ -368,11 +407,15 @@ impl RepoSnapshot {
             .unwrap_or(self)
             .with_working_tree(self.working_tree.clone())?;
         if !filter.is_active() {
-            return Ok(Self {
+            let whole = Self {
                 unfiltered: None,
                 applied_filter: Default::default(),
                 ..base
-            });
+            };
+            if whole.flow_layout != self.flow_layout {
+                return whole.with_flow_layout(self.flow_layout);
+            }
+            return Ok(whole);
         }
         // Graph ids are positions in the loaded log; `order[row]` is the id
         // of `commits[row]`.
@@ -435,6 +478,10 @@ impl RepoSnapshot {
         filtered.repo_editor = base.repo_editor.clone();
         filtered.unfiltered = Some(Arc::new(base));
         filtered.applied_filter = filter.clone();
+        // Hidden branches are left out before classifying (M13).
+        if self.flow_layout {
+            filtered = filtered.with_flow_layout(true)?;
+        }
         Ok(filtered)
     }
 
@@ -445,18 +492,7 @@ impl RepoSnapshot {
         let layout = if has_wip == self.has_wip {
             Arc::clone(&self.layout)
         } else {
-            let wip = has_wip.then_some(Wip {
-                head: self.graph.head,
-            });
-            let options = git_graph::LayoutOptions {
-                wip,
-                dashed: &self.graph.dashed,
-                hints: None,
-            };
-            Arc::new(
-                git_graph::layout_with(&self.graph.commits, &self.graph.order, &options)
-                    .map_err(|e| e.to_string())?,
-            )
+            Arc::new(self.compute_layout(has_wip, self.flow_hints.as_deref())?)
         };
         Ok(Self {
             layout,
@@ -1356,11 +1392,21 @@ mod perf {
 /// diagram built with the `git` CLI, topic branches deleted after
 /// finishing.
 #[cfg(test)]
-mod flow_tests {
+pub(crate) mod flow_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-    #[test]
-    fn classic_git_flow_history_with_deleted_branches() {
+    /// The classic diagram: v1.0 on main, develop, feature/a and feature/b
+    /// merged into develop, release/2.0 into main and develop, hotfix/2.1
+    /// into both; topic branches deleted. Loaded with Git flow defaults.
+    pub(crate) fn classic_snapshot() -> (crate::test_repo::TestRepo, super::RepoSnapshot) {
+        let repo = classic_repo();
+        let backend = git_core::GixBackend::discover(repo.path()).unwrap();
+        let mut snapshot = super::RepoSnapshot::load(&backend).unwrap();
+        snapshot.flow = Some(git_core::FlowConfig::defaults(&["main"]));
+        (repo, snapshot)
+    }
+
+    fn classic_repo() -> crate::test_repo::TestRepo {
         let repo = crate::test_repo::TestRepo::new();
         repo.commit("a.txt", "1\n", "v1.0");
         repo.git(&["switch", "--quiet", "-c", "develop"]);
@@ -1399,10 +1445,12 @@ mod flow_tests {
         repo.git(&["switch", "--quiet", "develop"]);
         repo.merge("hotfix/2.1", "Merge branch 'hotfix/2.1' into develop");
         repo.git(&["branch", "-D", "hotfix/2.1"]);
+        repo
+    }
 
-        let backend = git_core::GixBackend::discover(repo.path()).unwrap();
-        let mut snapshot = super::RepoSnapshot::load(&backend).unwrap();
-        snapshot.flow = Some(git_core::FlowConfig::defaults(&["main"]));
+    #[test]
+    fn classic_git_flow_history_with_deleted_branches() {
+        let (_repo, snapshot) = classic_snapshot();
         let result = snapshot.flow_classification().unwrap();
         let mut seen: Vec<String> = snapshot
             .commits
@@ -1436,5 +1484,40 @@ mod flow_tests {
                 "v1.0 → production/main",
             ]
         );
+    }
+
+    #[test]
+    fn flow_layout_groups_lanes_and_survives_status_changes() {
+        let (_repo, snapshot) = classic_snapshot();
+        let flow = snapshot.with_flow_layout(true).unwrap();
+        assert!(flow.flow_layout);
+        let lane = |s: &super::RepoSnapshot, summary: &str| {
+            let index = s.commits.iter().position(|c| c.summary == summary).unwrap();
+            s.layout.node_lane(s.row_of(index)).unwrap()
+        };
+        assert_eq!(lane(&flow, "v1.0"), 0);
+        let develop = lane(&flow, "develop work");
+        assert!(lane(&flow, "fix 2.1") < lane(&flow, "bump 2.0"));
+        assert!(lane(&flow, "bump 2.0") < develop);
+        assert!(lane(&flow, "feature a") > develop);
+        // A WIP row appearing keeps the layout; off restores the default.
+        let wip = flow
+            .with_working_tree(git_core::WorkingTree {
+                unstaged: vec![git_core::FileChange {
+                    path: "x".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                }],
+                staged: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(lane(&wip, "develop work"), develop);
+        let off = flow.with_flow_layout(false).unwrap();
+        assert!(!off.flow_layout);
+        assert_eq!(off.layout, snapshot.layout);
+        // Without Git flow configuration the default layout stays.
+        let mut plain = snapshot.clone();
+        plain.flow = None;
+        assert!(!plain.with_flow_layout(true).unwrap().flow_layout);
     }
 }

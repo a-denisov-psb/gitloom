@@ -16,7 +16,15 @@
 
 use std::collections::HashMap;
 
-use crate::{topo_order, Error, GraphCommit, Id};
+use crate::{topo_order, ColorId, Error, GraphCommit, Id, LaneHint};
+
+/// Color ids at and above this value are Git flow colors (M13-02): the
+/// caller maps `FLOW_COLOR_BASE + n` to its flow palette instead of the
+/// lane colors. `n`: 0 production, 1 hotfix, 2 release, 3 development,
+/// 4 … 7 the feature sub-palette, 8 unknown.
+pub const FLOW_COLOR_BASE: u32 = 0x8000_0000;
+/// Number of colors in the feature sub-palette.
+pub const FEATURE_COLORS: u32 = 4;
 
 /// Branch type of a commit, also its lane group (left to right).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -138,6 +146,38 @@ impl Classification {
     pub fn segment_of(&self, id: Id) -> Option<&FlowSegment> {
         let index = *self.commit_segment.get(id.index())?;
         self.segments.get(index as usize)
+    }
+}
+
+impl Classification {
+    /// Lane group and color per commit for [`crate::layout_with`]: one
+    /// group per type, one color per type; features cycle through the
+    /// sub-palette per segment.
+    pub fn lane_hints(&self) -> Vec<Option<LaneHint>> {
+        let mut feature_index: HashMap<u32, u32> = HashMap::new();
+        let color = |segment: u32, kind: FlowKind, features: &mut HashMap<u32, u32>| -> u32 {
+            match kind {
+                FlowKind::Production => 0,
+                FlowKind::Hotfix => 1,
+                FlowKind::Release => 2,
+                FlowKind::Development => 3,
+                FlowKind::Feature => {
+                    let next = features.len() as u32;
+                    4 + *features.entry(segment).or_insert(next) % FEATURE_COLORS
+                }
+                FlowKind::Unknown => 8,
+            }
+        };
+        self.commit_segment
+            .iter()
+            .map(|&segment| {
+                let kind = self.segments.get(segment as usize)?.kind;
+                Some(LaneHint {
+                    group: kind.group(),
+                    color: ColorId(FLOW_COLOR_BASE + color(segment, kind, &mut feature_index)),
+                })
+            })
+            .collect()
     }
 }
 
@@ -539,6 +579,61 @@ mod tests {
                 "12 development/develop/ref",
             ]
         );
+    }
+
+    #[test]
+    fn classic_history_lanes_by_group() {
+        // M13-02: production lane 0, hotfix, release, development, features
+        // right of it; development keeps one column over the whole history.
+        let (spec, subjects) = classic();
+        let commits = history(&spec);
+        let mut by_id = vec![None; commits.len()];
+        for (id, subject) in &subjects {
+            by_id[*id as usize] = Some((*subject).to_owned());
+        }
+        let tips = [tip("main", 11, false), tip("develop", 12, false)];
+        let result = classify(&FlowInput {
+            commits: &commits,
+            subjects: &by_id,
+            tips: &tips,
+            names: names(),
+        })
+        .unwrap();
+        let hints = result.lane_hints();
+        let order = crate::topo_order(&commits).unwrap().order;
+        let layout = crate::layout_with(
+            &commits,
+            &order,
+            &crate::LayoutOptions {
+                hints: Some(crate::LaneHints { commits: &hints }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::test_support::verify_hinted(&commits, &order, &layout);
+        let lane = |id: u32| {
+            let row = order.iter().position(|o| *o == Id(id)).unwrap();
+            layout.node_lane(row).unwrap()
+        };
+        let lanes: Vec<(u32, u16)> = (0..commits.len() as u32).map(|i| (i, lane(i))).collect();
+        let production: Vec<u16> = [0, 8, 11].iter().map(|&i| lane(i)).collect();
+        let development: Vec<u16> = [1, 5, 6, 9, 12].iter().map(|&i| lane(i)).collect();
+        assert!(production.iter().all(|&l| l == 0), "{lanes:?}");
+        assert!(development.windows(2).all(|w| w[0] == w[1]), "{lanes:?}");
+        let (hotfix, release, develop) = (lane(10), lane(7), development[0]);
+        assert!(
+            0 < hotfix && hotfix < release && release < develop,
+            "{lanes:?}"
+        );
+        for feature in [2, 3, 4] {
+            assert!(lane(feature) > develop, "{lanes:?}");
+        }
+        // Colors: one per type, features from the sub-palette per segment.
+        let color = |id: u32| hints[id as usize].unwrap().color.0 - FLOW_COLOR_BASE;
+        assert_eq!([color(0), color(10), color(7), color(1)], [0, 1, 2, 3]);
+        assert_eq!(color(2), color(3), "same segment");
+        assert_ne!(color(2), color(4), "next feature, next color");
+        assert!((4..8).contains(&color(2)) && (4..8).contains(&color(4)));
     }
 
     #[test]

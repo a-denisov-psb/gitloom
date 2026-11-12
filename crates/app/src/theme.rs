@@ -38,6 +38,9 @@ pub struct ThemePalette {
     pub backdrop: Color,
     /// Background of the graph's column header (ADR-048 token).
     pub header_band: Color,
+    /// Git flow layout colors (M13-02, ADR-048 token): production,
+    /// hotfix, release, development, the four feature colors, unknown.
+    pub flow_colors: [Color; 9],
 }
 
 /// The themes (ADR-054: Dark and Light).
@@ -73,6 +76,17 @@ pub const DARK: ThemePalette = ThemePalette {
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
     header_band: hex(0x252a33),
+    flow_colors: [
+        hex(0x5fb878), // production: green
+        hex(0x56b6c2), // hotfix: cyan
+        hex(0x4f9dde), // release: blue
+        hex(0xc678dd), // development: violet
+        hex(0xe86fb0), // features: pink, red, orange, yellow
+        hex(0xe06c75),
+        hex(0xd19a66),
+        hex(0xe5c07b),
+        hex(0x8a93a3), // unknown: gray
+    ],
 };
 
 pub const LIGHT: ThemePalette = ThemePalette {
@@ -101,6 +115,17 @@ pub const LIGHT: ThemePalette = ThemePalette {
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
     header_band: hex(0xf4f5f7),
+    flow_colors: [
+        hex(0x2e8b3a), // production: green
+        hex(0x0f8b9c), // hotfix: cyan
+        hex(0x1f6fc5), // release: blue
+        hex(0x8e44ad), // development: violet
+        hex(0xc2307f), // features: pink, red, orange, yellow
+        hex(0xd1343f),
+        hex(0xc0601c),
+        hex(0xa86d0c),
+        hex(0x6b7280), // unknown: gray
+    ],
 };
 
 /// Palette of the theme a style function is called with.
@@ -466,9 +491,13 @@ pub fn change_color(p: &ThemePalette, kind: ChangeKind) -> Color {
     }
 }
 
-/// Palette color for a lane color id from `git-graph`.
+/// Palette color for a lane color id from `git-graph`; ids from
+/// [`git_graph::flow::FLOW_COLOR_BASE`] on are Git flow colors (M13-02).
 pub fn lane_color(p: &ThemePalette, color: u32) -> Color {
-    p.lanes[color as usize % p.lanes.len()]
+    match color.checked_sub(git_graph::flow::FLOW_COLOR_BASE) {
+        Some(flow) => p.flow_colors[flow as usize % p.flow_colors.len()],
+        None => p.lanes[color as usize % p.lanes.len()],
+    }
 }
 
 /// Background of a selected graph row: the graph background tinted with
@@ -862,6 +891,19 @@ mod tests {
                     assert_ne!(lane, other);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn flow_colors_stay_visible() {
+        for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
+            for (i, color) in p.flow_colors.iter().enumerate() {
+                let ratio = contrast(*color, p.bg_graph);
+                assert!(ratio >= 3.0, "{name}: flow color {i} {ratio:.2}");
+            }
+            let base = git_graph::flow::FLOW_COLOR_BASE;
+            assert_eq!(lane_color(p, base + 3), p.flow_colors[3]);
+            assert_eq!(lane_color(p, 3), p.lanes[3]);
         }
     }
 
