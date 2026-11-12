@@ -20,7 +20,9 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (single release line to 1.0.0, ADR-042; M12 done, M13 current, 2026-11-12)
+## Current state (single release line to 1.0.0, ADR-042; M13 done, M14 current, 2026-11-12)
+
+- M13 (2026-11-12, on `develop`): done. Git flow graph layout: classifier in `git-graph::flow` (live prefixes, Git's merge messages, topology), lane groups production | hotfix | release | development | features with type colors, toggle in the column menu, palette and Preferences (per repository, `gitloom.flowLayout`), faded labels and tooltips for deleted branches, performance in `docs/PERFORMANCE.md`. Planning update 4: ref menus (M13-06) and file menus (M13-07) like GitKraken. Fixes on the way: toggle tooltips removed, Date/SHA columns with fixed width, last-lane clipping.
 
 - M12 (2026-11-12, on `develop`): done. Deselect on click and Stage/Unstage-only hover; toasts with plain-language errors (ADR-049); remote website links; conflict navigation and headers; operation state like GitKraken (graph row, details header, Conflicted/Resolved Files, Mark all resolved, Commit and merge / Abort); submodules; undo for stash push/drop/rename, stage/unstage, mark resolved, pull, remotes, upstream, submodule update; STASHES folders; multi-selection and bulk delete; palette settings toggles and deep links; commit prompt button; WSL notice, polling watcher and trust prompt (ADR-053). Fixes on the way: panel toggles in the status bar with filled icons, Classic Dark removed (ADR-054), prompt button look, CI (macOS key names, test identities, ownership test). Planning update 4 (2026-11-12): M13-06 ref menus and M13-07 file menus like GitKraken.
 

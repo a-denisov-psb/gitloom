@@ -106,6 +106,7 @@ One line per milestone: version, date, scope, notable deviations.
 | M11 Graph columns, themes and syntax highlighting | 1.0.0 (unreleased) | 2026-11-11 | Style tokens (an extra theme built and removed again, ADR-054), column widths with horizontal scrolling and gear menu, stash node, Preferences → Editor, word wrap, syntax highlighting (syntect + two-face), tree order and tag folders, start buttons, Preferences modal, panel toggles, README screenshot fixture | Column model changed by planning update 3 (every column own width, horizontal scrolling); OneHalfDark/GitHub as code themes (no VS Dark+ in two-face); pure Rust regex engine (1 MB highlight 3.4 s in the background) |
 | M10 Clone, init and Git settings | 1.0.0 (unreleased) | 2026-11-11 | New Tab start screen, clone, init with `.gitignore` templates, default branch name, signing settings and signature badge, commit template, commit message prompt, Templates page with stash message template, prune/.orig/long paths/toolbar labels, external editor per repository | Template's first line now prefills the summary, apply/remove-comments default on; SSH signatures without allowed signers file read "key not available"; Preferences → Templates also holds the prompt (planning update 1) |
 | M12 Workflow polish | 1.0.0 (unreleased) | 2026-11-12 | File lists deselect, toasts and plain-language errors, remote links, conflict navigation, operation state like GitKraken, submodules, undo for the remaining local actions, stash folders and rename, multi-selection and bulk delete, palette settings, commit prompt button, WSL notice and trust prompt | Panel toggles moved to the status bar, Classic Dark removed (ADR-054), planning update 4 (M13-06, M13-07) |
+| M13 Git flow graph layout | 1.0.0 (unreleased) | 2026-11-12 | Git flow layout (classifier, lane groups and colors, toggle per repository, faded labels and tooltips for deleted branches), ref menus and file menus like GitKraken | Tag entries without exactly one remote ask for it ("Push <t>…"); Open file location of commit files disabled only for files deleted there (no UI-thread I/O); commit files use `git difftool` for the temporary files |
 | M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
@@ -150,7 +151,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. M9 is done; M10 runs on `develop`, M11 … M14 are planned (ADR-042).
+1. M9 … M13 are done; M14 runs on `develop` (ADR-042).
 2. After M14: the maintainer runs the whole release checklist on Windows and answers the open GitKraken items; then 1.0.0 (M6-15).
 3. M6-10 (SignPath) can happen any time before 1.0.0.
 

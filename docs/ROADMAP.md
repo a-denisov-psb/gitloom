@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M13 – Git flow graph layout** → [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph-layout.md)
+**M14 – Commit details like GitKraken** → [`milestones/M14-commit-details.md`](milestones/M14-commit-details.md)
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M14 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -29,8 +29,8 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M10 | 1.0.0 | Clone, init and Git settings | Done |
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Done |
 | M12 | 1.0.0 | Workflow polish | Done |
-| M13 | 1.0.0 | Git flow graph layout | Current |
-| M14 | 1.0.0 | Commit details like GitKraken | Planned |
+| M13 | 1.0.0 | Git flow graph layout | Done |
+| M14 | 1.0.0 | Commit details like GitKraken | Current |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -107,7 +107,7 @@ Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-th
 
 Details: [`milestones/M12-workflow-polish.md`](milestones/M12-workflow-polish.md).
 
-### M13 – Git flow graph layout (current)
+### M13 – Git flow graph layout (done)
 
 When Git flow is initialized, an optional layout draws the graph like the classic Git flow diagram: fixed lane groups from left to right (production, hotfix, release, development, feature/other), one color per type, built on `LaneHints` (M2-15).
 
@@ -115,10 +115,11 @@ When Git flow is initialized, an optional layout draws the graph like the classi
 - Priority: live branch prefix > Git's default merge message ("Merge branch 'feature/x' into develop") > topology > feature. "Merge branch 'develop' of …" counts as development.
 - Group widths over the whole history (as `LaneHints` does), never per viewport. Unknown segments go to the feature group in a neutral color with the tooltip "Branch type unknown".
 - Toggle in the graph column menu (M11), the palette and Preferences → Repository → Gitflow; disabled with a reason when Git flow is not initialized. Optional: names of deleted branches from merge messages as faded labels. Gitloom extension (UX-PARITY).
+- Planning update 4: branch, remote branch and tag menus (Create branch here, Reset to this commit, Copy commit sha) and file menus (File blame, external diff tool also for commit files, Discard for staged files) like GitKraken.
 
 Details: [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph-layout.md).
 
-### M14 – Commit details like GitKraken (planned)
+### M14 – Commit details like GitKraken (current)
 
 Commit details like GitKraken: framed message box that edits unpushed commits by a click without a rebase (ADR-051), author block with co-authors and parent links, file list with summary, sort, Path/Tree and all files, relative time markers in the graph. Details: [`milestones/M14-commit-details.md`](milestones/M14-commit-details.md).
 
