@@ -1145,6 +1145,8 @@ pub enum Message {
     /// Save (Ctrl+Enter) / Cancel (Esc) of the message editor.
     CommitEditSave,
     CommitEditCancel,
+    /// A minute passed: the graph's time markers update (M14-06).
+    MinuteTick,
     /// Sort toggle of the details' file list (M14-03).
     FileListSortToggled,
     /// Path (`false`) or Tree (`true`).
@@ -1283,6 +1285,9 @@ pub struct App {
     /// Last reported window size, in logical pixels of `window_scale`;
     /// use [`App::window_size`].
     window_size: iced::Size,
+    /// Current time for the graph's time markers (M14-06), refreshed
+    /// every minute.
+    pub(crate) now: i64,
     /// Scale factor when `window_size` was reported.
     window_scale: f32,
     /// Scale factor of the window from the operating system (M9-05).
@@ -1362,6 +1367,7 @@ impl App {
             palette: None,
             recent_actions: Vec::new(),
             window_size: iced::Size::new(1400.0, 860.0),
+            now: unix_now(),
             window_scale: 1.0,
             system_scale: 1.0,
             status_seq: 0,
@@ -8965,6 +8971,7 @@ impl App {
                 }
             }
             Message::CommitEditSave => return self.save_message_edit(),
+            Message::MinuteTick => self.now = unix_now(),
             Message::FileListSortToggled => {
                 self.settings.file_list.descending = !self.settings.file_list.descending;
                 return self.save_settings();
@@ -10827,6 +10834,7 @@ impl App {
             [
                 event::listen_with(global_event),
                 window::close_requests().map(Message::CloseRequested),
+                iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::MinuteTick),
                 iced::system::theme_changes().map(Message::SystemTheme),
             ]
             .into_iter()

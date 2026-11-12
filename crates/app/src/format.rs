@@ -28,6 +28,29 @@ pub fn relative(timestamp: i64, now: i64) -> String {
     format!("{value} {unit}{plural} ago")
 }
 
+/// Relative date of the graph's time markers (M14-06), like GitKraken:
+/// "just now", "<n> minutes ago", "<n> hours ago" (same day), "yesterday",
+/// "<n> days ago" (< 7), "<n> weeks ago" (< 5), "<n> months ago",
+/// "<n> years ago". Days count calendar days (UTC, as the date column).
+pub fn time_marker(timestamp: i64, now: i64) -> String {
+    let seconds = now - timestamp;
+    if seconds < 60 {
+        return "just now".to_owned();
+    }
+    let days = now.div_euclid(86_400) - timestamp.div_euclid(86_400);
+    let plural =
+        |value: i64, unit: &str| format!("{value} {unit}{} ago", if value == 1 { "" } else { "s" });
+    match days {
+        0 if seconds < 3_600 => plural(seconds / 60, "minute"),
+        0 => plural(seconds / 3_600, "hour"),
+        1 => "yesterday".to_owned(),
+        2..=6 => plural(days, "day"),
+        7..=34 => plural(days / 7, "week"),
+        35..=364 => plural((days / 30).max(1), "month"),
+        _ => plural(days / 365, "year"),
+    }
+}
+
 /// Groups digits by thousands with a space: `100000` → `100 000`.
 pub fn thousands(value: usize) -> String {
     let digits = value.to_string();
@@ -99,5 +122,35 @@ mod tests {
     fn builds_initials() {
         assert_eq!(initials("Alice Meyer"), "AM");
         assert_eq!(initials("bob"), "B");
+    }
+
+    #[test]
+    fn time_marker_buckets() {
+        // 2026-11-12 12:00:00 UTC.
+        let now = 1_794_484_800;
+        let day = 86_400;
+        let cases = [
+            (now, "just now"),
+            (now + 300, "just now"),
+            (now - 59, "just now"),
+            (now - 60, "1 minute ago"),
+            (now - 119, "1 minute ago"),
+            (now - 3_599, "59 minutes ago"),
+            (now - 3_600, "1 hour ago"),
+            (now - 12 * 3_600, "12 hours ago"),
+            (now - 12 * 3_600 - 1, "yesterday"),
+            (now - day - 12 * 3_600, "yesterday"),
+            (now - 2 * day, "2 days ago"),
+            (now - 6 * day, "6 days ago"),
+            (now - 7 * day, "1 week ago"),
+            (now - 34 * day, "4 weeks ago"),
+            (now - 35 * day, "1 month ago"),
+            (now - 364 * day, "12 months ago"),
+            (now - 365 * day, "1 year ago"),
+            (now - 3 * 365 * day, "3 years ago"),
+        ];
+        for (timestamp, expected) in cases {
+            assert_eq!(time_marker(timestamp, now), expected, "{}", now - timestamp);
+        }
     }
 }

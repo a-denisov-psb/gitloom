@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Time markers in the graph like GitKraken: a small pill at the right of the commit message where the relative date changes ("just now", "25 minutes ago", "yesterday", "3 days ago", "1 week ago", "2 months ago", "1 year ago"); updated every minute.
+
 - Edit the message of a commit that was not pushed yet by clicking it in the commit details (also further back on the checked-out branch, across merges): Save with Ctrl+Enter, Cancel with Esc, one Undo step. The working tree and index stay untouched; other branches and tags that contain the commit keep the old one (the editor says which). Pushed commits, commits of other branches and running operations say why they cannot be edited.
 
 - Gitflow layout (graph column menu, command palette "Toggle Gitflow layout", Preferences → Repository → Gitflow): with Git flow initialized, the graph groups its lanes like the classic Git flow diagram, production left, then hotfix, release, development and features, one color per branch type, also for branches that were deleted long ago. Stored per repository.

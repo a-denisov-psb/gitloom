@@ -63,6 +63,7 @@ pub fn view<'a>(
     repo: &'a RepoView,
     avatars: &'a crate::avatars::Avatars,
     appearance: &crate::settings::Appearance,
+    now: i64,
 ) -> Element<'a, Message> {
     let lanes = repo.snapshot.layout.max_width;
     let widths = appearance.graph_columns.sanitized(MIN_GRAPH_WIDTH);
@@ -204,6 +205,7 @@ pub fn view<'a>(
                         clipped,
                         columns,
                         message_width,
+                        now,
                     },
                 )
             } else {
@@ -564,6 +566,51 @@ pub struct RowLayout<'w> {
     pub columns: Columns,
     /// Fill, or the minimum when the window is too narrow.
     pub message_width: Length,
+    /// Current time for the time markers (M14-06).
+    pub now: i64,
+}
+
+/// The time marker of commit row `index` (M14-06): its relative date when
+/// that differs from the commit above (always on the first commit).
+pub fn time_marker(
+    snapshot: &crate::snapshot::RepoSnapshot,
+    index: usize,
+    now: i64,
+) -> Option<String> {
+    let label = format::time_marker(snapshot.commits.get(index)?.author_time, now);
+    let above = index
+        .checked_sub(1)
+        .and_then(|i| snapshot.commits.get(i))
+        .map(|c| format::time_marker(c.author_time, now));
+    (above.as_deref() != Some(label.as_str())).then_some(label)
+}
+
+/// The commit message with the time marker pill at the right edge.
+fn message_with_marker(
+    summary: Element<'_, Message>,
+    marker: Option<String>,
+) -> Element<'_, Message> {
+    match marker {
+        None => summary,
+        // The first layer sets the stack's size: the whole cell.
+        Some(label) => iced::widget::stack![
+            container(summary)
+                .width(Fill)
+                .height(Fill)
+                .align_y(iced::Center),
+            container(
+                container(text(label).size(11).wrapping(text::Wrapping::None))
+                    .padding([1, 6])
+                    .style(theme::time_marker)
+            )
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::Right)
+            .align_y(iced::Center)
+            .padding(iced::Padding::ZERO.right(4)),
+        ]
+        .into(),
+    }
 }
 
 /// One table row: the WIP row or a commit row.
@@ -579,6 +626,7 @@ pub fn graph_row<'a>(
         clipped,
         columns,
         message_width,
+        now,
     } = *layout;
     let snapshot = &repo.snapshot;
     let Some(layout_row) = snapshot.layout.row(row_index) else {
@@ -689,7 +737,13 @@ pub fn graph_row<'a>(
     let mut content = row![
         refs_cell,
         graph_column(graph, graph_width, clipped, selected, color,),
-        cell(summary.wrapping(text::Wrapping::None), message_width),
+        cell(
+            message_with_marker(
+                summary.wrapping(text::Wrapping::None).into(),
+                time_marker(snapshot, index, now),
+            ),
+            message_width
+        ),
     ];
     if columns.author {
         content = content.push(cell(

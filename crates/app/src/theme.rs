@@ -478,6 +478,19 @@ pub fn flow_pill(theme: &Theme) -> container::Style {
     }
 }
 
+/// Time marker pill at the right of the commit message (M14-06): a muted
+/// pill (hover color, small text); the text keeps the normal color because
+/// muted text on it misses WCAG AA.
+pub fn time_marker(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.bg_hover)),
+        border: Border::default().rounded(8),
+        text_color: Some(p.text),
+        ..container::Style::default()
+    }
+}
+
 /// Ref pill (branch or tag label): outline in the kind's color.
 pub fn ref_pill(kind: RefKind, is_head: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
@@ -913,6 +926,19 @@ mod tests {
                 let ratio = contrast(p.text_muted, bg);
                 assert!(ratio >= 4.5, "{name}: muted text on {bg_name} {ratio:.2}");
             }
+        }
+        // Time marker pills (M14-06).
+        for kind in [ThemeKind::Dark, ThemeKind::Light] {
+            let style = time_marker(&app_theme(kind));
+            let (Some(fg), Some(Background::Color(bg))) = (style.text_color, style.background)
+            else {
+                panic!("time marker without colors");
+            };
+            assert!(
+                contrast(fg, bg) >= 4.5,
+                "time marker {:.2}",
+                contrast(fg, bg)
+            );
         }
         // Messages in danger/warning colors are text too.
         for color in [LIGHT.danger, LIGHT.warning, LIGHT.success, LIGHT.accent] {
