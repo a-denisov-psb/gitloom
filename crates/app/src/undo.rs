@@ -31,6 +31,15 @@ pub enum UndoAction {
     StashDrop(git_core::work_undo::StashDropRecord),
     /// Remote added, removed, renamed or edited; upstream set or unset (M12-08).
     Remote(git_core::remote_undo::RemoteChange),
+    /// Several branches and tags deleted in one step (M12-11). `merge`:
+    /// the forced part, joined to the step before; `report` travels to
+    /// `WriteFinished` only and is never stored.
+    Refs {
+        label: String,
+        changes: Vec<git_core::RefChange>,
+        merge: bool,
+        report: Option<BulkReport>,
+    },
     /// "Rename stash" (M12-10).
     StashRename(git_core::work_undo::StashRename),
     /// Checkouts of a submodule update (M12-08).
@@ -70,10 +79,20 @@ impl UndoAction {
             Self::StashPush(_) => "Stash".to_owned(),
             Self::StashDrop(_) => "Delete stash".to_owned(),
             Self::StashRename(_) => "Rename stash".to_owned(),
+            Self::Refs { label, .. } => label.clone(),
             Self::Remote(change) => change.label(),
             Self::Submodules { label, .. } => label.clone(),
         }
     }
+}
+
+/// What a bulk delete could not do (M12-11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkReport {
+    /// Refused by `git branch -d`: offered for `-D`.
+    pub unmerged: Vec<String>,
+    /// (name, Git's message).
+    pub failed: Vec<(String, String)>,
 }
 
 /// How a finished write changes the undo and redo stacks.

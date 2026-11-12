@@ -34,6 +34,7 @@ mod palette;
 mod panes;
 mod rebase_panel;
 mod ref_filter;
+mod ref_selection;
 mod repo_view;
 mod search;
 mod selection;

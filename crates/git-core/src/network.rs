@@ -159,6 +159,15 @@ pub fn delete_remote_branch_args(remote: &str, branch: &str) -> Vec<String> {
         .to_vec()
 }
 
+/// Arguments to delete several branches on `remote` in one push (M12-11).
+pub fn delete_remote_branches_args(remote: &str, branches: &[String]) -> Vec<String> {
+    let mut args: Vec<String> = ["push", "--progress", remote, "--delete"]
+        .map(str::to_owned)
+        .to_vec();
+    args.extend(branches.iter().cloned());
+    args
+}
+
 /// Arguments to rename a branch on `remote` in one push: upload local
 /// branch `new` under its name (becoming its upstream) and delete
 /// `old_remote_branch`.

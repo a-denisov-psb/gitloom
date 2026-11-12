@@ -36,6 +36,10 @@ Fetch, pull and push cannot be undone.
 
 Changes made outside Gitloom (new remotes, upstreams, `.git/config`) show up automatically.
 
+## Selecting several branches and tags
+
+Ctrl+click (⌘+click on macOS) adds or removes a branch or tag row in LOCAL, REMOTE, GITFLOW or TAGS; Shift+click selects all rows between the last clicked one and this one (rows in collapsed folders are left out). Esc clears the selection. Right click on a selected row: **Delete <n> branches…** (or tags, or branches and tags) and **Hide in graph** / **Show in graph**. The dialog lists everything grouped (local branches, remote branches per remote, tags); the checked-out branch is listed but skipped. Branches that are not merged are named in a second question (**Delete anyway**). Local branches and tags come back with one Undo; remote branches are deleted with one push per remote and cannot be undone. If something cannot be deleted, a notification lists it and the rest stays deleted.
+
 ## Submodules
 
 The SUBMODULES section lists every submodule, nested ones indented under their parent, with an icon for its state (tooltip): up to date, **not initialized**, **out of date** (the checked-out commit differs from the one the repository records), **modified** (local changes) or **conflict**.

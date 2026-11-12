@@ -75,8 +75,9 @@ pub use git_identity::{
 };
 pub use gix_backend::GixBackend;
 pub use history::{
-    branch_upstream, head_commit, head_position, move_head, ref_commit, restore_snapshot,
-    tag_message, unreachable_from_branches, HeadPosition, RefChange,
+    branch_upstream, delete_refs, head_commit, head_position, move_head, ref_commit,
+    restore_snapshot, tag_message, unreachable_from_branches, DeleteOutcome, HeadPosition,
+    RefChange,
 };
 pub use history_ops::{
     current_branch, current_state, index_tree, record_branch_move, record_pull, redo_history,
@@ -90,9 +91,9 @@ pub use merge::{
 #[cfg(any(test, feature = "mock"))]
 pub use mock::MockBackend;
 pub use network::{
-    delete_remote_branch_args, delete_remote_tag_args, fast_forward_args, fetch_remote_args,
-    parse_progress, push_args, push_rejection, push_tag_args, rename_remote_branch_args,
-    CancelToken, Progress, PullMode, PushRejection,
+    delete_remote_branch_args, delete_remote_branches_args, delete_remote_tag_args,
+    fast_forward_args, fetch_remote_args, parse_progress, push_args, push_rejection, push_tag_args,
+    rename_remote_branch_args, CancelToken, Progress, PullMode, PushRejection,
 };
 pub use patch::{build_patch, PatchDirection};
 pub use pick::{cherry_pick, commit_empty, revert};

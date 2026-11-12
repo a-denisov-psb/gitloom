@@ -806,6 +806,11 @@ pub struct RepoView {
     /// Network operation that follows the running write if it succeeds
     /// (e.g. renaming the remote branch after the local rename).
     pub then_network: Option<NetworkRequest>,
+    /// Further network requests run one after the other (bulk delete of
+    /// remote branches on several remotes, M12-11).
+    pub network_chain: std::collections::VecDeque<NetworkRequest>,
+    /// Selected rows of the left panel (M12-11).
+    pub ref_selection: crate::ref_selection::RefSelection,
     /// Branch of the running plain delete, to offer a force delete if Git
     /// says it is not merged.
     pub pending_delete: Option<String>,
@@ -1137,6 +1142,8 @@ impl RepoView {
             new_branch: None,
             rename: None,
             then_network: None,
+            network_chain: std::collections::VecDeque::new(),
+            ref_selection: crate::ref_selection::RefSelection::default(),
             pending_delete: None,
             pending_checkout: None,
             pending_merge: None,
@@ -1192,6 +1199,80 @@ impl RepoView {
         groups
     }
 
+    /// Rows of LOCAL, REMOTE, GITFLOW and TAGS in the order the left panel
+    /// shows them (M12-11): collapsed sections and folders and the text
+    /// filter leave rows out. A Git flow branch counts at its first row.
+    pub fn visible_refs(&self) -> Vec<crate::ref_selection::RefKey> {
+        use crate::branch_tree::{folder_key, rows, tag_folder_key, Row};
+        let needle = self.filter.to_lowercase();
+        let filtering = !needle.is_empty();
+        let refs = &self.snapshot.refs;
+        let mut order: Vec<crate::ref_selection::RefKey> = Vec::new();
+        let push_rows = |order: &mut Vec<_>, rows: Vec<Row<'_>>| {
+            for row in rows {
+                if let Row::Branch { index, .. } = row {
+                    if let Some(r) = refs.get(index) {
+                        let key = (r.kind, r.name.clone());
+                        if !order.contains(&key) {
+                            order.push(key);
+                        }
+                    }
+                }
+            }
+        };
+        let open = |section: Section| !self.collapsed.contains(&section);
+        if let (Some(config), true) = (&self.snapshot.flow, open(Section::Gitflow)) {
+            let branches = refs
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.kind == git_core::RefKind::LocalBranch)
+                .filter(|(_, r)| needle.is_empty() || r.name.to_lowercase().contains(&needle))
+                .map(|(index, r)| (index, r.name.as_str()));
+            let (tree, _) = crate::branch_tree::gitflow(branches, config);
+            let collapsed = |path: &str| self.folders_collapsed.contains(path);
+            push_rows(&mut order, rows(&tree, &collapsed, filtering));
+        }
+        let groups = self.sidebar_groups();
+        if open(Section::Local) {
+            let collapsed = |path: &str| self.folders_collapsed.contains(&folder_key(None, path));
+            push_rows(&mut order, rows(&groups.local, &collapsed, filtering));
+        }
+        if open(Section::Remote) {
+            for (name, nodes) in &groups.remotes {
+                if !filtering && self.folders_collapsed.contains(&folder_key(Some(name), "")) {
+                    continue;
+                }
+                let collapsed = |path: &str| {
+                    self.folders_collapsed
+                        .contains(&folder_key(Some(name), path))
+                };
+                push_rows(&mut order, rows(nodes, &collapsed, filtering));
+            }
+        }
+        if open(Section::Tags) {
+            let tags: Vec<(usize, &str)> = refs
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.kind == git_core::RefKind::Tag)
+                .filter(|(_, r)| needle.is_empty() || r.name.to_lowercase().contains(&needle))
+                .map(|(index, r)| (index, r.name.as_str()))
+                .collect();
+            let tree = crate::branch_tree::build(tags);
+            let collapsed = |path: &str| self.folders_collapsed.contains(&tag_folder_key(path));
+            push_rows(&mut order, rows(&tree, &collapsed, filtering));
+        }
+        order
+    }
+
+    /// Drops selected left panel rows that are no longer shown.
+    pub fn prune_ref_selection(&mut self) {
+        if self.ref_selection.len() == 0 && self.ref_selection.anchor.is_none() {
+            return;
+        }
+        let order = self.visible_refs();
+        self.ref_selection.retain_visible(&order);
+    }
+
     pub fn apply_snapshot(&mut self, snapshot: Arc<RepoSnapshot>) {
         self.selection = restore_selection(self.selection.as_ref(), &snapshot);
         self.multi.retain(&selectable_ids(&snapshot));
@@ -1203,6 +1284,7 @@ impl RepoView {
         let was_running = crate::operation::status(self).is_some();
         self.snapshot = snapshot;
         self.record_operation_conflicts(was_running);
+        self.prune_ref_selection();
         self.refreshing = false;
         self.suppress_watch = false;
         self.error = None;

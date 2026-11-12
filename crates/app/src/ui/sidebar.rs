@@ -640,8 +640,14 @@ fn ref_item<'a>(
 
     // One indent less: the gutter takes the parent level's column.
     let depth = depth.saturating_sub(1);
-    let message = Message::RefClicked(reference.name.clone());
-    let item = if reference.is_head {
+    let message = Message::RefClicked {
+        name: reference.name.clone(),
+        kind: reference.kind,
+    };
+    // Rows of a multi-selection use the selection style (M12-11).
+    let selected = repo.ref_selection.len() > 1
+        && repo.ref_selection.contains(reference.kind, &reference.name);
+    let item = if reference.is_head || selected {
         head_button(content, depth, message)
     } else {
         list_button(content, depth, message)

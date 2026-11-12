@@ -349,3 +349,63 @@ fn switch_to(writer: &dyn GitWriter, position: &HeadPosition) -> Result<()> {
         HeadPosition::Detached(id) => writer.switch_detached(id),
     }
 }
+
+/// Result of deleting several local branches and tags (M12-11).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeleteOutcome {
+    /// What was deleted, for one undo step.
+    pub changes: Vec<RefChange>,
+    /// Branches `git branch -d` refused because they are not merged.
+    pub unmerged: Vec<String>,
+    /// Other failures: (name, Git's message).
+    pub failed: Vec<(String, String)>,
+}
+
+/// Deletes local `branches` (`-d`, or `-D` with `force`) and `tags` one by
+/// one; a failure does not stop the others.
+pub fn delete_refs(
+    writer: &dyn GitWriter,
+    branches: &[String],
+    tags: &[String],
+    force: bool,
+) -> Result<DeleteOutcome> {
+    let mut outcome = DeleteOutcome::default();
+    for name in branches {
+        let Some(target) = crate::ref_commit(writer, &format!("refs/heads/{name}"))? else {
+            outcome
+                .failed
+                .push((name.clone(), "the branch no longer exists".into()));
+            continue;
+        };
+        let upstream = branch_upstream(writer, name)?;
+        match writer.delete_branch(name, force) {
+            Ok(()) => outcome.changes.push(RefChange::DeleteBranch {
+                name: name.clone(),
+                target,
+                upstream,
+            }),
+            Err(error) if crate::branch_not_merged(&error.to_string()) => {
+                outcome.unmerged.push(name.clone());
+            }
+            Err(error) => outcome.failed.push((name.clone(), error.to_string())),
+        }
+    }
+    for name in tags {
+        let Some(target) = crate::ref_commit(writer, &format!("refs/tags/{name}"))? else {
+            outcome
+                .failed
+                .push((name.clone(), "the tag no longer exists".into()));
+            continue;
+        };
+        let message = tag_message(writer, name)?;
+        match writer.delete_tag(name) {
+            Ok(()) => outcome.changes.push(RefChange::DeleteTag {
+                name: name.clone(),
+                target,
+                message,
+            }),
+            Err(error) => outcome.failed.push((name.clone(), error.to_string())),
+        }
+    }
+    Ok(outcome)
+}

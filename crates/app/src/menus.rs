@@ -549,6 +549,30 @@ pub fn stash(id: &str, writable: bool, restorable: bool) -> Vec<MenuEntry> {
     ]
 }
 
+/// Context menu on one of several selected left panel rows (M12-11):
+/// delete them all; hide or show the branches among them.
+pub fn bulk(
+    plan: &crate::ref_selection::BulkPlan,
+    branches: bool,
+    all_hidden: bool,
+    writable: bool,
+) -> Vec<MenuEntry> {
+    let mut entries = vec![action(
+        &plan.menu_label(),
+        writable && !plan.is_empty(),
+        Message::BulkDeleteStart,
+    )];
+    if branches {
+        entries.push(MenuEntry::Separator);
+        entries.push(if all_hidden {
+            MenuEntry::item("Show in graph", Message::HideSelected(false))
+        } else {
+            MenuEntry::item("Hide in graph", Message::HideSelected(true))
+        });
+    }
+    entries
+}
+
 /// Context menu of a submodule row (M12-06).
 pub fn submodule(path: &str, writable: bool) -> Vec<MenuEntry> {
     vec![
