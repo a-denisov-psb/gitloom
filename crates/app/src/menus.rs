@@ -539,6 +539,11 @@ pub fn stash(id: &str, writable: bool, restorable: bool) -> Vec<MenuEntry> {
             writable && restorable,
             Message::StashPop(id.into()),
         ),
+        action(
+            "Rename stash…",
+            writable,
+            Message::RenameStashStart(id.into()),
+        ),
         MenuEntry::Separator,
         action("Delete stash", writable, Message::StashDrop(id.into())),
     ]
@@ -945,10 +950,13 @@ mod tests {
 
     #[test]
     fn stash_restore_is_blocked_during_operations() {
-        assert_eq!(summary(&stash("s", true, false)).0, ["Delete stash"]);
+        assert_eq!(
+            summary(&stash("s", true, false)).0,
+            ["Rename stash…", "Delete stash"]
+        );
         assert_eq!(
             summary(&stash("s", true, true)).0,
-            ["Apply stash", "Pop stash", "Delete stash"]
+            ["Apply stash", "Pop stash", "Rename stash…", "Delete stash"]
         );
     }
 }

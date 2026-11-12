@@ -5,7 +5,7 @@ use iced::widget::{button, column, container, row, space, text, text_input};
 use iced::{Element, Fill};
 
 use crate::app::Message;
-use crate::branch_tree::{folder_key, tag_folder_key, Row};
+use crate::branch_tree::{folder_key, stash_folder_key, tag_folder_key, Row};
 use crate::icons::{self, Icon};
 use crate::repo_view::{RepoView, Section};
 use crate::theme;
@@ -88,27 +88,57 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     })
     .collect();
 
-    // Click selects the stash row in the graph; right click opens its menu.
-    let stashes: Vec<_> = repo
+    // STASHES as a tree at `/` (M12-10). Click selects the stash row in the
+    // graph; right click opens its menu; the tooltip shows the full
+    // message and the date.
+    let stash_count = repo
         .snapshot
         .stashes
         .iter()
         .filter(|s| matches(&s.message))
-        .map(|s| {
-            let item = list_button(
-                text(git_core::stash_label(&s.message))
-                    .wrapping(text::Wrapping::None)
-                    .into(),
-                1,
-                Message::CommitSelected(s.id.clone()),
-            );
-            let id = s.id.clone();
-            crate::ui::context_area::context_area(item, move |position| Message::StashContextMenu {
-                id: id.clone(),
-                position,
-            })
-        })
+        .count();
+    let labels: Vec<(usize, String)> = repo
+        .snapshot
+        .stashes
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| matches(&s.message))
+        .map(|(i, s)| (i, git_core::stash_label(&s.message)))
         .collect();
+    let stash_tree =
+        crate::branch_tree::stash_tree(labels.iter().map(|(i, label)| (*i, label.as_str())));
+    let stashes: Vec<_> = crate::branch_tree::rows(
+        &stash_tree,
+        &|path| repo.folders_collapsed.contains(&stash_folder_key(path)),
+        filtering,
+    )
+    .into_iter()
+    .map(|row| match row {
+        Row::Folder {
+            depth,
+            name,
+            path,
+            expanded,
+        } => folder_row(
+            name.to_owned(),
+            stash_folder_key(path),
+            expanded,
+            1 + u16::try_from(depth).unwrap_or(0),
+        ),
+        Row::Branch {
+            depth,
+            index,
+            label,
+        } => match repo.snapshot.stashes.get(index) {
+            Some(stash) => stash_item(
+                stash,
+                label.to_owned(),
+                1 + u16::try_from(depth).unwrap_or(0),
+            ),
+            None => space::horizontal().width(0).into(),
+        },
+    })
+    .collect();
 
     let hide_active = repo.ref_filter.is_active();
     let mut local = Some(section(
@@ -139,7 +169,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         repo,
         Section::Stashes,
         "STASHES",
-        stashes.len().to_string(),
+        stash_count.to_string(),
         stashes,
     ));
     let mut tags = Some(section(
@@ -494,6 +524,36 @@ fn tree_row<'a>(
             }
         }
     }
+}
+
+/// One stash of STASHES: its last label segment, the full message and
+/// date as tooltip (M12-10).
+fn stash_item<'a>(stash: &git_core::Stash, label: String, depth: u16) -> Element<'a, Message> {
+    let item = list_button(
+        row![
+            icons::tinted(Icon::Stash, 13.0, |p| p.text_muted),
+            text(label).wrapping(text::Wrapping::None),
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into(),
+        depth,
+        Message::CommitSelected(stash.id.clone()),
+    );
+    let id = stash.id.clone();
+    let item =
+        crate::ui::context_area::context_area(item, move |position| Message::StashContextMenu {
+            id: id.clone(),
+            position,
+        });
+    crate::ui::panel::with_tooltip_text(
+        item,
+        format!(
+            "{}\n{}",
+            stash.message,
+            crate::format::date_time(stash.time)
+        ),
+    )
 }
 
 /// Branch folder: chevron, folder icon, name; a click toggles it.

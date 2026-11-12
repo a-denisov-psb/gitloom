@@ -1034,6 +1034,8 @@ pub enum Message {
     StashApply(String),
     /// Close the banner of a resolved stash conflict without dropping it.
     KeepStash,
+    /// "Rename stash…" (M12-10): opens the dialog.
+    RenameStashStart(String),
     /// "Mark all resolved" (M12-05): checks the conflicted files for
     /// markers, then stages them (after a confirmation if any has markers).
     MarkAllResolved,
@@ -2244,6 +2246,18 @@ impl App {
                 self.form = None;
                 let label = format!("Start {} {name}", kind.noun());
                 self.create_and_switch(tab, full, base, label)
+            }
+            FormAction::RenameStash { tab, id } => {
+                let name = form.value(0).trim().to_owned();
+                if name.is_empty() {
+                    form.error = Some("Enter a name".into());
+                    return Task::none();
+                }
+                self.form = None;
+                self.run_undoable(tab, "Rename stash", move |git| {
+                    let rename = git_core::work_undo::rename_stash(git, &id, &name)?;
+                    Ok(Some(History::Push(UndoAction::StashRename(rename))))
+                })
             }
             FormAction::RenameRemote { tab, old } => {
                 let new = form.value(0).to_owned();
@@ -3692,6 +3706,10 @@ impl App {
                     } else {
                         UndoAction::Stash(Box::new(git_core::redo_stash(git, &root, &record)?))
                     }
+                }
+                UndoAction::StashRename(rename) => {
+                    git_core::work_undo::switch_stash_rename(git, &rename, undo)?;
+                    UndoAction::StashRename(rename)
                 }
                 UndoAction::Remote(change) => {
                     git_core::remote_undo::switch_remote_change(git, &change, undo)?;
@@ -7891,6 +7909,28 @@ impl App {
                 if let Some(view) = self.active_view_mut() {
                     view.stash_conflict = None;
                 }
+            }
+            Message::RenameStashStart(id) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(label) = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.snapshot.stashes.iter().find(|s| s.id == id))
+                    .map(|s| git_core::stash_label(&s.message))
+                else {
+                    return Task::none();
+                };
+                self.form = Some(Form {
+                    title: "Rename stash".into(),
+                    text: "Use / to put the stash into a folder.".into(),
+                    fields: vec![FormField::text("Name", label)],
+                    submit: "Rename".into(),
+                    action: FormAction::RenameStash { tab, id },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
             }
             Message::MarkAllResolved => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
@@ -16933,6 +16973,34 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn rename_stash_dialog() {
+        let mut app = stash_app();
+        let _ = app.update(Message::RenameStashStart("s1".into()));
+        let form = app.form.as_ref().unwrap();
+        assert_eq!(form.title, "Rename stash");
+        assert_eq!(form.value(0), "WIP on main");
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: "  ".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(
+            app.form.as_ref().unwrap().error.as_deref(),
+            Some("Enter a name")
+        );
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: "work/idea".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Rename stash")
+        );
+    }
+
+    #[test]
     fn stash_menu_and_confirmed_delete() {
         let mut app = staging_app(&["a"], &[]);
         let _ = app.update(Message::StashContextMenu {
@@ -16942,7 +17010,8 @@ pub(crate) mod tests {
         let menu = app.context_menu.clone().unwrap();
         assert!(matches!(menu.select(0), Some(Message::StashApply(id)) if id == "s1"));
         assert!(matches!(menu.select(1), Some(Message::StashPop(id)) if id == "s1"));
-        let _ = app.update(Message::MenuSelected(3));
+        assert!(matches!(menu.select(2), Some(Message::RenameStashStart(id)) if id == "s1"));
+        let _ = app.update(Message::MenuSelected(4));
         // Deleting asks first.
         assert!(app.tabs[0].view().unwrap().busy.is_none());
         let _ = app.update(Message::ModalAction(1));

@@ -688,6 +688,47 @@ mod tests {
         }
     }
 
+    /// STASHES as a tree (M12-10): stashes in stash order, then folders;
+    /// "WIP on feature/x" not split; one folder collapsed; the rename
+    /// dialog. Dark and light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_stash_folders() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::stash_app();
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut repo = (*view.snapshot).clone();
+            let template = repo.stashes[0].clone();
+            repo.stashes = [
+                "WIP on feature/login: 1a2b3c4 Add form",
+                "On main: experiments/fast path",
+                "On main: quick fix",
+                "On main: experiments/cache",
+                "On main: archive/2025/old idea",
+            ]
+            .iter()
+            .enumerate()
+            .map(|(index, message)| git_core::Stash {
+                index,
+                message: (*message).into(),
+                id: format!("s{index}"),
+                ..template.clone()
+            })
+            .collect();
+            view.snapshot = std::sync::Arc::new(repo);
+            view.folders_collapsed
+                .insert(crate::branch_tree::stash_folder_key("archive"));
+            snapshot(&app, &format!("stash-folders-{theme}"));
+            let _ = app.update(Message::RenameStashStart("s2".into()));
+            snapshot(&app, &format!("stash-rename-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

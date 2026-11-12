@@ -265,3 +265,142 @@ pub fn undo_stash_drop(git: &dyn GitWriter, record: &StashDropRecord) -> Result<
 pub fn redo_stash_drop(git: &dyn GitWriter, record: &StashDropRecord) -> Result<StashDropRecord> {
     stash_drop_recorded(git, &record.stash)
 }
+
+/// A renamed stash (M12-10): the entries from `stash@{0}` to the renamed
+/// one before and after, `(commit, message)` each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashRename {
+    pub before: Vec<(Oid, String)>,
+    pub after: Vec<(Oid, String)>,
+}
+
+/// New message for a stash renamed to `name`: `On <branch>: <name>` with
+/// the branch of the old message ("WIP on <branch>: …" or "On <branch>:
+/// …"), else `name` alone.
+pub fn renamed_message(old: &str, name: &str) -> String {
+    let branch = old
+        .strip_prefix("WIP on ")
+        .or_else(|| old.strip_prefix("On "))
+        .and_then(|rest| rest.split_once(':'))
+        .map(|(branch, _)| branch);
+    match branch {
+        Some(branch) => format!("On {branch}: {name}"),
+        None => name.to_owned(),
+    }
+}
+
+/// A copy of commit `id` with `message`: same tree, parents, author and
+/// committer (a signature is left out, it would no longer match).
+fn reword_commit(git: &dyn GitWriter, id: &str, message: &str) -> Result<Oid> {
+    let raw = git
+        .run(
+            &["cat-file", "commit", id],
+            RunOptions {
+                read_only: true,
+                ..RunOptions::default()
+            },
+        )?
+        .stdout_text();
+    let headers = raw.split_once("\n\n").map_or(raw.as_str(), |(h, _)| h);
+    let mut kept = Vec::new();
+    let mut in_signature = false;
+    for line in headers.lines() {
+        if line.starts_with("gpgsig") {
+            in_signature = true;
+            continue;
+        }
+        if in_signature && line.starts_with(' ') {
+            continue;
+        }
+        in_signature = false;
+        kept.push(line);
+    }
+    let content = format!("{}\n\n{}\n", kept.join("\n"), message.trim_end());
+    Ok(git
+        .run(
+            &["hash-object", "-t", "commit", "-w", "--stdin"],
+            RunOptions {
+                stdin: Some(content.as_bytes()),
+                read_only: false,
+            },
+        )?
+        .stdout_text()
+        .trim()
+        .to_owned())
+}
+
+/// Replaces the top entries `from` (`stash@{0}` …) by `to`; on a failure
+/// the original entries are stored back.
+fn replace_top(git: &dyn GitWriter, from: &[(Oid, String)], to: &[(Oid, String)]) -> Result<()> {
+    let attempt = || -> Result<()> {
+        for _ in from {
+            git.run(
+                &["stash", "drop", "--quiet", "stash@{0}"],
+                RunOptions::default(),
+            )?;
+        }
+        for (stash, message) in to.iter().rev() {
+            store(git, stash, message)?;
+        }
+        Ok(())
+    };
+    let result = attempt();
+    if result.is_err() {
+        // Back to the recorded entries: drop what is above the untouched
+        // rest of the list, then store them again.
+        let rest = stash_entries(git)?;
+        let extra = rest
+            .iter()
+            .take_while(|(id, _)| from.iter().chain(to).any(|(o, _)| o == id))
+            .count();
+        for _ in 0..extra {
+            git.run(
+                &["stash", "drop", "--quiet", "stash@{0}"],
+                RunOptions::default(),
+            )?;
+        }
+        for (stash, message) in from.iter().rev() {
+            store(git, stash, message)?;
+        }
+    }
+    result
+}
+
+/// Renames the stash with commit `id` to `name` at its position.
+pub fn rename_stash(git: &dyn GitWriter, id: &str, name: &str) -> Result<StashRename> {
+    let entries = stash_entries(git)?;
+    let position = entries
+        .iter()
+        .position(|(stash, _)| stash == id)
+        .ok_or_else(|| Error::NotFound(format!("stash {id}")))?;
+    let before: Vec<(Oid, String)> = entries.into_iter().take(position + 1).collect();
+    let message = renamed_message(&before[position].1, name);
+    let renamed = reword_commit(git, id, &message)?;
+    let mut after = before.clone();
+    after[position] = (renamed, message);
+    replace_top(git, &before, &after)?;
+    Ok(StashRename { before, after })
+}
+
+/// Undoes (`undo`) or redoes a rename; refuses when the entries up to the
+/// renamed one are no longer as the rename (or the undo) left them.
+pub fn switch_stash_rename(git: &dyn GitWriter, rename: &StashRename, undo: bool) -> Result<()> {
+    let (expected, target) = if undo {
+        (&rename.after, &rename.before)
+    } else {
+        (&rename.before, &rename.after)
+    };
+    let current: Vec<Oid> = stash_entries(git)?
+        .into_iter()
+        .take(expected.len())
+        .map(|(id, _)| id)
+        .collect();
+    let wanted: Vec<&Oid> = expected.iter().map(|(id, _)| id).collect();
+    if current.iter().collect::<Vec<_>>() != wanted {
+        return Err(Error::Backend(format!(
+            "Cannot {}: the stash list changed",
+            if undo { "undo" } else { "redo" }
+        )));
+    }
+    replace_top(git, expected, target)
+}

@@ -31,6 +31,8 @@ pub enum UndoAction {
     StashDrop(git_core::work_undo::StashDropRecord),
     /// Remote added, removed, renamed or edited; upstream set or unset (M12-08).
     Remote(git_core::remote_undo::RemoteChange),
+    /// "Rename stash" (M12-10).
+    StashRename(git_core::work_undo::StashRename),
     /// Checkouts of a submodule update (M12-08).
     Submodules {
         label: String,
@@ -67,6 +69,7 @@ impl UndoAction {
             Self::Work(change) => change.label.clone(),
             Self::StashPush(_) => "Stash".to_owned(),
             Self::StashDrop(_) => "Delete stash".to_owned(),
+            Self::StashRename(_) => "Rename stash".to_owned(),
             Self::Remote(change) => change.label(),
             Self::Submodules { label, .. } => label.clone(),
         }

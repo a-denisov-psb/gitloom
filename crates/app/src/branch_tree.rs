@@ -227,6 +227,46 @@ pub fn folder_key(remote: Option<&str>, path: &str) -> String {
     }
 }
 
+/// STASHES as a tree (M12-10): stash labels (`index` into the stashes,
+/// label) split at `/` like branches, but a label "WIP on <branch>" is
+/// never split (branch names contain `/`). On every level the stashes keep
+/// the stash order (newest first, as Git and the pop default), then come
+/// the folders sorted case-insensitively.
+pub fn stash_tree<'a>(stashes: impl IntoIterator<Item = (usize, &'a str)>) -> Vec<Node> {
+    let mut root = Vec::new();
+    for (index, label) in stashes {
+        if label.starts_with("WIP on ") {
+            root.push(Node::Branch {
+                index,
+                label: label.to_owned(),
+            });
+        } else {
+            insert(&mut root, "", index, label);
+        }
+    }
+    sort_stashes(&mut root);
+    root
+}
+
+fn sort_stashes(nodes: &mut [Node]) {
+    // Stable: stashes keep their order, folders go after them by name.
+    nodes.sort_by(|a, b| match (a.is_folder(), b.is_folder()) {
+        (true, true) => compare_names(a.name(), b.name()),
+        (false, false) => Ordering::Equal,
+        (folder, _) => folder.cmp(&!folder),
+    });
+    for node in nodes {
+        if let Node::Folder { children, .. } = node {
+            sort_stashes(children);
+        }
+    }
+}
+
+/// Key of a STASHES folder in the stored collapse state (M12-10).
+pub fn stash_folder_key(path: &str) -> String {
+    format!("stashes:{path}")
+}
+
 /// Key of a TAGS folder in the stored collapse state (M11-11).
 pub fn tag_folder_key(path: &str) -> String {
     format!("tags:{path}")
@@ -327,6 +367,40 @@ impl Groups {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stash_tree_keeps_stash_order_then_folders() {
+        let labels = [
+            (0, "WIP on feature/ui"),
+            (1, "work/zeta"),
+            (2, "plain"),
+            (3, "work/alpha"),
+            (4, "Archive/old"),
+            (5, "WIP on main"),
+        ];
+        let tree = stash_tree(labels);
+        let shown: Vec<String> = rows(&tree, &|_| false, false)
+            .into_iter()
+            .map(|row| match row {
+                Row::Folder { depth, name, .. } => format!("{depth}:[{name}]"),
+                Row::Branch { depth, label, .. } => format!("{depth}:{label}"),
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "0:WIP on feature/ui",
+                "0:plain",
+                "0:WIP on main",
+                "0:[Archive]",
+                "1:old",
+                "0:[work]",
+                "1:zeta",
+                "1:alpha",
+            ]
+        );
+        assert_eq!(stash_folder_key("work"), "stashes:work");
+    }
 
     fn flow() -> git_core::FlowConfig {
         git_core::FlowConfig::defaults(&["master"])
