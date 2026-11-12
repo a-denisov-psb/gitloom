@@ -1053,6 +1053,13 @@ pub enum Message {
     RenameStashStart(String),
     /// The highlight of a field opened from the palette ends (M12-12).
     SettingsHighlightEnded(u64),
+    /// Git flow layout on or off (M13-03): stored in the repository
+    /// config, the loaded history laid out again in the background.
+    FlowLayoutSet(bool),
+    FlowLayoutApplied {
+        tab: TabId,
+        result: Result<Arc<RepoSnapshot>, String>,
+    },
     /// "Don't show again" on the WSL notice of this repository (M12-14).
     WslNoticeDismissed(PathBuf),
     /// "Trust this repository…" for Git's path of a repository it refuses
@@ -3049,6 +3056,13 @@ impl App {
             // Only meaningful in the interactive rebase panel (handled above).
             Shortcut::TodoKey(_) | Shortcut::Reorder { .. } => {}
             Shortcut::ConflictStep { next } => return self.update(Message::ConflictStep { next }),
+            Shortcut::ToggleFlowLayout => {
+                let on = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| v.snapshot.flow_layout);
+                return self.update(Message::FlowLayoutSet(!on));
+            }
             Shortcut::Confirm => {
                 if let Some(modal) = self.modal.take() {
                     if let Some(message) = modal.default_action() {
@@ -4354,6 +4368,12 @@ impl App {
             }
             if let Some(reason) = view.state_block(Guarded::Checkout) {
                 return Some(reason);
+            }
+        }
+        if id == Shortcut::ToggleFlowLayout {
+            let view = self.active_tab().and_then(Tab::view)?;
+            if view.snapshot.flow.is_none() {
+                return Some("Initialize Gitflow first".to_owned());
             }
         }
         if let Shortcut::ConflictStep { .. } = id {
@@ -5821,6 +5841,25 @@ impl App {
                     MenuEntry::Separator,
                     MenuEntry::item("Reset column widths", Message::GraphColumnsReset),
                 ];
+                let mut entries = entries;
+                // The Git flow layout (M13-03), only with a repository.
+                if let Some(view) = self.active_tab().and_then(Tab::view) {
+                    entries.push(MenuEntry::Separator);
+                    entries.push(match self.action_block(Shortcut::ToggleFlowLayout) {
+                        None => MenuEntry::check(
+                            "Gitflow layout",
+                            view.snapshot.flow_layout,
+                            Message::FlowLayoutSet(!view.snapshot.flow_layout),
+                        ),
+                        Some(reason) => MenuEntry::Item {
+                            label: "Gitflow layout".into(),
+                            shortcut: None,
+                            enabled: false,
+                            message: Box::new(Message::FlowLayoutSet(true)),
+                            hint: Some(reason),
+                        },
+                    });
+                }
                 self.context_menu = Some(ContextMenu::new(position, entries));
             }
             Message::GraphColumnShown(column, shown) => {
@@ -8361,6 +8400,41 @@ impl App {
                 Err(error) => {
                     self.toasts.push(crate::toast::Toast::git_error(
                         "Could not trust the repository",
+                        error,
+                    ));
+                }
+            },
+            Message::FlowLayoutSet(on) => {
+                if let Some(reason) = self.action_block(Shortcut::ToggleFlowLayout) {
+                    self.status = reason;
+                    return Task::none();
+                }
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let writer = Arc::clone(&view.writer);
+                let snapshot = Arc::clone(&view.snapshot);
+                return Task::perform(
+                    blocking(move || {
+                        git_core::set_flow_layout(writer.as_ref(), on)
+                            .map_err(|e| e.to_string())?;
+                        snapshot.with_flow_layout(on).map(Arc::new)
+                    }),
+                    move |result| Message::FlowLayoutApplied { tab, result },
+                );
+            }
+            Message::FlowLayoutApplied { tab, result } => match result {
+                Ok(snapshot) => {
+                    if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                        view.apply_snapshot(snapshot);
+                    }
+                }
+                Err(error) => {
+                    self.toasts.push(crate::toast::Toast::git_error(
+                        "Could not change the Gitflow layout",
                         error,
                     ));
                 }
@@ -12451,8 +12525,14 @@ pub(crate) mod tests {
         let blocked: Vec<&str> = crate::actions::registry()
             .iter()
             .filter(|a| a.context != crate::actions::Context::RebasePanel)
-            // Starting/finishing a Git flow branch needs Git flow (M7-08, M7-10).
-            .filter(|a| !matches!(a.id, Shortcut::FlowStart(_) | Shortcut::FlowFinish))
+            // Starting/finishing a Git flow branch and its layout need Git
+            // flow (M7-08, M7-10, M13-03).
+            .filter(|a| {
+                !matches!(
+                    a.id,
+                    Shortcut::FlowStart(_) | Shortcut::FlowFinish | Shortcut::ToggleFlowLayout
+                )
+            })
             // The external editor needs one in the settings (M8-08).
             .filter(|a| a.id != Shortcut::OpenEditor)
             // The commit message prompt needs staged changes (M10-07).
@@ -16144,6 +16224,43 @@ pub(crate) mod tests {
             toast.action.as_ref().map(|(_, m)| m.as_ref()),
             Some(Message::TrustRepository { path, .. }) if path == "/mock"
         ));
+    }
+
+    #[test]
+    fn flow_layout_entry_points() {
+        // Without Git flow: palette entry and column menu are disabled.
+        let mut app = graph_app();
+        assert_eq!(
+            app.action_block(Shortcut::ToggleFlowLayout).as_deref(),
+            Some("Initialize Gitflow first")
+        );
+        let _ = app.update(checked(Shortcut::ToggleFlowLayout, false));
+        assert_eq!(app.status, "Initialize Gitflow first");
+        let _ = app.update(Message::GraphColumnMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.take().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, enabled: false, hint: Some(h), .. }
+                if label == "Gitflow layout" && h == "Initialize Gitflow first")));
+        // With Git flow: the column menu offers the switch; the applied
+        // layout replaces the snapshot without reloading.
+        let (_repo, snapshot) = crate::snapshot::flow_tests::classic_snapshot();
+        let tab = app.tabs[0].id;
+        app.tabs[0].view_mut().unwrap().snapshot = Arc::new(snapshot.clone());
+        assert_eq!(app.action_block(Shortcut::ToggleFlowLayout), None);
+        let _ = app.update(Message::GraphColumnMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.take().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Check { label, checked: false, message }
+                if label == "Gitflow layout"
+                    && matches!(**message, Message::FlowLayoutSet(true)))));
+        let _ = app.update(Message::FlowLayoutApplied {
+            tab,
+            result: Ok(Arc::new(snapshot.with_flow_layout(true).unwrap())),
+        });
+        assert!(app.tabs[0].view().unwrap().snapshot.flow_layout);
+        // The palette entry is listed and enabled.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        assert!(palette_labels(&app).contains(&"Toggle Gitflow layout".to_owned()));
     }
 
     #[test]

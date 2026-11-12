@@ -95,11 +95,13 @@ Acceptance: layout snapshots (text) for the classic history: production lane 0, 
 
 Note: `Classification::lane_hints` gives group and color per commit; flow colors travel as `ColorId(FLOW_COLOR_BASE + n)` (production, hotfix, release, development, four feature colors per segment, unknown) and `theme::lane_color` maps them to the palette token `flow_colors` (Dark and Light, contrast ≥ 3:1 tested), so the graph drawing needed no change. `RepoSnapshot::with_flow_layout(on)` re-lays out the loaded history (no reload); the hints are kept for a WIP row appearing, and a branch filter classifies the filtered history (hidden branches left out first). Tests: git-graph `classic_history_lanes_by_group` (lanes and colors, development column constant), app `flow_layout_groups_lanes_and_survives_status_changes`, `flow_colors_stay_visible`; snapshots `ui_check_flow_layout` (default and flow, Dark and Light) checked by eye.
 
-### [ ] M13-03 Toggle and persistence
+### [x] M13-03 Toggle and persistence
 
 - Setting per repository, three entry points, disabled state, re-layout on toggle without reloading the history.
 
 Acceptance: app tests for all entry points, persistence after restart, disabled without Git flow, default layout unchanged when off (existing layout snapshots unchanged).
+
+Note: `gitloom.flowLayout` (repository config) is read with the snapshot (`GitBackend::flow_layout`, gix) and written by `git_core::set_flow_layout`; `FlowLayoutSet(on)` writes it and lays the loaded history out again in the background (`RepoSnapshot::with_flow_layout`, no reload), `FlowLayoutApplied` applies the result. Entry points: the graph column menu ("Gitflow layout" check item; disabled with the hint "Initialize Gitflow first"), the palette action "Toggle Gitflow layout" (disabled with the same reason) and a toggle "Show the graph in the Gitflow layout" in Preferences → Repository → Gitflow (shown once Git flow is initialized; also a "Preferences:" deep link). Off, the default layout is computed exactly as before (`layout_with` without hints; unit test compares the layouts). Tests: `flow_layout_entry_points`, `flow_layout_is_stored_in_the_repository` (real repository: off by default, on and off after reload).
 
 ### [ ] M13-04 Labels and tooltips
 

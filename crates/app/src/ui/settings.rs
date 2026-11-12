@@ -420,7 +420,24 @@ fn gitflow<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     if let Some(reason) = problem.or(busy) {
         content = content.push(text(reason).size(12).style(theme::text_danger));
     }
-    content.push(actions).into()
+    let mut content = content.push(actions);
+    // The graph layout (M13-03), once Git flow is initialized.
+    if initialized {
+        let on = app
+            .active_tab()
+            .and_then(crate::app::Tab::view)
+            .is_some_and(|v| v.snapshot.flow_layout);
+        content = content.push(field(
+            "Show the graph in the Gitflow layout",
+            iced::widget::toggler(on)
+                .on_toggle(Message::FlowLayoutSet)
+                .label(if on { "On" } else { "Off" })
+                .into(),
+            "Production left, then hotfix, release, development and features, one color per \
+             branch type, also for deleted branches.",
+        ));
+    }
+    content.into()
 }
 
 /// Labelled setting with an explanation below.

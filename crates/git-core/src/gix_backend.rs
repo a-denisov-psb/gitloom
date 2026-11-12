@@ -645,6 +645,14 @@ impl GitBackend for GixBackend {
             .filter(|v| !v.trim().is_empty()))
     }
 
+    fn flow_layout(&self) -> Result<bool> {
+        let repo = self.local();
+        let config = repo.config_snapshot();
+        Ok(config
+            .boolean(crate::identity::config_key("flowLayout").as_str())
+            .unwrap_or(false))
+    }
+
     fn commit_template_options(&self) -> Result<crate::commit_template::TemplateOptions> {
         let repo = self.local();
         let config = repo.config_snapshot();
