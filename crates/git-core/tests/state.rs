@@ -53,6 +53,7 @@ fn conflicting_rebase_with_both_backends() {
         let (repo, _) = diverged();
         repo.checkout("topic");
         let onto = repo.git(&["rev-parse", "main"]);
+        let commit = repo.git(&["rev-parse", "topic"]);
         assert!(!repo.try_git(&["rebase", backend, "main"]));
         assert_eq!(
             state(&repo),
@@ -60,6 +61,7 @@ fn conflicting_rebase_with_both_backends() {
                 branch: Some("topic".into()),
                 onto: Some(onto),
                 step: Some((1, 1)),
+                commit: Some(commit),
             },
             "{backend}"
         );

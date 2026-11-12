@@ -43,8 +43,11 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Conflicted files without a running operation show a banner that explains how to get out, with "Discard conflicted files…".
 - Conflicted files can be discarded (context menu, "Discard all", the banner) after a confirmation; undo brings back both sides and the conflict.
 - "Reset <branch> to this commit…" is also offered on the HEAD commit: Mixed clears the index (also conflicts) and keeps the files, Hard discards uncommitted changes; Soft is disabled there. Undo restores conflicted files as well.
+- Conflict view: "conflict n of N" above the output with ↑/↓ arrows and Alt+↑/↓ (also in the command palette) jumps between the open conflicts and wraps around at the ends.
 
 ### Changed
+
+- Conflict view side headers name the commit and branch like GitKraken ("A · Commit 1a2b3c4 on main", "B · Commit 5e6f7a8 on topic"), also during a rebase and a cherry-pick; stash conflicts keep "Updated upstream" / "Stashed changes".
 
 - Errors that only inform appear as notifications at the bottom left instead of dialogs: a plain-language explanation of what went wrong and what to do, with Git's output under **Details** and **Copy**; they stay until closed. Up to three are shown; information closes after 6 seconds (not while the pointer rests on it). Dialogs that ask for a decision stay.
 - A second click on the selected file in the right panel deselects it and closes its diff or conflict view (like Esc). Hovering a file shows only "Stage File" / "Unstage File"; Discard is in the file's context menu.

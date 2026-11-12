@@ -58,6 +58,11 @@ pub enum ActionId {
     Reorder {
         up: bool,
     },
+    /// Alt+↑ / Alt+↓: previous or next open conflict in the conflict view
+    /// (M12-04). The rebase panel gets the same keys as `Reorder`.
+    ConflictStep {
+        next: bool,
+    },
     /// Ctrl+/: list of all keyboard shortcuts.
     ShortcutList,
     CommandPalette,
@@ -570,6 +575,20 @@ fn table() -> Vec<Action> {
 
     // Navigation
     add(
+        A::ConflictStep { next: false },
+        "Previous conflict",
+        Navigation,
+        Staging,
+        &[named(Named::ArrowUp).alt()],
+    );
+    add(
+        A::ConflictStep { next: true },
+        "Next conflict",
+        Navigation,
+        Staging,
+        &[named(Named::ArrowDown).alt()],
+    );
+    add(
         A::Navigate(Move::Next),
         "Next commit (older)",
         Navigation,
@@ -979,6 +998,8 @@ mod tests {
                     let expected = match action.id {
                         // S reaches the rebase panel as "stage current file".
                         ActionId::TodoKey('s') => ActionId::StageSelected,
+                        // Alt+↑/↓ reach the rebase panel as conflict steps.
+                        ActionId::Reorder { up } => ActionId::ConflictStep { next: !up },
                         id => id,
                     };
                     assert_eq!(

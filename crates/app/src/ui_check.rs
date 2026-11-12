@@ -514,6 +514,83 @@ mod tests {
         }
     }
 
+    /// Conflict view (M12-04): "conflict 2 of 3" with arrows, side headers
+    /// "Commit <sha> on <branch>", both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_conflict_navigation() {
+        use git_core::{Chunk, ConflictHunk, Head, RefKind, Reference, RepoState};
+        let (main, topic) = ("1a2b3c4d".repeat(5), "5e6f7a8b".repeat(5));
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::app_in_state(RepoState::Merging {
+                merge_head: topic.clone(),
+            });
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut repo = (*view.snapshot).clone();
+            repo.head = Head::Branch {
+                name: "main".into(),
+                target: main.clone(),
+            };
+            repo.refs = vec![
+                Reference {
+                    name: "main".into(),
+                    kind: RefKind::LocalBranch,
+                    target: main.clone(),
+                    is_head: true,
+                    upstream: None,
+                    ahead_behind: None,
+                },
+                Reference {
+                    name: "topic".into(),
+                    kind: RefKind::LocalBranch,
+                    target: topic.clone(),
+                    is_head: false,
+                    upstream: None,
+                    ahead_behind: None,
+                },
+            ];
+            view.apply_snapshot(std::sync::Arc::new(repo));
+            crate::app::tests::with_conflicts(&mut app, &["src/lib.rs"]);
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::ConflictOpened("src/lib.rs".into()));
+            let hunk = |n: &str| {
+                Chunk::Conflict(ConflictHunk {
+                    ours: vec![format!("    let value = {n};\n")],
+                    base: vec![],
+                    theirs: vec![format!("    let value = {n}0;\n")],
+                })
+            };
+            let clean = |line: &str| Chunk::Clean(vec![format!("{line}\n")]);
+            let _ = app.update(Message::ConflictLoaded {
+                tab,
+                path: "src/lib.rs".into(),
+                result: Ok(git_core::LoadedConflict {
+                    path: "src/lib.rs".into(),
+                    stages: git_core::ConflictStages::default(),
+                    content: git_core::ConflictContent::Text(git_core::ConflictText {
+                        chunks: vec![
+                            clean("fn one() {"),
+                            hunk("1"),
+                            clean("}"),
+                            clean("fn two() {"),
+                            hunk("2"),
+                            clean("}"),
+                            hunk("3"),
+                        ],
+                        eol: "\n",
+                    }),
+                }),
+            });
+            let _ = app.update(Message::ConflictStep { next: true });
+            snapshot(&app, &format!("conflict-navigation-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

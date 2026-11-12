@@ -109,7 +109,7 @@ fn text_view<'a>(
     .spacing(8)
     .align_y(iced::Center);
 
-    let (ours_label, theirs_label) = &conflict.labels;
+    let (ours_label, theirs_label) = &conflict.headers;
     let sides = row![
         side_panel(conflict, conflict_text, Side::Ours, ours_label, style),
         side_panel(conflict, conflict_text, Side::Theirs, theirs_label, style),
@@ -117,8 +117,30 @@ fn text_view<'a>(
     .spacing(8)
     .height(FillPortion(3));
 
-    let open = conflict.picks.open_count();
     let mut output_header = row![muted("Output")].spacing(10).align_y(iced::Center);
+    // "conflict n of N" with arrows like GitKraken (M12-04); also counts
+    // the markers of a hand-edited output.
+    if let Some((current, count)) = conflict.position() {
+        let arrow = |icon: &'static str, next: bool, tip: &'static str| {
+            with_tooltip_text(
+                button(text(icon).size(11))
+                    .padding([0, 6])
+                    .style(button::text)
+                    .on_press(Message::ConflictStep { next })
+                    .into(),
+                tip.to_owned(),
+            )
+        };
+        output_header = output_header.push(
+            row![
+                muted(format!("conflict {current} of {count}")).size(11),
+                arrow("↑", false, "Previous conflict (Alt+↑)"),
+                arrow("↓", true, "Next conflict (Alt+↓)"),
+            ]
+            .spacing(2)
+            .align_y(iced::Center),
+        );
+    }
     if conflict.edited {
         output_header = output_header
             .push(
@@ -132,16 +154,24 @@ fn text_view<'a>(
                     .style(button::secondary)
                     .on_press(Message::ConflictResetOutput),
             );
-    } else if open > 0 {
-        let left = if open == 1 {
-            "1 conflict left".to_string()
-        } else {
-            format!("{open} conflicts left")
-        };
-        output_header = output_header.push(muted(left).size(11));
     }
     let output = text_editor(&conflict.output)
         .on_action(Message::ConflictOutputEdited)
+        // Alt+↑/↓ step through the conflicts also while typing.
+        .key_binding(|press| {
+            use iced::keyboard::{key::Named, Key};
+            let step = match press.key.as_ref() {
+                Key::Named(Named::ArrowUp) => Some(false),
+                Key::Named(Named::ArrowDown) => Some(true),
+                _ => None,
+            };
+            match step {
+                Some(next) if press.modifiers.alt() && !press.modifiers.command() => {
+                    Some(text_editor::Binding::Custom(Message::ConflictStep { next }))
+                }
+                _ => text_editor::Binding::from_key_press(press),
+            }
+        })
         .font(style.font)
         .size(style.size)
         .height(Fill)
@@ -287,9 +317,9 @@ fn side_panel<'a>(
         }
     }
     let heading = if ours {
-        format!("A · ours · {label}")
+        format!("A · {label}")
     } else {
-        format!("B · theirs · {label}")
+        format!("B · {label}")
     };
     column![
         text(heading).size(12).style(if ours {

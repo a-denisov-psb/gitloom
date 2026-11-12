@@ -139,11 +139,13 @@ Acceptance: unit tests for all URL forms (with user, password, ports, trailing s
 
 Note: `git_core::remote_web` (`web_url`, `web_label`); the entry follows "Fetch" in the remote menu; palette action "Open remote in browser" (origin, the only remote, else the list `Mode::RemoteWebsites`; disabled "No remote with a website"). A host without a dot (except `localhost`) counts as local. Opens with the existing `OpenLink` (`launch::open_target`).
 
-### [ ] M12-04 Conflict view navigation and headers
+### [x] M12-04 Conflict view navigation and headers
 
 - "conflict n of N" with arrows and Alt+↑/↓; side headers with short SHA and branch.
 
 Acceptance: app tests for navigation (wraps or stops at the ends like GitKraken; record the choice), header texts for merge, rebase and cherry-pick; snapshot.
+
+Note: navigation wraps around at the ends (choice recorded; GitKraken's arrows cycle). The count follows the `<<<<<<<` lines of the output, so a hand-edited output counts its own markers; a step puts the editor cursor on the marker, which scrolls it into view. Alt+↑/↓ is the action "Previous/Next conflict" (context Staging, palette entry disabled outside the conflict view); the rebase panel receives the same keys as reorder; the output editor maps them too. Headers: A = HEAD commit on the checked-out branch (rebase: the branch at `onto`), B = merged commit / picked commit / replayed commit (`REBASE_HEAD`, new field `RepoState::Rebasing::commit`) with the branch pointing at it (rebase: the rebased branch); without a branch only "Commit <sha>". Marker labels in the output stay Git's. Tests: `navigation_wraps_around_the_open_conflicts`, `edited_output_counts_its_own_markers`, `conflict_headers_name_commit_and_branch`, `conflict_navigation_by_buttons_and_keys`; snapshot `ui_check_conflict_navigation` (dark, light) checked.
 
 ### [ ] M12-05 Operation state like GitKraken
 

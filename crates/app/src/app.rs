@@ -516,6 +516,10 @@ pub enum Message {
     ConflictTakeAll(git_core::Side),
     ConflictOutputEdited(iced::widget::text_editor::Action),
     ConflictResetOutput,
+    /// Previous or next open conflict in the output (M12-04).
+    ConflictStep {
+        next: bool,
+    },
     /// Save the output as the resolved file and stage it.
     ConflictSave,
     /// Take the whole file from one side (binary, delete/modify).
@@ -2920,6 +2924,7 @@ impl App {
             }
             // Only meaningful in the interactive rebase panel (handled above).
             Shortcut::TodoKey(_) | Shortcut::Reorder { .. } => {}
+            Shortcut::ConflictStep { next } => return self.update(Message::ConflictStep { next }),
             Shortcut::Confirm => {
                 if let Some(modal) = self.modal.take() {
                     if let Some(message) = modal.default_action() {
@@ -4147,6 +4152,14 @@ impl App {
             }
             if let Some(reason) = view.state_block(Guarded::Checkout) {
                 return Some(reason);
+            }
+        }
+        if let Shortcut::ConflictStep { .. } = id {
+            let open = self.active_tab().and_then(Tab::view).is_some_and(
+                |view| matches!(&view.center, CenterView::Conflict(c) if c.position().is_some()),
+            );
+            if !open {
+                return Some("Only in the conflict view with open conflicts".to_owned());
             }
         }
         let in_rebase_panel = self
@@ -8447,11 +8460,12 @@ impl App {
                 let Some(view) = self.active_view_mut() else {
                     return Task::none();
                 };
-                let labels = conflict_labels(&view.snapshot, view.stash_conflict.as_ref());
-                view.center = CenterView::Conflict(Box::new(crate::conflict::ConflictView::new(
-                    path.clone(),
-                    labels,
-                )));
+                let stash = view.stash_conflict.as_ref();
+                let labels = conflict_labels(&view.snapshot, stash);
+                let headers = conflict_headers(&view.snapshot, stash);
+                view.center = CenterView::Conflict(Box::new(
+                    crate::conflict::ConflictView::new(path.clone(), labels).with_headers(headers),
+                ));
                 let writer = Arc::clone(&view.writer);
                 return Task::perform(
                     blocking(move || {
@@ -8509,6 +8523,11 @@ impl App {
             Message::ConflictResetOutput => {
                 if let Some(conflict) = self.active_conflict() {
                     conflict.reset_output();
+                }
+            }
+            Message::ConflictStep { next } => {
+                if let Some(conflict) = self.active_conflict() {
+                    conflict.step(next);
                 }
             }
             Message::ConflictSave => {
@@ -9878,6 +9897,7 @@ fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut:
         Shortcut::Navigate(Move::Previous) => panel.move_selection(true),
         Shortcut::Navigate(Move::Next) => panel.move_selection(false),
         Shortcut::Reorder { up } => panel.move_selected(up),
+        Shortcut::ConflictStep { next } => panel.move_selected(!next),
         Shortcut::StageSelected => panel.set_selected_action(TodoAction::Squash),
         Shortcut::TodoKey(key) => {
             if let Some(action) = TodoAction::ALL.into_iter().find(|a| a.key() == key) {
@@ -9924,6 +9944,61 @@ fn conflict_labels(
         _ => "theirs".into(),
     };
     (ours, theirs)
+}
+
+/// Side headers of the conflict view (M12-04): "Commit <short sha> on
+/// <branch>" for A (the HEAD side) and B (the incoming side). A stash
+/// keeps its marker labels.
+fn conflict_headers(
+    snapshot: &RepoSnapshot,
+    stash: Option<&crate::repo_view::StashConflict>,
+) -> (String, String) {
+    use git_core::RepoState;
+    let labels = conflict_labels(snapshot, stash);
+    if let (RepoState::Clean, Some(_)) = (&snapshot.state, stash) {
+        return labels;
+    }
+    let header =
+        |commit: Option<&str>, branch: Option<String>, fallback: &str| match (commit, branch) {
+            (Some(id), Some(branch)) => format!("Commit {} on {branch}", short_id(id)),
+            (Some(id), None) => format!("Commit {}", short_id(id)),
+            (None, Some(branch)) => branch,
+            (None, None) => fallback.to_owned(),
+        };
+    let head = snapshot.head.target();
+    let (ours_branch, theirs_commit, theirs_branch) = match &snapshot.state {
+        // During a rebase HEAD is the new base plus the replayed commits;
+        // the incoming side is the commit of the rebased branch.
+        RepoState::Rebasing {
+            branch,
+            onto,
+            commit,
+            ..
+        } => (
+            onto.as_deref().and_then(|id| snapshot.ref_name(id)),
+            commit.clone(),
+            branch.clone(),
+        ),
+        RepoState::Merging { merge_head } => (
+            snapshot.head.branch().map(str::to_owned),
+            Some(merge_head.clone()),
+            snapshot.ref_name(merge_head),
+        ),
+        RepoState::CherryPicking { commit } | RepoState::Reverting { commit } => (
+            snapshot.head.branch().map(str::to_owned),
+            commit.clone(),
+            commit.as_deref().and_then(|id| snapshot.ref_name(id)),
+        ),
+        RepoState::Clean => (snapshot.head.branch().map(str::to_owned), None, None),
+    };
+    (
+        header(head, ours_branch, &labels.0),
+        header(theirs_commit.as_deref(), theirs_branch, &labels.1),
+    )
+}
+
+fn short_id(id: &str) -> &str {
+    &id[..id.len().min(7)]
 }
 
 /// Name of the checked-out branch for menu labels, "HEAD" when detached.
@@ -11145,6 +11220,8 @@ pub(crate) mod tests {
             .filter(|a| a.id != Shortcut::CopyCommitPrompt)
             // A remote website needs a remote with one (M12-03).
             .filter(|a| a.id != Shortcut::OpenRemoteWebsite)
+            // Conflict steps need an open conflict view (M12-04).
+            .filter(|a| !matches!(a.id, Shortcut::ConflictStep { .. }))
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
@@ -14076,7 +14153,7 @@ pub(crate) mod tests {
     }
 
     /// Staging app with `state` in progress and a staged file "a".
-    fn app_in_state(state: git_core::RepoState) -> App {
+    pub(crate) fn app_in_state(state: git_core::RepoState) -> App {
         let mut app = staging_app(&[], &["a"]);
         let view = app.tabs[0].view_mut().unwrap();
         let mut snapshot = (*view.snapshot).clone();
@@ -14119,6 +14196,7 @@ pub(crate) mod tests {
             branch: Some("topic".into()),
             onto: None,
             step: None,
+            commit: None,
         }
     }
 
@@ -14921,6 +14999,127 @@ pub(crate) mod tests {
             )
         );
         assert_eq!(conflict_labels(&view.snapshot, None).1, "theirs");
+    }
+
+    #[test]
+    fn conflict_headers_name_commit_and_branch() {
+        use git_core::{Head, RefKind, Reference, RepoState};
+        let (main, topic, next) = ("1".repeat(40), "2".repeat(40), "3".repeat(40));
+        let branch = |name: &str, target: &str| Reference {
+            name: name.into(),
+            kind: RefKind::LocalBranch,
+            target: target.into(),
+            is_head: name == "main",
+            upstream: None,
+            ahead_behind: None,
+        };
+        let headers = |head: Head, state: RepoState| {
+            let mut app = staging_app(&[], &["a"]);
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            snapshot.refs = vec![branch("main", &main), branch("topic", &topic)];
+            snapshot.head = head;
+            snapshot.state = state;
+            conflict_headers(&snapshot, None)
+        };
+        let on_main = || Head::Branch {
+            name: "main".into(),
+            target: main.clone(),
+        };
+        // Merge: A is HEAD's commit on the checked-out branch, B the
+        // merged commit with its branch.
+        assert_eq!(
+            headers(
+                on_main(),
+                RepoState::Merging {
+                    merge_head: topic.clone()
+                }
+            ),
+            (
+                "Commit 1111111 on main".to_owned(),
+                "Commit 2222222 on topic".to_owned()
+            )
+        );
+        // Rebase of topic onto main: A is the new base, B the replayed
+        // commit of topic.
+        assert_eq!(
+            headers(
+                Head::Detached {
+                    target: main.clone()
+                },
+                RepoState::Rebasing {
+                    branch: Some("topic".into()),
+                    onto: Some(main.clone()),
+                    step: Some((1, 2)),
+                    commit: Some(next.clone()),
+                }
+            ),
+            (
+                "Commit 1111111 on main".to_owned(),
+                "Commit 3333333 on topic".to_owned()
+            )
+        );
+        // Cherry-pick of a commit no branch points at.
+        assert_eq!(
+            headers(
+                on_main(),
+                RepoState::CherryPicking {
+                    commit: Some(next.clone())
+                }
+            ),
+            (
+                "Commit 1111111 on main".to_owned(),
+                "Commit 3333333".to_owned()
+            )
+        );
+        // Unknown incoming commit: Git's marker name stays.
+        assert_eq!(
+            headers(on_main(), RepoState::CherryPicking { commit: None }).1,
+            "theirs"
+        );
+    }
+
+    #[test]
+    fn conflict_navigation_by_buttons_and_keys() {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["a.txt"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ConflictOpened("a.txt".into()));
+        assert!(app
+            .action_block(Shortcut::ConflictStep { next: true })
+            .is_some());
+        let hunk = |n: &str| {
+            git_core::Chunk::Conflict(git_core::ConflictHunk {
+                ours: vec![format!("o{n}\n")],
+                base: vec![],
+                theirs: vec![format!("t{n}\n")],
+            })
+        };
+        let _ = app.update(Message::ConflictLoaded {
+            tab,
+            path: "a.txt".into(),
+            result: Ok(git_core::LoadedConflict {
+                path: "a.txt".into(),
+                stages: git_core::ConflictStages::default(),
+                content: git_core::ConflictContent::Text(git_core::ConflictText {
+                    chunks: vec![hunk("1"), hunk("2")],
+                    eol: "\n",
+                }),
+            }),
+        });
+        let position = |app: &mut App| app.active_conflict().unwrap().position();
+        assert_eq!(position(&mut app), Some((1, 2)));
+        assert_eq!(
+            app.action_block(Shortcut::ConflictStep { next: true }),
+            None
+        );
+        let _ = app.update(checked(Shortcut::ConflictStep { next: true }, false));
+        assert_eq!(position(&mut app), Some((2, 2)));
+        // Wraps around like GitKraken.
+        let _ = app.update(Message::ConflictStep { next: true });
+        assert_eq!(position(&mut app), Some((1, 2)));
+        let _ = app.update(Message::ConflictStep { next: false });
+        assert_eq!(position(&mut app), Some((2, 2)));
     }
 
     #[test]
