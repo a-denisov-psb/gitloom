@@ -189,11 +189,13 @@ Note: network requests carry `NetworkUndo` (None, Pull, PullBranch, SubmoduleUpd
 
 Acceptance: docs reviewed against the implemented behavior.
 
-### [ ] M12-10 Stash folders and rename
+### [x] M12-10 Stash folders and rename
 
 - STASHES tree, tooltip and rename per the decisions table; git-core `stash_rename(index, name)` with recovery; `UndoAction` entry.
 
 Acceptance: integration tests: rename of `stash@{0}` and of `stash@{2}` of three keeps the order, the oids of the other entries and author/dates; a failure in the middle restores the list; undo/redo compare `git stash list --format='%H %gs'` exactly; undo refused after a new stash push. Unit tests for the folder split (custom label with `/`, "WIP on feature/f1" not split, order). Snapshot of STASHES with folders.
+
+Note: `branch_tree::stash_tree` (stable order for stashes, folders after them by the M11-11 comparator), collapse keys `stashes:<path>`; the filter still matches the full message and expands all folders. Rename keeps tree, parents, author and committer by writing a copy of the stash commit with the new message (`git cat-file commit` → `git hash-object -t commit -w`, a `gpgsig` header is dropped) instead of `commit-tree` with environment variables (same result, no environment support in `GitWriter`); then drop `stash@{0…n}` and `git stash store` them back with the new commit at n; a failure stores the recorded entries back. Empty names show "Enter a name" on submit (forms have no per-field disabling). The menu is shared by STASHES and the graph's stash rows. Tests: `stash_tree_keeps_stash_order_then_folders`, `rename_stash_dialog`, `stash_menu_and_confirmed_delete`, git-core `rename_stash_in_place_with_undo_and_redo` (incl. refusal); snapshot `ui_check_stash_folders` (dark, light) checked.
 
 ### [ ] M12-11 Multi-selection and bulk delete in the left panel
 

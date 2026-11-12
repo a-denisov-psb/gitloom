@@ -12,6 +12,7 @@
 | Pop stash, Apply stash | With or without conflicts: the files, the index and the stash list return exactly to the state before; a popped stash goes back to its place in the list. If you already edited a conflicted file, Gitloom asks before throwing that work away. Redo applies the same stash again (not possible once it was deleted). |
 | Stash (push) | Undo applies the stash back (staged changes stay staged) and removes it from the list, but only while the working copy is still exactly as the stash left it. Redo stashes again with the same message. |
 | Delete stash | The stash goes back to its place in the list. |
+| Rename stash | The old name comes back, at the same place in the list; refused if the stash list changed above it. |
 | Stage, unstage (file, lines, hunk, block, all) | The index entries of the affected files return to what they were; refused if they changed since. |
 | Pull (the checked-out branch, or another branch from its menu) | The local part is undone like a merge, fast-forward or rebase: the branch goes back to where it was. The fetched remote-tracking branches stay (see Fetch below). |
 | Add, remove, rename a remote; edit its URL | Removing a remote is undone with all its settings, its remote-tracking branches and the upstreams that used it. |

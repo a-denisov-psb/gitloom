@@ -183,3 +183,49 @@ fn stash_drop_undo_keeps_the_position() {
     redo_stash_drop(&git, &record).unwrap();
     assert_eq!(state(&repo), after);
 }
+
+#[test]
+fn rename_stash_in_place_with_undo_and_redo() {
+    use git_core::work_undo::{rename_stash, renamed_message, switch_stash_rename};
+    let repo = repo();
+    let git = CliBackend::new(repo.path());
+    for name in ["one", "two", "three"] {
+        repo.write("a.txt", &format!("{name}\n"));
+        repo.git(&["stash", "push", "--quiet", "-m", name]);
+    }
+    let middle = repo.git(&["rev-parse", "stash@{1}"]);
+    let list = || repo.git(&["stash", "list", "--format=%H %gs"]);
+    let before = list();
+    let rename = rename_stash(&git, &middle, "work/better name").unwrap();
+    assert_eq!(
+        repo.git(&["stash", "list", "--format=%gs"]),
+        "On main: three\nOn main: work/better name\nOn main: one"
+    );
+    let renamed = repo.git(&["rev-parse", "stash@{1}"]);
+    assert_ne!(renamed, middle);
+    // Same tree, parents and author as the old stash commit.
+    let facts = |rev: &str| repo.git(&["log", "-1", "--format=%T %P %an %ae %ad", rev]);
+    assert_eq!(facts(&renamed), facts(&middle));
+    assert_eq!(
+        repo.git(&["stash", "show", "-p", "stash@{1}"]),
+        repo.git(&["diff", &format!("{middle}^1"), &middle])
+    );
+    let after = list();
+    switch_stash_rename(&git, &rename, true).unwrap();
+    assert_eq!(list(), before);
+    switch_stash_rename(&git, &rename, false).unwrap();
+    assert_eq!(list(), after);
+    // A new stash on top: undo refuses and changes nothing.
+    repo.write("a.txt", "four\n");
+    repo.git(&["stash", "push", "--quiet", "-m", "four"]);
+    let outside = list();
+    assert!(switch_stash_rename(&git, &rename, true).is_err());
+    assert_eq!(list(), outside);
+
+    assert_eq!(
+        renamed_message("WIP on feature/x: abc123 Fix", "n"),
+        "On feature/x: n"
+    );
+    assert_eq!(renamed_message("On main: old", "n"), "On main: n");
+    assert_eq!(renamed_message("custom", "n"), "n");
+}

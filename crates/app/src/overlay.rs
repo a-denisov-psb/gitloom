@@ -246,6 +246,8 @@ pub enum FormAction {
     },
     /// Rename remote `old`.
     RenameRemote { tab: crate::app::TabId, old: String },
+    /// Rename the stash with commit `id` (M12-10).
+    RenameStash { tab: crate::app::TabId, id: String },
     /// Create a tag (name, optional message) at commit `target`.
     CreateTag {
         tab: crate::app::TabId,

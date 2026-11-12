@@ -47,6 +47,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Submodules: the SUBMODULES section lists them (also nested ones) with their state (not initialized, out of date, modified, conflict); right click to update (with progress and Cancel), open in a new tab or the file manager, or copy the path; double click opens one in a tab; the header menu updates all. After a checkout, pull, merge or rebase a notification offers "Update" when submodules are out of date.
 - Undo and redo for pull (the local part: fast-forward, merge or rebase), adding, removing, renaming a remote and editing its URL, setting and unsetting the upstream, and updating submodules.
 - Undo and redo for Stash, Delete stash, stage and unstage (files, lines, hunks, blocks, all) and marking conflicts resolved.
+- STASHES shows folders: a `/` in a stash's name puts it into a folder (default "WIP on <branch>" names are never split); stashes keep their order, folders follow, collapsed folders are remembered; the tooltip shows the full message and date. "Rename stash…" in the stash menu renames it in place (undoable).
 
 ### Changed
 
