@@ -45,6 +45,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - "Reset <branch> to this commit…" is also offered on the HEAD commit: Mixed clears the index (also conflicts) and keeps the files, Hard discards uncommitted changes; Soft is disabled there. Undo restores conflicted files as well.
 - Conflict view: "conflict n of N" above the output with ↑/↓ arrows and Alt+↑/↓ (also in the command palette) jumps between the open conflicts and wraps around at the ends.
 - Submodules: the SUBMODULES section lists them (also nested ones) with their state (not initialized, out of date, modified, conflict); right click to update (with progress and Cancel), open in a new tab or the file manager, or copy the path; double click opens one in a tab; the header menu updates all. After a checkout, pull, merge or rebase a notification offers "Update" when submodules are out of date.
+- Undo and redo for Stash, Delete stash, stage and unstage (files, lines, hunks, blocks, all) and marking conflicts resolved.
 
 ### Changed
 

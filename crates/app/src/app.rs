@@ -1348,6 +1348,39 @@ impl App {
         self.run_undoable(tab, label, move |git| op(git).map(|()| None))
     }
 
+    /// A write that changes the index of `scope` (and the content of
+    /// `files`), recorded as one undo entry (M12-07): stage, unstage, lines,
+    /// mark resolved. Nothing changed: no entry.
+    fn run_index_change(
+        &mut self,
+        tab: TabId,
+        label: impl Into<String>,
+        scope: git_core::work_undo::Scope,
+        files: Vec<String>,
+        op: impl Fn(&dyn git_core::GitWriter) -> git_core::Result<()> + Send + Sync + 'static,
+    ) -> Task<Message> {
+        let Some(root) = self
+            .tab_mut(tab)
+            .and_then(Tab::view_mut)
+            .map(|v| v.backend.path().to_path_buf())
+        else {
+            return Task::none();
+        };
+        let label = label.into();
+        let entry_label = label.clone();
+        self.run_undoable(tab, label, move |git| {
+            let change = git_core::work_undo::record_work_change(
+                git,
+                &root,
+                &entry_label,
+                scope.clone(),
+                &files,
+                &op,
+            )?;
+            Ok(change.map(|c| History::Push(UndoAction::Work(Box::new(c)))))
+        })
+    }
+
     /// Like [`Self::run_write`]; the operation may return an undo entry.
     /// Operations are repeatable so a failure caused by a lock can be retried.
     fn run_undoable(
@@ -3077,13 +3110,19 @@ impl App {
         let mut paths = vec![file.path.clone()];
         paths.extend(file.old_path.clone());
         let label = format!("{} {}", if stage { "Stage" } else { "Unstage" }, file.path);
-        let write = self.run_write(tab, label, move |git| {
-            if stage {
-                git.stage(&paths)
-            } else {
-                git.unstage(&paths)
-            }
-        });
+        let write = self.run_index_change(
+            tab,
+            label,
+            git_core::work_undo::Scope::Paths(paths.clone()),
+            Vec::new(),
+            move |git| {
+                if stage {
+                    git.stage(&paths)
+                } else {
+                    git.unstage(&paths)
+                }
+            },
+        );
 
         // Only move on if the write was accepted and this file is the one shown.
         let Some(view) = self.active_view_mut() else {
@@ -3146,7 +3185,15 @@ impl App {
             if staged { "Unstage" } else { "Stage" },
             diff.request.path
         );
-        let task = self.run_write(tab, label, move |git| git.apply_cached(&patch, staged));
+        let mut paths = vec![diff.request.path.clone()];
+        paths.extend(diff.request.old_path.clone());
+        let task = self.run_index_change(
+            tab,
+            label,
+            git_core::work_undo::Scope::Paths(paths),
+            Vec::new(),
+            move |git| git.apply_cached(&patch, staged),
+        );
         if let Some(view) = self.active_view_mut() {
             if view.busy.is_some() {
                 view.reload_diff = true;
@@ -3631,6 +3678,28 @@ impl App {
                         UndoAction::Stash(record)
                     } else {
                         UndoAction::Stash(Box::new(git_core::redo_stash(git, &root, &record)?))
+                    }
+                }
+                UndoAction::Work(change) => {
+                    git_core::work_undo::switch_work_change(git, &root, &change, undo)?;
+                    UndoAction::Work(change)
+                }
+                UndoAction::StashPush(record) => {
+                    if undo {
+                        git_core::work_undo::undo_stash_push(git, &record)?;
+                        UndoAction::StashPush(record)
+                    } else {
+                        UndoAction::StashPush(Box::new(git_core::work_undo::redo_stash_push(
+                            git, &record,
+                        )?))
+                    }
+                }
+                UndoAction::StashDrop(record) => {
+                    if undo {
+                        git_core::work_undo::undo_stash_drop(git, &record)?;
+                        UndoAction::StashDrop(record)
+                    } else {
+                        UndoAction::StashDrop(git_core::work_undo::redo_stash_drop(git, &record)?)
                     }
                 }
                 UndoAction::Discard { label, snapshot } => {
@@ -6713,12 +6782,24 @@ impl App {
             Message::Unstage(file) => return self.stage_file(file, false),
             Message::StageAll => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
-                    return self.run_write(tab, "Stage all changes", |git| git.stage_all());
+                    return self.run_index_change(
+                        tab,
+                        "Stage all changes",
+                        git_core::work_undo::Scope::Whole,
+                        Vec::new(),
+                        |git| git.stage_all(),
+                    );
                 }
             }
             Message::UnstageAll => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
-                    return self.run_write(tab, "Unstage all changes", |git| git.unstage_all());
+                    return self.run_index_change(
+                        tab,
+                        "Unstage all changes",
+                        git_core::work_undo::Scope::Whole,
+                        Vec::new(),
+                        |git| git.unstage_all(),
+                    );
                 }
             }
             Message::CopyToClipboard(text) => {
@@ -7763,8 +7844,11 @@ impl App {
                 // entered (M10-10).
                 let message = self.stash_template_message();
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
-                    return self
-                        .run_write(tab, "Stash", move |git| git.stash_push(message.as_deref()));
+                    return self.run_undoable(tab, "Stash", move |git| {
+                        let record =
+                            git_core::work_undo::stash_push_recorded(git, message.as_deref())?;
+                        Ok(Some(History::Push(UndoAction::StashPush(Box::new(record)))))
+                    });
                 }
             }
             Message::StashPop(id) => return self.apply_stash(id, true),
@@ -7833,7 +7917,13 @@ impl App {
                     1 => "Mark 1 file resolved".to_owned(),
                     n => format!("Mark {n} files resolved"),
                 };
-                return self.run_write(tab, label, move |git| git.stage(&paths));
+                return self.run_index_change(
+                    tab,
+                    label,
+                    git_core::work_undo::Scope::Paths(paths.clone()),
+                    paths.clone(),
+                    move |git| git.stage(&paths),
+                );
             }
             Message::StashUndoChecked { tab, result } => match result {
                 Ok(true) => {
@@ -7870,7 +7960,10 @@ impl App {
                             view.selection = None;
                         }
                     }
-                    return self.run_write(tab, "Delete stash", move |git| git.stash_drop(&id));
+                    return self.run_undoable(tab, "Delete stash", move |git| {
+                        let record = git_core::work_undo::stash_drop_recorded(git, &id)?;
+                        Ok(Some(History::Push(UndoAction::StashDrop(record))))
+                    });
                 }
             }
             Message::StashContextMenu { id, position } => {
@@ -8744,9 +8837,13 @@ impl App {
                 let path = conflict.path.clone();
                 match conflict.resolved_content() {
                     Ok(content) => {
-                        return self.run_write(tab, format!("Resolve {path}"), move |git| {
-                            git_core::resolve_conflict(git, &path, content.as_bytes())
-                        });
+                        return self.run_index_change(
+                            tab,
+                            format!("Resolve {path}"),
+                            git_core::work_undo::Scope::Paths(vec![path.clone()]),
+                            vec![path.clone()],
+                            move |git| git_core::resolve_conflict(git, &path, content.as_bytes()),
+                        );
                     }
                     Err(reason) => self.status = reason,
                 }
@@ -8758,9 +8855,13 @@ impl App {
                 let Some(path) = self.active_conflict().map(|c| c.path.clone()) else {
                     return Task::none();
                 };
-                return self.run_write(tab, format!("Resolve {path}"), move |git| {
-                    git_core::resolve_with_side(git, &path, side)
-                });
+                return self.run_index_change(
+                    tab,
+                    format!("Resolve {path}"),
+                    git_core::work_undo::Scope::Paths(vec![path.clone()]),
+                    vec![path.clone()],
+                    move |git| git_core::resolve_with_side(git, &path, side),
+                );
             }
             Message::Retry(id) => {
                 let path = self

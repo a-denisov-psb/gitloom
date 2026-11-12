@@ -81,7 +81,7 @@ pub fn unmerged_paths(git: &dyn GitWriter) -> Result<Vec<String>> {
 }
 
 /// The stash list as (commit, reflog message), newest first.
-fn stash_entries(git: &dyn GitWriter) -> Result<Vec<(Oid, String)>> {
+pub(crate) fn stash_entries(git: &dyn GitWriter) -> Result<Vec<(Oid, String)>> {
     let output = git.run(&["stash", "list", "--format=%H%x00%gs%x00"], read_only())?;
     let fields = output
         .stdout
@@ -266,7 +266,7 @@ fn restore_entry(git: &dyn GitWriter, record: &StashRecord) -> Result<()> {
     Ok(())
 }
 
-fn store(git: &dyn GitWriter, stash: &str, message: &str) -> Result<()> {
+pub(crate) fn store(git: &dyn GitWriter, stash: &str, message: &str) -> Result<()> {
     git.run(
         &["stash", "store", "--quiet", "-m", message, stash],
         RunOptions::default(),
