@@ -145,6 +145,13 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Open a repository from `\\wsl.localhost\<distro>\…`: notice with "Don't show again", "WSL: <distro>" badge in the recent list, a change made inside WSL appears within a few seconds.
 - [ ] A repository owned by another user (e.g. on another drive or after `takeown`): "Git does not trust this repository" with "Trust this repository…"; after confirming it opens and `safe.directory` is in the global Git config.
 
+## 7g. New in M13 (Windows required, Linux checked in CI)
+
+- [ ] On a real Git flow repository (e.g. one with years of deleted feature, release and hotfix branches): turn on "Gitflow layout" in the gear menu; production is the left column, hotfix, release and development follow, features at the right; colors per type; the development column does not move while scrolling. Is it acceptably far left? (verification item of M13)
+- [ ] Faded labels at the tips of deleted branches show their names; tooltips on nodes say "from the merge message" or "inferred from the history"; commits only a tag reaches are gray.
+- [ ] The palette entry and the Preferences → Repository → Gitflow toggle switch the same setting; it survives a restart; without Git flow the entries say "Initialize Gitflow first"; off, the graph looks as before.
+- [ ] Hide a feature branch while the layout is on: the rest keeps its groups.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

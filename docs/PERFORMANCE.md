@@ -131,6 +131,19 @@ Release build in the Linux container (2026-11-11), `cargo test -p gitloom --rele
 
 Highlighting uses syntect's pure Rust regex engine (`regex-fancy`, ADR-047), which is slower than oniguruma but needs no C library; whole files are highlighted once per content and theme and cached (64 entries).
 
+## M13: Git flow layout (task M13-05)
+
+Release build in the Linux container (2026-11-12), `cargo test --release -p git-graph flow_perf -- --ignored --nocapture`, on a generated Git flow history: 100 004 commits, features of 2–6 commits merged with Git's message, a release every 20 features into main and develop, a hotfix every 140; all topic branches deleted.
+
+| Metric | Target | Result |
+|---|---|---|
+| Classify every commit (20 444 segments, none unknown) | – (background, snapshot step) | **19 ms** |
+| Default layout | – | **6 ms** (4 lanes) |
+| Git flow layout with lane groups (two passes) | – | **12 ms** (5 lanes) |
+| Frame while scrolling | < 50 ms | unchanged: the view draws the same rows; only lane positions and colors differ |
+
+Switching the layout lays out the loaded history again in the background (no reload); the classification runs on the filtered history when branches are hidden.
+
 ## Memory breakdown (rust-lang/rust)
 
 | Part | Size |

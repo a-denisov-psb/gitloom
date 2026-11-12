@@ -111,12 +111,15 @@ Acceptance: app tests for label texts per source; snapshot with deleted feature,
 
 Note: the snapshot keeps the classification while the layout is on (`flow_segment`, `flow_label`, `flow_tooltip`). The faded pill sits after the live ref pills of the tip row of a deleted branch (name, or the type when no name is known; none for live branches, unknown commits and stash rows); it has a thin muted outline instead of a dashed one, since iced containers draw no dashed borders (UX detail of a Gitloom extension, no GitKraken counterpart). The tooltip of nodes (the graph cell) and faded pills reads "<type> · <name>" plus "(from the merge message)" / "(inferred from the history)", or "Branch type unknown". Fixed on the way: since M11-04 the canvas starts at the column edge but the Graph column width did not count that padding, so a node in the last lane lost 2 px and its initials (`lanes_width` now includes it; unit test `the_last_lane_fits_its_column`). Tests: `faded_labels_and_tooltips`; snapshots `ui_check_flow_layout` with feature, release and hotfix labels (Dark, Light) checked.
 
-### [ ] M13-05 Performance, documentation, wrap-up
+### [x] M13-05 Performance, documentation, wrap-up
 
 - Benchmark with generated Git flow history; `docs/PERFORMANCE.md`.
 - User guide `git-flow.md` (the layout, how types are inferred, limits), `coming-from-gitkraken.md`; UX-PARITY extension row; `docs/RELEASE-CHECKLIST.md` section "7g. New in M13"; CHANGELOG `[Unreleased]`; `docs/ARCHITECTURE.md` "Lane groups" extended by the classifier; ROADMAP backlog entry "cap lanes per group" only if the verification item asks for it.
 
 Acceptance: measurements recorded; docs reviewed.
+
+Note: `flow_perf` (git-graph, ignored, release): 100 004 commits classified in 19 ms, Git flow layout 12 ms (default 6 ms); `docs/PERFORMANCE.md` "M13". User guide `git-flow.md` "Gitflow layout", `coming-from-gitkraken.md`, UX-PARITY extension row, `docs/ARCHITECTURE.md` lane groups with the classifier, release checklist "7g. New in M13" (includes the open verification item), CHANGELOG (M13-03, M13-04). The backlog entry "cap lanes per group" waits for the verification item (real repositories); not added.
+
 
 ### [ ] M13-06 Branch, remote branch and tag menus like GitKraken
 

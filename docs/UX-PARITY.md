@@ -157,6 +157,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Deviation | Reason |
 |---|---|
+| Gitflow layout of the graph (lane groups production, hotfix, release, development, features; one color per type; deleted branches inferred from merge messages and topology; faded labels) | Gitloom extension (M13, ADR-048 tokens); GitKraken has no such layout; off by default, per repository |
 | Date and SHA columns cannot be resized; their width always fits the content | Maintainer decision 2026-11-12: their content has a constant width, resizing only produced gaps or clipped text |
 | Notifications always at the bottom left | GitKraken has a location setting; out of scope for M12 (ADR-049), the default location is GitKraken's |
 | WSL notice, recent-list badge and polling watcher for repositories inside WSL; plain-language "Trust this repository…" for Git's dubious-ownership refusal | Gitloom extension (M12-14, ADR-053); whether GitKraken shows a notice for WSL or network paths is an open verification item |
