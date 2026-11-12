@@ -171,11 +171,13 @@ Acceptance: integration tests per entry comparing working tree, `git ls-files -s
 
 Note: `git_core::work_undo`. Stage/unstage of files, lines, hunks and blocks record the index entries of the affected paths (`Scope::Paths`, incl. the old path of a rename); "Stage/Unstage all changes" record the whole index (`Scope::Whole`: tree plus unmerged entries, like reset M9-04), since untracked folders are not listed path by path. Redo writes the recorded "after" entries (equivalent to repeating the action under the precondition). Mark resolved ("Save and mark resolved", take one side, "Mark all resolved", staging a conflicted file) records index entries and file content. An action that changed nothing adds no entry. Stash push precondition: HEAD and `git status --porcelain -uall` as right after the push. Tests: `stage_and_unstage_paths_undo_and_redo`, `unstage_all_undo_restores_the_whole_index`, `mark_resolved_restores_conflict_stages_and_content`, `stash_push_undo_and_redo`, `stash_drop_undo_keeps_the_position` (each with refusal where applicable).
 
-### [ ] M12-08 Undo: pull, remotes, upstream, submodule update
+### [x] M12-08 Undo: pull, remotes, upstream, submodule update
 
 - Undo entries per the decisions table; ADR-043 amendment applied.
 
 Acceptance: integration tests per entry (pull with fast-forward, merge and rebase; remove remote restores config and tracking refs; rename; URL change; upstream; submodule update) including refused cases.
+
+Note: network requests carry `NetworkUndo` (None, Pull, PullBranch, SubmoduleUpdate); the blocking part records around the command, so progress, Cancel and askpass stay. A pull that stops in conflicts records nothing (completing the merge is a commit, which is undoable; aborting restores the start). Undoing "Add remote" also removes refs fetched since; redo re-adds it without them. Restored config keys keep their order except after a rename back, where Git reorders them (same values). ADR-043 amendment (settings are not undo entries) was already applied in planning; ADR-043 got an implementation note. Tests: `pull_fast_forward_merge_and_rebase_undo_and_redo`, `pull_of_a_branch_that_is_not_checked_out`, `remove_remote_restores_config_tracking_refs_and_upstreams`, `add_rename_and_url_changes`, `upstream_set_and_unset`, `submodule_update_undo_and_redo` (each with refusals).
 
 ### [ ] M12-09 Documentation
 

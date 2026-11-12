@@ -114,7 +114,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Item right / left | → / L, ← / H | — in M1 (no horizontal items in the read-only graph yet) |
 | Next / previous commit in branch | Shift+J (first parent), Shift+K (child on the same branch) | done (M1; Shift+↑/↓ extend the selection since M4-01) |
 | First / last commit | Ctrl+Home / Ctrl+End (macOS ⌘↑ / ⌘↓) | done (M1) |
-| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reset, reword, squash (M4-12), stash pop/apply, discard of conflicted files, reset on HEAD (M9), stash push and delete, stage/unstage and mark resolved (M12-07); history operations are undone with `git reset --keep`, which refuses to overwrite local changes; what cannot be undone is listed in `docs/user/undo.md` (ADR-043) |
+| Undo / Redo | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | done for commit, amend, discard (M2), checkout, branches, tags (M3), merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reset, reword, squash (M4-12), stash pop/apply, discard of conflicted files, reset on HEAD (M9), stash push and delete, stage/unstage and mark resolved (M12-07), pull, remotes, upstream and submodule update (M12-08); history operations are undone with `git reset --keep`, which refuses to overwrite local changes; what cannot be undone is listed in `docs/user/undo.md` (ADR-043) |
 
 ### Command palette and search
 

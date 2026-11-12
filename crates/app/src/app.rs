@@ -1614,6 +1614,7 @@ impl App {
                 kind: NetworkKind::Push,
                 args: git_core::rename_remote_branch_args(&remote, &rename.name, &old_branch),
                 background: false,
+                undo: crate::repo_view::NetworkUndo::None,
             });
         let (old, new) = (rename.old.clone(), rename.name.clone());
         let task = self.run_undoable(tab, format!("Rename branch {old}"), move |git| {
@@ -1882,6 +1883,7 @@ impl App {
                     kind: NetworkKind::Push,
                     args: git_core::push_args(&remote, local, &branch, false, force),
                     background: false,
+                    undo: crate::repo_view::NetworkUndo::None,
                 };
                 self.run_network(tab, request)
             }
@@ -2095,8 +2097,10 @@ impl App {
             FormAction::SetUpstream { tab, local } => {
                 let upstream = form.value(0).to_owned();
                 self.form = None;
-                self.run_write(tab, format!("Set upstream of {local}"), move |git| {
-                    git.set_upstream(&local, &upstream)
+                self.run_undoable(tab, format!("Set upstream of {local}"), move |git| {
+                    let change =
+                        git_core::remote_undo::upstream_recorded(git, &local, Some(&upstream))?;
+                    Ok(Some(History::Push(UndoAction::Remote(change))))
                 })
             }
             FormAction::Identity { index, apply } => {
@@ -2143,8 +2147,9 @@ impl App {
                     return Task::none();
                 }
                 self.form = None;
-                self.run_write(tab, format!("Add remote {name}"), move |git| {
-                    git.add_remote(&name, &url)
+                self.run_undoable(tab, format!("Add remote {name}"), move |git| {
+                    let change = git_core::remote_undo::add_remote_recorded(git, &name, &url)?;
+                    Ok(Some(History::Push(UndoAction::Remote(change))))
                 })
             }
             FormAction::SetRemoteUrl { tab, name } => {
@@ -2154,8 +2159,9 @@ impl App {
                     return Task::none();
                 }
                 self.form = None;
-                self.run_write(tab, format!("Edit URL of {name}"), move |git| {
-                    git.set_remote_url(&name, &url)
+                self.run_undoable(tab, format!("Edit URL of {name}"), move |git| {
+                    let change = git_core::remote_undo::set_url_recorded(git, &name, &url)?;
+                    Ok(Some(History::Push(UndoAction::Remote(change))))
                 })
             }
             FormAction::FinishFlow { tab, branch } => {
@@ -2251,8 +2257,14 @@ impl App {
                     return Task::none();
                 }
                 self.form = None;
-                self.run_write(tab, format!("Rename remote {old}"), move |git| {
-                    git.rename_remote(&old, &new)
+                self.run_undoable(tab, format!("Rename remote {old}"), move |git| {
+                    git.rename_remote(&old, &new)?;
+                    Ok(Some(History::Push(UndoAction::Remote(
+                        git_core::remote_undo::RemoteChange::Rename {
+                            old: old.clone(),
+                            new: new.clone(),
+                        },
+                    ))))
                 })
             }
             FormAction::CreateTag { tab, target } => {
@@ -2345,6 +2357,7 @@ impl App {
                         },
                         args: git_core::push_args(&remote, &local, &branch, true, false),
                         background: false,
+                        undo: crate::repo_view::NetworkUndo::None,
                     },
                 )
             }
@@ -3679,6 +3692,14 @@ impl App {
                     } else {
                         UndoAction::Stash(Box::new(git_core::redo_stash(git, &root, &record)?))
                     }
+                }
+                UndoAction::Remote(change) => {
+                    git_core::remote_undo::switch_remote_change(git, &change, undo)?;
+                    UndoAction::Remote(change)
+                }
+                UndoAction::Submodules { label, record } => {
+                    git_core::submodule::switch_update(git, &root, &record, undo)?;
+                    UndoAction::Submodules { label, record }
                 }
                 UndoAction::Work(change) => {
                     git_core::work_undo::switch_work_change(git, &root, &change, undo)?;
@@ -7395,6 +7416,7 @@ impl App {
                     kind: NetworkKind::Push,
                     args: git_core::delete_remote_branch_args(remote, branch),
                     background: false,
+                    undo: crate::repo_view::NetworkUndo::None,
                 };
                 return self.run_network(tab, request);
             }
@@ -7402,9 +7424,15 @@ impl App {
             Message::UnsetUpstream(local) => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     let branch = local.clone();
-                    return self.run_write(tab, format!("Unset upstream of {local}"), move |git| {
-                        git.unset_upstream(&branch)
-                    });
+                    return self.run_undoable(
+                        tab,
+                        format!("Unset upstream of {local}"),
+                        move |git| {
+                            let change =
+                                git_core::remote_undo::upstream_recorded(git, &branch, None)?;
+                            Ok(Some(History::Push(UndoAction::Remote(change))))
+                        },
+                    );
                 }
             }
             Message::AddRemoteStart => {
@@ -7485,6 +7513,7 @@ impl App {
                             self.settings.general.prune_on_fetch,
                         ),
                         background: false,
+                        undo: crate::repo_view::NetworkUndo::None,
                     };
                     return self.run_network(tab, request);
                 }
@@ -7543,8 +7572,9 @@ impl App {
             Message::RemoveRemoteConfirmed(name) => {
                 if let Some(tab) = self.active_tab().map(|t| t.id) {
                     let remote = name.clone();
-                    return self.run_write(tab, format!("Remove remote {name}"), move |git| {
-                        git.remove_remote(&remote)
+                    return self.run_undoable(tab, format!("Remove remote {name}"), move |git| {
+                        let change = git_core::remote_undo::remove_remote_recorded(git, &remote)?;
+                        Ok(Some(History::Push(UndoAction::Remote(change))))
                     });
                 }
             }
@@ -7624,6 +7654,9 @@ impl App {
                     kind: NetworkKind::Fetch,
                     args: git_core::fast_forward_args(&remote, &branch, &local),
                     background: false,
+                    undo: crate::repo_view::NetworkUndo::PullBranch {
+                        branch: local.clone(),
+                    },
                 };
                 return self.run_network(tab, request);
             }
@@ -7638,6 +7671,7 @@ impl App {
                             kind: NetworkKind::PushBranch,
                             args: git_core::push_args(&remote, &local, &branch, false, false),
                             background: false,
+                            undo: crate::repo_view::NetworkUndo::None,
                         };
                         return self.run_network(tab, request);
                     }
@@ -8063,6 +8097,13 @@ impl App {
                     return Task::none();
                 };
                 let paths: Vec<String> = path.iter().cloned().collect();
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::path)
+                    .map(|p| p.to_path_buf())
+                else {
+                    return Task::none();
+                };
                 let label = match &path {
                     Some(path) => format!("Update submodule {path}"),
                     None => "Update submodules".to_owned(),
@@ -8074,6 +8115,7 @@ impl App {
                         kind: NetworkKind::SubmoduleUpdate,
                         args: git_core::submodule::update_args(&paths),
                         background: false,
+                        undo: crate::repo_view::NetworkUndo::SubmoduleUpdate { root },
                     },
                 );
             }
@@ -9756,6 +9798,7 @@ fn push_tag_request(remote: &str, tag: &str) -> NetworkRequest {
         kind: NetworkKind::Push,
         args: git_core::push_tag_args(remote, tag),
         background: false,
+        undo: crate::repo_view::NetworkUndo::None,
     }
 }
 
@@ -9765,6 +9808,7 @@ fn delete_remote_tag_request(remote: &str, tag: &str) -> NetworkRequest {
         kind: NetworkKind::Push,
         args: git_core::delete_remote_tag_args(remote, tag),
         background: false,
+        undo: crate::repo_view::NetworkUndo::None,
     }
 }
 
@@ -10606,15 +10650,19 @@ fn network_stream(
             use iced::futures::{SinkExt as _, StreamExt as _};
 
             let (sender, mut updates) = iced::futures::channel::mpsc::unbounded();
-            let NetworkRequest { label, args, .. } = request;
+            let NetworkRequest {
+                label, args, undo, ..
+            } = request;
+            let entry_label = label.clone();
             let work = tokio::task::spawn_blocking(move || {
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
-                writer
-                    .run_network(&args, &cancel, &mut |progress| {
+                let git = writer.as_ref();
+                let run = || {
+                    git.run_network(&args, &cancel, &mut |progress| {
                         let _ = sender.unbounded_send(progress);
                     })
-                    .map(|_| None)
-                    .map_err(|e| e.to_string())
+                };
+                network_with_undo(git, &entry_label, &undo, run).map_err(|e| e.to_string())
             });
             // The sender is dropped when the command ends, which ends this loop.
             while let Some(progress) = updates.next().await {
@@ -10630,6 +10678,43 @@ fn network_stream(
                 .await;
         },
     )
+}
+
+/// Runs a network command and records the undoable local part of it
+/// (M12-08): a pull's fast-forward/merge/rebase, the fast-forward of a
+/// branch that is not checked out, the checkouts of a submodule update.
+fn network_with_undo(
+    git: &dyn git_core::GitWriter,
+    label: &str,
+    undo: &crate::repo_view::NetworkUndo,
+    run: impl FnOnce() -> git_core::Result<git_core::GitOutput>,
+) -> git_core::Result<Option<History>> {
+    use crate::repo_view::NetworkUndo;
+    let history = |change: Option<git_core::HistoryChange>| {
+        change.map(|c| History::Push(UndoAction::History(c)))
+    };
+    match undo {
+        NetworkUndo::None => run().map(|_| None),
+        NetworkUndo::Pull => {
+            git_core::record_pull(git, label, run).map(|(_, change)| history(change))
+        }
+        NetworkUndo::PullBranch { branch } => {
+            git_core::record_branch_move(git, branch, label, run).map(|(_, c)| history(c))
+        }
+        NetworkUndo::SubmoduleUpdate { root } => {
+            let before = git_core::submodule::heads(git, root)?;
+            run()?;
+            let after = git_core::submodule::heads(git, root)?;
+            Ok(
+                git_core::submodule::update_record(&before, &after).map(|record| {
+                    History::Push(UndoAction::Submodules {
+                        label: label.to_owned(),
+                        record,
+                    })
+                }),
+            )
+        }
+    }
 }
 
 /// Runs an external tool unless no tool is configured (`explicit`: the

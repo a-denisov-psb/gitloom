@@ -167,3 +167,57 @@ pub fn index_tree(git: &dyn GitWriter) -> Result<Oid> {
         .trim()
         .to_owned())
 }
+
+/// Runs a pull of the checked-out branch (`op`) and records its local part
+/// (fast-forward, merge or rebase) for undo like the matching operation
+/// (M12-08); `None` when HEAD did not move. The fetched remote-tracking
+/// refs are not part of it.
+pub fn record_pull<T>(
+    git: &dyn GitWriter,
+    label: &str,
+    op: impl FnOnce() -> Result<T>,
+) -> Result<(T, Option<HistoryChange>)> {
+    let before = head_commit(git)?;
+    let branch = current_branch(git)?;
+    let value = op()?;
+    let after = head_commit(git)?;
+    let change = match (before, after) {
+        (Some(before), Some(after)) if before != after && current_state(git)?.is_clean() => {
+            Some(HistoryChange {
+                label: label.to_owned(),
+                kind: HistoryUndo::Keep,
+                before,
+                after,
+                branch,
+            })
+        }
+        _ => None,
+    };
+    Ok((value, change))
+}
+
+/// Like [`record_pull`] for a branch that is not checked out (`fetch
+/// remote b:b` fast-forwards it): undo moves the branch back.
+pub fn record_branch_move<T>(
+    git: &dyn GitWriter,
+    name: &str,
+    label: &str,
+    op: impl FnOnce() -> Result<T>,
+) -> Result<(T, Option<HistoryChange>)> {
+    let before = branch_commit(git, name)?;
+    let value = op()?;
+    let after = branch_commit(git, name)?;
+    let change = match (before, after) {
+        (Some(before), Some(after)) if before != after => Some(HistoryChange {
+            label: label.to_owned(),
+            kind: HistoryUndo::MoveBranch {
+                name: name.to_owned(),
+            },
+            before,
+            after,
+            branch: None,
+        }),
+        _ => None,
+    };
+    Ok((value, change))
+}
