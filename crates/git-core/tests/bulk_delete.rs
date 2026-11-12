@@ -25,6 +25,10 @@ fn refs(repo: &TestRepo) -> (String, String) {
 #[test]
 fn local_branches_and_tags_with_undo_in_one_step() {
     let repo = TestRepo::new();
+    // Restoring an annotated tag writes a tag object: the backend runs
+    // with the real environment, so the repository needs an identity.
+    repo.git(&["config", "user.name", "Test Author"]);
+    repo.git(&["config", "user.email", "author@example.com"]);
     let base = repo.commit("a.txt", "a\n", "base");
     for name in ["merged", "also-merged"] {
         repo.branch(name);

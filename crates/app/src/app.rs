@@ -13710,7 +13710,7 @@ pub(crate) mod tests {
         assert!(!app.panes.panel_visible);
         assert_eq!(
             panel_tooltip(PanelToggle::Right, app.panes.panel_visible),
-            "Show commit panel (Ctrl+K)"
+            format!("Show commit panel ({})", key("K"))
         );
     }
 
