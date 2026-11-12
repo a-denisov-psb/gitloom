@@ -1782,6 +1782,58 @@ mod tests {
         }
     }
 
+    /// The sparkle button at the right end of "Committing as …" sends
+    /// "Copy commit message prompt" (M12-13); without staged changes it
+    /// sends nothing.
+    #[test]
+    fn prompt_button_click() {
+        let clicked = |staged: &[&str]| -> Vec<Message> {
+            let mut app = crate::app::tests::staging_app(&["a.txt"], staged);
+            let _ = app.update(Message::WipSelected);
+            let mut sim = simulator(&app);
+            let identity = sim
+                .find("Committing as Test Author <author@example.com>")
+                .unwrap_or_else(|e| panic!("{e}"));
+            let amend = sim
+                .find("Amend previous commit")
+                .unwrap_or_else(|e| panic!("{e}"));
+            let y = iced_test::selector::Bounded::bounds(&identity).center_y();
+            let right = {
+                let b = iced_test::selector::Bounded::bounds(&amend);
+                b.x + b.width
+            };
+            sim.point_at(iced::Point::new(right - 10.0, y));
+            let _ = sim.simulate(iced_test::simulator::click());
+            sim.into_messages().collect()
+        };
+        assert!(clicked(&["s.txt"])
+            .iter()
+            .any(|m| matches!(m, Message::CopyPromptRequested)));
+        assert!(!clicked(&[])
+            .iter()
+            .any(|m| matches!(m, Message::CopyPromptRequested)));
+    }
+
+    /// Commit panel with the sparkle button (M12-13): enabled with staged
+    /// changes, disabled without; all three themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_prompt_button() {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
+            for (staged, name) in [(&["s.txt"][..], "staged"), (&[][..], "none")] {
+                let mut app = crate::app::tests::staging_app(&["a.txt"], staged);
+                app.settings.appearance.theme = choice;
+                let _ = app.update(Message::WipSelected);
+                snapshot(&app, &format!("prompt-button-{name}-{theme}"));
+            }
+        }
+    }
+
     /// The hover shows only "Stage File" / "Unstage File" (M12-01).
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

@@ -213,11 +213,13 @@ Acceptance: unit test: every boolean setting of the registry has a toggle entry,
 
 Note: `settings_registry` (label, page, field anchor, kind, keywords; page order). "Every boolean setting" covers the settings of `settings.json` (13 toggles, sending the same messages as the Preferences controls); on/off values that live in the Git config and are read in the background (long paths, sign commits/tags by default, the repository's commit template options) have "Preferences:" deep links instead, since their current value is not known without loading the page. "Custom" is not in the editor and stash template lists (it needs the text field: use the deep link). The field highlight is the accent tint for 1.5 s (timer with a sequence number); scrolling uses `snap_to` with the field's position among the page's fields. "Support long paths" is listed on Windows only, like its field. Palette entries got hidden `keywords` for the search ("profile" for "Choose identity…"). Ctrl+Shift+P has no GitKraken binding (checked against the shortcut list), so both open the palette. Tests: `every_boolean_setting_has_a_toggle`, `every_page_has_settings_and_choices_have_values`, `palette_settings_toggles_choices_and_deep_links`, `repository_settings_entries_need_a_repository`, `palette_runs_actions_and_remembers_them`; snapshots `ui_check_palette_settings` (dark, light) checked.
 
-### [ ] M12-13 Commit prompt button
+### [x] M12-13 Commit prompt button
 
 - Button per the decisions table.
 
 Acceptance: app tests: click opens the modal, disabled state and tooltip without staged changes; snapshots of the commit panel with and without staged changes in all three themes.
+
+Note: Lucide `sparkles` (lucide-static 1.55.0, same version and ISC license as the other icons) vendored as `assets/icons/sparkles.svg`. The button has a fixed 22 px size and the identity line takes the rest of the row (it is cut, not the button). The click sends `CopyPromptRequested`, which builds the prompt in the background and opens the modal (`PromptReady`, M10-07). Tests: layout test `prompt_button_click` (click at the button sends the message with staged changes, nothing without), `prompt_button_is_disabled_without_staged_changes`, `copy_commit_prompt_needs_staged_changes`; snapshots `ui_check_prompt_button` (with/without staged changes, three themes) checked.
 
 ### [ ] M12-14 WSL notice, polling watcher, trust prompt
 
