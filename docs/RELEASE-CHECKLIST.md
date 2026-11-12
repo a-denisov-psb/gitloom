@@ -141,7 +141,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] STASHES: names with `/` form folders, "WIP on feature/x" is not split, folders stay collapsed after a restart.
 - [ ] Ctrl/Shift+click several local and remote branches and a tag, Delete …: grouped dialog with the checked-out branch skipped, unmerged ones asked again, remote branches deleted with one push per remote (progress), Undo restores the local ones in one step.
 - [ ] Palette (Ctrl+P and Ctrl+Shift+P): "Toggle: Word wrap", "Set: Theme › Light", "Preferences: Default branch name" opens the Preferences with the field highlighted; repository entries only with a repository tab.
-- [ ] The sparkle button right of "Committing as …" opens the commit message prompt; disabled without staged changes.
+- [ ] The sparkle button right of "Committing as …" opens the commit message prompt; disabled without staged changes; same size and color as the branch icons in the left panel, enabled and disabled.
 - [ ] Open a repository from `\\wsl.localhost\<distro>\…`: notice with "Don't show again", "WSL: <distro>" badge in the recent list, a change made inside WSL appears within a few seconds.
 - [ ] A repository owned by another user (e.g. on another drive or after `takeown`): "Git does not trust this repository" with "Trust this repository…"; after confirming it opens and `safe.directory` is in the global Git config.
 
