@@ -151,6 +151,8 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Faded labels at the tips of deleted branches show their names; tooltips on nodes say "from the merge message" or "inferred from the history"; commits only a tag reaches are gray.
 - [ ] The palette entry and the Preferences → Repository → Gitflow toggle switch the same setting; it survives a restart; without Git flow the entries say "Initialize Gitflow first"; off, the graph looks as before.
 - [ ] Hide a feature branch while the layout is on: the rest keeps its groups.
+- [ ] Right click a local branch, a remote branch and a tag in the left panel and on their graph labels: order and labels as in GitKraken (no Checkout for the checked-out branch, remote menu starts with merge entries, "Push v1 to origin"); Create branch here opens the name field at the ref's commit; Reset … to this commit opens Soft/Mixed/Hard; Copy commit sha copies the full sha (the commit's, for an annotated tag).
+- [ ] Hide a branch, then use Create branch here from its left panel menu: a "Create branch at <branch>" dialog asks for the name; the new branch is created and checked out; Undo deletes it.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 

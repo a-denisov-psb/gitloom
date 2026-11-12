@@ -253,6 +253,12 @@ pub enum FormAction {
         tab: crate::app::TabId,
         target: String,
     },
+    /// Create a branch at commit `target` whose row is not in the graph
+    /// (M13-06 "Create branch here" fallback).
+    CreateBranch {
+        tab: crate::app::TabId,
+        target: String,
+    },
     /// Push tag `tag` to the chosen remote.
     PushTag { tab: crate::app::TabId, tag: String },
     /// Delete tag `tag` on the chosen remote.

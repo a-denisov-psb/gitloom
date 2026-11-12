@@ -12,11 +12,13 @@ If local changes are in the way, Gitloom offers **Stash and checkout**; the stas
 ## Create, rename and delete branches
 
 - **Branch** in the toolbar or Ctrl+B opens a name field at the selected commit (the WIP row means HEAD); also **Create branch here** in the commit menu. Invalid or taken names are flagged while you type; Enter creates and checks out the branch, Esc cancels.
-- Right click a branch → **Rename…** (inline; with an upstream you can rename the remote branch too) or **Delete** (asks first; unmerged branches offer a force delete; the checked-out branch cannot be deleted). Remote branches can be deleted on the remote.
+- Branch, remote branch and tag menus (left panel and graph labels) also have **Create branch here**: the same name field at the ref's commit (the tag's commit for annotated tags). The new branch tracks nothing; **Checkout** of a remote branch is the way to get a tracking branch. If the commit is not shown in the graph (hidden branch, beyond the loaded commits), a small dialog asks for the name instead.
+- Right click a branch → **Rename `<branch>`…** (inline; with an upstream you can rename the remote branch too) or **Delete `<branch>`** (asks first; unmerged branches offer a force delete; the checked-out branch cannot be deleted). Remote branches can be deleted on the remote.
+- Ref menus also offer **Reset `<head>` to this commit…** (the Soft / Mixed / Hard dialog of the commit menu), **Copy branch name** / **Copy tag name** and **Copy commit sha**. Like GitKraken, the checked-out branch has no Checkout entry, and a remote branch's menu starts with its merge, rebase and fast-forward entries.
 
 ## Tags
 
-**Create tag here** in the commit menu creates a lightweight tag, or an annotated one if you enter a message. Right click a tag to push it, delete it locally or on a remote, or copy its name. With several remotes Gitloom asks which one.
+**Create tag here** in the commit menu creates a lightweight tag, or an annotated one if you enter a message. Right click a tag to push it (**Push `<tag>` to origin**), merge or rebase with it, create a branch or reset to its commit, delete it locally or on a remote, or copy its name or commit sha. With several remotes the entries end in "…" and Gitloom asks which one.
 
 ## Fetch, pull and push
 

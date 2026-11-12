@@ -136,6 +136,8 @@ pub struct LocalBranch<'a> {
     /// Hidden / soloed in the graph (M5-08).
     pub hidden: bool,
     pub soloed: bool,
+    /// HEAD can be reset to the branch's commit (`CommitFacts::resettable`).
+    pub resettable: bool,
 }
 
 /// "Merge X into Y", "Rebase Y onto X" and, if possible, "Fast-forward Y
@@ -180,6 +182,33 @@ fn merge_entries(
     entries
 }
 
+/// Entries every ref menu shares (M13-06): "Create branch here" and
+/// "Reset <head> to this commit…" for the ref's commit `target`.
+fn commit_entries(
+    target: &str,
+    label: &str,
+    head: &str,
+    writable: bool,
+    resettable: bool,
+) -> [MenuEntry; 2] {
+    [
+        action(
+            "Create branch here",
+            writable,
+            Message::CreateBranchAtRef {
+                target: target.into(),
+                label: label.into(),
+            },
+        ),
+        action(
+            &format!("Reset {head} to this commit…"),
+            writable && resettable,
+            Message::ResetStart(target.into()),
+        ),
+    ]
+}
+
+/// Local branch menu like GitKraken's (M13-06).
 pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
     let LocalBranch {
         name,
@@ -191,6 +220,7 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         head_can_fast_forward,
         hidden,
         soloed,
+        resettable,
     } = branch;
     let (pull, push) = if is_head {
         (Message::Pull(None), Message::Push { force: false })
@@ -200,25 +230,17 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             Message::PushBranch(name.into()),
         )
     };
-    // Merging the checked-out branch into itself makes no sense.
-    let merge = if is_head {
-        Vec::new()
-    } else {
-        merge_entries(
-            name,
-            &format!("refs/heads/{name}"),
-            head,
-            head_can_fast_forward,
+    let mut entries = Vec::new();
+    // Like GitKraken: no Checkout for the checked-out branch.
+    if !is_head {
+        entries.push(action(
+            &format!("Checkout {name}"),
             writable,
-        )
-    };
-    let mut entries = vec![
-        action(
-            "Checkout",
-            writable && !is_head,
             Message::Checkout(CheckoutTarget::Local(name.into())),
-        ),
-        MenuEntry::Separator,
+        ));
+        entries.push(MenuEntry::Separator);
+    }
+    entries.extend([
         action("Pull", writable && has_upstream, pull),
         action("Push", writable, push),
         action(
@@ -231,22 +253,45 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
             writable && has_upstream,
             Message::UnsetUpstream(name.into()),
         ),
-        MenuEntry::Separator,
-    ];
-    entries.extend(merge);
+    ]);
+    // Merging the checked-out branch into itself makes no sense.
+    if !is_head {
+        entries.push(MenuEntry::Separator);
+        entries.extend(merge_entries(
+            name,
+            &format!("refs/heads/{name}"),
+            head,
+            head_can_fast_forward,
+            writable,
+        ));
+    }
+    entries.push(MenuEntry::Separator);
+    entries.extend(commit_entries(target, name, head, writable, resettable));
     entries.extend([
         MenuEntry::Separator,
-        action("Rename…", writable, Message::RenameStart(name.into())),
-        // The checked-out branch cannot be deleted.
         action(
-            "Delete",
-            writable && !is_head,
-            Message::DeleteBranch(name.into()),
+            &format!("Rename {name}…"),
+            writable,
+            Message::RenameStart(name.into()),
+        ),
+        // The checked-out branch cannot be deleted.
+        MenuEntry::Item {
+            label: format!("Delete {name}"),
+            shortcut: None,
+            enabled: writable && !is_head,
+            message: Box::new(Message::DeleteBranch(name.into())),
+            hint: is_head.then(|| "Checked-out branch".to_owned()),
+        },
+        MenuEntry::Separator,
+        action(
+            "Copy branch name",
+            true,
+            Message::CopyToClipboard(name.into()),
         ),
         action(
-            "Create tag here",
-            writable,
-            Message::CreateTagStart(target.into()),
+            "Copy commit sha",
+            true,
+            Message::CopyToClipboard(target.into()),
         ),
         MenuEntry::Separator,
     ]);
@@ -259,7 +304,11 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
     ));
     entries.extend([
         MenuEntry::Separator,
-        action("Copy name", true, Message::CopyToClipboard(name.into())),
+        action(
+            "Create tag here",
+            writable,
+            Message::CreateTagStart(target.into()),
+        ),
     ]);
     entries
 }
@@ -269,6 +318,8 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
 pub struct RemoteBranch<'a> {
     /// Short name (`origin/topic`).
     pub name: &'a str,
+    /// Commit the branch points to.
+    pub target: &'a str,
     pub writable: bool,
     /// Checked-out branch name, or "HEAD" when detached.
     pub head: &'a str,
@@ -279,27 +330,25 @@ pub struct RemoteBranch<'a> {
     pub behind_local: Option<&'a str>,
     pub hidden: bool,
     pub soloed: bool,
+    /// HEAD can be reset to the branch's commit.
+    pub resettable: bool,
 }
 
+/// Remote branch menu like GitKraken's (M13-06): merge entries first.
 pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
     let RemoteBranch {
         name,
+        target,
         writable,
         head,
         head_can_fast_forward,
         behind_local,
         hidden,
         soloed,
+        resettable,
     } = branch;
     let reference = format!("refs/remotes/{name}");
-    let mut entries = vec![
-        action(
-            "Checkout",
-            writable,
-            Message::Checkout(CheckoutTarget::Remote(name.into())),
-        ),
-        MenuEntry::Separator,
-    ];
+    let mut entries = Vec::new();
     if let Some(local) = behind_local {
         entries.push(action(
             &format!("Fast-forward {local} to {name}"),
@@ -321,9 +370,28 @@ pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
     entries.extend([
         MenuEntry::Separator,
         action(
-            "Delete on remote",
+            &format!("Checkout {name}"),
+            writable,
+            Message::Checkout(CheckoutTarget::Remote(name.into())),
+        ),
+    ]);
+    entries.extend(commit_entries(target, name, head, writable, resettable));
+    entries.extend([
+        action(
+            &format!("Delete {name}"),
             writable,
             Message::DeleteRemoteBranch(name.into()),
+        ),
+        MenuEntry::Separator,
+        action(
+            "Copy branch name",
+            true,
+            Message::CopyToClipboard(name.into()),
+        ),
+        action(
+            "Copy commit sha",
+            true,
+            Message::CopyToClipboard(target.into()),
         ),
         MenuEntry::Separator,
     ]);
@@ -336,7 +404,11 @@ pub fn remote_branch(branch: RemoteBranch<'_>) -> Vec<MenuEntry> {
     ));
     entries.extend([
         MenuEntry::Separator,
-        action("Copy name", true, Message::CopyToClipboard(name.into())),
+        action(
+            "Create tag here",
+            writable,
+            Message::CreateTagStart(target.into()),
+        ),
     ]);
     entries
 }
@@ -438,18 +510,76 @@ pub fn drop_menu(facts: DropFacts<'_>) -> Vec<MenuEntry> {
     entries
 }
 
-pub fn tag(name: &str, writable: bool) -> Vec<MenuEntry> {
-    vec![
-        action("Push to remote", writable, Message::PushTag(name.into())),
-        action("Delete local", writable, Message::DeleteTag(name.into())),
+/// Facts about a tag for its menu (M13-06).
+#[derive(Debug, Clone, Copy)]
+pub struct Tag<'a> {
+    pub name: &'a str,
+    /// The tag's commit (annotated tags peeled).
+    pub target: &'a str,
+    pub writable: bool,
+    /// Checked-out branch name, or "HEAD" when detached.
+    pub head: &'a str,
+    pub head_can_fast_forward: bool,
+    pub resettable: bool,
+    /// The only remote, named in the push and delete labels.
+    pub remote: Option<&'a str>,
+}
+
+/// Tag menu like GitKraken's (M13-06).
+pub fn tag(tag: Tag<'_>) -> Vec<MenuEntry> {
+    let Tag {
+        name,
+        target,
+        writable,
+        head,
+        head_can_fast_forward,
+        resettable,
+        remote,
+    } = tag;
+    let (push, delete_remote) = match remote {
+        Some(remote) => (
+            format!("Push {name} to {remote}"),
+            format!("Delete {name} from {remote}"),
+        ),
+        None => (
+            format!("Push {name}…"),
+            format!("Delete {name} from remote…"),
+        ),
+    };
+    let mut entries = vec![
+        action(&push, writable, Message::PushTag(name.into())),
+        MenuEntry::Separator,
+    ];
+    entries.extend(merge_entries(
+        name,
+        &format!("refs/tags/{name}"),
+        head,
+        head_can_fast_forward,
+        writable,
+    ));
+    entries.push(MenuEntry::Separator);
+    entries.extend(commit_entries(target, name, head, writable, resettable));
+    entries.extend([
+        MenuEntry::Separator,
         action(
-            "Delete on remote",
+            &format!("Delete {name} locally"),
+            writable,
+            Message::DeleteTag(name.into()),
+        ),
+        action(
+            &delete_remote,
             writable,
             Message::DeleteRemoteTag(name.into()),
         ),
         MenuEntry::Separator,
-        action("Copy name", true, Message::CopyToClipboard(name.into())),
-    ]
+        action("Copy tag name", true, Message::CopyToClipboard(name.into())),
+        action(
+            "Copy commit sha",
+            true,
+            Message::CopyToClipboard(target.into()),
+        ),
+    ]);
+    entries
 }
 
 /// `any_shown` / `any_hidden`: some of the remote's branches are shown /
@@ -637,18 +767,21 @@ mod tests {
             head_can_fast_forward: false,
             hidden: false,
             soloed: false,
+            resettable: true,
         })
     }
 
     fn remote_menu(behind_local: Option<&str>, head_can_fast_forward: bool) -> Vec<MenuEntry> {
         remote_branch(RemoteBranch {
             name: "origin/topic",
+            target: "r1",
             writable: true,
             head: "main",
             head_can_fast_forward,
             behind_local,
             hidden: false,
             soloed: false,
+            resettable: true,
         })
     }
 
@@ -687,6 +820,7 @@ mod tests {
             head_can_fast_forward: true,
             hidden: false,
             soloed: false,
+            resettable: true,
         });
         assert!(matches!(
             message_of(&ahead, "Fast-forward main to topic"),
@@ -715,15 +849,197 @@ mod tests {
         assert!(message_of(&menu, "Fast-forward main to origin/topic").is_some());
     }
 
+    /// All labels with "---" for separators.
+    fn layout(menu: &[MenuEntry]) -> Vec<&str> {
+        menu.iter()
+            .map(|e| match e {
+                MenuEntry::Item { label, .. } => label.as_str(),
+                MenuEntry::Separator => "---",
+                _ => "?",
+            })
+            .collect()
+    }
+
+    fn tag_menu(remote: Option<&'static str>, writable: bool, resettable: bool) -> Vec<MenuEntry> {
+        tag(Tag {
+            name: "v1",
+            target: "t1",
+            writable,
+            head: "main",
+            head_can_fast_forward: true,
+            resettable,
+            remote,
+        })
+    }
+
+    #[test]
+    fn local_branch_menu_is_ordered_like_gitkraken() {
+        assert_eq!(
+            layout(&branch(false, true)),
+            [
+                "Checkout topic",
+                "---",
+                "Pull",
+                "Push",
+                "Set upstream…",
+                "Unset upstream",
+                "---",
+                "Merge topic into main",
+                "Rebase main onto topic",
+                "---",
+                "Create branch here",
+                "Reset main to this commit…",
+                "---",
+                "Rename topic…",
+                "Delete topic",
+                "---",
+                "Copy branch name",
+                "Copy commit sha",
+                "---",
+                "Hide",
+                "Solo",
+                "---",
+                "Create tag here",
+            ]
+        );
+        let menu = branch(false, true);
+        assert!(matches!(
+            message_of(&menu, "Create branch here"),
+            Some(Message::CreateBranchAtRef { target, label }) if target == "c1" && label == "topic"
+        ));
+        assert!(matches!(
+            message_of(&menu, "Reset main to this commit…"),
+            Some(Message::ResetStart(id)) if id == "c1"
+        ));
+        assert!(matches!(
+            message_of(&menu, "Copy commit sha"),
+            Some(Message::CopyToClipboard(id)) if id == "c1"
+        ));
+        assert!(matches!(
+            message_of(&menu, "Copy branch name"),
+            Some(Message::CopyToClipboard(name)) if name == "topic"
+        ));
+    }
+
     #[test]
     fn checked_out_branch_cannot_be_checked_out_or_deleted() {
         let head = branch(true, true);
-        let (_, disabled) = summary(&head);
-        let labels: Vec<_> = disabled.iter().map(|(l, _)| *l).collect();
-        assert!(labels.contains(&"Checkout") && labels.contains(&"Delete"));
+        // Like GitKraken: no Checkout entry at all for the checked-out branch.
+        assert!(!layout(&head).iter().any(|l| l.starts_with("Checkout")));
+        assert_eq!(layout(&head)[0], "Pull");
+        assert_eq!(hint_of(&head, "Delete topic"), Some("Checked-out branch"));
         let other = branch(false, true);
         let (enabled, _) = summary(&other);
-        assert!(enabled.contains(&"Checkout") && enabled.contains(&"Delete"));
+        assert!(enabled.contains(&"Checkout topic") && enabled.contains(&"Delete topic"));
+    }
+
+    #[test]
+    fn remote_branch_menu_is_ordered_like_gitkraken() {
+        assert_eq!(
+            layout(&remote_menu(Some("topic"), true)),
+            [
+                "Fast-forward topic to origin/topic",
+                "Fast-forward main to origin/topic",
+                "Merge origin/topic into main",
+                "Rebase main onto origin/topic",
+                "---",
+                "Checkout origin/topic",
+                "Create branch here",
+                "Reset main to this commit…",
+                "Delete origin/topic",
+                "---",
+                "Copy branch name",
+                "Copy commit sha",
+                "---",
+                "Hide",
+                "Solo",
+                "---",
+                "Create tag here",
+            ]
+        );
+        let menu = remote_menu(None, false);
+        assert!(matches!(
+            message_of(&menu, "Create branch here"),
+            Some(Message::CreateBranchAtRef { target, .. }) if target == "r1"
+        ));
+        assert!(matches!(
+            message_of(&menu, "Delete origin/topic"),
+            Some(Message::DeleteRemoteBranch(name)) if name == "origin/topic"
+        ));
+    }
+
+    #[test]
+    fn tag_menu_is_ordered_like_gitkraken() {
+        assert_eq!(
+            layout(&tag_menu(Some("origin"), true, true)),
+            [
+                "Push v1 to origin",
+                "---",
+                "Fast-forward main to v1",
+                "Merge v1 into main",
+                "Rebase main onto v1",
+                "---",
+                "Create branch here",
+                "Reset main to this commit…",
+                "---",
+                "Delete v1 locally",
+                "Delete v1 from origin",
+                "---",
+                "Copy tag name",
+                "Copy commit sha",
+            ]
+        );
+        // Merge entries use the tag ref; git peels it to the commit.
+        let menu = tag_menu(None, true, true);
+        assert!(matches!(
+            message_of(&menu, "Merge v1 into main"),
+            Some(Message::Merge { source, .. }) if source == "refs/tags/v1"
+        ));
+        // Without exactly one remote the push and delete ask for one.
+        assert!(matches!(
+            message_of(&menu, "Push v1…"),
+            Some(Message::PushTag(t)) if t == "v1"
+        ));
+        assert!(message_of(&menu, "Delete v1 from remote…").is_some());
+        // Create branch here and Copy commit sha use the peeled commit.
+        assert!(matches!(
+            message_of(&menu, "Create branch here"),
+            Some(Message::CreateBranchAtRef { target, label }) if target == "t1" && label == "v1"
+        ));
+        assert!(matches!(
+            message_of(&menu, "Copy commit sha"),
+            Some(Message::CopyToClipboard(id)) if id == "t1"
+        ));
+    }
+
+    #[test]
+    fn reset_from_a_ref_follows_the_commit_facts() {
+        let menu = tag_menu(None, true, false);
+        let (enabled, disabled) = summary(&menu);
+        assert!(enabled.contains(&"Create branch here"));
+        assert!(disabled
+            .iter()
+            .any(|(l, _)| *l == "Reset main to this commit…"));
+        let mut facts = LocalBranch {
+            name: "topic",
+            target: "c1",
+            is_head: false,
+            has_upstream: false,
+            writable: true,
+            head: "main",
+            head_can_fast_forward: false,
+            hidden: false,
+            soloed: false,
+            resettable: false,
+        };
+        assert!(summary(&local_branch(facts))
+            .1
+            .iter()
+            .any(|(l, _)| *l == "Reset main to this commit…"));
+        facts.resettable = true;
+        assert!(summary(&local_branch(facts))
+            .0
+            .contains(&"Reset main to this commit…"));
     }
 
     #[test]
@@ -880,9 +1196,13 @@ mod tests {
             head_can_fast_forward: true,
             hidden: false,
             soloed: false,
+            resettable: true,
         });
         // Hiding only changes the view, not the repository.
-        assert_eq!(summary(&menu).0, ["Hide", "Solo", "Copy name"]);
+        assert_eq!(
+            summary(&menu).0,
+            ["Copy branch name", "Copy commit sha", "Hide", "Solo"]
+        );
         assert_eq!(
             summary(&commit(
                 "c1",
@@ -900,7 +1220,25 @@ mod tests {
             .0,
             ["Copy SHA", "Copy message"]
         );
-        assert_eq!(summary(&tag("v1", false)).0, ["Copy name"]);
+        assert_eq!(
+            summary(&tag_menu(Some("origin"), false, true)).0,
+            ["Copy tag name", "Copy commit sha"]
+        );
+        let remote_read_only = remote_branch(RemoteBranch {
+            name: "origin/topic",
+            target: "r1",
+            writable: false,
+            head: "main",
+            head_can_fast_forward: true,
+            behind_local: Some("topic"),
+            hidden: false,
+            soloed: false,
+            resettable: true,
+        });
+        assert_eq!(
+            summary(&remote_read_only).0,
+            ["Copy branch name", "Copy commit sha", "Hide", "Solo"]
+        );
         let read_only = RemoteFacts {
             any_shown: false,
             ..facts(false, None)
@@ -923,6 +1261,7 @@ mod tests {
             head_can_fast_forward: false,
             hidden: true,
             soloed: true,
+            resettable: true,
         });
         assert!(matches!(
             message_of(&hidden, "Show"),

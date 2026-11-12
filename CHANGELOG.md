@@ -57,6 +57,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Branch, remote branch and tag menus are ordered like GitKraken's and name the branch or tag; they also offer Create branch here, Reset to this commit and Copy commit sha.
+
 - The Date and SHA columns of the graph always fit their content and can no longer be resized.
 
 - The panel toggles in the status bar have no tooltip anymore; it covered the button.

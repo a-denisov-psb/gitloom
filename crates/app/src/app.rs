@@ -1006,6 +1006,13 @@ pub enum Message {
     RemoveRemoteConfirmed(String),
     /// Form for a new tag at commit `id`.
     CreateTagStart(String),
+    /// "Create branch here" of a branch or tag menu (M13-06): the inline
+    /// input at commit `target`, or a dialog named after `label` when the
+    /// commit has no row in the graph.
+    CreateBranchAtRef {
+        target: String,
+        label: String,
+    },
     /// Push a tag (asks for the remote if there are several).
     PushTag(String),
     /// Ask before deleting a local tag.
@@ -1565,6 +1572,40 @@ impl App {
             submitted: false,
         });
         iced::widget::operation::focus(crate::ui::NEW_BRANCH_INPUT)
+    }
+
+    /// "Create branch here" from a ref menu (M13-06): selects the commit,
+    /// scrolls it into view and opens the inline input there. A commit
+    /// without a row (hidden branch, truncated history) gets a dialog
+    /// instead, so the action never ends without a way to name the branch.
+    fn create_branch_at_ref(&mut self, target: String, label: String) -> Task<Message> {
+        if let Some(reason) = self.write_block() {
+            self.status = reason;
+            return Task::none();
+        }
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        if view.snapshot.index.contains_key(&target) {
+            view.center = CenterView::Graph;
+            select_multi(view, &target, false, false);
+            let select = self.select(Selection::Commit(target.clone()));
+            let reveal = self.reveal_selection();
+            let input = self.start_new_branch(Some(target));
+            return Task::batch([select, reveal, input]);
+        }
+        self.form = Some(Form {
+            title: format!("Create branch at {label}"),
+            text: String::new(),
+            fields: vec![FormField::text("Branch name", "")],
+            submit: "Create branch".into(),
+            action: FormAction::CreateBranch { tab, target },
+            error: None,
+        });
+        iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT)
     }
 
     /// Validates the inline rename; a branch with an upstream asks whether
@@ -2366,6 +2407,24 @@ impl App {
                         },
                     ))))
                 })
+            }
+            FormAction::CreateBranch { tab, target } => {
+                let name = form.value(0).trim().to_owned();
+                let names = self
+                    .tab_mut(tab)
+                    .and_then(|t| t.view())
+                    .map(|v| local_branch_names(&v.snapshot))
+                    .unwrap_or_default();
+                let Some(form) = self.form.as_mut() else {
+                    return Task::none();
+                };
+                if let Some(problem) = branch_name_problem(&name, &names) {
+                    form.error = Some(problem);
+                    return Task::none();
+                }
+                self.form = None;
+                let label = format!("Create branch {name}");
+                self.create_and_switch(tab, name, target, label)
             }
             FormAction::PushTag { tab, tag } => {
                 let remote = form.value(0).to_owned();
@@ -7734,6 +7793,9 @@ impl App {
                     ));
                     return Task::none();
                 }
+                // Like the commit menu's Reset (M9-04).
+                let resettable =
+                    view.snapshot.state.is_clean() && view.snapshot.head.target().is_some();
                 let entries = match kind {
                     git_core::RefKind::LocalBranch => {
                         let local = view
@@ -7752,6 +7814,7 @@ impl App {
                             head_can_fast_forward: view.snapshot.head_can_fast_forward(target),
                             hidden: view.ref_filter.is_hidden(&name, kind),
                             soloed: view.ref_filter.is_soloed(&name, kind),
+                            resettable,
                         })
                     }
                     git_core::RefKind::RemoteBranch => {
@@ -7763,15 +7826,37 @@ impl App {
                             .map_or("", |r| r.target.as_str());
                         crate::menus::remote_branch(crate::menus::RemoteBranch {
                             name: &name,
+                            target,
                             writable,
                             head: head_name(snapshot),
                             head_can_fast_forward: snapshot.head_can_fast_forward(target),
                             behind_local: behind_local(snapshot, &name, target),
                             hidden: view.ref_filter.is_hidden(&name, kind),
                             soloed: view.ref_filter.is_soloed(&name, kind),
+                            resettable,
                         })
                     }
-                    git_core::RefKind::Tag => crate::menus::tag(&name, writable),
+                    git_core::RefKind::Tag => {
+                        let snapshot = &view.snapshot;
+                        let target = snapshot
+                            .refs
+                            .iter()
+                            .find(|r| r.kind == kind && r.name == name)
+                            .map_or("", |r| r.target.as_str());
+                        let remote = match snapshot.remotes.as_slice() {
+                            [remote] => Some(remote.as_str()),
+                            _ => None,
+                        };
+                        crate::menus::tag(crate::menus::Tag {
+                            name: &name,
+                            target,
+                            writable,
+                            head: head_name(snapshot),
+                            head_can_fast_forward: snapshot.head_can_fast_forward(target),
+                            resettable,
+                            remote,
+                        })
+                    }
                 };
                 // Git flow: start entries on the development/production branch.
                 let mut entries = entries;
@@ -8061,6 +8146,9 @@ impl App {
                     error: None,
                 });
                 return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::CreateBranchAtRef { target, label } => {
+                return self.create_branch_at_ref(target, label);
             }
             Message::PushTag(tag) => return self.tag_remote_action(tag, false),
             Message::DeleteRemoteTag(tag) => return self.tag_remote_action(tag, true),
@@ -20178,16 +20266,16 @@ pub(crate) mod tests {
         let mut app = checkout_app();
         let head = branch_menu(&mut app, "main", git_core::RefKind::LocalBranch);
         assert!(
-            select_label(&head, "Delete").is_none(),
+            select_label(&head, "Delete main").is_none(),
             "the checked-out branch cannot be deleted"
         );
         let other = branch_menu(&mut app, "topic", git_core::RefKind::LocalBranch);
         assert!(
-            matches!(select_label(&other, "Delete"), Some(Message::DeleteBranch(n)) if n == "topic")
+            matches!(select_label(&other, "Delete topic"), Some(Message::DeleteBranch(n)) if n == "topic")
         );
         let remote = branch_menu(&mut app, "origin/feature", git_core::RefKind::RemoteBranch);
         assert!(
-            matches!(select_label(&remote, "Delete on remote"), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
+            matches!(select_label(&remote, "Delete origin/feature"), Some(Message::DeleteRemoteBranch(n)) if n == "origin/feature")
         );
     }
 
@@ -20330,8 +20418,15 @@ pub(crate) mod tests {
     fn tag_menu_and_remote_actions() {
         let mut app = tag_app(&["origin"]);
         let menu = branch_menu(&mut app, "v1", git_core::RefKind::Tag);
-        assert!(matches!(menu.select(0), Some(Message::PushTag(t)) if t == "v1"));
-        assert!(matches!(menu.select(4), Some(Message::CopyToClipboard(t)) if t == "v1"));
+        assert!(
+            matches!(select_label(&menu, "Push v1 to origin"), Some(Message::PushTag(t)) if t == "v1")
+        );
+        assert!(
+            matches!(select_label(&menu, "Copy tag name"), Some(Message::CopyToClipboard(t)) if t == "v1")
+        );
+        assert!(
+            matches!(select_label(&menu, "Copy commit sha"), Some(Message::CopyToClipboard(t)) if t == "c")
+        );
 
         // One remote: push runs, remote delete asks.
         let _ = app.update(Message::PushTag("v1".into()));
@@ -20352,6 +20447,80 @@ pub(crate) mod tests {
         });
         let _ = app.update(Message::FormSubmit);
         assert_eq!(running_args(&app), ["Push tag v1"]);
+    }
+
+    #[test]
+    fn create_branch_here_from_ref_menus() {
+        for (name, kind) in [
+            ("topic", git_core::RefKind::LocalBranch),
+            ("origin/feature", git_core::RefKind::RemoteBranch),
+            ("v1", git_core::RefKind::Tag),
+        ] {
+            let mut app = tag_app(&["origin"]);
+            let _ = app.update(git_available());
+            let menu = branch_menu(&mut app, name, kind);
+            let message = select_label(&menu, "Create branch here").unwrap();
+            assert!(
+                matches!(&message, Message::CreateBranchAtRef { target, label } if target == "c" && label == name),
+                "{name}"
+            );
+            let _ = app.update(message);
+            let view = app.tabs[0].view().unwrap();
+            // Same flow as the commit menu: the commit is selected and the
+            // inline input opens on its row.
+            assert!(matches!(&view.selection, Some(Selection::Commit(id)) if id == "c"));
+            let input = view.new_branch.clone().unwrap();
+            assert_eq!(
+                (input.start.as_str(), input.row.as_deref()),
+                ("c", Some("c"))
+            );
+            assert!(app.form.is_none());
+            let _ = app.update(Message::NewBranchInput("from-ref".into()));
+            let _ = app.update(Message::NewBranchSubmit);
+            assert_eq!(running_args(&app), ["Create branch from-ref"], "{name}");
+        }
+    }
+
+    #[test]
+    fn create_branch_here_without_a_row_opens_a_dialog() {
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(git_available());
+        // A hidden branch whose commit has no row in the graph.
+        let _ = app.update(Message::CreateBranchAtRef {
+            target: "f00d".into(),
+            label: "hidden/topic".into(),
+        });
+        assert!(app.tabs[0].view().unwrap().new_branch.is_none());
+        let form = app.form.as_ref().unwrap();
+        assert_eq!(form.title, "Create branch at hidden/topic");
+        assert_eq!(form.submit, "Create branch");
+        form_input(&mut app, 0, "topic");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app
+            .form
+            .as_ref()
+            .unwrap()
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("already exists"));
+        form_input(&mut app, 0, "rescued");
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Create branch rescued"]);
+    }
+
+    #[test]
+    fn reset_from_a_ref_menu_opens_the_reset_dialog() {
+        let mut app = tag_app(&["origin"]);
+        let _ = app.update(git_available());
+        let menu = branch_menu(&mut app, "v1", git_core::RefKind::Tag);
+        let message = select_label(&menu, "Reset main to this commit…").unwrap();
+        assert!(matches!(&message, Message::ResetStart(id) if id == "c"));
+        let _ = app.update(message);
+        let modal = app.modal.take().unwrap();
+        let labels: Vec<_> = modal.buttons.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(labels, ["Cancel", "Soft", "Mixed", "Hard"]);
     }
 
     fn form_input(app: &mut App, field: usize, value: &str) {

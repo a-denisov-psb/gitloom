@@ -121,7 +121,7 @@ Acceptance: measurements recorded; docs reviewed.
 Note: `flow_perf` (git-graph, ignored, release): 100 004 commits classified in 19 ms, Git flow layout 12 ms (default 6 ms); `docs/PERFORMANCE.md` "M13". User guide `git-flow.md` "Gitflow layout", `coming-from-gitkraken.md`, UX-PARITY extension row, `docs/ARCHITECTURE.md` lane groups with the classifier, release checklist "7g. New in M13" (includes the open verification item), CHANGELOG (M13-03, M13-04). The backlog entry "cap lanes per group" waits for the verification item (real repositories); not added.
 
 
-### [ ] M13-06 Branch, remote branch and tag menus like GitKraken
+### [x] M13-06 Branch, remote branch and tag menus like GitKraken
 
 Found by the maintainer while testing (2026-11-12, GitKraken 7.5.2 screenshots of the local branch, remote branch, tag and graph pill menus). GitKraken's ref menus carry the most used actions of the ref's commit; ours only had ref actions. Not everything is taken over: only what is used often on a ref (see "Not taken over").
 
@@ -182,6 +182,8 @@ Acceptance:
 - User guide (branches and tags pages) updated; CHANGELOG `[Unreleased]` → Changed: "Branch, remote branch and tag menus are ordered like GitKraken's and name the branch or tag; they also offer Create branch here, Reset to this commit and Copy commit sha."
 - `docs/RELEASE-CHECKLIST.md`: checks in this milestone's section (left panel and graph pill menus; hidden branch → dialog).
 - `./scripts/check.sh` green.
+
+Note (M13-06): Without exactly one remote the tag entries read "Push `<t>`…" and "Delete `<t>` from remote…" (the remote is asked); the remote branch menu has no separator between Reset and Delete, as listed above. "No upstream afterwards" and "undo deletes the branch" are tested in `git-core/tests/ref_undo.rs` (the app tests run on the mock backend).
 
 ### [ ] M13-07 File menus like GitKraken
 
