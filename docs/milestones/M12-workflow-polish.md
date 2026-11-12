@@ -76,19 +76,19 @@ Open:
 
 ## Milestone acceptance
 
-- [ ] Selected files deselect on click; hover shows only Stage/Unstage.
-- [ ] Remote websites open from the context menu and the palette for all URL forms; local remotes show no entry.
-- [ ] Conflict view navigation and headers like GitKraken.
-- [ ] Merge, rebase, cherry-pick, revert and stash conflicts show the graph row, the panel header, Conflicted/Resolved Files, "Mark all resolved" and the commit/abort buttons; the tab banner is gone; every state has a visible way back (ADR-044).
-- [ ] Submodules: status, update (also all), open in tab, out-of-date toast; works with nested submodules.
-- [ ] Informational errors appear as toasts with plain-language text and details; decisions stay modals.
-- [ ] Every action listed under "Undo" in the decisions table is undoable and redoable with the stated preconditions; `docs/user/undo.md` complete (ADR-043).
-- [ ] STASHES shows folders; a stash can be renamed in place (position kept); undo and redo restore the exact stash list.
-- [ ] Several branches and tags can be selected with Ctrl/Shift and deleted in one step; the local part is one undo step; remote deletion is confirmed as not undoable.
-- [ ] The palette toggles every boolean setting, offers the listed choices and jumps to any setting.
-- [ ] The sparkle button opens the commit message prompt; disabled without staged changes.
-- [ ] WSL repositories show the notice and the badge, refresh by polling, and "dubious ownership" offers "Trust this repository…".
-- [ ] User guide, UX-PARITY, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] Selected files deselect on click; hover shows only Stage/Unstage.
+- [x] Remote websites open from the context menu and the palette for all URL forms; local remotes show no entry.
+- [x] Conflict view navigation and headers like GitKraken.
+- [x] Merge, rebase, cherry-pick, revert and stash conflicts show the graph row, the panel header, Conflicted/Resolved Files, "Mark all resolved" and the commit/abort buttons; the tab banner is gone; every state has a visible way back (ADR-044).
+- [x] Submodules: status, update (also all), open in tab, out-of-date toast; works with nested submodules.
+- [x] Informational errors appear as toasts with plain-language text and details; decisions stay modals.
+- [x] Every action listed under "Undo" in the decisions table is undoable and redoable with the stated preconditions; `docs/user/undo.md` complete (ADR-043).
+- [x] STASHES shows folders; a stash can be renamed in place (position kept); undo and redo restore the exact stash list.
+- [x] Several branches and tags can be selected with Ctrl/Shift and deleted in one step; the local part is one undo step; remote deletion is confirmed as not undoable.
+- [x] The palette toggles every boolean setting, offers the listed choices and jumps to any setting.
+- [x] The sparkle button opens the commit message prompt; disabled without staged changes.
+- [x] WSL repositories show the notice and the badge, refresh by polling, and "dubious ownership" offers "Trust this repository…".
+- [x] User guide, UX-PARITY, release checklist and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 No release (ADR-042): when all tasks are done, continue with M13.
 

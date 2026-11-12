@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M12 – Workflow polish** → [`milestones/M12-workflow-polish.md`](milestones/M12-workflow-polish.md)
+**M13 – Git flow graph layout** → [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph-layout.md)
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M14 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -28,8 +28,8 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M9 | 1.0.0 | Fixes and consistency | Done |
 | M10 | 1.0.0 | Clone, init and Git settings | Done |
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Done |
-| M12 | 1.0.0 | Workflow polish | Current |
-| M13 | 1.0.0 | Git flow graph layout | Planned |
+| M12 | 1.0.0 | Workflow polish | Done |
+| M13 | 1.0.0 | Git flow graph layout | Current |
 | M14 | 1.0.0 | Commit details like GitKraken | Planned |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
@@ -95,7 +95,7 @@ Details: [`milestones/M10-clone-init-settings.md`](milestones/M10-clone-init-set
 
 Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-themes-highlighting.md).
 
-### M12 – Workflow polish (current)
+### M12 – Workflow polish (done)
 
 - File lists: a click on the selected file deselects it (the diff closes); hover shows only Stage/Unstage, per-file Discard moves to the context menu (deviation, maintainer decision 2026-11-10).
 - Remotes: "Open on GitHub/GitLab/Bitbucket" (other hosts "Open in browser") in the remote context menu and the palette; repository start page only, URL derived offline.
@@ -103,10 +103,11 @@ Details: [`milestones/M11-graph-themes-highlighting.md`](milestones/M11-graph-th
 - Submodules: list with status (not initialized, out of date, modified), Update/Initialize, out-of-date hint after checkout and pull, double click opens in a new tab, section always shown with its count like GitKraken. No add/remove.
 - Errors as non-modal toasts (bottom left like GitKraken) with plain-language text, Details and Copy; a modal only when a decision is needed; plain-language texts for common Git errors.
 - Undo coverage (ADR-043): stash push and drop, stage/unstage, "mark resolved", the local part of pull, remotes and upstream, submodule update; settings are not undo entries (ADR-043 amended).
+- Also done: STASHES folders and rename, multi-selection with bulk delete, palette settings toggles and deep links (Ctrl+Shift+P), commit prompt button, WSL notice and trust prompt; fixes: panel toggles in the status bar, Classic Dark removed (ADR-054).
 
 Details: [`milestones/M12-workflow-polish.md`](milestones/M12-workflow-polish.md).
 
-### M13 – Git flow graph layout (planned)
+### M13 – Git flow graph layout (current)
 
 When Git flow is initialized, an optional layout draws the graph like the classic Git flow diagram: fixed lane groups from left to right (production, hotfix, release, development, feature/other), one color per type, built on `LaneHints` (M2-15).
 
