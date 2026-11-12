@@ -44,6 +44,10 @@ mod settings_registry;
 mod shortcuts;
 mod snapshot;
 mod stash_template;
+/// Temporary repositories built with the `git` CLI (git-core's test support).
+#[cfg(test)]
+#[path = "../../git-core/tests/support/mod.rs"]
+mod test_repo;
 mod theme;
 mod toast;
 mod ui;

@@ -3,6 +3,7 @@
 //! The crate knows nothing about Git object ids. The caller maps its commits
 //! to positions in an input slice and passes plain [`GraphCommit`] values.
 
+pub mod flow;
 mod layout;
 mod topo;
 mod visible;
