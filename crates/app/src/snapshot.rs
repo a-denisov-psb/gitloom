@@ -192,6 +192,7 @@ impl RepoSnapshot {
                 email: String::new(),
                 author_time: stash.time,
                 commit_time: stash.time,
+                committer: String::new(),
             });
         }
         let stash_ids: std::collections::HashSet<String> =
@@ -768,6 +769,7 @@ mod tests {
             email: "a@example.com".into(),
             author_time: time,
             commit_time: time,
+            committer: String::new(),
         }
     }
 
@@ -1206,6 +1208,7 @@ mod filter_perf {
                 email: String::new(),
                 author_time: (count - i) as i64,
                 commit_time: (count - i) as i64,
+                committer: String::new(),
             });
         }
         let branch = |name: &str, target: &str| Reference {

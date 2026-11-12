@@ -80,11 +80,13 @@ Acceptance: app test: click on the header copies the full sha; snapshots with a 
 
 Note (M14-01): two themes since ADR-054 (Dark, Light). The message is shown in read-only text editors (iced has no selectable plain text): mouse and keyboard select, Ctrl+C copies, edits are ignored. The header button has the tooltip "Copy the full sha". The 40 % limit is measured with `responsive` on the panel's height.
 
-### [ ] M14-02 Author block, co-authors, parent links
+### [x] M14-02 Author block, co-authors, parent links
 
 - Author block, committer line, co-author parsing and avatars, parent links.
 
 Acceptance: unit tests for trailer parsing (case, several co-authors, trailers not in the last paragraph ignored, malformed lines); app test: a parent link selects and scrolls to the parent; snapshots with avatars on and off, with co-authors and a merge commit (two parents).
+
+Note (M14-02): `git_core::Commit` gained `committer` (name after the mailmap, empty when name and email equal the author's, so 100k commits allocate nothing extra). The e-mail moved from the author line into the name's tooltip. The initials tile keeps the theme's avatar color (no per-author color exists elsewhere in Gitloom). A parent beyond the loaded history is a disabled link with the tooltip "Not in the loaded history".
 
 ### [ ] M14-03 File list summary, sort, Path/Tree, all files
 

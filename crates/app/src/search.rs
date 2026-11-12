@@ -165,6 +165,7 @@ mod tests {
             email: email.into(),
             author_time: 0,
             commit_time: 0,
+            committer: String::new(),
         }
     }
 

@@ -1064,6 +1064,44 @@ mod tests {
         app
     }
 
+    /// Author block with and without avatars, co-authors and a merge
+    /// commit's two parents (M14-02).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_author_block() {
+        let body = "Pair work.\n\nCo-authored-by: Bo Kim <bo@example.com>\nCo-authored-by: Cy Dee <cy@example.com>";
+        let mut app = details_app(&[
+            ("c3", "Merge branch 'topic'", ""),
+            ("c2", "Add the author block", body),
+            ("c1", "Initial commit", ""),
+        ]);
+        // c3 merges c1 as second parent; c2 has a different committer.
+        {
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            let mut commits = (*snapshot.commits).clone();
+            commits[0].parents.push("c1".into());
+            commits[1].committer = "Release Bot".into();
+            snapshot.commits = std::sync::Arc::new(commits);
+            view.snapshot = std::sync::Arc::new(snapshot);
+        }
+        for (id, name) in [("c2", "co-authors"), ("c3", "merge")] {
+            let _ = app.update(Message::CommitSelected(id.into()));
+            snapshot(&app, &format!("author-block-{name}-initials"));
+        }
+        // Avatars on: the app icon stands in for a Gravatar image.
+        let icon = include_bytes!("../assets/app-icon/icon-64.png").to_vec();
+        for email in ["ana@example.com", "bo@example.com"] {
+            let hash = crate::avatars::gravatar_hash(email);
+            let _ = app.avatars.request([email]);
+            let _ = app
+                .avatars
+                .finished(&hash, Ok(crate::avatars::Cached::Image(icon.clone())));
+        }
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        snapshot(&app, "author-block-co-authors-avatars");
+    }
+
     /// A click on "commit: <short sha>" copies the full sha (M14-01).
     /// Layout only, so part of every test run.
     #[test]

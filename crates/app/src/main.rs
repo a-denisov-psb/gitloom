@@ -50,6 +50,7 @@ mod stash_template;
 mod test_repo;
 mod theme;
 mod toast;
+mod trailers;
 mod ui;
 #[cfg(test)]
 mod ui_check;

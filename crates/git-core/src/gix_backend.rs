@@ -909,6 +909,13 @@ fn to_commit(commit: &gix::Commit<'_>, mailmap: &gix::mailmap::Snapshot) -> Resu
     let author = decoded.author().map_err(backend)?;
     let committer = decoded.committer().map_err(backend)?;
     let identity = mailmap.resolve_cow(author);
+    let committed_by = mailmap.resolve_cow(committer);
+    let committer_name =
+        if committed_by.name == identity.name && committed_by.email == identity.email {
+            String::new()
+        } else {
+            committed_by.name.to_str_lossy().into_owned()
+        };
     let message = decoded.message();
     Ok(Commit {
         id: commit.id.to_string(),
@@ -922,6 +929,7 @@ fn to_commit(commit: &gix::Commit<'_>, mailmap: &gix::mailmap::Snapshot) -> Resu
         email: identity.email.to_str_lossy().into_owned(),
         author_time: author.seconds(),
         commit_time: committer.seconds(),
+        committer: committer_name,
     })
 }
 

@@ -1503,6 +1503,7 @@ mod tests {
                 email: String::new(),
                 author_time: 100 - i as i64,
                 commit_time: 100 - i as i64,
+                committer: String::new(),
             })
             .collect();
         let working_tree = WorkingTree {

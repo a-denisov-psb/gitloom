@@ -622,29 +622,7 @@ fn details_content<'a>(
     avatars: &crate::avatars::Avatars,
     height: f32,
 ) -> Element<'a, Message> {
-    let author = row![
-        crate::ui::avatar(avatars.get(&commit.email), &commit.author, 32.0),
-        {
-            let mut lines = column![
-                text(&commit.author),
-                muted(author_line(&commit.email, commit.author_time)).size(12),
-            ]
-            .spacing(2);
-            if let Some(badge) = signature_badge(view, &commit.id) {
-                lines = lines.push(badge);
-            }
-            lines
-        },
-    ]
-    .spacing(10)
-    .align_y(iced::Center);
-
-    let parents = commit.parents.iter().map(|p| {
-        muted(format!("parent: {}", short(p)))
-            .font(iced::Font::MONOSPACE)
-            .size(12)
-            .into()
-    });
+    let author = author_block(view, commit, avatars);
 
     let files: Element<'a, Message> = match view.details.as_ref().map(|d| &d.changes) {
         Some(Loadable::Ready(DetailChanges::Commit(changes))) => column![
@@ -669,13 +647,104 @@ fn details_content<'a>(
         message_box(view, commit, height * 0.4)
     ]
     .push(author)
-    .push(row(parents).spacing(12))
     .push(space::vertical().height(4))
     .push(files)
     .spacing(8)
     .padding(12);
 
     crate::ui::vscroll(content).height(Fill).into()
+}
+
+/// Author block like GitKraken's (M14-02): 40 px avatar, name, "authored
+/// <date>", "committed by" when the committer differs, the signature, the
+/// parents as links at the right and the co-authors below.
+fn author_block<'a>(
+    view: &'a RepoView,
+    commit: &'a Commit,
+    avatars: &crate::avatars::Avatars,
+) -> Element<'a, Message> {
+    let name: Element<'a, Message> = if commit.email.is_empty() {
+        text(&commit.author).into()
+    } else {
+        with_tooltip_text(text(&commit.author).into(), commit.email.clone())
+    };
+    let mut lines = column![
+        name,
+        muted(format!(
+            "authored {}",
+            format::date_time(commit.author_time)
+        ))
+        .size(12),
+    ]
+    .spacing(2);
+    if !commit.committer.is_empty() {
+        lines = lines.push(
+            muted(format!(
+                "committed by {} {}",
+                commit.committer,
+                format::date_time(commit.commit_time)
+            ))
+            .size(12),
+        );
+    }
+    if let Some(badge) = signature_badge(view, &commit.id) {
+        lines = lines.push(badge);
+    }
+    let parents = Column::with_children(
+        commit
+            .parents
+            .iter()
+            .map(|parent| parent_link(view, parent)),
+    )
+    .spacing(2)
+    .align_x(iced::Right);
+    let top = row![
+        crate::ui::avatar(avatars.get(&commit.email), &commit.author, 40.0),
+        lines.width(Fill),
+        parents,
+    ]
+    .spacing(10)
+    .align_y(iced::Center);
+
+    let co_authors = crate::trailers::co_authors(&commit.body);
+    if co_authors.is_empty() {
+        return top.into();
+    }
+    let faces = co_authors.into_iter().map(|author| {
+        with_tooltip_text(
+            crate::ui::avatar(avatars.get(&author.email), &author.name, 20.0),
+            format!("{} <{}>", author.name, author.email),
+        )
+    });
+    column![
+        top,
+        row![muted("Co-authors:").size(12)]
+            .extend(faces)
+            .spacing(6)
+            .align_y(iced::Center),
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// "parent: <short sha>": selects the parent and scrolls to it (M14-02);
+/// disabled when the parent is beyond the loaded history.
+fn parent_link<'a>(view: &RepoView, parent: &'a str) -> Element<'a, Message> {
+    let label = row![
+        muted("parent:").size(12),
+        text(short(parent)).font(iced::Font::MONOSPACE).size(12),
+    ]
+    .spacing(4);
+    let loaded = view.snapshot.commit(parent).is_some();
+    let link = button(label)
+        .on_press_maybe(loaded.then(|| Message::ParentClicked(parent.to_owned())))
+        .padding([1, 4])
+        .style(theme::flat);
+    if loaded {
+        link.into()
+    } else {
+        with_tooltip_text(link.into(), "Not in the loaded history".into())
+    }
 }
 
 /// Signature badge after the author line (M10-05): green for a good
@@ -715,16 +784,6 @@ pub(crate) fn changed_files(count: usize) -> String {
         "1 changed file".to_owned()
     } else {
         format!("{count} changed files")
-    }
-}
-
-/// "email · authored date", without the separator when the email is empty.
-pub(crate) fn author_line(email: &str, time: i64) -> String {
-    let date = format::date_time(time);
-    if email.is_empty() {
-        format!("authored {date}")
-    } else {
-        format!("{email} · authored {date}")
     }
 }
 
