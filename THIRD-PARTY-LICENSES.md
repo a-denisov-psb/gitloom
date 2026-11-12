@@ -10533,6 +10533,8 @@ the following restrictions:
 
 SVG icons under `crates/app/assets/icons/`, https://lucide.dev
 
+`panel-left-filled.svg` and `panel-right-filled.svg` are modified Lucide icons (`panel-left`, `panel-right` with the side part filled).
+
 ```text
 ISC License
 

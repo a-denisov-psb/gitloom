@@ -8,7 +8,7 @@ Every commit is a row: branch and tag pills, the lane graph, the message, author
 - Ctrl+click and Shift+click (or Shift+↑/↓) select several commits; the right panel lists them.
 - ↓/J and ↑/K move the selection, Shift+J/K follow the branch, Ctrl+Home/Ctrl+End jump to the first/last commit.
 - Clicking a branch in the left panel jumps to its commit. Branch and tag names with `/` are grouped into folders (click a folder or remote to collapse it; remembered per repository); every level lists branches (or tags) first, then folders. The checked-out branch is highlighted and has a check next to its branch icon.
-- The buttons at the right end of the toolbar hide and show the left panel and the commit panel (also Ctrl+J and Ctrl+K).
+- The small panel icons at the left and right end of the status bar hide and show the left panel and the commit panel (also Ctrl+J and Ctrl+K); a filled side means the panel is shown.
 
 **Columns:** drag the border at the right of any column header to change that column's width (only that one changes); a double click sets the width that fits the visible rows, on the Commit message border it goes back to filling the free space. A table wider than the window scrolls sideways: the scrollbar below the rows, Shift+wheel or a horizontal wheel; the header moves along. The gear at the right end of the header shows or hides Author, Date and SHA and has **Reset column widths**. Widths are kept across restarts.
 

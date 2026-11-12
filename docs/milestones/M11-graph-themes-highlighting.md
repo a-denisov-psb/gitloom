@@ -228,6 +228,8 @@ Acceptance: app tests (click and shortcut give the same state, tooltips follow t
 
 Note: Lucide `panel-left` / `panel-right` (v1.55.0, vendored). The buttons send the same `ShortcutChecked` as the shortcuts (without the focus query), so palette, shortcut and click share one path; "active" uses the mode-button highlight. They sit after Settings with an 8 px gap, icon only (also without compact mode). Layout test `panel_toggles_in_the_toolbar` clicks the left toggle; snapshots `ui_check_panel_toggles` checked.
 
+Moved to the status bar, fix 2026-11-12 (maintainer decision): left toggle at the left end, commit panel toggle at the right end like Zed; the state is shown by the icon (side part filled = shown, outline = hidden, modified Lucide icons `panel-left-filled` / `panel-right-filled`) instead of a highlighted background, like VS Code; muted, text color on hover, no background in any state; only in repository tabs. The toolbar ends with Settings again. Tests: `status_bar_panel_toggles`, `toolbar_has_no_panel_toggles`, `panel_toggles_follow_the_shortcuts`; snapshots `ui_check_status_bar_toggles` (both/none/mixed, three themes, 125 %) and `ui_check_panel_toggles` (toolbar without toggles) checked.
+
 ### [x] M11-15 README screenshot from a fixture
 
 - Fixture script, ignored snapshot test, `scripts/screenshot.sh`, README, `next-task.md` step 4.

@@ -67,10 +67,14 @@ pub enum Icon {
     PanelRight,
     /// Commit message prompt button (M12-13).
     Sparkles,
+    /// Panel toggles while the panel is shown (fix 2026-11-12): the side
+    /// part filled, like VS Code.
+    PanelLeftFilled,
+    PanelRightFilled,
 }
 
 impl Icon {
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 46] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -115,6 +119,8 @@ impl Icon {
         Self::PanelLeft,
         Self::PanelRight,
         Self::Sparkles,
+        Self::PanelLeftFilled,
+        Self::PanelRightFilled,
     ];
 
     /// SVG source of the icon.
@@ -169,6 +175,8 @@ impl Icon {
             Self::PanelLeft => lucide!("panel-left"),
             Self::PanelRight => lucide!("panel-right"),
             Self::Sparkles => lucide!("sparkles"),
+            Self::PanelLeftFilled => lucide!("panel-left-filled"),
+            Self::PanelRightFilled => lucide!("panel-right-filled"),
         }
     }
 
@@ -215,6 +223,9 @@ pub fn snap_offset(position: f32, scale: f32) -> f32 {
 /// [`snap_size`], its position moved by [`snap_offset`] when drawn.
 pub struct Sharp<'a> {
     svg: Svg<'a, Theme>,
+    /// The icon counts as hovered this far around it (a click area larger
+    /// than the icon, e.g. the panel toggles).
+    hover_margin: f32,
 }
 
 impl<Message, Renderer> Widget<Message, Theme, Renderer> for Sharp<'_>
@@ -268,6 +279,12 @@ where
         let scale = scale();
         let bounds = layout.bounds();
         let offset = Vector::new(snap_offset(bounds.x, scale), snap_offset(bounds.y, scale));
+        let cursor = if self.hover_margin > 0.0 && cursor.is_over(bounds.expand(self.hover_margin))
+        {
+            mouse::Cursor::Available(bounds.center())
+        } else {
+            cursor
+        };
         renderer.with_translation(offset, |renderer| {
             <Svg<'_, Theme> as Widget<Message, Theme, Renderer>>::draw(
                 &self.svg, tree, renderer, theme, style, layout, cursor, viewport,
@@ -306,6 +323,31 @@ pub fn colored<'a>(icon: Icon, size: f32, color: impl Fn(&Theme) -> Color + 'a) 
             .style(move |theme, _status| svg::Style {
                 color: Some(color(theme)),
             }),
+        hover_margin: 0.0,
+    }
+}
+
+/// Icon in `idle` color, `hovered` while the pointer is within `margin`
+/// of it (fix 2026-11-12: the status bar panel toggles).
+pub fn hover_tinted<'a>(
+    icon: Icon,
+    size: f32,
+    idle: fn(&ThemePalette) -> Color,
+    hovered: fn(&ThemePalette) -> Color,
+    margin: f32,
+) -> Sharp<'a> {
+    let size = snap_size(size, scale());
+    Sharp {
+        svg: iced::widget::svg(icon.handle())
+            .width(size)
+            .height(size)
+            .style(move |theme, status| svg::Style {
+                color: Some(match status {
+                    svg::Status::Hovered => hovered(palette(theme)),
+                    svg::Status::Idle => idle(palette(theme)),
+                }),
+            }),
+        hover_margin: margin,
     }
 }
 

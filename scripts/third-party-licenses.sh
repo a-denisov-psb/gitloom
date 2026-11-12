@@ -31,6 +31,7 @@ cargo about generate --locked scripts/third-party/list.tsv.hbs -o "$out_dir/list
     printf '\n## Bundled assets\n\n'
     printf '### Lucide icons (ISC License)\n\n'
     printf 'SVG icons under `crates/app/assets/icons/`, https://lucide.dev\n\n'
+    printf '`panel-left-filled.svg` and `panel-right-filled.svg` are modified Lucide icons (`panel-left`, `panel-right` with the side part filled).\n\n'
     printf '```text\n'
     cat crates/app/assets/icons/LICENSE
     printf '```\n\n'

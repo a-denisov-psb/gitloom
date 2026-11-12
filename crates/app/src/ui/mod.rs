@@ -201,17 +201,8 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
                 branch: app.action_block(crate::shortcuts::Shortcut::CheckoutBranch),
                 editor: !app.editor_command().is_empty(),
             };
-            let mut content = column![toolbar::view(
-                view,
-                app.pull_mode,
-                compact,
-                pickers,
-                toolbar::Panels {
-                    left: app.panes.sidebar_visible,
-                    right: app.panes.panel_visible,
-                },
-            )]
-            .spacing(1);
+            let mut content =
+                column![toolbar::view(view, app.pull_mode, compact, pickers,)].spacing(1);
             // A running operation shows in the graph and the right panel
             // (M12-05); a Git flow finish that waits (after a restart or a
             // failed step) keeps its bar.

@@ -56,6 +56,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- The panel toggles moved from the toolbar to the status bar (left panel at the left end, commit panel at the right end); a filled icon shows that the panel is visible, without a highlighted background.
+
 - A running merge, rebase, cherry-pick, revert or stash conflict shows like GitKraken instead of the bar at the top of the tab: a row in the warning color at the top of the graph ("A file conflict was found when attempting to merge into main"), a bar above the details of another commit ("1 file conflict in working directory · View conflict"), the panel title "Merge conflicts detected – Merging topic into main", Conflicted Files and Resolved Files, "Mark all resolved" (asks first when a file still contains conflict markers) and the buttons "Commit and merge" / "Continue rebase" … with "Abort merge" / "Abort rebase" … (Skip for rebase and cherry-pick).
 
 - Conflict view side headers name the commit and branch like GitKraken ("A · Commit 1a2b3c4 on main", "B · Commit 5e6f7a8 on topic"), also during a rebase and a cherry-pick; stash conflicts keep "Updated upstream" / "Stashed changes".
