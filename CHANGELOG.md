@@ -45,6 +45,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Errors that only inform appear as notifications at the bottom left instead of dialogs: a plain-language explanation of what went wrong and what to do, with Git's output under **Details** and **Copy**; they stay until closed. Up to three are shown; information closes after 6 seconds (not while the pointer rests on it). Dialogs that ask for a decision stay.
 - A second click on the selected file in the right panel deselects it and closes its diff or conflict view (like Esc). Hovering a file shows only "Stage File" / "Unstage File"; Discard is in the file's context menu.
 - New README screenshot, rendered from a scripted example repository (`scripts/screenshot.sh`).
 - Two buttons at the right end of the toolbar show and hide the left panel and the commit panel (also Ctrl+J and Ctrl+K).

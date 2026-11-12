@@ -42,6 +42,7 @@ mod shortcuts;
 mod snapshot;
 mod stash_template;
 mod theme;
+mod toast;
 mod ui;
 #[cfg(test)]
 mod ui_check;

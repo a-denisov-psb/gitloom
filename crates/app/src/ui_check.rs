@@ -1527,6 +1527,44 @@ mod tests {
         }
     }
 
+    /// Toasts of every kind in all themes (M12-02), one with details open.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_toasts() {
+        use crate::settings::ThemeChoice;
+        use crate::toast::{Toast, ToastKind};
+        for (choice, theme) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice;
+            app.toasts.push(Toast::git_error(
+                "Push failed",
+                "fatal: unable to access 'https://example.org/r.git/': Could not resolve host: example.org",
+            ));
+            app.toasts.push(Toast::new(
+                ToastKind::Warning,
+                "Submodules are out of date",
+                "Two submodules point to other commits than recorded.",
+            ));
+            app.toasts.push(Toast::new(
+                ToastKind::Success,
+                "Pushed",
+                "main → origin/main",
+            ));
+            snapshot(&app, &format!("toasts-{theme}"));
+            let id = app.toasts.list[0].id;
+            let _ = app.update(Message::ToastDetails(id));
+            snapshot(&app, &format!("toasts-details-{theme}"));
+            // A fourth pushes out the oldest; info is the remaining kind.
+            app.toasts
+                .push(Toast::new(ToastKind::Info, "Fetched", "3 new commits"));
+            snapshot(&app, &format!("toasts-info-{theme}"));
+        }
+    }
+
     /// Preferences modal (M11-13): a click on the backdrop does not close it,
     /// and the app behind is out of reach for focus and Tab. Layout only.
     #[test]

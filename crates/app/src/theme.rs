@@ -656,6 +656,36 @@ pub fn graph_row(selected: bool, lane: u32) -> impl Fn(&Theme, button::Status) -
 }
 
 /// In-tab error banner.
+/// A toast (M12-02): the panel color with a stripe in the kind's color.
+pub fn toast(kind: crate::toast::ToastKind) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let p = palette(theme);
+        let color = toast_color(p, kind);
+        container::Style {
+            background: Some(Background::Color(p.bg_panel)),
+            border: Border::default().rounded(6).width(1).color(color),
+            text_color: Some(p.text),
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 8.0,
+            },
+            ..container::Style::default()
+        }
+    }
+}
+
+/// Color of a toast kind.
+pub fn toast_color(p: &ThemePalette, kind: crate::toast::ToastKind) -> Color {
+    use crate::toast::ToastKind;
+    match kind {
+        ToastKind::Error => p.danger,
+        ToastKind::Warning => p.warning,
+        ToastKind::Info => p.accent,
+        ToastKind::Success => p.success,
+    }
+}
+
 pub fn error_banner(theme: &Theme) -> container::Style {
     let p = palette(theme);
     container::Style {

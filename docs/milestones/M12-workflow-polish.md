@@ -123,11 +123,13 @@ Acceptance: app tests for deselect in every list (diff/conflict view closes); sn
 
 Note: the selected row sends `DiffClosed` (like Esc) in every list built by `file_row` (Unstaged, Staged, Conflicted, commit and stash files). Hover labels keep GitKraken's "Stage File" / "Unstage File". Tests: layout test `second_click_on_a_file_deselects_it` (unstaged, staged, conflicted), snapshot test `ui_check_file_row_hover` (no Discard on hover).
 
-### [ ] M12-02 Toasts and plain-language errors
+### [x] M12-02 Toasts and plain-language errors
 
 - Toast area, kinds, stacking, timeout, Details/Copy; catalog in git-core; informational `Modal::error` call sites moved to toasts; ADR-049.
 
 Acceptance: unit tests for the catalog (one stderr sample per entry, unknown falls back); app tests: stacking limit, timeout and hover pause (simulated time), error stays, Details toggles, decisions still modal; snapshots of each kind in all themes.
+
+Note: see ADR-049 "Implementation". Timeouts are tasks that send `ToastExpired { id, seq }`; tests send it directly (simulated time). A fourth toast pushes out the oldest. `App::notify` and `Toast::with_action` are first used by M12-06. Existing tests that expected error dialogs now check the toast. Snapshots `ui_check_toasts` (error with details, warning, success, info; three themes) checked.
 
 ### [ ] M12-03 Remote website links
 
