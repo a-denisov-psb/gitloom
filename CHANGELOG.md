@@ -55,6 +55,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- The Date and SHA columns of the graph always fit their content and can no longer be resized.
+
+- The panel toggles in the status bar have no tooltip anymore; it covered the button.
+
 - The commit message prompt button looks like the branch icons in the left panel (same size and muted color, also while disabled).
 
 - The panel toggles moved from the toolbar to the status bar (left panel at the left end, commit panel at the right end); a filled icon shows that the panel is visible, without a highlighted background.

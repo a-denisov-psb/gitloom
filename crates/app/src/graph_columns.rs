@@ -2,6 +2,9 @@
 //! own width and handle; dragging changes only that column. The table is
 //! as wide as its columns: wider than the viewport it scrolls
 //! horizontally, narrower the commit message grows to fill it.
+//! Date and SHA are not resizable (fix 2026-11-12): their content has a
+//! constant width, so the view gives them a fixed width fitted to it; they
+//! have no stored width and no handle.
 //! Pure: no iced types; the view measures content and passes it in.
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +36,11 @@ impl ColumnId {
         ColumnId::Date,
         ColumnId::Sha,
     ];
+
+    /// The column has a handle and a stored width (Date and SHA do not).
+    pub fn is_resizable(self) -> bool {
+        !matches!(self, Self::Date | Self::Sha)
+    }
 }
 
 /// Column widths in logical pixels, a global setting (`settings.json`).
@@ -47,8 +55,6 @@ pub struct ColumnWidths {
     /// ([`MIN_MESSAGE_WIDTH`]: "fill").
     pub message: f32,
     pub author: f32,
-    pub date: f32,
-    pub sha: f32,
 }
 
 impl Default for ColumnWidths {
@@ -58,8 +64,6 @@ impl Default for ColumnWidths {
             graph: None,
             message: MIN_MESSAGE_WIDTH,
             author: 130.0,
-            date: 135.0,
-            sha: 70.0,
         }
     }
 }
@@ -67,25 +71,25 @@ impl Default for ColumnWidths {
 impl ColumnWidths {
     /// Set width of `column`; `auto_graph` is the Graph width while it was
     /// never resized. The message's effective width is [`Layout::message`].
-    pub fn width(&self, column: ColumnId, auto_graph: f32) -> f32 {
+    /// `None` for the fixed columns (Date, SHA): the view knows their width.
+    pub fn width(&self, column: ColumnId, auto_graph: f32) -> Option<f32> {
         match column {
-            ColumnId::Refs => self.refs,
-            ColumnId::Graph => self.graph.unwrap_or(auto_graph),
-            ColumnId::Message => self.message,
-            ColumnId::Author => self.author,
-            ColumnId::Date => self.date,
-            ColumnId::Sha => self.sha,
+            ColumnId::Refs => Some(self.refs),
+            ColumnId::Graph => Some(self.graph.unwrap_or(auto_graph)),
+            ColumnId::Message => Some(self.message),
+            ColumnId::Author => Some(self.author),
+            ColumnId::Date | ColumnId::Sha => None,
         }
     }
 
+    /// Sets the width of a resizable column; fixed columns are ignored.
     pub fn set(&mut self, column: ColumnId, width: f32) {
         match column {
             ColumnId::Refs => self.refs = width,
             ColumnId::Graph => self.graph = Some(width),
             ColumnId::Message => self.message = width,
             ColumnId::Author => self.author = width,
-            ColumnId::Date => self.date = width,
-            ColumnId::Sha => self.sha = width,
+            ColumnId::Date | ColumnId::Sha => {}
         }
     }
 
@@ -98,8 +102,9 @@ impl ColumnWidths {
             match column {
                 ColumnId::Graph => self.graph = self.graph.map(fix),
                 _ => {
-                    let width = fix(self.width(column, 0.0));
-                    self.set(column, width);
+                    if let Some(width) = self.width(column, 0.0) {
+                        self.set(column, fix(width));
+                    }
                 }
             }
         }
@@ -161,12 +166,31 @@ mod tests {
     #[test]
     fn defaults_match_the_former_fixed_widths() {
         let widths = ColumnWidths::default();
-        assert_eq!(widths.width(ColumnId::Refs, 42.0), 200.0);
-        assert_eq!(widths.width(ColumnId::Graph, 42.0), 42.0);
-        assert_eq!(widths.width(ColumnId::Message, 42.0), MIN_MESSAGE_WIDTH);
-        assert_eq!(widths.width(ColumnId::Author, 42.0), 130.0);
-        assert_eq!(widths.width(ColumnId::Date, 42.0), 135.0);
-        assert_eq!(widths.width(ColumnId::Sha, 42.0), 70.0);
+        assert_eq!(widths.width(ColumnId::Refs, 42.0), Some(200.0));
+        assert_eq!(widths.width(ColumnId::Graph, 42.0), Some(42.0));
+        assert_eq!(
+            widths.width(ColumnId::Message, 42.0),
+            Some(MIN_MESSAGE_WIDTH)
+        );
+        assert_eq!(widths.width(ColumnId::Author, 42.0), Some(130.0));
+        // Date and SHA have a fixed width the view computes.
+        for fixed in [ColumnId::Date, ColumnId::Sha] {
+            assert_eq!(widths.width(fixed, 42.0), None);
+            assert!(!fixed.is_resizable());
+            let mut changed = widths;
+            changed.set(fixed, 500.0);
+            assert_eq!(changed, widths);
+        }
+    }
+
+    #[test]
+    fn old_settings_with_date_and_sha_widths_load() {
+        let old: ColumnWidths =
+            serde_json::from_str(r#"{"refs": 210, "author": 140, "date": 300, "sha": 90}"#)
+                .unwrap();
+        assert_eq!(old.refs, 210.0);
+        assert_eq!(old.author, 140.0);
+        assert!(!serde_json::to_string(&old).unwrap().contains("date"));
     }
 
     #[test]
@@ -176,7 +200,6 @@ mod tests {
         widths.set(ColumnId::Author, dragged(130.0, 40.0, MIN_WIDTH));
         assert_eq!(widths.author, 170.0);
         // Neighbours keep their widths.
-        assert_eq!(widths.date, before.date);
         assert_eq!(widths.message, before.message);
         assert_eq!(widths.refs, before.refs);
         // Minimums.
@@ -228,16 +251,12 @@ mod tests {
             graph: Some(5.0),
             message: 3.0,
             author: -3.0,
-            date: 300.0,
-            sha: f32::INFINITY,
         }
         .sanitized(30.0);
         assert_eq!(widths.refs, MIN_WIDTH);
         assert_eq!(widths.graph, Some(30.0));
         assert_eq!(widths.message, MIN_MESSAGE_WIDTH);
         assert_eq!(widths.author, MIN_WIDTH);
-        assert_eq!(widths.date, 300.0);
-        assert_eq!(widths.sha, MIN_WIDTH);
         assert_eq!(ColumnWidths::default().sanitized(30.0).graph, None);
     }
 

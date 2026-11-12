@@ -5783,9 +5783,11 @@ impl App {
                 self.add_tab(TabState::Start);
             }
             Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
-            Message::ColumnDragStarted { column, origin } => {
+            // Date and SHA have a fixed width (fix 2026-11-12).
+            Message::ColumnDragStarted { column, origin } if column.is_resizable() => {
                 self.column_drag = Some(ColumnDrag { column, origin });
             }
+            Message::ColumnDragStarted { .. } => {}
             Message::ColumnDragged(delta) => {
                 if let Some(drag) = self.column_drag {
                     let min =
@@ -5951,6 +5953,7 @@ impl App {
                     return self.save_settings();
                 }
             }
+            Message::ColumnFit { column, .. } if !column.is_resizable() => {}
             Message::ColumnFit { column, viewport } => {
                 let Some(view) = self.active_tab().and_then(Tab::view) else {
                     return Task::none();
@@ -12750,20 +12753,30 @@ pub(crate) mod tests {
         let _ = app.update(Message::ColumnDragged(40.0));
         assert_eq!(app.settings.appearance.graph_columns.refs, 200.0);
 
-        // Every handle, Commit message and SHA included, changes only its
-        // own column (M11-16).
+        // Date and SHA have a fixed width: a drag does nothing (fix
+        // 2026-11-12).
+        for column in [ColumnId::Date, ColumnId::Sha] {
+            let before = app.settings.appearance.graph_columns;
+            let _ = app.update(Message::ColumnDragStarted {
+                column,
+                origin: 100.0,
+            });
+            assert!(app.column_drag.is_none(), "{column:?}");
+            let _ = app.update(Message::ColumnDragged(30.0));
+            assert_eq!(app.settings.appearance.graph_columns, before);
+        }
+        // Every other handle, Commit message included, changes only its own
+        // column (M11-16).
         for (column, origin) in [
             (ColumnId::Refs, 200.0),
             (ColumnId::Message, 400.0),
             (ColumnId::Author, 130.0),
-            (ColumnId::Date, 135.0),
-            (ColumnId::Sha, 70.0),
         ] {
             let before = app.settings.appearance.graph_columns;
             let _ = app.update(Message::ColumnDragStarted { column, origin });
             let _ = app.update(Message::ColumnDragged(30.0));
             let after = app.settings.appearance.graph_columns;
-            assert_eq!(after.width(column, 0.0), origin + 30.0, "{column:?}");
+            assert_eq!(after.width(column, 0.0), Some(origin + 30.0), "{column:?}");
             for other in ColumnId::ALL.into_iter().filter(|c| *c != column) {
                 assert_eq!(
                     after.width(other, 0.0),
@@ -12775,7 +12788,7 @@ pub(crate) mod tests {
             let _ = app.update(Message::ColumnDragged(2000.0));
             assert_eq!(
                 app.settings.appearance.graph_columns.width(column, 0.0),
-                origin + 2000.0
+                Some(origin + 2000.0)
             );
             let _ = app.update(Message::ColumnDragged(-5000.0));
             let min = if column == ColumnId::Message {
@@ -12785,7 +12798,7 @@ pub(crate) mod tests {
             };
             assert_eq!(
                 app.settings.appearance.graph_columns.width(column, 0.0),
-                min
+                Some(min)
             );
             let _ = app.update(Message::ColumnDragEnded);
             assert!(app.column_drag.is_none());
@@ -12892,7 +12905,11 @@ pub(crate) mod tests {
                 column,
                 viewport: 1200.0,
             });
-            app.settings.appearance.graph_columns.width(column, 0.0)
+            app.settings
+                .appearance
+                .graph_columns
+                .width(column, 0.0)
+                .unwrap_or_default()
         };
         // The widest pill group: "feature" (padding, border, cell padding).
         let refs = fit(&mut app, ColumnId::Refs);
@@ -12902,11 +12919,15 @@ pub(crate) mod tests {
         let author = fit(&mut app, ColumnId::Author);
         let name = crate::overlay::text_width("Ana Lyst", 13.0);
         assert!(author > name + 8.0 && author < name + 12.0, "{author}");
-        // SHA: 1-character ids, so the minimum.
-        assert_eq!(
-            fit(&mut app, ColumnId::Sha),
-            crate::graph_columns::MIN_WIDTH
-        );
+        // Date and SHA: a double click changes nothing (fixed width).
+        let before = app.settings.appearance.graph_columns;
+        for column in [ColumnId::Date, ColumnId::Sha] {
+            let _ = app.update(Message::ColumnFit {
+                column,
+                viewport: 1200.0,
+            });
+            assert_eq!(app.settings.appearance.graph_columns, before);
+        }
         // Commit message: back to "fill".
         app.settings.appearance.graph_columns.message = 700.0;
         assert_eq!(fit(&mut app, ColumnId::Message), MIN_MESSAGE_WIDTH);
@@ -13671,24 +13692,13 @@ pub(crate) mod tests {
 
     #[test]
     fn panel_toggles_follow_the_shortcuts() {
-        use crate::ui::statusbar::{panel_tooltip, PanelToggle};
+        use crate::icons::Icon;
+        use crate::ui::statusbar::{panel_icon, PanelToggle};
         let mut app = ready_app(&["c"]);
         assert!(app.panes.sidebar_visible && app.panes.panel_visible);
-        // macOS names the keys with ⌘.
-        let key = |k: &str| {
-            if crate::actions::MAC {
-                format!("⌘{k}")
-            } else {
-                format!("Ctrl+{k}")
-            }
-        };
         assert_eq!(
-            panel_tooltip(PanelToggle::Left, true),
-            format!("Hide left panel ({})", key("J"))
-        );
-        assert_eq!(
-            panel_tooltip(PanelToggle::Right, true),
-            format!("Hide commit panel ({})", key("K"))
+            panel_icon(PanelToggle::Left, app.panes.sidebar_visible),
+            Icon::PanelLeftFilled
         );
         // The buttons send what the shortcuts send.
         let _ = app.update(Message::ShortcutChecked {
@@ -13697,16 +13707,16 @@ pub(crate) mod tests {
         });
         assert!(!app.panes.sidebar_visible);
         assert_eq!(
-            panel_tooltip(PanelToggle::Left, app.panes.sidebar_visible),
-            format!("Show left panel ({})", key("J"))
+            panel_icon(PanelToggle::Left, app.panes.sidebar_visible),
+            Icon::PanelLeft
         );
         let _ = app.update(checked(Shortcut::ToggleSidebar, false));
         assert!(app.panes.sidebar_visible);
         let _ = app.update(checked(Shortcut::TogglePanel, false));
         assert!(!app.panes.panel_visible);
         assert_eq!(
-            panel_tooltip(PanelToggle::Right, app.panes.panel_visible),
-            format!("Show commit panel ({})", key("K"))
+            panel_icon(PanelToggle::Right, app.panes.panel_visible),
+            Icon::PanelRight
         );
     }
 

@@ -66,7 +66,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let lanes = repo.snapshot.layout.max_width;
     let widths = appearance.graph_columns.sanitized(MIN_GRAPH_WIDTH);
-    let graph_width = widths.width(ColumnId::Graph, graph_width(lanes));
+    let graph_width = column_width(&widths, ColumnId::Graph, graph_width(lanes));
     // A Graph column narrower than the lanes fades out at its right edge.
     let clipped = graph_width < lanes_width(lanes);
     let columns = Columns::shown(appearance);
@@ -85,8 +85,13 @@ pub fn view<'a>(
         let header_cell = |label: &'static str, column: ColumnId| -> Element<'_, Message> {
             let width = match column {
                 ColumnId::Message => layout.message,
-                _ => widths.width(column, graph_width),
+                _ => column_width(&widths, column, graph_width),
             };
+            // Date and SHA fit their content and have no handle (fix
+            // 2026-11-12).
+            if !column.is_resizable() {
+                return cell(muted(label).size(HEADER_SIZE), width);
+            }
             let handle = crate::ui::column_handle::column_handle(
                 Message::ColumnDragStarted {
                     column,
@@ -383,8 +388,58 @@ impl Columns {
         widths.refs
             + graph_width
             + if self.author { widths.author } else { 0.0 }
-            + if self.date { widths.date } else { 0.0 }
-            + if self.sha { widths.sha } else { 0.0 }
+            + if self.date {
+                fixed_width(ColumnId::Date)
+            } else {
+                0.0
+            }
+            + if self.sha {
+                fixed_width(ColumnId::Sha)
+            } else {
+                0.0
+            }
+    }
+}
+
+/// Width of `column`: its stored width, or the fixed width of Date and SHA.
+fn column_width(widths: &ColumnWidths, column: ColumnId, auto_graph: f32) -> f32 {
+    widths
+        .width(column, auto_graph)
+        .unwrap_or_else(|| fixed_width(column))
+}
+
+/// Fixed width of the Date and SHA columns (fix 2026-11-12): their content
+/// always has the same width. Date: `DDDD-DD-DD DD:DD` with the widest
+/// digit of the cell font; SHA: 7 monospace characters; at least the
+/// header label; plus cell padding and slack. Font and size are constant
+/// (the zoom scales logical pixels), so it is measured once. 0 for the
+/// resizable columns.
+pub fn fixed_width(column: ColumnId) -> f32 {
+    static WIDTHS: std::sync::OnceLock<(f32, f32)> = std::sync::OnceLock::new();
+    let (date, sha) = *WIDTHS.get_or_init(|| {
+        use crate::overlay::{text_width, text_width_in};
+        let widest = ('0'..='9')
+            .max_by(|a, b| {
+                text_width(&a.to_string(), TEXT_SIZE)
+                    .total_cmp(&text_width(&b.to_string(), TEXT_SIZE))
+            })
+            .unwrap_or('0');
+        let template: String = "DDDD-DD-DD DD:DD".replace('D', &widest.to_string());
+        let fit = |content: f32, label: &str| {
+            content.max(text_width(label, HEADER_SIZE)) + 2.0 * CELL_PADDING + FIT_SLACK
+        };
+        (
+            fit(text_width(&template, TEXT_SIZE), "DATE"),
+            fit(
+                text_width_in("0000000", TEXT_SIZE, iced::Font::MONOSPACE),
+                "SHA",
+            ),
+        )
+    });
+    match column {
+        ColumnId::Date => date,
+        ColumnId::Sha => sha,
+        _ => 0.0,
     }
 }
 
@@ -407,7 +462,10 @@ const FIT_SLACK: f32 = 2.0;
 /// layout, at most half of the `table` width. Not limited here; the caller
 /// applies minimum and room.
 pub fn optimal_column_width(repo: &RepoView, column: ColumnId, table: f32) -> f32 {
-    use crate::overlay::{text_width, text_width_in};
+    use crate::overlay::text_width;
+    if !column.is_resizable() {
+        return fixed_width(column);
+    }
     if column == ColumnId::Graph {
         return crate::graph_columns::graph_optimal(
             lanes_width(repo.snapshot.layout.max_width),
@@ -438,14 +496,8 @@ pub fn optimal_column_width(repo: &RepoView, column: ColumnId, table: f32) -> f3
                 pills_width(&ref_labels(&refs, &snapshot.head, commit))
             }
             ColumnId::Author => text_width(&commit.author, TEXT_SIZE),
-            ColumnId::Date => text_width(&format::date_time(commit.author_time), TEXT_SIZE),
-            ColumnId::Sha => text_width_in(
-                &commit.id[..commit.id.len().min(7)],
-                TEXT_SIZE,
-                iced::Font::MONOSPACE,
-            ),
             ColumnId::Message => text_width(&commit.summary, TEXT_SIZE),
-            ColumnId::Graph => 0.0,
+            ColumnId::Graph | ColumnId::Date | ColumnId::Sha => 0.0,
         })
         .fold(0.0_f32, f32::max);
     content + 2.0 * CELL_PADDING + FIT_SLACK
@@ -627,13 +679,13 @@ pub fn graph_row<'a>(
     if columns.date {
         content = content.push(cell(
             muted(format::date_time(commit.author_time)).wrapping(text::Wrapping::None),
-            widths.date,
+            fixed_width(ColumnId::Date),
         ));
     }
     if columns.sha {
         content = content.push(cell(
             muted(&commit.id[..commit.id.len().min(7)]).font(iced::Font::MONOSPACE),
-            widths.sha,
+            fixed_width(ColumnId::Sha),
         ));
     }
 
@@ -1469,11 +1521,41 @@ mod tests {
                 sha: true
             }
         );
-        assert_eq!(all.sum(&w, 48.0), w.refs + 48.0 + w.author + w.date + w.sha);
+        let (date, sha) = (fixed_width(ColumnId::Date), fixed_width(ColumnId::Sha));
+        assert_eq!(all.sum(&w, 48.0), w.refs + 48.0 + w.author + date + sha);
         appearance.graph_date = false;
         let some = Columns::shown(&appearance);
         assert!(some.author && !some.date && some.sha);
-        assert_eq!(some.sum(&w, 48.0), w.refs + 48.0 + w.author + w.sha);
+        assert_eq!(some.sum(&w, 48.0), w.refs + 48.0 + w.author + sha);
+    }
+
+    #[test]
+    fn date_and_sha_widths_fit_their_content() {
+        use crate::overlay::{text_width, text_width_in};
+        let date = fixed_width(ColumnId::Date);
+        let sha = fixed_width(ColumnId::Sha);
+        let room = 2.0 * CELL_PADDING;
+        // Timestamps with many wide digits (local time: any hour fits).
+        for time in [965_722_080_i64, 946_684_740, 1_234_567_890, 0] {
+            let text = format::date_time(time);
+            assert!(date >= text_width(&text, TEXT_SIZE) + room, "{text}");
+        }
+        assert!(date >= text_width("2000-08-08 08:08", TEXT_SIZE) + room);
+        assert!(date >= text_width("1999-12-31 23:59", TEXT_SIZE) + room);
+        assert!(sha >= text_width_in("abcdef0", TEXT_SIZE, iced::Font::MONOSPACE) + room);
+        assert!(date >= text_width("DATE", HEADER_SIZE) + room);
+        assert!(sha >= text_width("SHA", HEADER_SIZE) + room);
+        // Constant: no stored width, independent of rows and scrolling.
+        assert_eq!(fixed_width(ColumnId::Date), date);
+        assert_eq!(fixed_width(ColumnId::Author), 0.0);
+        let mut app = crate::app::tests::graph_app();
+        for offset in [0.0, 5000.0] {
+            let view = app.tabs[0].view_mut().unwrap();
+            view.scroll.offset = offset;
+            let view = app.tabs[0].view().unwrap();
+            assert_eq!(optimal_column_width(view, ColumnId::Date, 1200.0), date);
+            assert_eq!(optimal_column_width(view, ColumnId::Sha, 1200.0), sha);
+        }
     }
 
     #[test]

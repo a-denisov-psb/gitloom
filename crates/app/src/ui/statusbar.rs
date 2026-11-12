@@ -75,20 +75,6 @@ pub enum PanelToggle {
     Right,
 }
 
-/// Tooltip of a panel toggle: what a click does, with its shortcut; the
-/// state is in the text, not only in the icon.
-pub fn panel_tooltip(toggle: PanelToggle, shown: bool) -> String {
-    let (name, action) = match toggle {
-        PanelToggle::Left => ("left panel", crate::actions::ActionId::ToggleSidebar),
-        PanelToggle::Right => ("commit panel", crate::actions::ActionId::TogglePanel),
-    };
-    let verb = if shown { "Hide" } else { "Show" };
-    match action.shortcut_text() {
-        Some(keys) => format!("{verb} {name} ({keys})"),
-        None => format!("{verb} {name}"),
-    }
-}
-
 /// Icon of a panel toggle: filled side part while the panel is shown,
 /// outline while hidden (like VS Code).
 pub fn panel_icon(toggle: PanelToggle, shown: bool) -> crate::icons::Icon {
@@ -104,7 +90,7 @@ pub fn panel_icon(toggle: PanelToggle, shown: bool) -> crate::icons::Icon {
 /// Toggle of the left or the commit panel in the status bar (fix
 /// 2026-11-12, replaces the toolbar toggles of M11-14): a 14 px icon in a
 /// 22 × 20 px click area, no background in any state; muted, the text
-/// color on hover.
+/// color on hover; no tooltip (it covered the button, fix 2026-11-12).
 fn panel_toggle<'a>(toggle: PanelToggle, shown: bool) -> Element<'a, Message> {
     use crate::shortcuts::Shortcut;
     let shortcut = match toggle {
@@ -118,20 +104,17 @@ fn panel_toggle<'a>(toggle: PanelToggle, shown: bool) -> Element<'a, Message> {
         |p| p.text,
         4.0,
     );
-    crate::ui::panel::with_tooltip_text(
-        button(container(icon).center(Fill))
-            // Like the shortcut, without asking which widget has the focus.
-            .on_press(Message::ShortcutChecked {
-                shortcut,
-                text_input_focused: false,
-            })
-            .padding(0)
-            .width(22)
-            .height(20)
-            .style(theme::bare)
-            .into(),
-        panel_tooltip(toggle, shown),
-    )
+    button(container(icon).center(Fill))
+        // Like the shortcut, without asking which widget has the focus.
+        .on_press(Message::ShortcutChecked {
+            shortcut,
+            text_input_focused: false,
+        })
+        .padding(0)
+        .width(22)
+        .height(20)
+        .style(theme::bare)
+        .into()
 }
 
 /// "Fetch: Receiving objects 45%" (phase and percentage once Git reports them).
