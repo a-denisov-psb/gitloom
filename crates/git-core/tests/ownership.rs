@@ -19,6 +19,8 @@ fn trusting_a_repository_owned_by_another_user() {
     // global config is a temporary file.
     std::env::set_var("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1");
     std::env::set_var("GIT_CONFIG_GLOBAL", global.path());
+    // CI images may trust every directory in the system config.
+    std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
     let error = git_core::check_repository_access(repo.path())
         .unwrap_err()
         .to_string();
