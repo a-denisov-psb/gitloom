@@ -57,6 +57,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Commit details like GitKraken: "commit: <sha>" centered at the top (a click copies the full sha) and the message in a framed, scrollable box whose text can be selected and copied.
+
 - File menus are ordered like GitKraken's and add File blame, Open in external diff tool (also for files of a commit), Open file location for commit files and Discard changes for staged files.
 
 - Branch, remote branch and tag menus are ordered like GitKraken's and name the branch or tag; they also offer Create branch here, Reset to this commit and Copy commit sha.

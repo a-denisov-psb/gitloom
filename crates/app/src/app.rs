@@ -1126,6 +1126,11 @@ pub enum Message {
     },
     SummaryChanged(String),
     DescriptionEdited(iced::widget::text_editor::Action),
+    /// Selection in the details' message box (M14-01); edits are ignored.
+    DetailsTextInput {
+        body: bool,
+        action: iced::widget::text_editor::Action,
+    },
     /// Commit the staged changes with the entered message.
     CommitRequested,
     AmendToggled(bool),
@@ -4257,6 +4262,10 @@ impl App {
             id: id.clone(),
             changes: Loadable::Loading,
         });
+        view.message_box = view
+            .snapshot
+            .commit(&id)
+            .map(crate::repo_view::MessageBox::new);
         let backend = Arc::clone(&view.backend);
         let commit = id.clone();
         let is_stash = view.snapshot.is_stash(&id);
@@ -8696,6 +8705,20 @@ impl App {
             Message::SummaryChanged(summary) => {
                 if let Some(view) = self.active_view_mut() {
                     view.summary = summary;
+                }
+            }
+            Message::DetailsTextInput { body, action } => {
+                if !action.is_edit() {
+                    if let Some(message) =
+                        self.active_view_mut().and_then(|v| v.message_box.as_mut())
+                    {
+                        let content = if body {
+                            &mut message.body
+                        } else {
+                            &mut message.summary
+                        };
+                        content.perform(action);
+                    }
                 }
             }
             Message::DescriptionEdited(action) => {
@@ -18481,6 +18504,35 @@ pub(crate) mod tests {
         ));
         let _ = app.update(message);
         assert_eq!(app.status, "Waiting for meld…");
+    }
+
+    #[test]
+    fn message_box_selects_but_never_edits() {
+        use iced::widget::text_editor::{Action, Edit};
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::CommitSelected("c".into()));
+        let view = app.tabs[0].view_mut().unwrap();
+        view.message_box = Some(crate::repo_view::MessageBox::new(&git_core::Commit {
+            id: "c".into(),
+            parents: Vec::new(),
+            summary: "Summary".into(),
+            body: "Body".into(),
+            author: String::new(),
+            email: String::new(),
+            author_time: 0,
+            commit_time: 0,
+        }));
+        let _ = app.update(Message::DetailsTextInput {
+            body: false,
+            action: Action::Edit(Edit::Insert('x')),
+        });
+        let _ = app.update(Message::DetailsTextInput {
+            body: true,
+            action: Action::SelectAll,
+        });
+        let message = app.tabs[0].view().unwrap().message_box.as_ref().unwrap();
+        assert_eq!(message.summary.text(), "Summary");
+        assert_eq!(message.body.selection().as_deref(), Some("Body"));
     }
 
     #[test]

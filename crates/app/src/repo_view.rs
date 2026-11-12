@@ -48,6 +48,30 @@ pub struct CommitDetails {
     pub changes: Loadable<DetailChanges>,
 }
 
+/// Message of the selected commit in the details' framed box (M14-01):
+/// read-only editors so the text can be selected and copied.
+pub struct MessageBox {
+    pub id: String,
+    pub summary: iced::widget::text_editor::Content,
+    pub body: iced::widget::text_editor::Content,
+}
+
+impl MessageBox {
+    pub fn new(commit: &git_core::Commit) -> Self {
+        Self {
+            id: commit.id.clone(),
+            summary: iced::widget::text_editor::Content::with_text(&commit.summary),
+            body: iced::widget::text_editor::Content::with_text(&commit.body),
+        }
+    }
+}
+
+impl std::fmt::Debug for MessageBox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MessageBox").field("id", &self.id).finish()
+    }
+}
+
 /// Files shown in the details panel of a graph row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DetailChanges {
@@ -735,6 +759,8 @@ pub struct RepoView {
     /// multi-selection panel.
     pub multi: crate::selection::MultiSelection,
     pub details: Option<CommitDetails>,
+    /// Message box of the selected commit (M14-01).
+    pub message_box: Option<MessageBox>,
     /// Signature status per commit, requested once when a commit is
     /// selected (M10-05).
     pub signatures:
@@ -1113,6 +1139,7 @@ impl RepoView {
             reopen_conflict: None,
             multi: crate::selection::MultiSelection::default(),
             details: None,
+            message_box: None,
             signatures: std::collections::HashMap::new(),
             center: CenterView::Graph,
             filter: String::new(),

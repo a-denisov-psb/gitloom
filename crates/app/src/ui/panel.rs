@@ -555,16 +555,73 @@ fn counter_level(remaining: i64) -> CounterLevel {
 fn details<'a>(
     view: &'a RepoView,
     commit: &'a Commit,
-    avatars: &crate::avatars::Avatars,
+    avatars: &'a crate::avatars::Avatars,
 ) -> Element<'a, Message> {
-    let id = row![
+    // The message box takes at most 40 % of the panel (M14-01).
+    iced::widget::responsive(move |size| details_content(view, commit, avatars, size.height)).into()
+}
+
+/// "commit: <short sha>" centered like GitKraken; a click copies the full
+/// sha (M14-01).
+fn details_header(id: &str) -> Element<'_, Message> {
+    let label = row![
         muted("commit:"),
-        text(short(&commit.id)).font(iced::Font::MONOSPACE),
+        text(short(id)).font(iced::Font::MONOSPACE),
     ]
     .spacing(6);
+    let copy = button(label)
+        .on_press(Message::CopyToClipboard(id.to_owned()))
+        .padding([2, 6])
+        .style(theme::flat);
+    container(with_tooltip_text(copy.into(), "Copy the full sha".into()))
+        .center_x(Fill)
+        .into()
+}
 
-    let body = (!commit.body.is_empty()).then(|| text(&commit.body));
+/// Summary (larger) and description in a framed, scrollable box whose text
+/// can be selected and copied (M14-01).
+fn message_box<'a>(
+    view: &'a RepoView,
+    commit: &'a Commit,
+    max_height: f32,
+) -> Element<'a, Message> {
+    let inner: Element<'a, Message> = match view.message_box.as_ref().filter(|m| m.id == commit.id)
+    {
+        Some(message) => {
+            let summary = text_editor(&message.summary)
+                .size(16)
+                .padding(0)
+                .style(theme::message_text)
+                .on_action(|action| Message::DetailsTextInput {
+                    body: false,
+                    action,
+                });
+            let body = (!commit.body.is_empty()).then(|| {
+                text_editor(&message.body)
+                    .padding(0)
+                    .style(theme::message_text)
+                    .on_action(|action| Message::DetailsTextInput { body: true, action })
+            });
+            column![summary].push(body).spacing(8).into()
+        }
+        None => column![text(&commit.summary).size(16)]
+            .push((!commit.body.is_empty()).then(|| text(&commit.body)))
+            .spacing(8)
+            .into(),
+    };
+    container(crate::ui::vscroll(container(inner).padding(10).width(Fill)))
+        .max_height(max_height.max(60.0))
+        .width(Fill)
+        .style(theme::message_box)
+        .into()
+}
 
+fn details_content<'a>(
+    view: &'a RepoView,
+    commit: &'a Commit,
+    avatars: &crate::avatars::Avatars,
+    height: f32,
+) -> Element<'a, Message> {
     let author = row![
         crate::ui::avatar(avatars.get(&commit.email), &commit.author, 32.0),
         {
@@ -607,14 +664,16 @@ fn details<'a>(
         Some(Loadable::Loading) | None => muted("Loading changed files…").into(),
     };
 
-    let content = column![id, text(&commit.summary).size(16)]
-        .push(body)
-        .push(author)
-        .push(row(parents).spacing(12))
-        .push(space::vertical().height(4))
-        .push(files)
-        .spacing(8)
-        .padding(12);
+    let content = column![
+        details_header(&commit.id),
+        message_box(view, commit, height * 0.4)
+    ]
+    .push(author)
+    .push(row(parents).spacing(12))
+    .push(space::vertical().height(4))
+    .push(files)
+    .spacing(8)
+    .padding(12);
 
     crate::ui::vscroll(content).height(Fill).into()
 }
