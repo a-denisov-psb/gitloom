@@ -47,7 +47,13 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - Every graph column, Commit message included, has its own width; a table wider than the window scrolls sideways instead of fitting it. The gear above the graph shows or hides Author, Date and SHA.
 - The left panel lists branches before folders on every level, also in GITFLOW and TAGS (tags have folders too).
 - **Preferences** open as a window over the app instead of a full view.
-- Two toolbar buttons at the right hide and show the side panels (GitKraken: shortcuts and the View menu only).
+- Two small toggles at the ends of the status bar hide and show the side panels, like Zed (GitKraken: shortcuts and the View menu only).
+- Hovering a file in the staging area shows only **Stage File** / **Unstage File**; **Discard** is in the right-click menu.
+- Notifications sit at the bottom left (GitKraken lets you move them); errors explain Git's message in plain words and keep Git's output under **Details**.
+- Stage, unstage, mark resolved, stash, delete/rename stash, pull, remote and upstream changes and submodule updates can be undone as well ([Undo](undo.md)).
+- Several branches and tags can be selected (Ctrl/Shift+click) and deleted in one step.
+- The command palette also toggles settings and opens any Preferences setting; Ctrl+Shift+P opens it too.
+- A sparkle button next to "Committing as …" copies a commit message prompt for a tool of your choice (no AI inside Gitloom).
 - **Classic Dark** brings back the look of older GitKraken versions; Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.

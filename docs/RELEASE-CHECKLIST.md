@@ -130,6 +130,22 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] The status bar toggles (left end: left panel, right end: commit panel) hide and show the panels, in step with Ctrl+J / Ctrl+K; filled icon = shown, outline = hidden, no background; sharp at 125 %; none on the start screen; the toolbar has no toggles.
 - [ ] The README screenshot matches the app.
 
+## 7f. New in M12 (Windows required, Linux checked in CI)
+
+- [ ] A click on the selected file (Unstaged, Staged, Conflicted, commit files) deselects it and closes the diff; hovering a file shows only Stage File / Unstage File.
+- [ ] Errors appear as notifications at the bottom left with plain-language text, Details and Copy (e.g. push without network, a locked index still asks with Retry); info notifications close after a few seconds unless hovered; at most three.
+- [ ] Remote menu: "Open on GitHub" for an SSH and an HTTPS GitHub remote opens the repository page; a local remote has no entry; palette "Open remote in browser".
+- [ ] Conflict view: "conflict n of N" with ↑/↓ and Alt+↑/↓ (wraps around); headers "Commit <sha> on <branch>" for merge, rebase and cherry-pick.
+- [ ] Merge with conflicts: orange graph row, "1 file conflict in working directory · View conflict" on another commit, panel "Merge conflicts detected – Merging … into …", Conflicted and Resolved Files, Mark all resolved (asks when markers remain), Commit and merge / Abort merge; same for rebase (Skip), cherry-pick, revert and a conflicting stash pop; no bar at the top of the tab.
+- [ ] Submodules: SUBMODULES lists them with state icons (also 0); Update (single and all) with progress and Cancel; double click opens one in a tab; after a checkout that changes a submodule pointer the "Submodules are out of date" notification offers Update.
+- [ ] Undo/Redo: stash, delete stash, rename stash (rename one in the middle of the list, undo, the list is exactly as before), stage/unstage (file, lines, all), mark resolved, pull (fast-forward, merge, rebase), add/remove/rename remote and URL, set/unset upstream, submodule update; each refuses after an outside change.
+- [ ] STASHES: names with `/` form folders, "WIP on feature/x" is not split, folders stay collapsed after a restart.
+- [ ] Ctrl/Shift+click several local and remote branches and a tag, Delete …: grouped dialog with the checked-out branch skipped, unmerged ones asked again, remote branches deleted with one push per remote (progress), Undo restores the local ones in one step.
+- [ ] Palette (Ctrl+P and Ctrl+Shift+P): "Toggle: Word wrap", "Set: Theme › Classic Dark", "Preferences: Default branch name" opens the Preferences with the field highlighted; repository entries only with a repository tab.
+- [ ] The sparkle button right of "Committing as …" opens the commit message prompt; disabled without staged changes.
+- [ ] Open a repository from `\\wsl.localhost\<distro>\…`: notice with "Don't show again", "WSL: <distro>" badge in the recent list, a change made inside WSL appears within a few seconds.
+- [ ] A repository owned by another user (e.g. on another drive or after `takeown`): "Git does not trust this repository" with "Trust this repository…"; after confirming it opens and `safe.directory` is in the global Git config.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
