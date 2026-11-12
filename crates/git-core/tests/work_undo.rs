@@ -229,3 +229,58 @@ fn rename_stash_in_place_with_undo_and_redo() {
     assert_eq!(renamed_message("On main: old", "n"), "On main: n");
     assert_eq!(renamed_message("custom", "n"), "n");
 }
+
+#[test]
+fn rename_first_and_last_of_three_keeps_the_others() {
+    use git_core::work_undo::rename_stash;
+    let repo = repo();
+    let git = CliBackend::new(repo.path());
+    for name in ["one", "two", "three"] {
+        repo.write("a.txt", &format!("{name}\n"));
+        repo.git(&["stash", "push", "--quiet", "-m", name]);
+    }
+    let oids = || -> Vec<String> {
+        repo.git(&["stash", "list", "--format=%H"])
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    };
+    let before = oids();
+    rename_stash(&git, &before[0], "newest").unwrap();
+    let after = oids();
+    assert_ne!(after[0], before[0]);
+    assert_eq!(after[1..], before[1..]);
+    rename_stash(&git, &before[2], "oldest").unwrap();
+    let last = oids();
+    assert_eq!(last[..2], after[..2], "entries above keep their commits");
+    assert_eq!(
+        repo.git(&["stash", "list", "--format=%gs"]),
+        "On main: newest\nOn main: two\nOn main: oldest"
+    );
+    let dates = |rev: &str| repo.git(&["log", "-1", "--format=%an %ad %cn %cd", rev]);
+    assert_eq!(dates(&last[2]), dates(&before[2]));
+}
+
+#[test]
+fn a_failed_replacement_restores_the_list() {
+    use git_core::work_undo::replace_top;
+    let repo = repo();
+    let git = CliBackend::new(repo.path());
+    for name in ["one", "two"] {
+        repo.write("a.txt", &format!("{name}\n"));
+        repo.git(&["stash", "push", "--quiet", "-m", name]);
+    }
+    let list = || repo.git(&["stash", "list", "--format=%H %gs"]);
+    let before = list();
+    let entries: Vec<(String, String)> = repo
+        .git(&["stash", "list", "--format=%H%x09%gs"])
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(a, b)| (a.to_owned(), b.to_owned()))
+        .collect();
+    // The second store fails (no such commit): everything goes back.
+    let mut broken = entries.clone();
+    broken[0].0 = "0123456789012345678901234567890123456789".into();
+    assert!(replace_top(&git, &entries, &broken).is_err());
+    assert_eq!(list(), before);
+}

@@ -331,7 +331,11 @@ fn reword_commit(git: &dyn GitWriter, id: &str, message: &str) -> Result<Oid> {
 
 /// Replaces the top entries `from` (`stash@{0}` …) by `to`; on a failure
 /// the original entries are stored back.
-fn replace_top(git: &dyn GitWriter, from: &[(Oid, String)], to: &[(Oid, String)]) -> Result<()> {
+pub fn replace_top(
+    git: &dyn GitWriter,
+    from: &[(Oid, String)],
+    to: &[(Oid, String)],
+) -> Result<()> {
     let attempt = || -> Result<()> {
         for _ in from {
             git.run(
