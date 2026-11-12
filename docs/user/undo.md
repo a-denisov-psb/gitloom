@@ -5,7 +5,7 @@
 | Can be undone | Notes |
 |---|---|
 | Commit and amend | The changes of an undone commit stay staged. |
-| Discard (file, hunk, lines, all) | The content before the discard is restored. Discarding a conflicted file is undone as well: both sides and the conflict come back. |
+| Discard (file, staged file, hunk, lines, all) | The content before the discard is restored. Discarding a conflicted file is undone as well: both sides and the conflict come back. |
 | Checkout, create/delete/rename branch, create/delete tag | Local only: a branch renamed on the remote stays renamed there. Restored annotated tags are new tag objects with the same message. |
 | Deleting several branches and tags at once (left panel selection) | All local branches and tags of one bulk delete come back in one step, with their upstreams, also the ones deleted after "Delete anyway". Remote branches of the same delete cannot be undone (see below). |
 | Merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reword, squash | An operation that stopped with conflicts gets its entry when it is completed; an aborted operation leaves none. |

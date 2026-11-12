@@ -1315,6 +1315,22 @@ mod tests {
         snapshot(&app, "context-menu-wide");
     }
 
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_staged_file_menu() {
+        let mut app = crate::app::tests::staging_app(&["a.txt"], &["src/main.rs"]);
+        let _ = app.update(Message::FileContextMenu {
+            file: git_core::FileChange {
+                path: "src/main.rs".into(),
+                kind: git_core::ChangeKind::Modified,
+                old_path: None,
+            },
+            area: crate::app::FileArea::Staged,
+            position: iced::Point::new(1100.0, 200.0),
+        });
+        snapshot(&app, "file-menu-staged");
+    }
+
     /// Dragging the border right of BRANCH / TAG with real mouse events
     /// resizes the column; a double click sets its optimal width (M11-02).
     /// Layout only, so part of every test run.

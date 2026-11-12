@@ -72,6 +72,8 @@ pub enum DiscardTarget {
     Block(usize),
     /// Every conflicted file (banner without a running operation, M9-03).
     Conflicted,
+    /// A staged file: index and working tree back to HEAD (M13-07).
+    Staged(git_core::FileChange),
 }
 
 /// An entry of the identity menu (commit panel, palette, Preferences;
@@ -679,6 +681,19 @@ pub enum Message {
     FileHistoryOpened {
         path: String,
         start: Option<String>,
+    },
+    /// "File blame" of a file menu (M13-07): the history view of `path`
+    /// (starting at `start`) in Blame mode at `rev` (`None`: working copy).
+    FileBlameOpened {
+        path: String,
+        start: Option<String>,
+        rev: Option<String>,
+    },
+    /// "Open in external diff tool" of a file menu (M13-07).
+    ExternalDiffFile {
+        target: git_core::DiffTarget,
+        path: String,
+        old_path: Option<String>,
     },
     FileHistoryLoaded {
         tab: TabId,
@@ -3929,6 +3944,39 @@ impl App {
                     })))
                 })
             }
+            DiscardTarget::Staged(file) => {
+                // The file's staged and unstaged changes (M13-07).
+                let paths: Vec<&str> = file
+                    .old_path
+                    .iter()
+                    .map(String::as_str)
+                    .chain([file.path.as_str()])
+                    .collect();
+                let tree = git_core::WorkingTree {
+                    staged: vec![file.clone()],
+                    unstaged: view
+                        .snapshot
+                        .working_tree
+                        .unstaged
+                        .iter()
+                        .filter(|f| paths.contains(&f.path.as_str()))
+                        .cloned()
+                        .collect(),
+                };
+                if matches!(&view.center, CenterView::Diff(d) if paths.contains(&d.request.path.as_str()))
+                {
+                    view.center = CenterView::Graph;
+                }
+                let label = format!("Discard {}", file.path);
+                let undo_label = label.clone();
+                self.run_undoable(tab, label, move |git| {
+                    let snapshot = git_core::discard_everything(git, &root, &tree)?;
+                    Ok(Some(History::Push(UndoAction::Discard {
+                        label: undo_label.clone(),
+                        snapshot,
+                    })))
+                })
+            }
             DiscardTarget::All => {
                 let unstaged = view.snapshot.working_tree.unstaged.clone();
                 if matches!(&view.center, CenterView::Diff(d) if d.staged() == Some(false)) {
@@ -4847,10 +4895,6 @@ impl App {
     /// Opens the shown diff (diff view or file history) in the external
     /// diff tool; the app stays usable while it runs.
     fn external_diff(&mut self) -> Task<Message> {
-        let Some(tab) = self.active_tab().map(|t| t.id) else {
-            return Task::none();
-        };
-        let choice = self.settings.tools.diff_tool.clone();
         let Some(view) = self.active_view_mut() else {
             return Task::none();
         };
@@ -4873,6 +4917,21 @@ impl App {
                 return Task::none();
             }
         };
+        self.run_external_diff(target, request.path, request.old_path)
+    }
+
+    /// Runs `git difftool` for `path` (M13-07: also from the file menus;
+    /// Git writes the sides of a commit to temporary files and removes them).
+    fn run_external_diff(
+        &mut self,
+        target: git_core::DiffTarget,
+        path: String,
+        old_path: Option<String>,
+    ) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let choice = self.settings.tools.diff_tool.clone();
         let tool = match Self::tool_argument(&choice) {
             Ok(tool) => tool,
             Err(error) => {
@@ -4882,6 +4941,9 @@ impl App {
                     result: Err(error),
                 })
             }
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
         };
         let writer = Arc::clone(&view.writer);
         self.status = format!(
@@ -4899,8 +4961,8 @@ impl App {
                             git,
                             &target,
                             tool.as_deref(),
-                            &request.path,
-                            request.old_path.as_deref(),
+                            &path,
+                            old_path.as_deref(),
                         )
                     },
                 );
@@ -7149,97 +7211,53 @@ impl App {
                 position,
             } => {
                 let writable = self.write_block().is_none();
-                let write_item =
-                    |label: &str, shortcut: Option<&str>, message: Message| MenuEntry::Item {
-                        hint: None,
-                        label: label.into(),
-                        shortcut: shortcut.map(str::to_owned),
-                        enabled: writable,
-                        message: Box::new(message),
-                    };
-                let mut entries = Vec::new();
-                match area {
-                    FileArea::Unstaged => {
-                        entries.push(write_item("Stage", Some("S"), Message::Stage(file.clone())));
-                        entries.push(write_item(
-                            "Discard changes",
-                            None,
-                            Message::Discard(DiscardTarget::File(file.clone())),
-                        ));
-                        entries.push(MenuEntry::Separator);
-                        entries.push(write_item(
-                            "Ignore",
-                            None,
-                            Message::IgnoreFile(file.path.clone()),
-                        ));
-                    }
-                    FileArea::Staged => {
-                        entries.push(write_item(
-                            "Unstage",
-                            Some("U"),
-                            Message::Unstage(file.clone()),
-                        ));
-                        entries.push(MenuEntry::Item {
-                            hint: None,
-                            label: "Copy commit message prompt…".into(),
-                            shortcut: None,
-                            enabled: true,
-                            message: Box::new(Message::CopyPromptRequested),
-                        });
-                        entries.push(MenuEntry::Separator);
-                    }
-                    FileArea::Commit => {}
-                }
-                if file.kind == git_core::ChangeKind::Conflicted {
-                    entries.push(write_item(
-                        "Open in merge tool",
-                        None,
-                        Message::OpenMergeTool(file.path.clone()),
-                    ));
-                }
-                // History of the file (M5-09); from a commit it starts there.
-                let start = match area {
-                    FileArea::Commit => self
-                        .active_tab()
-                        .and_then(Tab::view)
-                        .and_then(|v| v.selected_commit().map(str::to_owned)),
+                let view = self.active_tab().and_then(Tab::view);
+                // Files of a commit start history and blame at it (M5-09).
+                let commit = match area {
+                    FileArea::Commit => view.and_then(|v| v.selected_commit().map(str::to_owned)),
                     FileArea::Unstaged | FileArea::Staged => None,
                 };
-                entries.push(MenuEntry::Item {
-                    label: "File history".into(),
-                    shortcut: None,
-                    enabled: file.kind != git_core::ChangeKind::Untracked,
-                    message: Box::new(Message::FileHistoryOpened {
-                        path: file.path.clone(),
-                        start,
-                    }),
-                    hint: (file.kind == git_core::ChangeKind::Untracked)
-                        .then(|| "Untracked files have no history".to_owned()),
+                let parent = commit.as_deref().and_then(|id| {
+                    view.and_then(|v| v.snapshot.commit(id))
+                        .and_then(|c| c.parents.first().cloned())
                 });
-                if area != FileArea::Commit {
-                    entries.push(MenuEntry::item(
-                        "Open file location",
-                        Message::OpenFileLocation(file.path.clone()),
-                    ));
-                }
-                entries.push(editor_entry(
-                    &self.editor_command(),
-                    &file.path,
-                    file.kind == git_core::ChangeKind::Deleted,
-                ));
                 // The absolute path with native separators (M6-21).
-                let path = match self.active_tab().and_then(Tab::path) {
+                let copy_path = match self.active_tab().and_then(Tab::path) {
                     Some(root) => crate::launch::repo_file_path(root, &file.path)
                         .to_string_lossy()
                         .into_owned(),
-                    None => file.path,
+                    None => file.path.clone(),
                 };
-                entries.push(MenuEntry::item(
-                    "Copy file path",
-                    Message::CopyToClipboard(path),
-                ));
+                let entries = crate::menus::file(crate::menus::FileFacts {
+                    file: &file,
+                    area,
+                    writable,
+                    commit: commit.as_deref(),
+                    parent: parent.as_deref(),
+                    diff_tool: self.settings.tools.diff_tool != settings::ToolChoice::None,
+                    editor: editor_entry(
+                        &self.editor_command(),
+                        &file.path,
+                        file.kind == git_core::ChangeKind::Deleted,
+                    ),
+                    copy_path,
+                });
                 self.context_menu = Some(ContextMenu::new(position, entries));
             }
+            Message::FileBlameOpened { path, start, rev } => {
+                let open = self.update(Message::FileHistoryOpened {
+                    path: path.clone(),
+                    start,
+                });
+                let blame =
+                    self.start_blame(move |_| Some(crate::file_history::BlameView::new(path, rev)));
+                return Task::batch([open, blame]);
+            }
+            Message::ExternalDiffFile {
+                target,
+                path,
+                old_path,
+            } => return self.run_external_diff(target, path, old_path),
             Message::Stage(file) => return self.stage_file(file, true),
             Message::Unstage(file) => return self.stage_file(file, false),
             Message::StageAll => {
@@ -8385,7 +8403,7 @@ impl App {
                             None => return Task::none(),
                         },
                     ),
-                    DiscardTarget::File(file) => (
+                    DiscardTarget::File(file) | DiscardTarget::Staged(file) => (
                         "Discard changes".to_string(),
                         format!(
                             "Discard all changes to {}? This cannot be undone outside {}.",
@@ -15507,7 +15525,7 @@ pub(crate) mod tests {
         });
         let menu = app.context_menu.clone().unwrap();
         assert!(matches!(menu.select(0), Some(Message::Stage(f)) if f.path == "a"));
-        assert!(menu.select(2).is_none(), "separator");
+        assert!(menu.select(3).is_none(), "separator");
         let _ = app.update(Message::MenuSelected(0));
         assert_eq!(app.tabs[0].view().unwrap().busy.as_deref(), Some("Stage a"));
     }
@@ -18302,17 +18320,21 @@ pub(crate) mod tests {
             [
                 "Stage",
                 "Discard changes",
-                "-",
                 "Ignore",
+                "-",
                 "File history",
-                "Open file location",
+                "File blame",
+                "-",
+                "Open in external diff tool",
                 "Open in external editor",
+                "Open file location",
+                "-",
                 "Copy file path"
             ]
         );
         // The copied path is absolute, with native separators (M6-21).
         let root = app.tabs[0].path().unwrap().to_path_buf();
-        let copy = menu.select(7);
+        let copy = menu.select(menu.entries.len() - 1);
         let expected = crate::launch::repo_file_path(&root, "a")
             .to_string_lossy()
             .into_owned();
@@ -18363,6 +18385,105 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn file_blame_opens_blame_mode_at_the_right_revision() {
+        let mut app = ready_app(&["c2", "c1"]);
+        let _ = app.update(git_available());
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        for (kind, rev) in [
+            (git_core::ChangeKind::Modified, "c2"),
+            (git_core::ChangeKind::Deleted, "c1"),
+        ] {
+            let mut change = file("src/a.rs");
+            change.kind = kind;
+            let _ = app.update(Message::FileContextMenu {
+                file: change,
+                area: FileArea::Commit,
+                position: iced::Point::ORIGIN,
+            });
+            let menu = app.context_menu.take().unwrap();
+            let blame = select_label(&menu, "File blame").unwrap();
+            let _ = app.update(blame);
+            let view = app.tabs[0].view().unwrap();
+            let CenterView::FileHistory(history) = &view.center else {
+                panic!("no file history");
+            };
+            assert_eq!(history.mode, crate::file_history::HistoryMode::Blame);
+            assert_eq!(history.start, "c2", "the history starts at the commit");
+            let blame = history.blame.as_ref().unwrap();
+            assert_eq!(
+                (blame.path.as_str(), blame.rev.as_deref()),
+                ("src/a.rs", Some(rev))
+            );
+            let _ = app.update(Message::CommitSelected("c2".into()));
+            app.tabs[0].view_mut().unwrap().center = CenterView::Graph;
+        }
+        // Working copy files: blame of the file on disk.
+        let _ = app.update(Message::FileBlameOpened {
+            path: "a".into(),
+            start: None,
+            rev: None,
+        });
+        let view = app.tabs[0].view().unwrap();
+        let CenterView::FileHistory(history) = &view.center else {
+            panic!("no file history");
+        };
+        assert_eq!(history.blame.as_ref().unwrap().rev, None);
+    }
+
+    #[test]
+    fn staged_discard_asks_and_runs_undoable() {
+        let mut app = staging_app(&["a"], &["a", "b"]);
+        let _ = app.update(Message::FileContextMenu {
+            file: file("a"),
+            area: FileArea::Staged,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        let discard = select_label(&menu, "Discard changes").unwrap();
+        let _ = app.update(discard);
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Discard changes");
+        let _ = app.update(Message::DiscardConfirmed(DiscardTarget::Staged(file("a"))));
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Discard a")
+        );
+    }
+
+    #[test]
+    fn external_diff_of_a_commit_file_needs_a_tool() {
+        let mut app = ready_app(&["c2", "c1"]);
+        let _ = app.update(git_available());
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        app.settings.tools.diff_tool = settings::ToolChoice::None;
+        let _ = app.update(Message::FileContextMenu {
+            file: file("a"),
+            area: FileArea::Commit,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(select_label(&menu, "Open in external diff tool").is_none());
+        app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
+        let _ = app.update(Message::FileContextMenu {
+            file: file("a"),
+            area: FileArea::Commit,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        let message = select_label(&menu, "Open in external diff tool").unwrap();
+        assert!(matches!(
+            &message,
+            Message::ExternalDiffFile {
+                target: git_core::DiffTarget::Commit { id, parent: Some(p) },
+                path,
+                ..
+            } if id == "c2" && p == "c1" && path == "a"
+        ));
+        let _ = app.update(message);
+        assert_eq!(app.status, "Waiting for meld…");
+    }
+
+    #[test]
     fn file_context_menu_copies_the_path() {
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::FileContextMenu {
@@ -18374,8 +18495,9 @@ pub(crate) mod tests {
         // Other shortcuts are ignored while the menu is open.
         let _ = app.update(checked(Shortcut::NewTab, false));
         assert_eq!(app.tabs.len(), 1);
-        // "File history", "Open in external editor", then "Copy file path".
-        let _ = app.update(Message::MenuSelected(2));
+        // "Copy file path" is the last entry.
+        let last = app.context_menu.as_ref().unwrap().entries.len() - 1;
+        let _ = app.update(Message::MenuSelected(last));
         assert!(app.context_menu.is_none());
         assert_eq!(app.status, "Copied to the clipboard");
     }

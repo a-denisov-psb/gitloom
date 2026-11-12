@@ -249,3 +249,56 @@ fn state_unborn(repo: &TestRepo) -> (String, String) {
         repo.git(&["ls-files", "--stage"]),
     )
 }
+
+#[test]
+fn discard_one_staged_file_and_undo_it() {
+    // "Discard changes" of a staged file (M13-07): the app passes the file
+    // and its unstaged entry; other files keep their changes.
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "base\n", "Base");
+    repo.commit("e.txt", "eee\n", "E");
+    repo.write("a.txt", "staged\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "staged and edited\n");
+    repo.write("c.txt", "new\n");
+    repo.git(&["add", "c.txt"]);
+    repo.write("e.txt", "edited\n");
+    let before = state(&repo);
+    let cli = CliBackend::new(repo.path());
+    let full = GixBackend::discover(repo.path())
+        .unwrap()
+        .working_tree()
+        .unwrap();
+    let only = |path: &str| git_core::WorkingTree {
+        staged: full
+            .staged
+            .iter()
+            .filter(|f| f.path == path)
+            .cloned()
+            .collect(),
+        unstaged: full
+            .unstaged
+            .iter()
+            .filter(|f| f.path == path)
+            .cloned()
+            .collect(),
+    };
+
+    let snapshot = git_core::discard_everything(&cli, repo.path(), &only("a.txt")).unwrap();
+    assert_eq!(read(&repo, "a.txt"), b"base\n");
+    assert_eq!(
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        "A  c.txt\n M e.txt"
+    );
+    let new_file = git_core::discard_everything(&cli, repo.path(), &only("c.txt")).unwrap();
+    assert!(!repo.path().join("c.txt").exists());
+    assert_eq!(
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        "M e.txt"
+    );
+
+    // Undo in reverse order restores index and working tree.
+    git_core::restore_snapshot(&cli, repo.path(), &new_file).unwrap();
+    git_core::restore_snapshot(&cli, repo.path(), &snapshot).unwrap();
+    assert_eq!(state(&repo), before);
+}

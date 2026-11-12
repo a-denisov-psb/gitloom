@@ -185,7 +185,7 @@ Acceptance:
 
 Note (M13-06): Without exactly one remote the tag entries read "Push `<t>`…" and "Delete `<t>` from remote…" (the remote is asked); the remote branch menu has no separator between Reset and Delete, as listed above. "No upstream afterwards" and "undo deletes the branch" are tested in `git-core/tests/ref_undo.rs` (the app tests run on the mock backend).
 
-### [ ] M13-07 File menus like GitKraken
+### [x] M13-07 File menus like GitKraken
 
 Found by the maintainer while testing (2026-11-12, GitKraken 7.5.2 screenshots of the unstaged, staged and commit file menus).
 
@@ -230,6 +230,8 @@ Acceptance:
 - `docs/UX-PARITY.md` row "Right click file in staging" updated, deviations listed; user guide updated; CHANGELOG `[Unreleased]` → Changed: "File menus are ordered like GitKraken's and add File blame, Open in external diff tool (also for files of a commit), Open file location for commit files and Discard changes for staged files."
 - `docs/RELEASE-CHECKLIST.md`: checks in this milestone's section (external diff from a commit file on Windows).
 - `./scripts/check.sh` green.
+
+Note (M13-07): The external diff of a commit file runs `git difftool <parent> <commit> -- <path>`; Git writes the temporary files and removes them, so Gitloom does not write its own. Open file location of a commit file is disabled only for files deleted in that commit (no file I/O on the UI thread; other missing files open their nearest folder). Blame is disabled for staged or unstaged added files with "Not committed yet" (nothing in HEAD to blame) and the external diff for untracked and conflicted files. The fake-tool test of the commit diff is `git-core/tests/external_tools.rs` (`difftool_for_commit_unstaged_and_staged`); the staged discard + undo test is `git-core/tests/discard.rs` (`discard_one_staged_file_and_undo_it`).
 
 ## After M13
 
