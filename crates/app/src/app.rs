@@ -35,6 +35,9 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// Recently used palette actions remembered (in memory).
 const RECENT_ACTIONS: usize = 8;
 
+/// How long a field opened from the palette stays highlighted (M12-12).
+const HIGHLIGHT_TIME: Duration = Duration::from_millis(1500);
+
 /// File system events are collected for this long before they are classified.
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
@@ -1048,6 +1051,8 @@ pub enum Message {
     KeepStash,
     /// "Rename stash…" (M12-10): opens the dialog.
     RenameStashStart(String),
+    /// The highlight of a field opened from the palette ends (M12-12).
+    SettingsHighlightEnded(u64),
     /// "Mark all resolved" (M12-05): checks the conflicted files for
     /// markers, then stages them (after a confirmation if any has markers).
     MarkAllResolved,
@@ -1120,6 +1125,8 @@ pub struct App {
     pub column_drag: Option<ColumnDrag>,
     /// Notifications at the bottom left (M12-02).
     pub toasts: crate::toast::Toasts,
+    /// Counts palette deep links; an older highlight timer is ignored.
+    highlight_seq: u64,
     /// Highlighted files, shared with the background tasks (M11-09).
     highlight_cache: Arc<std::sync::Mutex<crate::highlight::Cache>>,
     pub status: String,
@@ -1223,6 +1230,7 @@ impl App {
             panes: Panes::new(Default::default()),
             column_drag: None,
             toasts: crate::toast::Toasts::default(),
+            highlight_seq: 0,
             highlight_cache: Arc::default(),
             status: String::new(),
             start_path: String::new(),
@@ -4371,11 +4379,16 @@ impl App {
                         };
                         let mut entry = Entry::new(action.label.clone(), target)
                             .disabled(self.action_block(action.id));
+                        // GitKraken calls identities "profiles" (M12-12).
+                        if action.id == Shortcut::ChooseIdentity {
+                            entry = entry.keywords("profile");
+                        }
                         if let Some(keys) = action.shortcut_label(crate::actions::MAC) {
                             entry = entry.detail(keys);
                         }
                         entry
                     })
+                    .chain(self.settings_entries())
                     .collect()
             }
             Mode::OpenRepository => {
@@ -4451,11 +4464,161 @@ impl App {
                     .collect()
             }
             Mode::Files => Vec::new(),
+            Mode::Choice(choice) => {
+                let global = use_global_editor_label(&self.settings.tools.editor_command);
+                let current = self.choice_value(choice);
+                choice
+                    .options(&global)
+                    .into_iter()
+                    .map(|value| {
+                        let entry = Entry::new(
+                            value.clone(),
+                            Target::Setting(palette::SettingTarget::Choose(choice, value.clone())),
+                        );
+                        if current.as_deref() == Some(value.as_str()) {
+                            entry.detail("current")
+                        } else {
+                            entry
+                        }
+                    })
+                    .collect()
+            }
             Mode::RemoteWebsites => self
                 .remote_websites()
                 .into_iter()
                 .map(|(name, url)| Entry::new(name, Target::Link(url.clone())).detail(url))
                 .collect(),
+        }
+    }
+
+    /// Palette entries of the settings registry (M12-12): toggles, choice
+    /// sub-lists and deep links into the Preferences. Repository entries
+    /// only with a repository tab.
+    fn settings_entries(&self) -> Vec<palette::Entry> {
+        use crate::settings_registry::{pages, Kind, SETTINGS};
+        use palette::{Entry, Mode, SettingTarget, Target};
+        let repo = self.active_tab().and_then(Tab::view).is_some();
+        let shown = |category: Option<settings::Category>| {
+            repo || !category.is_some_and(settings::Category::is_repository)
+        };
+        let settings_shown = SETTINGS
+            .iter()
+            .filter(|s| s.available() && shown(s.category));
+        let mut entries = Vec::new();
+        for setting in settings_shown.clone() {
+            match setting.kind {
+                Kind::Toggle(toggle) => {
+                    let on = toggle.value(&self.settings);
+                    entries.push(Entry::new(
+                        format!(
+                            "Toggle: {} ({})",
+                            setting.label,
+                            if on { "on" } else { "off" }
+                        ),
+                        Target::Setting(SettingTarget::Toggle(toggle)),
+                    ));
+                }
+                Kind::Choice(choice) if !choice.repository() || repo => {
+                    entries.push(Entry::new(
+                        choice.label(),
+                        Target::Mode(Mode::Choice(choice)),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        for page in pages().filter(|p| shown(Some(*p))) {
+            entries.push(Entry::new(
+                format!("Preferences: {}", page.title()),
+                Target::Setting(SettingTarget::Open(page, None)),
+            ));
+        }
+        for setting in settings_shown {
+            if let Some(category) = setting.category {
+                entries.push(Entry::new(
+                    format!("Preferences: {}", setting.label),
+                    Target::Setting(SettingTarget::Open(category, setting.field)),
+                ));
+            }
+        }
+        // Keywords help the fuzzy search ("profile" finds identities).
+        for entry in &mut entries {
+            if let Some(setting) = SETTINGS.iter().find(|s| entry.label.contains(s.label)) {
+                if !setting.keywords.is_empty() {
+                    entry.keywords = Some(setting.keywords.join(" "));
+                }
+            }
+        }
+        entries
+    }
+
+    /// Current value label of a palette choice (M12-12).
+    fn choice_value(&self, choice: crate::settings_registry::Choice) -> Option<String> {
+        use crate::settings_registry::Choice;
+        Some(match choice {
+            Choice::Theme => match self.settings.appearance.theme {
+                settings::ThemeChoice::Dark => "Dark",
+                settings::ThemeChoice::Light => "Light",
+                settings::ThemeChoice::ClassicDark => "Classic Dark",
+                settings::ThemeChoice::System => "System",
+            }
+            .to_owned(),
+            Choice::DiffView => self.settings.diff.view_mode.label().to_owned(),
+            Choice::StashTemplate => self.settings.templates.stash_template.clone(),
+            Choice::ExternalEditor => {
+                settings::EditorPreset::of(&self.settings.tools.editor_command)
+                    .label()
+                    .to_owned()
+            }
+            Choice::RepoEditor => match self
+                .active_tab()
+                .and_then(Tab::view)
+                .and_then(|v| v.snapshot.repo_editor.clone())
+            {
+                Some(command) => settings::EditorPreset::of(&command).label().to_owned(),
+                None => use_global_editor_label(&self.settings.tools.editor_command),
+            },
+        })
+    }
+
+    /// Runs a settings entry of the palette (M12-12).
+    fn run_setting(&mut self, target: palette::SettingTarget) -> Task<Message> {
+        use palette::SettingTarget;
+        match target {
+            SettingTarget::Toggle(toggle) => {
+                let on = toggle.value(&self.settings);
+                self.update(toggle.message(!on))
+            }
+            SettingTarget::Choose(choice, value) => Task::batch(
+                choice
+                    .messages(&value)
+                    .into_iter()
+                    .map(|message| self.update(message))
+                    .collect::<Vec<_>>(),
+            ),
+            SettingTarget::Open(category, field) => {
+                let open = self.open_preferences(category);
+                let Some(field) = field else {
+                    return open;
+                };
+                self.highlight_seq += 1;
+                let seq = self.highlight_seq;
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.highlight = Some(field);
+                }
+                let y = crate::settings_registry::scroll_position(category, field);
+                Task::batch([
+                    open,
+                    iced::widget::operation::snap_to(
+                        crate::ui::settings::SETTINGS_SCROLL,
+                        iced::widget::scrollable::RelativeOffset { x: 0.0, y },
+                    ),
+                    Task::perform(
+                        async { tokio::time::sleep(HIGHLIGHT_TIME).await },
+                        move |()| Message::SettingsHighlightEnded(seq),
+                    ),
+                ])
+            }
         }
     }
 
@@ -4501,6 +4664,7 @@ impl App {
             Target::File(path) => self.update(Message::FileHistoryOpened { path, start: None }),
             Target::Identity(choice) => self.update(Message::IdentityChosen(choice)),
             Target::Link(url) => self.update(Message::OpenLink(url)),
+            Target::Setting(setting) => self.run_setting(setting),
             Target::Mode(_) => Task::none(),
         }
     }
@@ -8108,6 +8272,13 @@ impl App {
             Message::KeepStash => {
                 if let Some(view) = self.active_view_mut() {
                     view.stash_conflict = None;
+                }
+            }
+            Message::SettingsHighlightEnded(seq) => {
+                if seq == self.highlight_seq {
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.highlight = None;
+                    }
                 }
             }
             Message::RenameStashStart(id) => {
@@ -19031,15 +19202,118 @@ pub(crate) mod tests {
             .unwrap_or_default()
     }
 
+    fn palette_choose(app: &mut App, query: &str) {
+        let _ = app.update(Message::PaletteQuery(query.into()));
+        let _ = app.update(checked(Shortcut::Confirm, true));
+    }
+
+    #[test]
+    fn palette_settings_toggles_choices_and_deep_links() {
+        let mut app = checkout_app();
+        // Ctrl+Shift+P opens the palette too.
+        assert_eq!(
+            crate::shortcuts::shortcut_with_modified(
+                &keyboard::Key::Character("p".into()),
+                &keyboard::Key::Character("P".into()),
+                keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT
+            ),
+            Some(Shortcut::CommandPalette)
+        );
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let labels = palette_labels(&app);
+        assert!(
+            labels.contains(&"Toggle: Word wrap (off)".to_owned()),
+            "{labels:?}"
+        );
+        // Keywords find entries whose label does not contain the word.
+        let _ = app.update(Message::PaletteQuery("gravatar".into()));
+        assert!(palette_labels(&app)
+            .iter()
+            .any(|l| l == "Toggle: Load avatars from Gravatar (on)"
+                || l == "Toggle: Load avatars from Gravatar (off)"));
+        let _ = app.update(Message::PaletteQuery("init.defaultBranch".into()));
+        assert_eq!(palette_labels(&app)[0], "Preferences: Default branch name");
+        // A toggle switches the setting.
+        palette_choose(&mut app, "Toggle: Word wrap");
+        assert!(app.settings.editor.word_wrap);
+        assert!(app.palette.is_none());
+        // A choice opens its list, a value sets it.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        palette_choose(&mut app, "Set: Theme");
+        assert_eq!(
+            app.palette.as_ref().unwrap().mode,
+            palette::Mode::Choice(crate::settings_registry::Choice::Theme)
+        );
+        palette_choose(&mut app, "Classic Dark");
+        assert_eq!(
+            app.settings.appearance.theme,
+            settings::ThemeChoice::ClassicDark
+        );
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        palette_choose(&mut app, "Set: Diff view");
+        palette_choose(&mut app, "Split");
+        assert_eq!(app.settings.diff.view_mode, settings::DiffMode::Split);
+        // A deep link opens the page with the field highlighted, briefly.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        palette_choose(&mut app, "Preferences: Default branch name");
+        let page = app.settings_page.as_ref().unwrap();
+        assert_eq!(page.category, settings::Category::General);
+        assert_eq!(page.highlight, Some("Default branch name"));
+        let seq = app.highlight_seq;
+        let _ = app.update(Message::SettingsHighlightEnded(seq - 1));
+        assert!(
+            app.settings_page.as_ref().unwrap().highlight.is_some(),
+            "an older timer"
+        );
+        let _ = app.update(Message::SettingsHighlightEnded(seq));
+        assert!(app.settings_page.as_ref().unwrap().highlight.is_none());
+    }
+
+    #[test]
+    fn repository_settings_entries_need_a_repository() {
+        let (empty, _) = App::new(Vec::new(), None);
+        let labels: Vec<String> = empty
+            .settings_entries()
+            .into_iter()
+            .map(|e| e.label)
+            .collect();
+        assert!(labels.contains(&"Preferences: General".to_owned()));
+        assert!(labels.contains(&"Set: External editor ›".to_owned()));
+        assert!(!labels.iter().any(|l| l.starts_with("Repository:")
+            || l == "Preferences: Gitflow"
+            || l == "Preferences: Repository identity"));
+        let app = checkout_app();
+        let labels: Vec<String> = app
+            .settings_entries()
+            .into_iter()
+            .map(|e| e.label)
+            .collect();
+        assert!(labels.contains(&"Repository: External editor ›".to_owned()));
+        assert!(labels.contains(&"Preferences: Gitflow".to_owned()));
+        // Every page and every setting with a page has a "Preferences:" entry.
+        for page in crate::settings_registry::pages() {
+            assert!(
+                labels.contains(&format!("Preferences: {}", page.title())),
+                "{page:?}"
+            );
+        }
+        for setting in crate::settings_registry::SETTINGS {
+            if setting.category.is_some() && setting.available() {
+                assert!(labels.contains(&format!("Preferences: {}", setting.label)));
+            }
+        }
+    }
+
     #[test]
     fn palette_runs_actions_and_remembers_them() {
         let mut app = checkout_app();
         let _ = app.update(checked(Shortcut::CommandPalette, false));
         assert!(app.palette.is_some());
-        // Every registered action is listed (the palette itself excepted).
+        // Every registered action is listed (the palette itself excepted),
+        // then the settings entries (M12-12).
         assert_eq!(
             app.palette.as_ref().unwrap().shown_count(),
-            crate::actions::registry().len() - 1
+            crate::actions::registry().len() - 1 + app.settings_entries().len()
         );
         let sidebar = app.panes.sidebar_visible;
         let _ = app.update(Message::PaletteQuery("toggle left".into()));

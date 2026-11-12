@@ -55,6 +55,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     .width(220)
     .height(Fill);
 
+    HIGHLIGHT.with(|h| h.set(page.highlight));
     let form = match page.category {
         Category::General => general(&app.settings, page),
         Category::Appearance => appearance(app),
@@ -69,6 +70,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::RepoEditor => repository_editor(app, page),
         Category::Gitflow => gitflow(app, page),
     };
+    HIGHLIGHT.with(|h| h.set(None));
 
     let header = row![
         text("Preferences").size(18),
@@ -93,6 +95,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
                 .padding(20)
                 .max_width(640)
         )
+        .id(SETTINGS_SCROLL)
         .width(Fill)
         .height(Fill),
     ]
@@ -430,8 +433,24 @@ fn field<'a>(
     if let Some(note) = note.into() {
         content = content.push(muted(note).size(12));
     }
+    // A field opened from the palette is highlighted for a moment (M12-12).
+    if HIGHLIGHT.with(|h| h.get() == Some(label)) {
+        return container(content)
+            .padding(8)
+            .width(Fill)
+            .style(theme::setting_highlight)
+            .into();
+    }
     content.into()
 }
+
+thread_local! {
+    /// Label of the highlighted field while a page is built (view only).
+    static HIGHLIGHT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// Scrollable of a Preferences page (palette deep links scroll it).
+pub const SETTINGS_SCROLL: &str = "settings-page";
 
 /// Label of the default font in the font list.
 const DEFAULT_FONT: &str = "Default";

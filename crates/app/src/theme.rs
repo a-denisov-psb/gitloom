@@ -806,6 +806,19 @@ pub fn operation_row(theme: &Theme) -> container::Style {
     }
 }
 
+/// A Preferences field opened from the palette (M12-12): accent tint.
+pub fn setting_highlight(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.accent.scale_alpha(0.16))),
+        border: Border::default()
+            .width(1)
+            .rounded(4)
+            .color(p.accent.scale_alpha(0.6)),
+        ..container::Style::default()
+    }
+}
+
 /// Git flow finish waiting at the top of a tab (M7-10).
 pub fn state_banner(theme: &Theme) -> container::Style {
     let p = palette(theme);

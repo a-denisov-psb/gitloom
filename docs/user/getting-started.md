@@ -46,7 +46,7 @@ All dividers can be dragged. The diff of a file replaces the graph; **Esc** retu
 
 ## Finding things
 
-- **Ctrl+P** – command palette: type part of any action's name.
+- **Ctrl+P** (or Ctrl+Shift+P) – command palette: type part of any action's or setting's name.
 - **Ctrl+/** – list of all keyboard shortcuts with a filter.
 - **Ctrl+F** – search commits by message, author, email or SHA.
 - **Shift+F10** (or the Menu key) – context menu of the selected commit.

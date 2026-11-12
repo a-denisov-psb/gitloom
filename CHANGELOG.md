@@ -49,6 +49,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Undo and redo for Stash, Delete stash, stage and unstage (files, lines, hunks, blocks, all) and marking conflicts resolved.
 - STASHES shows folders: a `/` in a stash's name puts it into a folder (default "WIP on <branch>" names are never split); stashes keep their order, folders follow, collapsed folders are remembered; the tooltip shows the full message and date. "Rename stash…" in the stash menu renames it in place (undoable).
 - Select several branches and tags in the left panel with Ctrl+click and Shift+click and delete them in one step (local part undoable in one step, remote branches with one push per remote) or hide/show them in the graph.
+- Command palette: Ctrl+Shift+P opens it too; every on/off setting can be toggled from it, Theme, Diff view, Stash message template and External editor have value lists, and "Preferences: …" entries open the Preferences at a page or setting (highlighted for a moment).
 
 ### Changed
 
