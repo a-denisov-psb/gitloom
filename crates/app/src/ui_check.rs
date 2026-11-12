@@ -822,6 +822,31 @@ mod tests {
         }
     }
 
+    /// Git flow layout (M13-02) of the classic diagram: production left,
+    /// hotfix, release, development, features right; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_flow_layout() {
+        let (_repo, snapshot) = crate::snapshot::flow_tests::classic_snapshot();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for (on, name) in [(false, "default"), (true, "flow")] {
+                let view = app.tabs[0].view_mut().unwrap();
+                view.snapshot = std::sync::Arc::new(snapshot.with_flow_layout(on).unwrap());
+                snapshot_sized(
+                    &app,
+                    &format!("flow-layout-{name}-{theme}"),
+                    (1200.0, 520.0),
+                );
+            }
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

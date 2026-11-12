@@ -87,11 +87,13 @@ Acceptance: unit tests on hand-built histories for every rule and edge case (com
 
 Note: `git_graph::flow::classify` returns segments (one per first-parent chain: tip, kind, name, source) and the segment of every commit, so labels (M13-04) and the feature sub-palette (M13-02) work per segment. Step 3 builds a segment from every still free commit in topological order (newest first); its targets are all merges that have one of its commits as a non-first parent, its fork point the first parent of its oldest commit; a segment no merge reaches stays unknown (step 4), which also covers tag-only chains. One segment per branch name (a remote twin of a local branch is skipped; `origin/main` serves when `main` is not local). Topology rules as in the table; "origin release/feature with a target in production" counts as release (the table's "origin unknown" rule). App: `RepoSnapshot::flow_classification` collects merge subjects (summaries of merge commits) and branch tips from the loaded snapshot; stash rows take their base commit's segment. Tests: `merge_subjects`, `classic_history_by_merge_messages`, `classic_history_by_topology`, `live_branches_win_and_remote_twins_are_skipped`, `production_wins_and_remote_main_counts`, `pull_merges_nested_features_fast_forward_and_unknown`, `hotfix_into_develop_only_and_missing_parents`; app `classic_git_flow_history_with_deleted_branches` (real repository built with the `git` CLI, topic branches deleted).
 
-### [ ] M13-02 Lane groups and colors
+### [x] M13-02 Lane groups and colors
 
 - `LaneHints` from the classification; `flow_colors` tokens for all themes; feature sub-palette per segment.
 
 Acceptance: layout snapshots (text) for the classic history: production lane 0, hotfix, release, development, features right of it; development column stays constant over the whole history; snapshots of the graph in Dark and Light checked by eye.
+
+Note: `Classification::lane_hints` gives group and color per commit; flow colors travel as `ColorId(FLOW_COLOR_BASE + n)` (production, hotfix, release, development, four feature colors per segment, unknown) and `theme::lane_color` maps them to the palette token `flow_colors` (Dark and Light, contrast ≥ 3:1 tested), so the graph drawing needed no change. `RepoSnapshot::with_flow_layout(on)` re-lays out the loaded history (no reload); the hints are kept for a WIP row appearing, and a branch filter classifies the filtered history (hidden branches left out first). Tests: git-graph `classic_history_lanes_by_group` (lanes and colors, development column constant), app `flow_layout_groups_lanes_and_survives_status_changes`, `flow_colors_stay_visible`; snapshots `ui_check_flow_layout` (default and flow, Dark and Light) checked by eye.
 
 ### [ ] M13-03 Toggle and persistence
 
