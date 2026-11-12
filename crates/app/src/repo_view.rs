@@ -49,6 +49,28 @@ pub struct CommitDetails {
     /// Every file of the commit's tree for "View all files" (M14-03);
     /// `None` until it is turned on.
     pub all_files: Option<Loadable<Vec<String>>>,
+    /// Whether the message can be edited by a click (M14-05): `Ok(None)`
+    /// editable, `Ok(Some(reason))` blocked.
+    pub edit_block: Loadable<Option<String>>,
+}
+
+/// Inline editor of a commit message in the details (M14-05, ADR-051).
+pub struct MessageEdit {
+    pub id: String,
+    pub summary: String,
+    pub body: iced::widget::text_editor::Content,
+    /// Moved branch and refs that keep the old commit, for the note.
+    pub facts: Loadable<git_core::reword::EditFacts>,
+    pub error: Option<String>,
+}
+
+impl std::fmt::Debug for MessageEdit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MessageEdit")
+            .field("id", &self.id)
+            .field("summary", &self.summary)
+            .finish()
+    }
 }
 
 /// Message of the selected commit in the details' framed box (M14-01):
@@ -766,6 +788,8 @@ pub struct RepoView {
     pub message_box: Option<MessageBox>,
     /// Collapsed folders of the details' file tree (M14-03), per session.
     pub file_tree_collapsed: HashSet<String>,
+    /// Open message editor of the details (M14-05).
+    pub message_edit: Option<MessageEdit>,
     /// Signature status per commit, requested once when a commit is
     /// selected (M10-05).
     pub signatures:
@@ -1146,6 +1170,7 @@ impl RepoView {
             details: None,
             message_box: None,
             file_tree_collapsed: HashSet::new(),
+            message_edit: None,
             signatures: std::collections::HashMap::new(),
             center: CenterView::Graph,
             filter: String::new(),
@@ -1336,6 +1361,25 @@ impl RepoView {
     }
 
     /// Selected commit id, if a commit (not WIP) is selected.
+    /// Whether the message of the details' commit `id` can be edited now
+    /// (M14-05): `Some(None)` editable, `Some(Some(reason))` blocked, `None`
+    /// still being checked. A write block or an operation that started
+    /// after the check wins over the stored answer.
+    pub fn message_edit_block(&self, id: &str) -> Option<Option<String>> {
+        let details = self.details.as_ref().filter(|d| d.id == id)?;
+        if let Some(reason) = &self.write_block {
+            return Some(Some(reason.clone()));
+        }
+        if !self.snapshot.state.is_clean() {
+            return Some(Some(git_core::reword::EditBlock::OperationRunning.reason()));
+        }
+        match &details.edit_block {
+            Loadable::Ready(block) => Some(block.clone()),
+            Loadable::Failed(error) => Some(Some(error.clone())),
+            Loadable::Loading => None,
+        }
+    }
+
     pub fn selected_commit(&self) -> Option<&str> {
         match &self.selection {
             Some(Selection::Commit(id)) => Some(id),

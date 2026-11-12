@@ -1126,6 +1126,25 @@ pub enum Message {
     },
     SummaryChanged(String),
     DescriptionEdited(iced::widget::text_editor::Action),
+    /// Whether commit `id`'s message can be edited (M14-05).
+    EditBlockLoaded {
+        tab: TabId,
+        id: String,
+        result: Result<Option<String>, String>,
+    },
+    /// Click on an editable message box: open the editor.
+    CommitEditStart,
+    CommitEditSummary(String),
+    CommitEditBody(iced::widget::text_editor::Action),
+    /// Refs that keep the old commit, for the note before saving.
+    CommitEditFactsLoaded {
+        tab: TabId,
+        id: String,
+        result: Result<git_core::reword::EditFacts, String>,
+    },
+    /// Save (Ctrl+Enter) / Cancel (Esc) of the message editor.
+    CommitEditSave,
+    CommitEditCancel,
     /// Sort toggle of the details' file list (M14-03).
     FileListSortToggled,
     /// Path (`false`) or Tree (`true`).
@@ -3207,9 +3226,11 @@ impl App {
             || self
                 .active_view_mut()
                 .is_some_and(|v| v.drag.take().is_some())
-            || self
-                .active_view_mut()
-                .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
+            || self.active_view_mut().is_some_and(|v| {
+                v.new_branch.take().is_some()
+                    || v.rename.take().is_some()
+                    || v.message_edit.take().is_some()
+            })
     }
 
     /// Opens the repository containing `path` in tab `id`.
@@ -3895,6 +3916,10 @@ impl App {
                     git_core::work_undo::switch_stash_rename(git, &rename, undo)?;
                     UndoAction::StashRename(rename)
                 }
+                UndoAction::Reword(done) => {
+                    done.apply(git, undo)?;
+                    UndoAction::Reword(done)
+                }
                 UndoAction::Remote(change) => {
                     git_core::remote_undo::switch_remote_change(git, &change, undo)?;
                     UndoAction::Remote(change)
@@ -4277,13 +4302,57 @@ impl App {
             return Task::none();
         };
         if view.details.as_ref().is_some_and(|d| d.id == id) {
+            // The commit arrived with a refresh (e.g. after editing its message).
+            if view.message_box.as_ref().is_none_or(|m| m.id != id) {
+                view.message_box = view
+                    .snapshot
+                    .commit(&id)
+                    .map(crate::repo_view::MessageBox::new);
+            }
             return Task::none();
         }
+        // Editable by a click (M14-05): blocked right away without Git, or
+        // asked in the background.
+        let quick_block = if view.snapshot.is_stash(&id) {
+            Some("Stashes cannot be edited".to_owned())
+        } else if let Some(reason) = view.write_block.clone() {
+            Some(reason)
+        } else if !view.snapshot.state.is_clean() {
+            Some(git_core::reword::EditBlock::OperationRunning.reason())
+        } else {
+            None
+        };
         view.details = Some(CommitDetails {
             id: id.clone(),
             changes: Loadable::Loading,
             all_files: None,
+            edit_block: match &quick_block {
+                Some(reason) => Loadable::Ready(Some(reason.clone())),
+                None => Loadable::Loading,
+            },
         });
+        view.message_edit = None;
+        let block_task = if quick_block.is_some() {
+            Task::none()
+        } else {
+            let writer = Arc::clone(&view.writer);
+            let checked = id.clone();
+            Task::perform(
+                blocking(move || {
+                    git_core::reword::edit_block(writer.as_ref(), &checked)
+                        .map(|block| block.map(|b| b.reason()))
+                        .map_err(|e| e.to_string())
+                }),
+                {
+                    let id = id.clone();
+                    move |result| Message::EditBlockLoaded {
+                        tab: tab_id,
+                        id: id.clone(),
+                        result,
+                    }
+                },
+            )
+        };
         view.message_box = view
             .snapshot
             .commit(&id)
@@ -4330,7 +4399,79 @@ impl App {
             },
         );
         let all_files = self.load_all_files();
-        Task::batch([changes, signature, all_files])
+        Task::batch([changes, signature, all_files, block_task])
+    }
+
+    /// Opens the message editor of the selected commit when its message
+    /// can be edited (M14-05) and asks which refs keep the old commit.
+    fn start_message_edit(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(details) = view.details.as_ref() else {
+            return Task::none();
+        };
+        if view.message_edit_block(&details.id) != Some(None) || view.busy.is_some() {
+            return Task::none();
+        }
+        let Some(commit) = view.snapshot.commit(&details.id) else {
+            return Task::none();
+        };
+        let id = commit.id.clone();
+        view.message_edit = Some(crate::repo_view::MessageEdit {
+            id: id.clone(),
+            summary: commit.summary.clone(),
+            body: iced::widget::text_editor::Content::with_text(&commit.body),
+            facts: Loadable::Loading,
+            error: None,
+        });
+        let writer = Arc::clone(&view.writer);
+        let facts = Task::perform(
+            blocking({
+                let id = id.clone();
+                move || {
+                    git_core::reword::edit_facts(writer.as_ref(), &id).map_err(|e| e.to_string())
+                }
+            }),
+            move |result| Message::CommitEditFactsLoaded {
+                tab,
+                id: id.clone(),
+                result,
+            },
+        );
+        Task::batch([
+            facts,
+            iced::widget::operation::focus(crate::ui::panel::MESSAGE_EDIT_SUMMARY),
+        ])
+    }
+
+    /// Saves the edited message (ADR-051); one undo entry.
+    fn save_message_edit(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) else {
+            return Task::none();
+        };
+        let summary = edit.summary.trim().to_owned();
+        if summary.is_empty() {
+            edit.error = Some("Enter a summary".to_owned());
+            return Task::none();
+        }
+        let body = edit.body.text().trim_end().to_owned();
+        let message = if body.trim().is_empty() {
+            summary
+        } else {
+            format!("{summary}\n\n{body}")
+        };
+        let id = edit.id.clone();
+        self.run_undoable(tab, "Edit commit message", move |git| {
+            let done = git_core::reword::reword_unpushed(git, &id, &message)?;
+            Ok(Some(History::Push(UndoAction::Reword(done))))
+        })
     }
 
     /// Loads every file of the selected commit's tree when "View all
@@ -7547,6 +7688,11 @@ impl App {
                             view.redo.clear();
                         }
                         Ok(Some(History::Push(action))) => {
+                            // The rewritten commit stays selected (M14-05).
+                            if let UndoAction::Reword(done) = action {
+                                view.selection = Some(Selection::Commit(done.new_commit.clone()));
+                                view.message_edit = None;
+                            }
                             view.undo.push(action.clone());
                             view.redo.clear();
                         }
@@ -8775,6 +8921,50 @@ impl App {
                     view.summary = summary;
                 }
             }
+            Message::EditBlockLoaded { tab, id, result } => {
+                if let Some(details) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.details.as_mut())
+                    .filter(|d| d.id == id)
+                {
+                    details.edit_block = match result {
+                        Ok(block) => Loadable::Ready(block),
+                        Err(error) => Loadable::Failed(error),
+                    };
+                }
+            }
+            Message::CommitEditStart => return self.start_message_edit(),
+            Message::CommitEditSummary(summary) => {
+                if let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) {
+                    edit.summary = summary;
+                    edit.error = None;
+                }
+            }
+            Message::CommitEditBody(action) => {
+                if let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) {
+                    edit.body.perform(action);
+                }
+            }
+            Message::CommitEditFactsLoaded { tab, id, result } => {
+                if let Some(edit) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.message_edit.as_mut())
+                    .filter(|e| e.id == id)
+                {
+                    edit.facts = match result {
+                        Ok(facts) => Loadable::Ready(facts),
+                        Err(error) => Loadable::Failed(error),
+                    };
+                }
+            }
+            Message::CommitEditCancel => {
+                if let Some(view) = self.active_view_mut() {
+                    view.message_edit = None;
+                }
+            }
+            Message::CommitEditSave => return self.save_message_edit(),
             Message::FileListSortToggled => {
                 self.settings.file_list.descending = !self.settings.file_list.descending;
                 return self.save_settings();
@@ -18747,6 +18937,136 @@ pub(crate) mod tests {
         assert_eq!(all(&app), Some(Loadable::Loading));
     }
 
+    fn editable_app() -> App {
+        let mut app = ready_app(&["c2", "c1"]);
+        let _ = app.update(git_available());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        app
+    }
+
+    #[test]
+    fn message_edit_opens_only_when_allowed() {
+        let mut app = editable_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitEditStart);
+        assert!(app.tabs[0].view().unwrap().message_edit.is_some());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(
+            app.tabs[0].view().unwrap().message_edit.is_none(),
+            "Esc cancels"
+        );
+
+        // Pushed: no editor, the reason is kept for the tooltip.
+        let reason = git_core::reword::EditBlock::Pushed("origin/main".into()).reason();
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(Some(reason.clone())),
+        });
+        let _ = app.update(Message::CommitEditStart);
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.message_edit.is_none());
+        assert_eq!(
+            view.details.as_ref().unwrap().edit_block,
+            Loadable::Ready(Some(reason))
+        );
+        // A late answer for another commit is ignored.
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c1".into(),
+            result: Ok(None),
+        });
+        assert_ne!(
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .details
+                .as_ref()
+                .unwrap()
+                .edit_block,
+            Loadable::Ready(None)
+        );
+    }
+
+    #[test]
+    fn message_edit_is_blocked_without_git_and_during_operations() {
+        // Without Git: the write block is the reason, no background check.
+        let mut app = ready_app(&["c2", "c1"]);
+        app.tabs[0].view_mut().unwrap().write_block = Some("Git was not found".into());
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        assert_eq!(
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .details
+                .as_ref()
+                .unwrap()
+                .edit_block,
+            Loadable::Ready(Some("Git was not found".into()))
+        );
+        let mut app = app_in_state(rebasing());
+        let _ = app.update(Message::CommitSelected("c".into()));
+        assert_eq!(
+            app.tabs[0].view().unwrap().message_edit_block("c"),
+            Some(Some("Finish the running operation first".into()))
+        );
+        let _ = app.update(Message::CommitEditStart);
+        assert!(app.tabs[0].view().unwrap().message_edit.is_none());
+    }
+
+    #[test]
+    fn message_edit_saves_selects_and_undoes() {
+        let mut app = editable_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitEditStart);
+        let _ = app.update(Message::CommitEditSummary("   ".into()));
+        let _ = app.update(Message::CommitEditSave);
+        let edit = app.tabs[0].view().unwrap().message_edit.as_ref().unwrap();
+        assert_eq!(edit.error.as_deref(), Some("Enter a summary"));
+        let _ = app.update(Message::CommitEditSummary("Better summary".into()));
+        let _ = app.update(Message::CommitEditFactsLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(git_core::reword::EditFacts {
+                branch: "main".into(),
+                keep_old: vec!["copy".into()],
+                drops_signature: false,
+            }),
+        });
+        assert!(matches!(
+            &app.tabs[0].view().unwrap().message_edit.as_ref().unwrap().facts,
+            Loadable::Ready(f) if f.keep_old == ["copy"]
+        ));
+        let _ = app.update(Message::CommitEditSave);
+        assert_eq!(running_args(&app), ["Edit commit message"]);
+
+        // Success: the rewritten commit is selected, the editor closes and
+        // Ctrl+Z restores the branch.
+        let done = git_core::reword::Reworded {
+            branch: "main".into(),
+            old_head: "c2".into(),
+            new_head: "n2".into(),
+            new_commit: "n2".into(),
+        };
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Edit commit message".into(),
+            result: Ok(Some(History::Push(UndoAction::Reword(done)))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.message_edit.is_none());
+        assert_eq!(view.selection, Some(Selection::Commit("n2".into())));
+        assert_eq!(view.undo.last().unwrap().label(), "Edit commit message");
+        let _ = app.update(checked(Shortcut::Undo, false));
+        assert_eq!(running_args(&app), ["Undo Edit commit message"]);
+    }
+
     #[test]
     fn message_box_selects_but_never_edits() {
         use iced::widget::text_editor::{Action, Edit};
@@ -19380,6 +19700,7 @@ pub(crate) mod tests {
             id: "s".into(),
             changes: Loadable::Loading,
             all_files: None,
+            edit_block: Loadable::Loading,
         });
         let untracked = git_core::FileChange {
             path: "new.txt".into(),

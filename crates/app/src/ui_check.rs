@@ -1050,6 +1050,9 @@ mod tests {
     pub(crate) fn details_app(messages: &[(&str, &str, &str)]) -> App {
         let ids: Vec<&str> = messages.iter().map(|(id, _, _)| *id).collect();
         let mut app = ready_app(&ids);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
         let view = app.tabs[0].view_mut().unwrap();
         let mut snapshot = (*view.snapshot).clone();
         let mut commits = (*snapshot.commits).clone();
@@ -1185,6 +1188,71 @@ mod tests {
         app.settings.appearance.theme = crate::settings::ThemeChoice::Light;
         let _ = app.update(Message::FileListTreeChosen(false));
         snapshot(&app, "file-list-path-all-light");
+    }
+
+    /// Message editor in the details with the note about other refs
+    /// (M14-05); a click on the box opens it. Layout part runs always.
+    #[test]
+    fn message_box_click_opens_the_editor() {
+        let mut app = details_app(&[("c2", "Fix the typo", "Body text"), ("c1", "Initial", "")]);
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let messages: Vec<Message> = {
+            let mut sim = simulator(&app);
+            sim.click("Body text")
+                .unwrap_or_else(|e| panic!("no box: {e}"));
+            sim.into_messages().collect()
+        };
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::CommitEditStart)),
+            "{messages:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_message_editor() {
+        let mut app = details_app(&[
+            (
+                "c2",
+                "Fix the typo in the header",
+                "Explain why.\n\nRefs #12",
+            ),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        snapshot(&app, "message-edit-idle");
+        let _ = app.update(Message::CommitEditStart);
+        let _ = app.update(Message::CommitEditFactsLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(git_core::reword::EditFacts {
+                branch: "main".into(),
+                keep_old: vec!["backup".into(), "v1.2".into()],
+                drops_signature: true,
+            }),
+        });
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("message-edit-{theme}"));
+        }
     }
 
     /// A click on "commit: <short sha>" copies the full sha (M14-01).
