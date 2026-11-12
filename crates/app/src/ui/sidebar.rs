@@ -149,7 +149,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         tag_count.to_string(),
         tags,
     ));
-    let mut submodules_section = Some(submodules());
+    let mut submodules_section = Some(submodules(repo, &needle));
     let mut sections = column![].spacing(6);
     for kind in section_order(gitflow_section.is_some()) {
         let element = match kind {
@@ -283,9 +283,16 @@ fn section_with_action<'a>(
         .padding([4, 6])
         .width(Fill)
         .style(theme::section_header);
+    // SUBMODULES: right click on the header offers "Update all submodules".
+    let header: Element<'a, Message> = if section == Section::Submodules {
+        let header: Element<'a, Message> = header.into();
+        crate::ui::context_area::context_area(header, Message::SubmodulesHeaderMenu)
+    } else {
+        header.into()
+    };
 
     if collapsed {
-        header.into()
+        header
     } else {
         column![header].extend(items).into()
     }
@@ -360,26 +367,57 @@ fn gitflow<'a>(
     )
 }
 
-/// Submodules are listed from M2 on; the header stays visible but inactive.
-fn submodules<'a>() -> Element<'a, Message> {
-    crate::ui::panel::with_tooltip(
-        container(
-            row![
-                container(icons::tinted(Icon::ChevronRight, 12.0, |p| p
-                    .text_muted
-                    .scale_alpha(0.6)))
-                .width(INDENT),
-                icons::tinted(Icon::Package, 13.0, |p| p.text_muted.scale_alpha(0.6)),
-                text("SUBMODULES").size(11),
-                space::horizontal(),
-            ]
-            .spacing(6)
-            .align_y(iced::Center),
-        )
-        .padding([4, 6])
-        .width(Fill)
-        .style(theme::faded)
-        .into(),
+/// SUBMODULES (M12-06): always shown with its count like GitKraken; one
+/// row per submodule (nested ones indented) with a state icon and tooltip.
+/// Double click opens it in a tab; right click opens its menu.
+fn submodules<'a>(repo: &'a RepoView, needle: &str) -> Element<'a, Message> {
+    use git_core::submodule::SubmoduleState;
+    let all = &repo.submodules;
+    let items: Vec<Element<'a, Message>> = all
+        .iter()
+        .filter(|s| needle.is_empty() || s.path.to_lowercase().contains(needle))
+        .map(|submodule| {
+            let (icon, tint): (Icon, fn(&theme::ThemePalette) -> iced::Color) =
+                match submodule.state {
+                    SubmoduleState::Current => (Icon::Package, |p| p.text_muted),
+                    SubmoduleState::NotInitialized => (Icon::Pull, |p| p.text_muted),
+                    SubmoduleState::OutOfDate => (Icon::Alert, |p| p.warning),
+                    SubmoduleState::Modified => (Icon::Pencil, |p| p.warning),
+                    SubmoduleState::Conflict => (Icon::FileConflicted, |p| p.danger),
+                };
+            let state = crate::ui::panel::with_tooltip_text(
+                icons::tinted(icon, 13.0, tint).into(),
+                submodule.state.description().to_owned(),
+            );
+            let name = text(submodule.name().to_owned()).wrapping(text::Wrapping::None);
+            let name: Element<'a, Message> = if submodule.state == SubmoduleState::NotInitialized {
+                name.style(theme::text_muted).into()
+            } else {
+                name.into()
+            };
+            let content = row![state, name].spacing(6).align_y(iced::Center).into();
+            let depth = 1 + u16::try_from(submodule.depth(all)).unwrap_or(u16::MAX);
+            let item = list_button(content, depth, Message::StatusText(submodule.path.clone()));
+            let item = crate::ui::context_area::double_click_area(
+                item,
+                Message::OpenSubmodule(submodule.path.clone()),
+            );
+            let path = submodule.path.clone();
+            let item = crate::ui::context_area::context_area(item, move |position| {
+                Message::SubmoduleContextMenu {
+                    path: path.clone(),
+                    position,
+                }
+            });
+            crate::ui::panel::with_tooltip_text(item, submodule.path.clone())
+        })
+        .collect();
+    section(
+        repo,
+        Section::Submodules,
+        "SUBMODULES",
+        all.len().to_string(),
+        items,
     )
 }
 

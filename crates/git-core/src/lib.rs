@@ -41,6 +41,7 @@ pub mod signing;
 pub mod ssh;
 mod stash;
 mod state;
+pub mod submodule;
 mod todo;
 mod watch;
 

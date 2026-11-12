@@ -1078,6 +1078,21 @@ pub enum Message {
     SaveDue(u64),
     Saved(Result<(), String>),
     OpenRecent(PathBuf),
+    /// Submodules of tab `tab` read with HEAD at `head` (M12-06).
+    SubmodulesLoaded {
+        tab: TabId,
+        head: Option<String>,
+        result: Result<Vec<git_core::submodule::Submodule>, String>,
+    },
+    SubmoduleContextMenu {
+        path: String,
+        position: iced::Point,
+    },
+    SubmodulesHeaderMenu(iced::Point),
+    /// `git submodule update --init --recursive` for one submodule, or all.
+    SubmoduleUpdate(Option<String>),
+    /// Opens the submodule at this path (relative to the root) in a tab.
+    OpenSubmodule(String),
     RemoveRecent(TabId),
     CloseRequested(window::Id),
     Exit,
@@ -4628,8 +4643,71 @@ impl App {
         }
     }
 
+    /// Reads the submodules of tab `tab` in the background (M12-06).
+    fn load_submodules(&mut self, tab: TabId) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let writer = Arc::clone(&view.writer);
+        let root = view.backend.path().to_path_buf();
+        let head = view.snapshot.head.target().map(str::to_owned);
+        Task::perform(
+            blocking(move || {
+                git_core::submodule::submodules(&*writer, &root).map_err(|e| e.to_string())
+            }),
+            move |result| Message::SubmodulesLoaded {
+                tab,
+                head: head.clone(),
+                result,
+            },
+        )
+    }
+
+    /// New submodule states; after HEAD moved (checkout, pull, merge,
+    /// rebase) out-of-date submodules raise a toast with "Update".
+    fn submodules_loaded(
+        &mut self,
+        tab: TabId,
+        head: Option<String>,
+        result: Result<Vec<git_core::submodule::Submodule>, String>,
+    ) -> Task<Message> {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let Ok(list) = result else {
+            // Shown again with the next refresh; the section keeps the
+            // last known states.
+            return Task::none();
+        };
+        let moved = view
+            .submodules_head
+            .as_ref()
+            .is_some_and(|previous| *previous != head);
+        view.submodules_head = Some(head);
+        view.submodules = list;
+        let out_of_date = view
+            .submodules
+            .iter()
+            .filter(|s| s.state == git_core::submodule::SubmoduleState::OutOfDate)
+            .count();
+        if !moved || out_of_date == 0 {
+            return Task::none();
+        }
+        let text = match out_of_date {
+            1 => "1 submodule points to another commit than recorded.".to_owned(),
+            n => format!("{n} submodules point to other commits than recorded."),
+        };
+        self.notify(
+            crate::toast::Toast::new(
+                crate::toast::ToastKind::Info,
+                "Submodules are out of date",
+                text,
+            )
+            .with_action("Update", Message::SubmoduleUpdate(None)),
+        )
+    }
+
     /// Shows a toast (M12-02); info and success close by themselves.
-    #[allow(dead_code)] // first used by the submodule notice (M12-06)
     pub fn notify(&mut self, toast: crate::toast::Toast) -> Task<Message> {
         match self.toasts.push(toast) {
             Some(timer) => toast_timer(timer),
@@ -7866,6 +7944,63 @@ impl App {
                 self.status = format!("Could not save the session: {error}");
             }
             Message::OpenRecent(path) => return self.open_path(path),
+            Message::SubmodulesLoaded { tab, head, result } => {
+                return self.submodules_loaded(tab, head, result);
+            }
+            Message::SubmoduleContextMenu { path, position } => {
+                let writable = self.write_block().is_none();
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    crate::menus::submodule(&path, writable),
+                ));
+            }
+            Message::SubmodulesHeaderMenu(position) => {
+                let any = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .is_some_and(|v| !v.submodules.is_empty());
+                let writable = self.write_block().is_none() && any;
+                self.context_menu = Some(ContextMenu::new(
+                    position,
+                    crate::menus::submodules_header(writable),
+                ));
+            }
+            Message::SubmoduleUpdate(path) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let paths: Vec<String> = path.iter().cloned().collect();
+                let label = match &path {
+                    Some(path) => format!("Update submodule {path}"),
+                    None => "Update submodules".to_owned(),
+                };
+                return self.run_network(
+                    tab,
+                    crate::repo_view::NetworkRequest {
+                        label,
+                        kind: NetworkKind::SubmoduleUpdate,
+                        args: git_core::submodule::update_args(&paths),
+                        background: false,
+                    },
+                );
+            }
+            Message::OpenSubmodule(path) => {
+                let Some(root) = self
+                    .active_tab()
+                    .and_then(Tab::path)
+                    .map(|p| p.to_path_buf())
+                else {
+                    return Task::none();
+                };
+                // Its folder lies inside the superproject: match the root
+                // exactly instead of `open_path`'s subfolder rule.
+                let target = root.join(path);
+                if let Some(index) = self.tabs.iter().position(|t| t.path() == Some(&target)) {
+                    self.active = index;
+                    return Task::none();
+                }
+                return self.open_in_new_tab(target);
+            }
             Message::RemoveRecent(id) => {
                 if let Some(path) = self.tabs.iter().find(|t| t.id == id).and_then(Tab::path) {
                     let path = path.to_path_buf();
@@ -9321,7 +9456,8 @@ impl App {
                     .map(|v| v.backend.path().to_path_buf());
                 if let Some(root) = root {
                     if let Some(existing) = self.tabs.iter().position(|t| {
-                        t.id != id && t.view().is_some_and(|v| same_repo(v.backend.path(), &root))
+                        // Equal roots: a nested repository (submodule) is its own.
+                        t.id != id && t.view().is_some_and(|v| v.backend.path() == root)
                     }) {
                         let existing_id = self.tabs[existing].id;
                         self.close_tab(id);
@@ -9331,7 +9467,7 @@ impl App {
                         return Task::none();
                     }
                 }
-                return self.load_details();
+                return Task::batch([self.load_details(), self.load_submodules(id)]);
             }
             Message::SnapshotLoaded {
                 tab,
@@ -9393,8 +9529,9 @@ impl App {
                             && view.snapshot.state.is_clean()
                             && view.flow_resumed_at != Some(plan.next)
                     });
+                let submodules = self.load_submodules(id);
                 if resume {
-                    return Task::batch([self.resume_finish(id), self.load_details()]);
+                    return Task::batch([self.resume_finish(id), self.load_details(), submodules]);
                 }
                 // Branches that no longer exist leave the filter; a filter
                 // changed while loading is applied now.
@@ -9411,7 +9548,12 @@ impl App {
                     None => filter,
                 };
                 // Matches are commit indices: search the new history again.
-                let search = Task::batch([self.run_search(id, None), filter, self.persist()]);
+                let search = Task::batch([
+                    self.run_search(id, None),
+                    filter,
+                    self.persist(),
+                    submodules,
+                ]);
                 if reload {
                     return Task::batch([self.reload_diff(id), self.load_details(), search]);
                 }
@@ -15409,6 +15551,93 @@ pub(crate) mod tests {
             app.tabs[0].view().unwrap().busy.as_deref(),
             Some("Mark 2 files resolved")
         );
+    }
+
+    fn submodule(
+        path: &str,
+        state: git_core::submodule::SubmoduleState,
+    ) -> git_core::submodule::Submodule {
+        git_core::submodule::Submodule {
+            path: path.into(),
+            commit: "a".repeat(40),
+            state,
+        }
+    }
+
+    #[test]
+    fn out_of_date_submodules_raise_a_toast_after_head_moved() {
+        use git_core::submodule::SubmoduleState::{Current, OutOfDate};
+        let mut app = ready_app(&["c"]);
+        let tab = app.tabs[0].id;
+        let loaded = |head: &str, state| Message::SubmodulesLoaded {
+            tab,
+            head: Some(head.into()),
+            result: Ok(vec![
+                submodule("libs/a", state),
+                submodule("libs/a/b", Current),
+            ]),
+        };
+        // The first read (tab opened) stays quiet.
+        let _ = app.update(loaded("h1", OutOfDate));
+        assert!(app.toasts.list.is_empty());
+        assert_eq!(app.tabs[0].view().unwrap().submodules.len(), 2);
+        // HEAD moved (checkout, pull, merge, rebase): info toast with Update.
+        let _ = app.update(loaded("h2", OutOfDate));
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.title, "Submodules are out of date");
+        assert_eq!(
+            toast.text,
+            "1 submodule points to another commit than recorded."
+        );
+        assert!(toast.kind.times_out());
+        let (label, action) = toast.action.clone().unwrap();
+        assert_eq!(label, "Update");
+        assert!(matches!(*action, Message::SubmoduleUpdate(None)));
+        // Same HEAD, or nothing out of date: no further toast.
+        let _ = app.update(loaded("h2", OutOfDate));
+        let _ = app.update(loaded("h3", Current));
+        assert_eq!(app.toasts.list.len(), 1);
+        // A failed read keeps the last states.
+        let _ = app.update(Message::SubmodulesLoaded {
+            tab,
+            head: Some("h3".into()),
+            result: Err("boom".into()),
+        });
+        assert_eq!(app.tabs[0].view().unwrap().submodules.len(), 2);
+    }
+
+    #[test]
+    fn submodule_menus_update_and_open() {
+        use git_core::submodule::SubmoduleState::NotInitialized;
+        let mut app = staging_app(&[], &[]);
+        app.tabs[0].view_mut().unwrap().submodules = vec![submodule("libs/a", NotInitialized)];
+        let _ = app.update(Message::SubmoduleContextMenu {
+            path: "libs/a".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.clone().unwrap();
+        assert!(matches!(menu.select(0), Some(Message::SubmoduleUpdate(Some(p))) if p == "libs/a"));
+        assert!(matches!(menu.select(1), Some(Message::OpenSubmodule(p)) if p == "libs/a"));
+        assert!(matches!(menu.select(2), Some(Message::OpenFileLocation(p)) if p == "libs/a"));
+        assert!(matches!(menu.select(4), Some(Message::CopyToClipboard(p)) if p == "libs/a"));
+        app.context_menu = None;
+        let _ = app.update(Message::SubmodulesHeaderMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(
+            menu.select(0),
+            Some(Message::SubmoduleUpdate(None))
+        ));
+        // Update runs as a network operation with progress and Cancel.
+        let _ = app.update(Message::SubmoduleUpdate(Some("libs/a".into())));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Update submodule libs/a"));
+        let op = view.network.as_ref().unwrap();
+        assert_eq!(op.kind, crate::repo_view::NetworkKind::SubmoduleUpdate);
+        // Opening a submodule opens (or switches to) a tab for its folder.
+        let root = app.tabs[0].path().unwrap().to_path_buf();
+        let _ = app.update(Message::OpenSubmodule("libs/a".into()));
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.tabs[1].path(), Some(root.join("libs/a").as_path()));
     }
 
     #[test]

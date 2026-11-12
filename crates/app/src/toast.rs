@@ -12,7 +12,7 @@ use crate::app::Message;
 pub const TIMEOUT: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Warning, Info and Success are used by the next tasks (submodules M12-06).
+// Warning and Success are shown by later tasks; the view styles all kinds.
 #[allow(dead_code)]
 pub enum ToastKind {
     Error,
@@ -84,7 +84,6 @@ impl Toast {
         }
     }
 
-    #[allow(dead_code)] // first used by the submodule notice (M12-06)
     pub fn with_action(mut self, label: impl Into<String>, message: Message) -> Self {
         self.action = Some((label.into(), Box::new(message)));
         self

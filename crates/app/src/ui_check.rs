@@ -645,6 +645,49 @@ mod tests {
         }
     }
 
+    /// SUBMODULES section (M12-06): every state, a nested submodule, the
+    /// row menu and the out-of-date toast; dark and light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_submodules() {
+        use git_core::submodule::{Submodule, SubmoduleState as S};
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::staging_app(&[], &[]);
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let tab = app.tabs[0].id;
+            let list = [
+                ("libs/core", S::Current),
+                ("libs/core/nested", S::Modified),
+                ("libs/ui", S::OutOfDate),
+                ("vendor/zlib", S::NotInitialized),
+                ("tools/gen", S::Conflict),
+            ]
+            .into_iter()
+            .map(|(path, state)| Submodule {
+                path: path.into(),
+                commit: "a".repeat(40),
+                state,
+            })
+            .collect::<Vec<_>>();
+            for head in ["h1", "h2"] {
+                let _ = app.update(Message::SubmodulesLoaded {
+                    tab,
+                    head: Some(head.into()),
+                    result: Ok(list.clone()),
+                });
+            }
+            let _ = app.update(Message::SubmoduleContextMenu {
+                path: "libs/ui".into(),
+                position: iced::Point::new(120.0, 420.0),
+            });
+            snapshot(&app, &format!("submodules-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.
