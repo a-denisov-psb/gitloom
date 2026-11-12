@@ -20,6 +20,7 @@ mod diff_wrap;
 mod editor_style;
 mod fetch;
 mod file_history;
+mod file_list;
 mod format;
 mod fuzzy;
 mod graph_columns;

@@ -1102,6 +1102,91 @@ mod tests {
         snapshot(&app, "author-block-co-authors-avatars");
     }
 
+    /// `details_app` with commit c2 selected, its changes and all files.
+    fn file_list_app() -> App {
+        let mut app = details_app(&[("c2", "Rework the panel", ""), ("c1", "Initial", "")]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let change = |path: &str, kind| git_core::FileChange {
+            path: path.into(),
+            kind,
+            old_path: None,
+        };
+        let _ = app.update(Message::CommitChangesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(crate::repo_view::DetailChanges::Commit(vec![
+                change("src/ui/panel.rs", git_core::ChangeKind::Modified),
+                change("src/ui/old.rs", git_core::ChangeKind::Deleted),
+                change("docs/guide.md", git_core::ChangeKind::Added),
+                change("Cargo.toml", git_core::ChangeKind::Modified),
+            ])),
+        });
+        app
+    }
+
+    /// Unchanged files of "View all files" are muted and open the file's
+    /// content at the commit (M14-03). Layout only.
+    #[test]
+    fn unchanged_files_open_their_content() {
+        let mut app = file_list_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::FileListAllFilesToggled(true));
+        let _ = app.update(Message::AllFilesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(vec![
+                "Cargo.toml".into(),
+                "LICENSE".into(),
+                "docs/guide.md".into(),
+                "src/ui/panel.rs".into(),
+            ]),
+        });
+        let messages: Vec<Message> = {
+            let mut sim = simulator(&app);
+            sim.click("LICENSE")
+                .unwrap_or_else(|e| panic!("no row: {e}"));
+            sim.into_messages().collect()
+        };
+        assert!(
+            messages.iter().any(|m| matches!(m,
+                Message::FileBlameOpened { path, rev: Some(rev), .. }
+                    if path == "LICENSE" && rev == "c2")),
+            "{messages:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_file_list() {
+        let mut app = file_list_app();
+        let tab = app.tabs[0].id;
+        snapshot(&app, "file-list-path");
+        let _ = app.update(Message::FileListTreeChosen(true));
+        snapshot(&app, "file-list-tree");
+        let _ = app.update(Message::FileListFolderToggled("src/ui".into()));
+        let _ = app.update(Message::FileListSortToggled);
+        snapshot(&app, "file-list-tree-collapsed-desc");
+        let _ = app.update(Message::FileListSortToggled);
+        let _ = app.update(Message::FileListFolderToggled("src/ui".into()));
+        let _ = app.update(Message::FileListAllFilesToggled(true));
+        let _ = app.update(Message::AllFilesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(vec![
+                "Cargo.toml".into(),
+                "LICENSE".into(),
+                "docs/guide.md".into(),
+                "src/main.rs".into(),
+                "src/ui/panel.rs".into(),
+            ]),
+        });
+        snapshot(&app, "file-list-tree-all");
+        app.settings.appearance.theme = crate::settings::ThemeChoice::Light;
+        let _ = app.update(Message::FileListTreeChosen(false));
+        snapshot(&app, "file-list-path-all-light");
+    }
+
     /// A click on "commit: <short sha>" copies the full sha (M14-01).
     /// Layout only, so part of every test run.
     #[test]

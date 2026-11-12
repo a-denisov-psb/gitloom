@@ -88,11 +88,13 @@ Acceptance: unit tests for trailer parsing (case, several co-authors, trailers n
 
 Note (M14-02): `git_core::Commit` gained `committer` (name after the mailmap, empty when name and email equal the author's, so 100k commits allocate nothing extra). The e-mail moved from the author line into the name's tooltip. The initials tile keeps the theme's avatar color (no per-author color exists elsewhere in Gitloom). A parent beyond the loaded history is a disabled link with the tooltip "Not in the loaded history".
 
-### [ ] M14-03 File list summary, sort, Path/Tree, all files
+### [x] M14-03 File list summary, sort, Path/Tree, all files
 
 - Summary, toolbar, tree mode, "View all files", persistence.
 
 Acceptance: unit tests for the summary (every kind, plural) and the tree order; app tests for sort, mode switch, expand/collapse all, "View all files" (unchanged files muted, a click shows the file's content), persistence across restart; snapshots in Path and Tree mode.
+
+Note (M14-03): Git's copy and type-change kinds are reported by git-core as added and modified, so the summary has no "copied" or "type changed" entries. A click on an unchanged file opens the blame view at the commit, which shows the file's content (no extra content view). The sort toggle is a text button "A→Z" / "Z→A" (no sort icon in the icon set). The multi-commit selection has no file list today, so there is nothing to apply the options to; the stash file list keeps its Staged / Unstaged / Untracked sections. Folder collapse state lives for the session (only sort, mode and "View all files" are stored).
 
 ### [ ] M14-04 Message rewrite engine (ADR-051)
 

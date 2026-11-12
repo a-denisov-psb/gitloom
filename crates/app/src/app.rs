@@ -1126,6 +1126,25 @@ pub enum Message {
     },
     SummaryChanged(String),
     DescriptionEdited(iced::widget::text_editor::Action),
+    /// Sort toggle of the details' file list (M14-03).
+    FileListSortToggled,
+    /// Path (`false`) or Tree (`true`).
+    FileListTreeChosen(bool),
+    /// "View all files".
+    FileListAllFilesToggled(bool),
+    /// A folder of the file tree was clicked.
+    FileListFolderToggled(String),
+    /// "Expand all" (`true`) / "Collapse all" (`false`); the folder paths.
+    FileListExpandAll {
+        expand: bool,
+        folders: Vec<String>,
+    },
+    /// Every file of commit `id` (M14-03).
+    AllFilesLoaded {
+        tab: TabId,
+        id: String,
+        result: Result<Vec<String>, String>,
+    },
     /// "parent: <sha>" in the details (M14-02): select and scroll to it.
     ParentClicked(String),
     /// Selection in the details' message box (M14-01); edits are ignored.
@@ -4263,6 +4282,7 @@ impl App {
         view.details = Some(CommitDetails {
             id: id.clone(),
             changes: Loadable::Loading,
+            all_files: None,
         });
         view.message_box = view
             .snapshot
@@ -4309,7 +4329,47 @@ impl App {
                 result,
             },
         );
-        Task::batch([changes, signature])
+        let all_files = self.load_all_files();
+        Task::batch([changes, signature, all_files])
+    }
+
+    /// Loads every file of the selected commit's tree when "View all
+    /// files" is on (M14-03); stashes keep their sections.
+    fn load_all_files(&mut self) -> Task<Message> {
+        if !self.settings.file_list.all_files {
+            return Task::none();
+        }
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return Task::none();
+        };
+        let tab_id = tab.id;
+        let Some(view) = tab.view_mut() else {
+            return Task::none();
+        };
+        let Some(details) = view.details.as_mut() else {
+            return Task::none();
+        };
+        if details.all_files.is_some() || view.snapshot.is_stash(&details.id) {
+            return Task::none();
+        }
+        details.all_files = Some(Loadable::Loading);
+        let id = details.id.clone();
+        let writer = Arc::clone(&view.writer);
+        Task::perform(
+            blocking({
+                let id = id.clone();
+                move || {
+                    let cancel = git_core::CancelToken::new();
+                    git_core::tracked_files(writer.as_ref(), &id, &cancel)
+                        .map_err(|e| e.to_string())
+                }
+            }),
+            move |result| Message::AllFilesLoaded {
+                tab: tab_id,
+                id: id.clone(),
+                result,
+            },
+        )
     }
 
     fn select(&mut self, selection: Selection) -> Task<Message> {
@@ -8713,6 +8773,48 @@ impl App {
             Message::SummaryChanged(summary) => {
                 if let Some(view) = self.active_view_mut() {
                     view.summary = summary;
+                }
+            }
+            Message::FileListSortToggled => {
+                self.settings.file_list.descending = !self.settings.file_list.descending;
+                return self.save_settings();
+            }
+            Message::FileListTreeChosen(tree) => {
+                self.settings.file_list.tree = tree;
+                return self.save_settings();
+            }
+            Message::FileListAllFilesToggled(all) => {
+                self.settings.file_list.all_files = all;
+                let save = self.save_settings();
+                return Task::batch([save, self.load_all_files()]);
+            }
+            Message::FileListFolderToggled(path) => {
+                if let Some(view) = self.active_view_mut() {
+                    if !view.file_tree_collapsed.remove(&path) {
+                        view.file_tree_collapsed.insert(path);
+                    }
+                }
+            }
+            Message::FileListExpandAll { expand, folders } => {
+                if let Some(view) = self.active_view_mut() {
+                    if expand {
+                        view.file_tree_collapsed.clear();
+                    } else {
+                        view.file_tree_collapsed.extend(folders);
+                    }
+                }
+            }
+            Message::AllFilesLoaded { tab, id, result } => {
+                if let Some(details) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.details.as_mut())
+                    .filter(|d| d.id == id)
+                {
+                    details.all_files = Some(match result {
+                        Ok(files) => Loadable::Ready(files),
+                        Err(error) => Loadable::Failed(error),
+                    });
                 }
             }
             Message::ParentClicked(id) => {
@@ -18545,6 +18647,106 @@ pub(crate) mod tests {
         assert_eq!(app.tabs[0].view().unwrap().selected_commit(), Some("c150"));
     }
 
+    fn file_list_app() -> App {
+        let mut app = ready_app(&["c2", "c1"]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let change = |path: &str, kind| git_core::FileChange {
+            path: path.into(),
+            kind,
+            old_path: None,
+        };
+        let _ = app.update(Message::CommitChangesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(DetailChanges::Commit(vec![
+                change("src/ui/b.rs", git_core::ChangeKind::Modified),
+                change("README.md", git_core::ChangeKind::Added),
+            ])),
+        });
+        app
+    }
+
+    #[test]
+    fn file_list_options_toggle_and_persist() {
+        let mut app = file_list_app();
+        assert_eq!(app.settings.file_list, Default::default());
+        let _ = app.update(Message::FileListSortToggled);
+        let _ = app.update(Message::FileListTreeChosen(true));
+        assert!(app.settings.file_list.descending && app.settings.file_list.tree);
+        // Stored with the settings, so they survive a restart.
+        let json = crate::settings::to_json(&app.settings);
+        assert_eq!(
+            crate::settings::parse(&json).unwrap().file_list,
+            app.settings.file_list
+        );
+        let _ = app.update(Message::FileListSortToggled);
+        let _ = app.update(Message::FileListTreeChosen(false));
+        assert_eq!(app.settings.file_list, Default::default());
+    }
+
+    #[test]
+    fn file_tree_folders_expand_and_collapse() {
+        let mut app = file_list_app();
+        let _ = app.update(Message::FileListFolderToggled("src".into()));
+        assert!(app.tabs[0]
+            .view()
+            .unwrap()
+            .file_tree_collapsed
+            .contains("src"));
+        let _ = app.update(Message::FileListFolderToggled("src".into()));
+        assert!(app.tabs[0].view().unwrap().file_tree_collapsed.is_empty());
+        let _ = app.update(Message::FileListExpandAll {
+            expand: false,
+            folders: vec!["src".into(), "src/ui".into()],
+        });
+        assert_eq!(app.tabs[0].view().unwrap().file_tree_collapsed.len(), 2);
+        let _ = app.update(Message::FileListExpandAll {
+            expand: true,
+            folders: Vec::new(),
+        });
+        assert!(app.tabs[0].view().unwrap().file_tree_collapsed.is_empty());
+    }
+
+    #[test]
+    fn view_all_files_loads_the_tree_once_per_commit() {
+        let mut app = file_list_app();
+        let tab = app.tabs[0].id;
+        let all = |app: &App| {
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .details
+                .as_ref()
+                .unwrap()
+                .all_files
+                .clone()
+        };
+        assert_eq!(all(&app), None, "off: nothing loaded");
+        let _ = app.update(Message::FileListAllFilesToggled(true));
+        assert_eq!(all(&app), Some(Loadable::Loading));
+        let _ = app.update(Message::AllFilesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(vec![
+                "README.md".into(),
+                "a.txt".into(),
+                "src/ui/b.rs".into(),
+            ]),
+        });
+        assert!(matches!(all(&app), Some(Loadable::Ready(files)) if files.len() == 3));
+        // A late result of another commit is dropped.
+        let _ = app.update(Message::AllFilesLoaded {
+            tab,
+            id: "c1".into(),
+            result: Ok(Vec::new()),
+        });
+        assert!(matches!(all(&app), Some(Loadable::Ready(files)) if files.len() == 3));
+        // Another commit loads its own list right away.
+        let _ = app.update(Message::CommitSelected("c1".into()));
+        assert_eq!(all(&app), Some(Loadable::Loading));
+    }
+
     #[test]
     fn message_box_selects_but_never_edits() {
         use iced::widget::text_editor::{Action, Edit};
@@ -19177,6 +19379,7 @@ pub(crate) mod tests {
         view.details = Some(CommitDetails {
             id: "s".into(),
             changes: Loadable::Loading,
+            all_files: None,
         });
         let untracked = git_core::FileChange {
             path: "new.txt".into(),

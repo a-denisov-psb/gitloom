@@ -30,6 +30,8 @@ pub struct Settings {
     pub templates: Templates,
     /// Preferences → Editor (M11-06).
     pub editor: EditorSettings,
+    /// Sort, Path/Tree and "View all files" of the details' file list (M14-03).
+    pub file_list: crate::file_list::FileListOptions,
 }
 
 /// Preferences → Editor (M11-06): the code views (diffs, blame, file
@@ -226,6 +228,7 @@ impl Default for Settings {
             identities: Identities::default(),
             templates: Templates::default(),
             editor: EditorSettings::default(),
+            file_list: crate::file_list::FileListOptions::default(),
         }
     }
 }
@@ -914,6 +917,8 @@ mod tests {
         settings.general.auto_fetch_minutes = 15;
         settings.appearance.theme = ThemeChoice::Light;
         settings.appearance.zoom_percent = 120;
+        settings.file_list.tree = true;
+        settings.file_list.descending = true;
         settings.appearance.avatars = true;
         settings.tools.diff_tool = ToolChoice::Tool("meld".into());
         settings.tools.merge_tool = ToolChoice::None;

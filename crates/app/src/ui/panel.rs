@@ -16,12 +16,16 @@ use crate::ui::{change_badge, muted};
 
 const NOT_AVAILABLE: &str = "Not available yet";
 
-pub fn view<'a>(view: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Element<'a, Message> {
+pub fn view<'a>(
+    view: &'a RepoView,
+    avatars: &'a crate::avatars::Avatars,
+    files: crate::file_list::FileListOptions,
+) -> Element<'a, Message> {
     let content = match &view.selection {
         _ if view.is_multi() => multi_selection(view),
         Some(Selection::Wip) => staging(view),
         Some(Selection::Commit(id)) => match view.snapshot.commit(id) {
-            Some(commit) => details(view, commit, avatars),
+            Some(commit) => details(view, commit, avatars, files),
             None => muted("Nothing selected").into(),
         },
         None => container(muted("Nothing selected")).padding(12).into(),
@@ -556,9 +560,11 @@ fn details<'a>(
     view: &'a RepoView,
     commit: &'a Commit,
     avatars: &'a crate::avatars::Avatars,
+    files: crate::file_list::FileListOptions,
 ) -> Element<'a, Message> {
     // The message box takes at most 40 % of the panel (M14-01).
-    iced::widget::responsive(move |size| details_content(view, commit, avatars, size.height)).into()
+    iced::widget::responsive(move |size| details_content(view, commit, avatars, files, size.height))
+        .into()
 }
 
 /// "commit: <short sha>" centered like GitKraken; a click copies the full
@@ -620,21 +626,15 @@ fn details_content<'a>(
     view: &'a RepoView,
     commit: &'a Commit,
     avatars: &crate::avatars::Avatars,
+    options: crate::file_list::FileListOptions,
     height: f32,
 ) -> Element<'a, Message> {
     let author = author_block(view, commit, avatars);
 
     let files: Element<'a, Message> = match view.details.as_ref().map(|d| &d.changes) {
-        Some(Loadable::Ready(DetailChanges::Commit(changes))) => column![
-            muted(changed_files(changes.len())),
-            Column::with_children(
-                changes
-                    .iter()
-                    .map(|file| { file_row(view, file, DiffKind::Commit(commit.id.clone())) })
-            ),
-        ]
-        .spacing(8)
-        .into(),
+        Some(Loadable::Ready(DetailChanges::Commit(changes))) => {
+            commit_files(view, &commit.id, changes, options)
+        }
         Some(Loadable::Ready(DetailChanges::Stash(changes))) => {
             stash_files(view, &commit.id, changes)
         }
@@ -862,6 +862,22 @@ fn file_section_with_menu<'a>(
 }
 
 fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Element<'a, Message> {
+    let label = match &file.old_path {
+        Some(old) => format!("{old} → {}", file.path),
+        None => file.path.clone(),
+    };
+    file_row_labeled(view, file, kind, label, 0)
+}
+
+/// [`file_row`] with its own label (tree mode: the last segment) and
+/// indentation level (M14-03).
+fn file_row_labeled<'a>(
+    view: &'a RepoView,
+    file: &'a FileChange,
+    kind: DiffKind,
+    label: String,
+    depth: usize,
+) -> Element<'a, Message> {
     let request = DiffRequest {
         kind,
         path: file.path.clone(),
@@ -875,11 +891,6 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         CenterView::Graph | CenterView::Rebase(_) | CenterView::FileHistory(_) => false,
     };
 
-    let label = match &file.old_path {
-        Some(old) => format!("{old} → {}", file.path),
-        None => file.path.clone(),
-    };
-
     let area = match &request.kind {
         DiffKind::Staged => FileArea::Staged,
         DiffKind::Unstaged | DiffKind::Untracked => FileArea::Unstaged,
@@ -887,6 +898,7 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
     };
     let row = button(
         row![
+            space::horizontal().width(tree_indent(depth)),
             change_badge(file.kind),
             text(label).wrapping(text::Wrapping::None),
         ]
@@ -938,6 +950,222 @@ fn file_row<'a>(view: &'a RepoView, file: &'a FileChange, kind: DiffKind) -> Ele
         area,
         position,
     })
+}
+
+/// Indentation of a tree row at `depth` (M14-03).
+fn tree_indent(depth: usize) -> f32 {
+    depth as f32 * 14.0
+}
+
+fn small_button(label: &str, message: Message) -> button::Button<'_, Message> {
+    button(text(label).size(12))
+        .padding([2, 8])
+        .style(theme::flat)
+        .on_press(message)
+}
+
+/// File list of a commit (M14-03): summary per kind, toolbar (sort,
+/// Path/Tree, "View all files", expand/collapse) and the rows.
+fn commit_files<'a>(
+    view: &'a RepoView,
+    id: &'a str,
+    changes: &'a [FileChange],
+    options: crate::file_list::FileListOptions,
+) -> Element<'a, Message> {
+    use crate::branch_tree::Row;
+    use crate::file_list::Entry;
+    let summary: Element<'a, Message> = if changes.is_empty() {
+        muted(crate::file_list::summary(changes)).size(12).into()
+    } else {
+        row(crate::file_list::counts(changes)
+            .into_iter()
+            .map(|(kind, count)| {
+                row![
+                    crate::icons::change_icon(kind, 14.0),
+                    text(crate::file_list::count_label(kind, count)).size(12),
+                ]
+                .spacing(4)
+                .align_y(iced::Center)
+                .into()
+            }))
+        .spacing(12)
+        .into()
+    };
+
+    let all = match view.details.as_ref().and_then(|d| d.all_files.as_ref()) {
+        Some(Loadable::Ready(files)) if options.all_files => Some(files.as_slice()),
+        _ => None,
+    };
+    let entries = crate::file_list::entries(changes, all, options.descending);
+    let nodes = options
+        .tree
+        .then(|| crate::file_list::tree(&entries, options.descending));
+
+    let segment = |label: &'a str, active: bool, tree: bool| {
+        button(text(label).size(12))
+            .padding([2, 8])
+            .style(if active {
+                theme::mode_active
+            } else {
+                theme::flat
+            })
+            .on_press(Message::FileListTreeChosen(tree))
+    };
+    let sort = with_tooltip_text(
+        small_button(
+            if options.descending { "Z→A" } else { "A→Z" },
+            Message::FileListSortToggled,
+        )
+        .into(),
+        "Sort by path".into(),
+    );
+    let mut toolbar = row![
+        sort,
+        row![
+            segment("Path", !options.tree, false),
+            segment("Tree", options.tree, true)
+        ],
+        checkbox(options.all_files)
+            .label("View all files")
+            .size(14)
+            .text_size(12)
+            .on_toggle(Message::FileListAllFilesToggled),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    if let Some(nodes) = &nodes {
+        let folders = crate::file_list::folder_paths(nodes);
+        toolbar = toolbar.extend([
+            small_button(
+                "Expand all",
+                Message::FileListExpandAll {
+                    expand: true,
+                    folders: Vec::new(),
+                },
+            )
+            .into(),
+            small_button(
+                "Collapse all",
+                Message::FileListExpandAll {
+                    expand: false,
+                    folders,
+                },
+            )
+            .into(),
+        ]);
+    }
+
+    let entry_row = |entry: Entry<'a>, label: String, depth: usize| -> Element<'a, Message> {
+        match entry {
+            Entry::Changed(file) => {
+                file_row_labeled(view, file, DiffKind::Commit(id.to_owned()), label, depth)
+            }
+            // Unchanged: muted; a click shows the file's content at the
+            // commit (blame view).
+            Entry::Unchanged(path) => button(
+                row![
+                    space::horizontal().width(tree_indent(depth) + 20.0),
+                    muted(label).wrapping(text::Wrapping::None),
+                ]
+                .align_y(iced::Center),
+            )
+            .on_press(Message::FileBlameOpened {
+                path: path.to_owned(),
+                start: Some(id.to_owned()),
+                rev: Some(id.to_owned()),
+            })
+            .padding([3, 12])
+            .width(Fill)
+            .clip(true)
+            .style(theme::list_item(false))
+            .into(),
+        }
+    };
+    let rows: Vec<Element<'a, Message>> = match &nodes {
+        None => entries
+            .iter()
+            .map(|entry| {
+                let label = match entry {
+                    Entry::Changed(file) => match &file.old_path {
+                        Some(old) => format!("{old} → {}", file.path),
+                        None => file.path.clone(),
+                    },
+                    Entry::Unchanged(path) => (*path).to_owned(),
+                };
+                entry_row(*entry, label, 0)
+            })
+            .collect(),
+        Some(nodes) => crate::branch_tree::rows(
+            nodes,
+            &|path| view.file_tree_collapsed.contains(path),
+            false,
+        )
+        .into_iter()
+        .map(|item| match item {
+            Row::Folder {
+                depth,
+                name,
+                path,
+                expanded,
+            } => {
+                let (chevron, folder) = if expanded {
+                    (
+                        crate::icons::Icon::ChevronDown,
+                        crate::icons::Icon::FolderOpen,
+                    )
+                } else {
+                    (crate::icons::Icon::ChevronRight, crate::icons::Icon::Folder)
+                };
+                button(
+                    row![
+                        space::horizontal().width(tree_indent(depth)),
+                        crate::icons::icon(chevron, 12.0),
+                        crate::icons::icon(folder, 14.0),
+                        text(name.to_owned()).wrapping(text::Wrapping::None),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Center),
+                )
+                .on_press(Message::FileListFolderToggled(path.to_owned()))
+                .padding([3, 12])
+                .width(Fill)
+                .clip(true)
+                .style(theme::list_item(false))
+                .into()
+            }
+            Row::Branch {
+                depth,
+                index,
+                label,
+            } => match entries.get(index) {
+                Some(entry) => entry_row(*entry, label.to_owned(), depth),
+                None => space::vertical().height(0).into(),
+            },
+        })
+        .collect(),
+    };
+    let loading: Option<Element<'a, Message>> =
+        match view.details.as_ref().and_then(|d| d.all_files.as_ref()) {
+            Some(Loadable::Loading) if options.all_files => {
+                Some(muted("Loading all files…").size(12).into())
+            }
+            Some(Loadable::Failed(error)) if options.all_files => Some(
+                text(error.clone())
+                    .size(12)
+                    .style(theme::text_danger)
+                    .into(),
+            ),
+            _ => None,
+        };
+    column![
+        muted(changed_files(changes.len())).size(12),
+        summary,
+        toolbar.wrap().vertical_spacing(4),
+    ]
+    .push(loading)
+    .push(Column::with_children(rows))
+    .spacing(8)
+    .into()
 }
 
 /// "Stage all" / "Unstage all": active when writing is possible and the list is not empty.
