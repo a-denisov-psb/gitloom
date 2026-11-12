@@ -96,11 +96,13 @@ Acceptance: unit tests for the summary (every kind, plural) and the tree order; 
 
 Note (M14-03): Git's copy and type-change kinds are reported by git-core as added and modified, so the summary has no "copied" or "type changed" entries. A click on an unchanged file opens the blame view at the commit, which shows the file's content (no extra content view). The sort toggle is a text button "A→Z" / "Z→A" (no sort icon in the icon set). The multi-commit selection has no file list today, so there is nothing to apply the options to; the stash file list keeps its Staged / Unstaged / Untracked sections. Folder collapse state lives for the session (only sort, mode and "View all files" are stored).
 
-### [ ] M14-04 Message rewrite engine (ADR-051)
+### [x] M14-04 Message rewrite engine (ADR-051)
 
 - git-core `reword_unpushed(branch, commit, message)` per ADR-051, including eligibility checks (`EditBlock` reason: pushed with the remote branch name, not on the checked-out branch, operation running) and the list of local branches and tags that keep the old commit.
 
 Acceptance: integration tests: HEAD; a commit three back on a linear branch; a commit before a merge (the merge is rebuilt with its second parent unchanged, no conflict); staged and unstaged changes and untracked files untouched (byte compare, `git ls-files -s`); author name, e-mail and date preserved; committer updated; signed rebuild with an SSH signing key when `commit.gpgSign` is true; refused when pushed, on another branch, or during a merge; ref update refused when the branch moved meanwhile; undo and redo restore the exact branch oid.
+
+Note (M14-04): `git_core::reword` (`edit_block`, `edit_facts`, `reword_unpushed`, `Reworded::apply` for undo/redo). The author is passed to `git commit-tree` through `GIT_AUTHOR_*` with the new `GitWriter::run_with_env`; the encoding header is kept for rebuilt descendants and dropped for the target (its new message is UTF-8). "The branch moved meanwhile" is guarded by `update-ref <new> <old>` and tested through undo after a new commit. Tests: `crates/git-core/tests/reword.rs`.
 
 ### [ ] M14-05 Edit message in the details
 

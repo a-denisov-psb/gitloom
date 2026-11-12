@@ -227,6 +227,20 @@ pub trait GitWriter: Send + Sync {
     /// Runs `git` with `args` in the repository root.
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput>;
 
+    /// Runs `git` like [`Self::run`] with extra environment variables
+    /// (`git commit-tree` takes the author from `GIT_AUTHOR_*`, ADR-051).
+    fn run_with_env(
+        &self,
+        args: &[&str],
+        env: &[(&str, &str)],
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
+        let _ = (args, env, options);
+        Err(Error::Backend(
+            "this backend cannot pass environment variables".into(),
+        ))
+    }
+
     /// Runs `git` like [`Self::run`] but returns the exit code (`None` if
     /// terminated) with the output instead of failing on a non-zero code,
     /// for commands that report results that way (`git merge-file`).
@@ -805,6 +819,19 @@ impl GitWriter for CliBackend {
 
     fn run(&self, args: &[&str], options: RunOptions<'_>) -> Result<GitOutput> {
         self.execute(self.command(), args, options)
+    }
+
+    fn run_with_env(
+        &self,
+        args: &[&str],
+        env: &[(&str, &str)],
+        options: RunOptions<'_>,
+    ) -> Result<GitOutput> {
+        let mut command = self.command();
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        self.execute(command, args, options)
     }
 
     fn run_status(

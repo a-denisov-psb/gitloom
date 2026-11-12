@@ -36,6 +36,7 @@ pub mod remote_undo;
 pub mod remote_web;
 mod reset;
 mod resolve;
+pub mod reword;
 mod rewrite;
 pub mod signature;
 pub mod signing;
