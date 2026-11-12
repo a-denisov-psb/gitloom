@@ -41,7 +41,7 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - **Terminal** (Alt+T) opens your system terminal in the repository instead of a terminal inside the app.
 - Discarding a hunk or selected lines asks first (GitKraken asks only for files and "discard all"). "Discard all" with staged changes asks whether to discard those too.
 - **Reset** opens a dialog with Soft / Mixed / Hard instead of a submenu; Hard lists the changes that will be lost. It is also offered on the checked-out commit.
-- A stash pop or apply that conflicts can be undone completely (banner, Ctrl+Z); conflicted files can be discarded and the discard undone.
+- A stash pop or apply that conflicts can be undone completely (Undo below the commit button, Ctrl+Z); conflicted files can be discarded and the discard undone.
 - Merge, rebase or checkout blocked by local changes offers "Stash and …"; merge and rebase re-apply the stash automatically.
 - A Git lock file (`index.lock`) is never deleted; the operation offers **Retry** instead.
 - Every graph column, Commit message included, has its own width; a table wider than the window scrolls sideways instead of fitting it. The gear above the graph shows or hides Author, Date and SHA.

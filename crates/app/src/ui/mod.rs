@@ -192,23 +192,14 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
                 },
             )]
             .spacing(1);
-            let finish = view.snapshot.flow_finish.as_ref();
-            match (view.snapshot.state_banner(), finish) {
-                // A Git flow finish stopped in a merge: "Finishing … · Merging …".
-                (Some(state), Some(plan)) => {
-                    content = content.push(state_banner(
-                        view,
-                        format!("{} · {state}", plan.title()),
-                        true,
-                    ));
-                }
-                (Some(state), None) => content = content.push(state_banner(view, state, false)),
-                // A finish waits (after a restart or a failed step).
-                (None, Some(plan)) => content = content.push(finish_banner(view, plan)),
-                (None, None) => {}
-            }
-            if let Some(banner) = view.conflict_banner() {
-                content = content.push(conflict_banner(view, banner));
+            // A running operation shows in the graph and the right panel
+            // (M12-05); a Git flow finish that waits (after a restart or a
+            // failed step) keeps its bar.
+            if let (true, Some(plan)) = (
+                view.snapshot.state.is_clean(),
+                view.snapshot.flow_finish.as_ref(),
+            ) {
+                content = content.push(finish_banner(view, plan));
             }
             if let Some(error) = &view.error {
                 content = content.push(banner(error, tab.id));
@@ -331,8 +322,6 @@ fn notice_banner(notice: &str) -> Element<'_, Message> {
     .into()
 }
 
-/// Operation in progress, like GitKraken's "Merging X into Y" bar, with
-/// Continue (uses the commit panel's message), Skip and Abort.
 /// A Git flow finish that is not running (after a restart or a failed
 /// step): "Continue finishing" / "Abort" (M7-10).
 fn finish_banner<'a>(
@@ -359,121 +348,6 @@ fn finish_banner<'a>(
                 .padding([3, 10])
                 .style(button::danger)
                 .on_press_maybe(idle.then_some(Message::FlowFinishAbort)),
-        ]
-        .spacing(12)
-        .align_y(iced::Center),
-    )
-    .padding([6, 12])
-    .width(Fill)
-    .style(theme::state_banner)
-    .into()
-}
-
-/// `finishing`: the operation belongs to a Git flow finish; Abort aborts
-/// the finish (M7-10).
-fn state_banner(view: &RepoView, state: String, finishing: bool) -> Element<'_, Message> {
-    let Some(operation) = view.snapshot.state.kind() else {
-        return space::horizontal().into();
-    };
-    let conflicts = !view.conflicted_files().is_empty();
-    let hint = if conflicts {
-        "Resolve conflicts and stage them, then continue."
-    } else {
-        "Check the message in the commit panel, then continue."
-    };
-    let idle = view.write_block.is_none() && view.busy.is_none();
-    let action = |label: &'static str, style: fn(&iced::Theme, button::Status) -> button::Style| {
-        button(text(label).size(12)).padding([3, 10]).style(style)
-    };
-    let blocker = crate::app::commit_blocker(view, false);
-    let continue_button = action("Continue", button::primary)
-        .on_press_maybe((idle && blocker.is_none()).then_some(Message::ContinueOperation));
-    let continue_button: Element<'_, Message> = match (&view.write_block, blocker) {
-        (Some(_), _) => panel::write_tooltip(continue_button.into(), view),
-        (None, Some(reason)) => panel::with_tooltip_text(continue_button.into(), reason),
-        (None, None) => continue_button.into(),
-    };
-    let mut actions = row![continue_button].spacing(6);
-    if operation.can_skip() {
-        actions = actions.push(
-            action("Skip", button::secondary)
-                .on_press_maybe(idle.then_some(Message::SkipOperation)),
-        );
-    }
-    let abort = if finishing {
-        Message::FlowFinishAbort
-    } else {
-        Message::AbortOperation
-    };
-    actions = actions.push(action("Abort", button::danger).on_press_maybe(idle.then_some(abort)));
-    container(
-        row![
-            crate::icons::tinted(crate::icons::Icon::Merge, 15.0, |p| p.accent),
-            text(state).style(theme::text_normal),
-            muted(hint).size(12),
-            space::horizontal(),
-            actions,
-        ]
-        .spacing(12)
-        .align_y(iced::Center),
-    )
-    .padding([6, 12])
-    .width(Fill)
-    .style(theme::state_banner)
-    .into()
-}
-
-/// Conflicted files that no Git operation explains: a stash pop/apply that
-/// stopped in conflicts, or leftovers (M9-01, ADR-044).
-fn conflict_banner(
-    view: &RepoView,
-    banner: crate::repo_view::ConflictBanner,
-) -> Element<'_, Message> {
-    use crate::repo_view::ConflictBanner;
-    let idle = view.write_block.is_none() && view.busy.is_none();
-    let action = |label: &'static str, style: fn(&iced::Theme, button::Status) -> button::Style| {
-        button(text(label).size(12)).padding([3, 10]).style(style)
-    };
-    let mut actions = row![].spacing(6);
-    let hint = match &banner {
-        ConflictBanner::StashConflicts { undo, .. } => {
-            if *undo {
-                actions = actions.push(
-                    action("Undo", button::secondary).on_press_maybe(idle.then_some(Message::Undo)),
-                );
-            }
-            let drop = action("Drop stash", button::secondary);
-            actions = actions.push(panel::with_tooltip_text(
-                drop.into(),
-                "Resolve the conflicts first".into(),
-            ));
-            "Resolve the conflicts and stage them."
-        }
-        ConflictBanner::StashResolved { id, .. } => {
-            actions = actions
-                .push(
-                    action("Drop stash", button::primary)
-                        .on_press_maybe(idle.then(|| Message::StashDropConfirmed(id.clone()))),
-                )
-                .push(action("Keep stash", button::secondary).on_press(Message::KeepStash));
-            "Drop the stash if you no longer need it."
-        }
-        ConflictBanner::Orphaned => {
-            actions = actions.push(
-                action("Discard conflicted files…", button::danger).on_press_maybe(
-                    idle.then_some(Message::Discard(crate::app::DiscardTarget::Conflicted)),
-                ),
-            );
-            "Resolve them in the conflict view (click a conflicted file), or discard them."
-        }
-    };
-    container(
-        row![
-            crate::icons::tinted(crate::icons::Icon::Alert, 15.0, |p| p.warning),
-            text(banner.text()).style(theme::text_normal),
-            muted(hint).size(12),
-            space::horizontal(),
-            actions,
         ]
         .spacing(12)
         .align_y(iced::Center),

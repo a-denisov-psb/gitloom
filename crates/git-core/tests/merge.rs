@@ -239,3 +239,45 @@ fn local_changes_block_the_rebase_unless_autostashed() {
         "local\n"
     );
 }
+
+#[test]
+fn mark_all_resolved_then_commit_and_merge() {
+    // M12-05: two conflicts; one resolved by hand, one still with markers.
+    let repo = repo();
+    repo.commit("b.txt", "base\n", "add b");
+    repo.branch("topic");
+    repo.commit("a.txt", "main\n", "main a");
+    repo.commit("b.txt", "main\n", "main b");
+    repo.checkout("topic");
+    repo.commit("a.txt", "topic\n", "topic a");
+    repo.commit("b.txt", "topic\n", "topic b");
+    repo.checkout("main");
+    let git = cli(&repo);
+    assert_eq!(
+        merge(&git, "topic", false).unwrap(),
+        MergeOutcome::Conflicts
+    );
+    std::fs::write(repo.path().join("a.txt"), "resolved\n").unwrap();
+    let paths = vec!["a.txt".to_owned(), "b.txt".to_owned()];
+    assert_eq!(
+        git_core::files_with_conflict_markers(repo.path(), &paths),
+        ["b.txt"]
+    );
+    // Confirmed anyway: everything is staged, the merge commits.
+    git.stage(&paths).unwrap();
+    let status = repo.git(&["status", "--porcelain"]);
+    assert!(!status.contains("UU"), "{status}");
+    // "Commit and merge" concludes the merge with the panel's message.
+    git.commit("Merge branch 'topic'", false).unwrap();
+    assert_eq!(state(&repo), RepoState::Clean);
+    assert_eq!(
+        repo.git(&["rev-list", "--parents", "-n1", "HEAD"])
+            .split(' ')
+            .count(),
+        3
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("a.txt")).unwrap(),
+        "resolved\n"
+    );
+}

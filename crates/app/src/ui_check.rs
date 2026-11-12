@@ -591,6 +591,60 @@ mod tests {
         }
     }
 
+    /// Operation state like GitKraken (M12-05): graph row, panel title,
+    /// Conflicted/Resolved Files with "Mark all resolved", "Commit and
+    /// merge"/"Abort merge"; then a commit selected with the details
+    /// header; a rebase without conflicts. All themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_operation_state() {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
+            let mut app = crate::app::tests::app_in_state(git_core::RepoState::Merging {
+                merge_head: "x".into(),
+            });
+            app.settings.appearance.theme = choice;
+            let view = app.tabs[0].view_mut().unwrap();
+            let tree = git_core::WorkingTree {
+                unstaged: vec![git_core::FileChange {
+                    path: "src/main.rs".into(),
+                    kind: git_core::ChangeKind::Conflicted,
+                    old_path: None,
+                }],
+                staged: ["README.md", "src/lib.rs"]
+                    .iter()
+                    .map(|p| git_core::FileChange {
+                        path: (*p).into(),
+                        kind: git_core::ChangeKind::Modified,
+                        old_path: None,
+                    })
+                    .collect(),
+            };
+            view.operation_conflicts =
+                Some(["src/lib.rs".to_owned(), "src/main.rs".to_owned()].into());
+            view.snapshot = std::sync::Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("operation-0-merge-{theme}"));
+            let id = app.tabs[0].view().unwrap().snapshot.commits[0].id.clone();
+            let _ = app.update(Message::CommitSelected(id));
+            snapshot(&app, &format!("operation-1-details-{theme}"));
+
+            let mut rebase = crate::app::tests::app_in_state(git_core::RepoState::Rebasing {
+                branch: Some("topic".into()),
+                onto: None,
+                step: Some((2, 3)),
+                commit: None,
+            });
+            rebase.settings.appearance.theme = choice;
+            let _ = rebase.update(Message::WipSelected);
+            snapshot(&rebase, &format!("operation-2-rebase-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

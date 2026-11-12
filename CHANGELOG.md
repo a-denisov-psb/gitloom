@@ -47,6 +47,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- A running merge, rebase, cherry-pick, revert or stash conflict shows like GitKraken instead of the bar at the top of the tab: a row in the warning color at the top of the graph ("A file conflict was found when attempting to merge into main"), a bar above the details of another commit ("1 file conflict in working directory · View conflict"), the panel title "Merge conflicts detected – Merging topic into main", Conflicted Files and Resolved Files, "Mark all resolved" (asks first when a file still contains conflict markers) and the buttons "Commit and merge" / "Continue rebase" … with "Abort merge" / "Abort rebase" … (Skip for rebase and cherry-pick).
+
 - Conflict view side headers name the commit and branch like GitKraken ("A · Commit 1a2b3c4 on main", "B · Commit 5e6f7a8 on topic"), also during a rebase and a cherry-pick; stash conflicts keep "Updated upstream" / "Stashed changes".
 
 - Errors that only inform appear as notifications at the bottom left instead of dialogs: a plain-language explanation of what went wrong and what to do, with Git's output under **Details** and **Copy**; they stay until closed. Up to three are shown; information closes after 6 seconds (not while the pointer rests on it). Dialogs that ask for a decision stay.

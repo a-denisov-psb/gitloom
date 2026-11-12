@@ -928,9 +928,6 @@ pub enum Message {
         source: String,
         autostash: bool,
     },
-    /// Continue the operation in progress with the commit panel's message
-    /// (banner button; the commit button does the same).
-    ContinueOperation,
     /// Skip the current commit of a rebase or cherry-pick.
     SkipOperation,
     /// Abort the operation in progress (banner, failed pull dialog).
@@ -1037,6 +1034,18 @@ pub enum Message {
     StashApply(String),
     /// Close the banner of a resolved stash conflict without dropping it.
     KeepStash,
+    /// "Mark all resolved" (M12-05): checks the conflicted files for
+    /// markers, then stages them (after a confirmation if any has markers).
+    MarkAllResolved,
+    MarkAllResolvedChecked {
+        tab: TabId,
+        paths: Vec<String>,
+        with_markers: Vec<String>,
+    },
+    MarkAllResolvedConfirmed {
+        tab: TabId,
+        paths: Vec<String>,
+    },
     /// Whether the files of the stash pop/apply to undo changed since.
     StashUndoChecked {
         tab: TabId,
@@ -7554,7 +7563,6 @@ impl App {
             Message::Merge { .. } | Message::FastForward { .. } | Message::Rebase { .. } => {
                 return self.merge(message);
             }
-            Message::ContinueOperation => return self.commit(false),
             Message::SkipOperation => return self.skip_or_abort(true),
             Message::AbortOperation => return self.skip_or_abort(false),
             Message::AutoFetchDue(seq) => {
@@ -7687,6 +7695,67 @@ impl App {
                 if let Some(view) = self.active_view_mut() {
                     view.stash_conflict = None;
                 }
+            }
+            Message::MarkAllResolved => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let paths: Vec<String> = view
+                    .conflicted_files()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect();
+                if paths.is_empty() {
+                    return Task::none();
+                }
+                let root = view.backend.path().to_path_buf();
+                return Task::perform(
+                    blocking(move || {
+                        let with_markers = git_core::files_with_conflict_markers(&root, &paths);
+                        Ok::<_, String>((paths, with_markers))
+                    }),
+                    move |result| match result {
+                        Ok((paths, with_markers)) => Message::MarkAllResolvedChecked {
+                            tab,
+                            paths,
+                            with_markers,
+                        },
+                        Err(_) => Message::MarkAllResolvedChecked {
+                            tab,
+                            paths: Vec::new(),
+                            with_markers: Vec::new(),
+                        },
+                    },
+                );
+            }
+            Message::MarkAllResolvedChecked {
+                tab,
+                paths,
+                with_markers,
+            } => {
+                if paths.is_empty() {
+                    return Task::none();
+                }
+                if with_markers.is_empty() {
+                    return self.update(Message::MarkAllResolvedConfirmed { tab, paths });
+                }
+                self.modal = Some(Modal::confirm(
+                    "Mark all resolved",
+                    mark_resolved_text(&with_markers),
+                    "Mark all resolved",
+                    false,
+                    Message::MarkAllResolvedConfirmed { tab, paths },
+                ));
+            }
+            Message::MarkAllResolvedConfirmed { tab, paths } => {
+                let label = match paths.len() {
+                    1 => "Mark 1 file resolved".to_owned(),
+                    n => format!("Mark {n} files resolved"),
+                };
+                return self.run_write(tab, label, move |git| git.stage(&paths));
             }
             Message::StashUndoChecked { tab, result } => match result {
                 Ok(true) => {
@@ -9907,6 +9976,21 @@ fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut:
         _ => return false,
     }
     true
+}
+
+/// Confirmation of "Mark all resolved" when files still contain conflict
+/// markers (M12-05).
+fn mark_resolved_text(with_markers: &[String]) -> String {
+    let list: Vec<String> = with_markers.iter().map(|p| format!("• {p}")).collect();
+    let (these, contain) = if with_markers.len() == 1 {
+        ("This file still contains", "it")
+    } else {
+        ("These files still contain", "them")
+    };
+    format!(
+        "{these} conflict markers:\n{}\n\nMark {contain} resolved anyway? The markers are committed as they are.",
+        list.join("\n")
+    )
 }
 
 /// Confirmation text for discarding the conflicted files `paths` (M9-03).
@@ -12902,7 +12986,7 @@ pub(crate) mod tests {
             commit_blocker(app.tabs[0].view().unwrap(), false).as_deref(),
             Some(NO_IDENTITY)
         );
-        let _ = app.update(Message::ContinueOperation);
+        let _ = app.update(Message::CommitRequested);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
     }
 
@@ -15122,6 +15206,203 @@ pub(crate) mod tests {
         assert_eq!(position(&mut app), Some((2, 2)));
     }
 
+    fn operation_of(app: &App) -> crate::operation::OperationStatus {
+        app.tabs[0].view().unwrap().operation().unwrap()
+    }
+
+    #[test]
+    fn operation_texts_like_gitkraken() {
+        use crate::operation::OpKind;
+        use git_core::{Operation, RepoState};
+        // (state, row with conflicts, row without, title, heading, commit, abort)
+        let cases = [
+            (
+                merging(),
+                "A file conflict was found when attempting to merge into HEAD",
+                "Merge in progress",
+                "Merging x into HEAD",
+                "Merge conflicts detected",
+                "Commit and merge",
+                "Abort merge",
+            ),
+            (
+                rebasing(),
+                "A file conflict was found when attempting to rebase topic",
+                "Rebase in progress",
+                "Rebasing topic",
+                "Rebase conflicts detected",
+                "Continue rebase",
+                "Abort rebase",
+            ),
+            (
+                RepoState::CherryPicking {
+                    commit: Some("1a2b3c4d5e".into()),
+                },
+                "A file conflict was found when attempting to cherry-pick 1a2b3c4",
+                "Cherry-pick in progress",
+                "Cherry-picking 1a2b3c4",
+                "Cherry-pick conflicts detected",
+                "Continue cherry-pick",
+                "Abort cherry-pick",
+            ),
+            (
+                RepoState::Reverting {
+                    commit: Some("9f8e7d6c5b".into()),
+                },
+                "A file conflict was found when attempting to revert 9f8e7d6",
+                "Revert in progress",
+                "Reverting 9f8e7d6",
+                "Revert conflicts detected",
+                "Continue revert",
+                "Abort revert",
+            ),
+        ];
+        for (state, row, clean_row, title, heading, commit, abort) in cases {
+            let operation = state.kind().unwrap();
+            let mut app = app_in_state(state);
+            let status = operation_of(&app);
+            assert_eq!(status.row, clean_row);
+            assert_eq!(status.conflicts_heading(), None);
+            with_conflicts(&mut app, &["b.txt"]);
+            let status = operation_of(&app);
+            assert_eq!(status.kind, OpKind::Git(operation));
+            assert_eq!(status.row, row);
+            assert_eq!(status.title, title);
+            assert_eq!(status.conflicts_heading().as_deref(), Some(heading));
+            assert_eq!(status.commit_label().as_deref(), Some(commit));
+            assert_eq!(status.abort_label().as_deref(), Some(abort));
+            assert_eq!(
+                status.conflicts_text(),
+                "1 file conflict in working directory"
+            );
+            assert_eq!(
+                operation.can_skip(),
+                matches!(operation, Operation::Rebase | Operation::CherryPick)
+            );
+        }
+        assert_eq!(
+            app_in_state(git_core::RepoState::Clean).tabs[0]
+                .view()
+                .unwrap()
+                .operation(),
+            None
+        );
+    }
+
+    #[test]
+    fn stash_and_orphaned_conflicts_use_the_same_parts() {
+        use crate::operation::OpKind;
+        let mut app = stash_app();
+        pop_stash(&mut app, git_core::StashOutcome::Conflicts);
+        with_conflicts(&mut app, &["a.txt", "b.txt"]);
+        let status = operation_of(&app);
+        assert!(matches!(status.kind, OpKind::Stash(_)));
+        assert_eq!(
+            status.row,
+            "A file conflict was found when attempting to apply stash 'WIP on main: c base'"
+        );
+        assert_eq!(status.title, "Applying stash 'WIP on main: c base'");
+        assert_eq!(
+            status.conflicts_text(),
+            "2 file conflicts in working directory"
+        );
+        assert_eq!(status.commit_label(), None);
+        resolve_all(&mut app);
+        assert_eq!(
+            operation_of(&app).row,
+            "Conflicts resolved. The stash 'WIP on main: c base' is still in the list."
+        );
+
+        let mut orphaned = staging_app(&[], &[]);
+        with_conflicts(&mut orphaned, &["a.txt"]);
+        let status = operation_of(&orphaned);
+        assert_eq!(status.kind, OpKind::Orphaned);
+        assert_eq!(status.row, "Conflicted files without a running operation");
+    }
+
+    #[test]
+    fn resolved_files_are_the_conflicts_staged_during_the_operation() {
+        let conflicted = |path: &str| git_core::FileChange {
+            path: path.into(),
+            kind: git_core::ChangeKind::Conflicted,
+            old_path: None,
+        };
+        let mut app = staging_app(&[], &[]);
+        let view = app.tabs[0].view_mut().unwrap();
+        let apply = |view: &mut crate::repo_view::RepoView,
+                     unstaged: Vec<git_core::FileChange>,
+                     staged: Vec<git_core::FileChange>| {
+            let mut snapshot = view
+                .snapshot
+                .with_working_tree(git_core::WorkingTree { unstaged, staged })
+                .unwrap();
+            snapshot.state = merging();
+            view.apply_snapshot(Arc::new(snapshot));
+        };
+        // The merge stops: b and c conflicted, d merged cleanly (staged).
+        apply(
+            view,
+            vec![conflicted("b"), conflicted("c")],
+            vec![file("d")],
+        );
+        assert!(view.resolved_files().is_empty());
+        // b is resolved: listed under Resolved Files, d stays staged.
+        apply(view, vec![conflicted("c")], vec![file("b"), file("d")]);
+        let resolved: Vec<&str> = view
+            .resolved_files()
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
+        assert_eq!(resolved, ["b"]);
+        // The merge ends: no more record.
+        let clean = view
+            .snapshot
+            .with_working_tree(git_core::WorkingTree::default())
+            .unwrap();
+        let mut clean = clean;
+        clean.state = git_core::RepoState::Clean;
+        view.apply_snapshot(Arc::new(clean));
+        assert!(view.operation_conflicts.is_none());
+
+        // Opened while the operation already ran (restart): every staged
+        // file counts as resolved.
+        let mut app = app_in_state(merging());
+        let view = app.tabs[0].view_mut().unwrap();
+        view.operation_conflicts = None;
+        apply(view, vec![conflicted("c")], vec![file("b"), file("d")]);
+        assert_eq!(view.resolved_files().len(), 2);
+    }
+
+    #[test]
+    fn mark_all_resolved_confirms_files_with_markers() {
+        let mut app = app_in_state(merging());
+        with_conflicts(&mut app, &["b.txt", "c.txt"]);
+        let tab = app.tabs[0].id;
+        let paths = vec!["b.txt".to_owned(), "c.txt".to_owned()];
+        let _ = app.update(Message::MarkAllResolvedChecked {
+            tab,
+            paths: paths.clone(),
+            with_markers: vec!["c.txt".into()],
+        });
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Mark all resolved");
+        assert!(modal
+            .text
+            .contains("This file still contains conflict markers:\n• c.txt"));
+        assert!(app.tabs[0].view().unwrap().busy.is_none());
+        // Without markers the files are staged right away.
+        let _ = app.update(Message::MarkAllResolvedChecked {
+            tab,
+            paths,
+            with_markers: Vec::new(),
+        });
+        assert!(app.modal.is_none());
+        assert_eq!(
+            app.tabs[0].view().unwrap().busy.as_deref(),
+            Some("Mark 2 files resolved")
+        );
+    }
+
     #[test]
     fn banner_continue_needs_resolved_conflicts_and_a_message() {
         let mut app = app_in_state(rebasing());
@@ -15131,12 +15412,12 @@ pub(crate) mod tests {
             commit_blocker(view, false).as_deref(),
             Some("Resolve and stage the conflicted files first: b.txt, c.txt")
         );
-        let _ = app.update(Message::ContinueOperation);
+        let _ = app.update(Message::CommitRequested);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
 
         let mut app = app_in_state(rebasing());
         app.tabs[0].view_mut().unwrap().summary.clear();
-        let _ = app.update(Message::ContinueOperation);
+        let _ = app.update(Message::CommitRequested);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
         assert_eq!(app.status, "Enter a commit summary");
     }

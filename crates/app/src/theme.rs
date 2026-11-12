@@ -802,7 +802,19 @@ pub fn notice_banner(theme: &Theme) -> container::Style {
     }
 }
 
-/// Operation in progress (merge, rebase, ...) at the top of a tab.
+/// Operation in progress (M12-05): the graph row and the details header,
+/// in the warning color like GitKraken's orange row.
+pub fn operation_row(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.warning.scale_alpha(0.22))),
+        border: Border::default().width(1).color(p.warning.scale_alpha(0.6)),
+        text_color: Some(p.text),
+        ..container::Style::default()
+    }
+}
+
+/// Git flow finish waiting at the top of a tab (M7-10).
 pub fn state_banner(theme: &Theme) -> container::Style {
     let p = palette(theme);
     container::Style {

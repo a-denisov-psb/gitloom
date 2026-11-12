@@ -28,6 +28,7 @@ mod icons;
 mod launch;
 mod menus;
 mod nav;
+mod operation;
 mod overlay;
 mod palette;
 mod panes;
