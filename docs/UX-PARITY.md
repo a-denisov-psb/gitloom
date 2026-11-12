@@ -31,6 +31,10 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Classic graph look | GitKraken 7.x: rows tinted in the lane color, filled ref pills joined to their node by a line, header band with separators, panel shadows | not offered: built in M11-04 as an extra theme, removed again by maintainer decision (ADR-054); Gitloom has Dark and Light |
 | Preferences → Editor | Font, Font Size, Tab Size, End of Line Character, Syntax Highlighting, Show Line Numbers, Word Wrap | done (M11-06): Font (installed monospace fonts, Default), Font size 8–24, Tab size 1–8, Show line numbers for diffs, blame, file history and the conflict view; Word wrap in all diff modes since M11-07; Syntax highlighting in all diff modes, blame, file history and the conflict view since M11-09; no End of Line Character (no in-app editor) |
 | Right panel | Commit details or staging area (WIP selected) | done (M0), real M1 |
+| Commit details header and message | "commit: <sha>" header, framed message box, click to edit | done (M14-01, M14-05): header copies the full sha; message selectable; unpushed commits on the checked-out branch editable by a click (ADR-051) |
+| Commit details author block | Avatar, "authored <date>", co-authors, parent links | done (M14-02): committer line when it differs, co-author avatars from trailers, parents select and scroll |
+| Commit details file list | Summary, sort, Path/Tree, View all files, Expand all | done (M14-03): options stored globally |
+| Graph time markers | Relative date pills at the right of the graph rows | done (M14-06): where the relative date changes, refreshed every minute |
 | Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); inline and split M7 (ADR-038) |
 | Status bar | Bottom line | done |
 | Resizable panes | All splits draggable | done |
@@ -196,6 +200,10 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Toolbar button "Editor" and Alt+E for the external editor | M8 plan; mirrors Terminal (Alt+T) |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
 | Ref menus (branch, remote branch, tag) do not offer Cherry pick commit, Revert commit, Edit commit message, Create annotated tag here, Push and start a pull request, tag Hide/Solo, Hide/Show all tags, Annotate tag | M13-06: only actions used often on a ref are taken over; commit actions stay in the commit menu, the tag form covers annotated tags, no provider APIs |
+| Only commits that were not pushed can be edited by a click on their message; pushed ones show a tooltip pointing to interactive rebase | ADR-051 (maintainer decision 2026-11-11): rewriting pushed history forces others to rebase; GitKraken's behavior is a verification item |
+| Editable messages are plain text until clicked (selection works in the editor); blocked ones stay selectable | M14-05: the click must reach the box; iced has no selectable plain text |
+| A click on an unchanged file of "View all files" opens the blame view at the commit to show its content | M14-03: no separate file viewer |
+| Time marker pills use the normal text color on a muted background | M14-06: muted text on the pill misses WCAG AA |
 | File menus do not offer the Ignore submenu (file / extension / folder), Edit file, Delete file and Open file in default program | M13-07: Ignore adds the file itself; no in-app editor; the external editor and Open file location cover the rest |
 | Open file location of a commit file is disabled only when the file was deleted in that commit; a file missing from the working tree for other reasons opens its nearest folder | M13-07: the UI thread does no file I/O, so the menu cannot check the disk while it opens |
 | "Create branch here" of a ref whose commit has no row in the graph opens a small "Create branch at <ref>" dialog | M13-06, ADR-044: no dead end when the branch is hidden or the commit is beyond the loaded history |

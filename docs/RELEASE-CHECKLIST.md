@@ -156,6 +156,15 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] On Windows with a diff tool set (e.g. WinMerge or Meld): Open in external diff tool on a file in the commit details shows the parent's and the commit's version; the temporary files are gone after closing the tool.
 - [ ] Hide a branch, then use Create branch here from its left panel menu: a "Create branch at <branch>" dialog asks for the name; the new branch is created and checked out; Undo deletes it.
 
+## 7h. New in M14 (Windows required, Linux checked in CI)
+
+- [ ] Commit details: "commit: <sha>" centered, a click copies the full sha; the message in a framed box, text selectable; long descriptions scroll in the box.
+- [ ] Author block: avatar (also with avatars on), "authored <date>", "committed by" after a rebase of someone else's commit, "Co-authors:" with avatars for `Co-authored-by:` trailers; "parent:" links select and scroll (both parents of a merge).
+- [ ] File list: summary per kind, A→Z/Z→A, Path/Tree with Expand all / Collapse all, View all files (unchanged muted, click shows the content); the choice survives a restart.
+- [ ] Edit the message of an unpushed commit two commits back, with a merge after it and with staged and unstaged changes: the history keeps its shape and files, the changes stay, the rewritten commit is selected; Ctrl+Z restores the branch, Ctrl+Y redoes. With `commit.gpgSign` on, the rebuilt commits are signed.
+- [ ] A pushed commit, a commit of another branch and a commit during a merge cannot be edited; hovering says why. A branch or tag that also contains the commit is named in the editor ("… keeps the old commit").
+- [ ] Time markers on the graph rows ("just now" … "years ago") where the age changes, readable in Dark and Light; they update after a minute.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

@@ -5,6 +5,7 @@
 Every commit is a row: branch and tag pills, the lane graph, the message, author, date and SHA. Each branch keeps its lane and color; merges and forks are curved lines. Local and remote branches on the same commit share one pill (a cloud icon names the remotes in its tooltip); more references collapse into "+N". Local branches show how many commits they are ahead (↑) or behind (↓) their upstream. Stashes are dashed squares with a stash icon attached to their base commit, labelled "WIP on <branch>" (or the message you gave). Large histories are cut off at 100 000 commits ("History truncated").
 
 - Click a commit for its details on the right; click a file there to see its diff.
+- Small pills at the right of the commit message mark where the age changes ("just now", "25 minutes ago", "yesterday", "3 days ago", "2 months ago"); they update every minute.
 - Ctrl+click and Shift+click (or Shift+↑/↓) select several commits; the right panel lists them.
 - ↓/J and ↑/K move the selection, Shift+J/K follow the branch, Ctrl+Home/Ctrl+End jump to the first/last commit.
 - Clicking a branch in the left panel jumps to its commit. Branch and tag names with `/` are grouped into folders (click a folder or remote to collapse it; remembered per repository); every level lists branches (or tags) first, then folders. The checked-out branch is highlighted and has a check next to its branch icon.
@@ -17,6 +18,19 @@ Every commit is a row: branch and tag pills, the lane graph, the message, author
 **Hide and solo branches:** the eye that appears when you hover a branch in the left panel hides it from the graph; the branch menu also has **Solo**, which shows only soloed branches (and HEAD). A remote's menu hides or shows all its branches. This is remembered per repository. While anything is hidden or soloed, "Viewing x/y · Show All" above the filter says how many branches are shown, and **Show All** shows them all again.
 
 ![Graph with the commit details](../screenshots/m5-graph-dark.png)
+
+## Commit details
+
+- **commit: <sha>** at the top copies the full SHA with a click.
+- The message sits in a framed box; select text in it and copy it with Ctrl+C. Long descriptions scroll inside the box.
+- The author block shows the avatar, the author and "authored <date>"; "committed by <name> <date>" when someone else committed (e.g. after a rebase or `git am`). `Co-authored-by:` lines at the end of the message appear as small avatars after "Co-authors:" (name and e-mail in the tooltip). **parent: <sha>** links select the parent and scroll to it.
+- The file list starts with a summary ("1 added · 2 modified · 1 deleted"). Its toolbar sorts A→Z or Z→A, switches between **Path** (full paths) and **Tree** (folders, with **Expand all** / **Collapse all**), and **View all files** lists every file of the commit, the unchanged ones muted; click one to see its content at that commit. These options are remembered.
+
+### Edit a commit message
+
+Click the message of a commit that you have not pushed yet: it becomes an editor with the summary (and its counter) and the description. **Save** (Ctrl+Enter) or **Cancel** (Esc). This works for the newest commit and for older ones on the checked-out branch, also when merges follow: Gitloom rebuilds the commits after it with the same files, authors and dates, and moves the branch. Your working tree and staged changes are not touched. Other branches and tags that contain the commit keep the old one; the editor lists them before you save. With commit signing on, the rebuilt commits are signed again; with it off, the editor says that their signatures are removed.
+
+The message cannot be edited when the commit is already on a remote ("Already pushed to origin/main. Use interactive rebase to change pushed history."), when it is not on the checked-out branch, or while a merge, rebase, cherry-pick or revert runs; hovering the message says why. Ctrl+Z undoes the edit.
 
 ## Diffs
 

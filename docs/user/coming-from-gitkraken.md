@@ -58,6 +58,8 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
+- Commit messages can be edited by a click only for commits that were not pushed; pushed ones say why and point to interactive rebase.
+- In the commit details' file list the sort toggle reads "A→Z" / "Z→A", and a click on an unchanged file ("View all files") shows its content in the blame view.
 - **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.
 - **SSH key per repository** (Preferences → Repository → SSH key) instead of one global key; it is Git's own `core.sshCommand`.
 - **Signing** is Preferences → Signing (GPG or SSH) instead of GitKraken's GPG page; there is no key generator.
