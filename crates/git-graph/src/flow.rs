@@ -767,3 +767,124 @@ mod tests {
         );
     }
 }
+
+/// Timing of classification and grouped layout on a generated Git flow
+/// history (M13-05). Run with
+/// `cargo test --release -p git-graph flow_perf -- --ignored --nocapture`.
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    /// About `target` commits: develop with features (2–6 commits each,
+    /// merged with Git's message), a release every 20 features merged into
+    /// main and develop, a hotfix every 7 releases; branches deleted.
+    fn generated(target: usize) -> (Vec<GraphCommit>, Vec<Option<String>>, Vec<FlowTip>) {
+        let mut commits: Vec<GraphCommit> = Vec::new();
+        let mut subjects: Vec<Option<String>> = Vec::new();
+        let mut add = |parents: Vec<u32>, subject: Option<String>| -> u32 {
+            let id = commits.len() as u32;
+            commits.push(GraphCommit {
+                id: Id(id),
+                parents: parents.into_iter().map(Id).collect(),
+                time: i64::from(id),
+            });
+            subjects.push(subject);
+            id
+        };
+        let mut main = add(vec![], None);
+        let mut develop = add(vec![main], None);
+        let mut n = 0u32;
+        while (commits_len(&develop, &main) as usize) < target {
+            n += 1;
+            let mut tip = develop;
+            for _ in 0..(2 + n % 5) {
+                tip = add(vec![tip], None);
+            }
+            develop = add(
+                vec![develop, tip],
+                Some(format!("Merge branch 'feature/f{n}' into develop")),
+            );
+            if n.is_multiple_of(20) {
+                let release = add(vec![develop], None);
+                main = add(
+                    vec![main, release],
+                    Some(format!("Merge branch 'release/{n}'")),
+                );
+                develop = add(
+                    vec![develop, release],
+                    Some(format!("Merge branch 'release/{n}' into develop")),
+                );
+            }
+            if n.is_multiple_of(140) {
+                let fix = add(vec![main], None);
+                main = add(vec![main, fix], Some(format!("Merge branch 'hotfix/{n}'")));
+                develop = add(
+                    vec![develop, fix],
+                    Some(format!("Merge branch 'hotfix/{n}' into develop")),
+                );
+            }
+        }
+        fn commits_len(develop: &u32, main: &u32) -> u32 {
+            develop.max(main) + 1
+        }
+        let tips = vec![
+            FlowTip {
+                name: "main".into(),
+                commit: Id(main),
+                remote: false,
+            },
+            FlowTip {
+                name: "develop".into(),
+                commit: Id(develop),
+                remote: false,
+            },
+        ];
+        (commits, subjects, tips)
+    }
+
+    #[test]
+    #[ignore = "timing; run in release with --ignored --nocapture"]
+    fn flow_perf() {
+        let (commits, subjects, tips) = generated(100_000);
+        let names = FlowNames {
+            production: "main",
+            development: "develop",
+            feature: "feature/",
+            release: "release/",
+            hotfix: "hotfix/",
+        };
+        let start = std::time::Instant::now();
+        let result = classify(&FlowInput {
+            commits: &commits,
+            subjects: &subjects,
+            tips: &tips,
+            names,
+        })
+        .unwrap();
+        let classified = start.elapsed();
+        let hints = result.lane_hints();
+        let order = crate::topo_order(&commits).unwrap().order;
+        let start = std::time::Instant::now();
+        let plain = crate::layout(&commits, &order, None).unwrap();
+        let default = start.elapsed();
+        let start = std::time::Instant::now();
+        let grouped = crate::layout_with(
+            &commits,
+            &order,
+            &crate::LayoutOptions {
+                hints: Some(crate::LaneHints { commits: &hints }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let hinted = start.elapsed();
+        eprintln!(
+            "{} commits, {} segments: classify {classified:?}, default layout {default:?} ({} lanes), Git flow layout {hinted:?} ({} lanes)",
+            commits.len(),
+            result.segments.len(),
+            plain.max_width,
+            grouped.max_width,
+        );
+        assert!(result.segments.iter().all(|s| s.kind != FlowKind::Unknown));
+    }
+}

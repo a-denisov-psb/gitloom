@@ -121,6 +121,8 @@ API: `layout(&commits, &order, wip: Option<Wip>) -> Result<Layout, git_graph::Er
 
 `layout_with(&commits, &order, &LayoutOptions { wip, dashed, hints })` accepts optional `LaneHints { commits: &[Option<LaneHint>] }` with `LaneHint { group: u16, color: ColorId }` per commit (prepared for the Git flow layout, ROADMAP backlog). Groups occupy side-by-side lane ranges in group order; commits without a hint form an implicit last group.
 
+Since M13 the Git flow layout feeds it: `git_graph::flow::classify` takes the commits, the subjects of merge commits, the branch tips and the Git flow names and returns one segment per first-parent chain (type, name, source: live ref, merge message, topology, unknown) plus the segment of every commit; `Classification::lane_hints` turns that into groups (production 0, hotfix 1, release 2, development 3, features and unknown 4) and colors `FLOW_COLOR_BASE + n`, which `theme::lane_color` maps to the palette's `flow_colors`. `RepoSnapshot::with_flow_layout` re-lays out the loaded history with them; `gitloom.flowLayout` in the repository config stores the choice.
+
 - The node takes the lowest incoming lane of its own group; if none belongs to it, the lowest free lane of its group (incoming lanes of other groups still end in the node).
 - A further parent without a waiting lane opens one in the parent's group. New lanes of hinted commits use the hint color.
 - Two passes: the first grows each group's range whenever the group needs another lane (inserting a free lane at the range end and shifting later groups); the second lays out with the final ranges. Allocation inside a group does not depend on where the group starts, so both passes allocate identically and every group keeps its columns over the whole history.

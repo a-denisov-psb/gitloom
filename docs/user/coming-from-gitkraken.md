@@ -53,6 +53,7 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - Stage, unstage, mark resolved, stash, delete/rename stash, pull, remote and upstream changes and submodule updates can be undone as well ([Undo](undo.md)).
 - Several branches and tags can be selected (Ctrl/Shift+click) and deleted in one step.
 - The command palette also toggles settings and opens any Preferences setting; Ctrl+Shift+P opens it too.
+- **Gitflow layout** (gear menu above the graph): with Git flow initialized the graph groups lanes like the classic Git flow diagram, also for deleted branches (Gitloom extension).
 - A sparkle button next to "Committing as …" copies a commit message prompt for a tool of your choice (no AI inside Gitloom).
 - Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
