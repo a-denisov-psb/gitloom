@@ -59,7 +59,7 @@ With a detached HEAD, the commit panel reminds you to create a branch.
 
 ## Stashing
 
-**Stash** in the toolbar stashes all changes including untracked files (with the stash message template of Preferences → Templates when it is on, else Git's default message, shown as "WIP on <branch>"); **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop** and **Delete**. Selecting a stash shows its staged, unstaged and untracked files. Pop and Apply can be undone; if they conflict, see [Stash conflicts](merge-rebase-conflicts.md#stash-conflicts).
+**Stash** in the toolbar stashes all changes including untracked files (with the stash message template of Preferences → Templates when it is on, else Git's default message, shown as "WIP on <branch>"); **Pop** applies and removes the newest stash. Right click a stash (left panel or graph) for **Apply**, **Pop**, **Rename stash…** and **Delete**. A `/` in a stash's name puts it into a folder in STASHES (Git's default "WIP on <branch>" names are never split); stashes keep their order, folders follow. Renaming keeps the stash at its place in the list. Stash, Delete and Rename can be undone. Selecting a stash shows its staged, unstaged and untracked files. Pop and Apply can be undone; if they conflict, see [Stash conflicts](merge-rebase-conflicts.md#stash-conflicts).
 
 ## File history and blame
 
@@ -74,3 +74,7 @@ Switch to **Blame** to see author, commit and age for each block of lines, for t
 **Terminal** in the toolbar or Alt+T opens your terminal in the repository; Alt+O (or "Open file location") opens the file manager. The terminal command can be set in Preferences → External tools.
 
 With an external editor set (Preferences → External tools), **Editor** in the toolbar, Alt+E or "Open repository in editor" in the palette opens the repository in it; **Open in external editor** in the context menu of a file (unstaged, staged, commit files, file history) opens that file. Deleted files cannot be opened.
+
+## Several branches and tags at once
+
+Ctrl+click and Shift+click select several branches and tags in the left panel; right click one of them to delete them all or hide them in the graph. See [Branches and remotes](branches-and-remotes.md#selecting-several-branches-and-tags).

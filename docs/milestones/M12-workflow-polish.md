@@ -179,7 +179,7 @@ Acceptance: integration tests per entry (pull with fast-forward, merge and rebas
 
 Note: network requests carry `NetworkUndo` (None, Pull, PullBranch, SubmoduleUpdate); the blocking part records around the command, so progress, Cancel and askpass stay. A pull that stops in conflicts records nothing (completing the merge is a commit, which is undoable; aborting restores the start). Undoing "Add remote" also removes refs fetched since; redo re-adds it without them. Restored config keys keep their order except after a rename back, where Git reorders them (same values). ADR-043 amendment (settings are not undo entries) was already applied in planning; ADR-043 got an implementation note. Tests: `pull_fast_forward_merge_and_rebase_undo_and_redo`, `pull_of_a_branch_that_is_not_checked_out`, `remove_remote_restores_config_tracking_refs_and_upstreams`, `add_rename_and_url_changes`, `upstream_set_and_unset`, `submodule_update_undo_and_redo` (each with refusals).
 
-### [ ] M12-09 Documentation
+### [x] M12-09 Documentation
 
 - `docs/user/undo.md` complete with the "Cannot be undone" list (also rename stash and bulk delete, the remote part under "Cannot be undone"); user guide for operations, toasts, submodules, remote links, `daily-workflow.md` (stash folders and rename, multi-selection and bulk delete), `settings.md` (palette entries); `coming-from-gitkraken.md`.
 - UX-PARITY rows and deviations (hover, fixed toast location).
@@ -188,6 +188,8 @@ Note: network requests carry `NetworkUndo` (None, Pull, PullBranch, SubmoduleUpd
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed against the implemented behavior.
+
+Note: most guide changes landed with their tasks (undo.md, merge-rebase-conflicts.md, branches-and-remotes.md, settings.md, troubleshooting.md); this task added the notifications row, WSL and trust in getting-started.md, remote website links, stash folders/rename and multi-selection in daily-workflow.md, the M12 differences in coming-from-gitkraken.md, the hover and fixed notification location in UX-PARITY and release checklist section 7f. Reviewed against the code and the snapshots of M12-01 … M12-14 and the panel toggle fix.
 
 ### [x] M12-10 Stash folders and rename
 

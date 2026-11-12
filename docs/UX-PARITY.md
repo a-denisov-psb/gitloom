@@ -53,7 +53,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
 | Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu) |
 | Auto-fetch | Periodic fetch in the background | done (M3, every 5 min; interval in Preferences → General since M5-02) |
-| Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2) |
+| Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2); since M12-01 only Stage/Unstage (deviation below) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path); M8 "Open in external editor" |
 | Stage hunk / lines in the diff view | "Stage hunk" per hunk; click, Shift+click, Ctrl+click select lines, "Stage selected lines" | done (M2) |
 | Diff view mode | Hunk / Inline / Split toggle in the diff header; arrows jump between changes | done (M7: one global setting; staging by line in all modes and by block in Inline/Split; read-only diffs have no bars; GitKraken checks on remembering, block buttons and Split alignment open) |
@@ -157,6 +157,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Deviation | Reason |
 |---|---|
+| Notifications always at the bottom left | GitKraken has a location setting; out of scope for M12 (ADR-049), the default location is GitKraken's |
 | WSL notice, recent-list badge and polling watcher for repositories inside WSL; plain-language "Trust this repository…" for Git's dubious-ownership refusal | Gitloom extension (M12-14, ADR-053); whether GitKraken shows a notice for WSL or network paths is an open verification item |
 | Multi-selection of branches and tags in the left panel (Ctrl/Shift+click) with bulk delete and hide/show | Gitloom extension (M12-11, maintainer request; whether GitKraken 7.5.2 offers it is an open verification item); a plain click behaves as before |
 | A hotfix finished while a release branch exists is merged into the development branch | GitKraken's documentation; the `git-flow` CLI merges into the release branch instead (M7-09, GitKraken check open) |

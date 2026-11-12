@@ -32,7 +32,8 @@ Fetch, pull and push cannot be undone.
 
 - Branch menu: **Set upstream** / **Unset upstream** (also offered when Pull finds no upstream).
 - **+** in the REMOTE section adds a remote (name and URL).
-- Right click a remote: **Fetch**, **Edit URL**, **Rename**, **Remove**, **Hide all** / **Show all** branches.
+- Right click a remote: **Fetch**, **Edit URL**, **Rename**, **Remove**, **Hide all** / **Show all** branches, and **Open on GitHub** / **Open on GitLab** / **Open on Bitbucket** (**Open in browser** for other hosts) for remotes with a web address; local remotes (paths, `file://`) have no such entry. The command palette has **Open remote in browser** (origin, else the only remote, else a list).
+- Adding, removing, renaming a remote, editing its URL and setting or unsetting an upstream can be undone.
 
 Changes made outside Gitloom (new remotes, upstreams, `.git/config`) show up automatically.
 

@@ -19,6 +19,10 @@ Download the package for your system from the [releases page](https://github.com
 
 Gitloom remembers the open tabs, the active tab and the pane sizes and restores them on the next start. The start screen lists up to 20 recent repositories; a missing one can be removed from the list.
 
+**Repositories of another user.** If Git refuses a repository because its folder belongs to another user ("dubious ownership", e.g. a shared drive), the tab says so in plain words and offers **Trust this repository…**; after you confirm, Gitloom adds it to `safe.directory` in your global Git config and opens it.
+
+**Repositories inside WSL** (Windows, `\\wsl$\…` or `\\wsl.localhost\…`) open, but slowly; a notice in the tab explains why (**Don't show again** hides it), the recent list marks them "WSL: <distro>", and changes are picked up within about two seconds. See [Troubleshooting](troubleshooting.md#repositories-inside-wsl).
+
 ## Clone a repository
 
 Start screen → **Clone a repo**: paste the URL (HTTPS, SSH or a local path), choose **Where to clone to** (Browse… or type a folder; it starts with the folder of your most recent repository) and check the **Name** (taken from the URL, editable); **Full path** shows the result. **Clone submodules** is on by default. **Clone** shows Git's progress in the dialog; **Cancel** (or Esc) stops it. Credentials are asked like for fetch and never stored. The target must not exist or must be an empty folder; a failed or cancelled clone leaves no new folder behind. The clone opens in the same tab and appears in the recent list.
@@ -40,7 +44,8 @@ Clone and init cannot be undone with Ctrl+Z: delete the folder if you no longer 
 | Left panel | Local branches (in folders), remote branches per remote, tags, stashes, Git flow (when set up), submodules; filter on top (Ctrl+Alt+F); Ctrl+J hides it |
 | Graph | All commits with the lane graph, branch and tag pills, the "WIP" row for your uncommitted changes |
 | Right panel | Details of the selected commit, or the staging area when the WIP row is selected; Ctrl+K hides it |
-| Status bar | Messages, running operations (with Cancel), notices |
+| Status bar | Messages, running operations (with Cancel), notices; at both ends the toggles for the left panel and the commit panel (filled = shown) |
+| Notifications (bottom left) | Errors, warnings and short confirmations, up to three. Errors explain in plain words what happened and what to do; **Details** shows Git's own output, **Copy** copies it. Errors and warnings stay until you close them (×); info and success notifications close after a few seconds (not while the pointer is on them). Questions that need a decision stay dialogs. |
 
 All dividers can be dragged. The diff of a file replaces the graph; **Esc** returns to the graph at the same position.
 
