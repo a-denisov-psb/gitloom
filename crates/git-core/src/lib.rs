@@ -51,7 +51,8 @@ pub use cli_backend::{
     GitOutput, GitVersion, GitWriter, RunOptions, MIN_GIT_VERSION,
 };
 pub use conflict::{
-    with_line_endings, Chunk, ConflictHunk, ConflictText, HunkPicks, PickState, Picks, Side,
+    files_with_conflict_markers, has_conflict_markers, with_line_endings, Chunk, ConflictHunk,
+    ConflictText, HunkPicks, PickState, Picks, Side,
 };
 pub use diff::{text_diff_with, TextDiff};
 pub use discard::{

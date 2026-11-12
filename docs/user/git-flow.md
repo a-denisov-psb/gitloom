@@ -38,7 +38,7 @@ Right click the branch → **Finish feature …** / **Finish release …** / **F
 
 Nothing is pushed; push the branches and the tag yourself when you are ready. The dialog warns when the production or development branch is behind its upstream, so you can pull first. A finish needs a clean working tree (untracked files are fine) and no merge or rebase in progress.
 
-**Conflicts:** when a merge of the finish stops with conflicts, the banner reads "Finishing release 1.2.0 · Merging …". Resolve the conflicts as usual and **Continue**: the remaining steps (tag, second merge, delete) run by themselves. If Gitloom was closed in between, the banner offers **Continue finishing** when you open the repository again. **Abort** stops the merge and the finish and lists what was already done.
+**Conflicts:** when a merge of the finish stops with conflicts, the right panel is titled "Finishing release 1.2.0 · Merging …". Resolve the conflicts as usual and **Commit and merge**: the remaining steps (tag, second merge, delete) run by themselves. If Gitloom was closed in between, a bar offers **Continue finishing** when you open the repository again. **Abort finish** (or **Abort** in that bar) stops the merge and the finish and lists what was already done.
 
 **Undo:** a whole finish is one Ctrl+Z: every branch and the tag go back to where they were, and the branch you were on is checked out again. Ctrl+Y redoes it with the same tag. Undo is refused if one of the branches moved in the meantime (for example a new commit on develop).
 

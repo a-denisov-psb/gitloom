@@ -296,8 +296,50 @@ pub fn with_line_endings(edited: &str, eol: &str) -> String {
     }
 }
 
+/// Whether `content` still contains a conflict block: a `<<<<<<<`, a
+/// `=======` and a `>>>>>>>` line, in that order (M12-05).
+pub fn has_conflict_markers(content: &[u8]) -> bool {
+    let mut stage = 0;
+    for line in content.split(|&b| b == b'\n') {
+        let marker: &[u8] = match stage {
+            0 => b"<<<<<<<",
+            1 => b"=======",
+            _ => b">>>>>>>",
+        };
+        if line.starts_with(marker) {
+            stage += 1;
+            if stage == 3 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The files of `paths` (relative to the working tree `root`) that still
+/// contain conflict markers; unreadable files are skipped.
+pub fn files_with_conflict_markers(root: &std::path::Path, paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| {
+            std::fs::read(root.join(path)).is_ok_and(|content| has_conflict_markers(&content))
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn conflict_markers_need_all_three_lines_in_order() {
+        use super::has_conflict_markers as markers;
+        assert!(markers(b"a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> topic\n"));
+        assert!(markers(b"<<<<<<< HEAD\r\n=======\r\n>>>>>>> t\r\n"));
+        assert!(!markers(b"Title\n=======\ntext\n"));
+        assert!(!markers(b">>>>>>> x\n=======\n<<<<<<< y\n"));
+        assert!(!markers(b"resolved\n"));
+    }
+
     use super::*;
 
     fn marker(c: char) -> String {

@@ -805,6 +805,10 @@ pub struct RepoView {
     /// A stash pop or apply that stopped in conflicts (M9-01); in memory
     /// only, the banner offers Drop stash once the conflicts are resolved.
     pub stash_conflict: Option<StashConflict>,
+    /// Files that were conflicted while the current operation ran, for
+    /// "Resolved Files" (M12-05); `None` when the operation was already
+    /// running when the tab opened (then every staged file counts).
+    pub operation_conflicts: Option<std::collections::BTreeSet<String>>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -959,6 +963,46 @@ impl RepoView {
         }
     }
 
+    /// The operation in progress (M12-05).
+    pub fn operation(&self) -> Option<crate::operation::OperationStatus> {
+        crate::operation::status(self)
+    }
+
+    /// Keeps the set of files that were conflicted during the operation:
+    /// starts when an operation appears, grows while it runs, ends with it.
+    fn record_operation_conflicts(&mut self, was_running: bool) {
+        if crate::operation::status(self).is_none() {
+            self.operation_conflicts = None;
+            return;
+        }
+        let conflicted: Vec<String> = self
+            .conflicted_files()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        match &mut self.operation_conflicts {
+            Some(set) => set.extend(conflicted),
+            None if !was_running => {
+                self.operation_conflicts = Some(conflicted.into_iter().collect())
+            }
+            None => {}
+        }
+    }
+
+    /// Staged files that were conflicted during the operation ("Resolved
+    /// Files"); without a record (the operation ran before the tab opened)
+    /// every staged file.
+    pub fn resolved_files(&self) -> Vec<&git_core::FileChange> {
+        if crate::operation::status(self).is_none() {
+            return Vec::new();
+        }
+        let staged = &self.snapshot.working_tree.staged;
+        match &self.operation_conflicts {
+            Some(set) => staged.iter().filter(|f| set.contains(&f.path)).collect(),
+            None => staged.iter().collect(),
+        }
+    }
+
     /// Paths with unresolved conflicts, sorted.
     pub fn conflicted_files(&self) -> Vec<&str> {
         self.snapshot
@@ -1075,6 +1119,7 @@ impl RepoView {
             drag: None,
             pending_history: None,
             stash_conflict: None,
+            operation_conflicts: None,
             pull_failure: None,
             network: None,
             queued: None,
@@ -1128,7 +1173,9 @@ impl RepoView {
                 self.details = None;
             }
         }
+        let was_running = crate::operation::status(self).is_some();
         self.snapshot = snapshot;
+        self.record_operation_conflicts(was_running);
         self.refreshing = false;
         self.suppress_watch = false;
         self.error = None;

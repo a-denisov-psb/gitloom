@@ -26,12 +26,54 @@ pub fn view<'a>(view: &'a RepoView, avatars: &'a crate::avatars::Avatars) -> Ele
         },
         None => container(muted("Nothing selected")).padding(12).into(),
     };
+    // Another commit is selected while an operation runs: a header leads
+    // back to the conflicts (M12-05).
+    let content = match view.operation() {
+        Some(status) if view.selection != Some(Selection::Wip) => {
+            column![operation_header(&status), content].into()
+        }
+        _ => content,
+    };
 
     container(content)
         .width(Fill)
         .height(Fill)
         .style(theme::panel)
         .into()
+}
+
+/// "1 file conflict in working directory · View conflicts" (or the
+/// operation's title without conflicts) above the commit details.
+fn operation_header<'a>(status: &crate::operation::OperationStatus) -> Element<'a, Message> {
+    let (label, action) = if status.conflicts > 0 {
+        let action = if status.conflicts == 1 {
+            "View conflict"
+        } else {
+            "View conflicts"
+        };
+        (status.conflicts_text(), action)
+    } else {
+        (status.title.clone(), "View changes")
+    };
+    container(
+        row![
+            crate::icons::tinted(crate::icons::Icon::Alert, 14.0, |p| p.warning),
+            text(label)
+                .size(12)
+                .width(Fill)
+                .wrapping(text::Wrapping::WordOrGlyph),
+            button(text(action).size(12).wrapping(text::Wrapping::None))
+                .padding([3, 8])
+                .style(button::secondary)
+                .on_press(Message::WipSelected),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    )
+    .padding([6, 12])
+    .width(Fill)
+    .style(theme::operation_row)
+    .into()
 }
 
 /// Several commits selected: their summaries and the actions for them.
@@ -90,11 +132,24 @@ fn multi_selection(view: &RepoView) -> Element<'_, Message> {
 
 fn staging(view: &RepoView) -> Element<'_, Message> {
     let tree = &view.snapshot.working_tree;
-    let header = format!(
-        "{} file changes on {}",
-        tree.len(),
-        view.snapshot.branch_label()
-    );
+    let operation = view.operation();
+    // A running operation names itself like GitKraken: "Merge conflicts
+    // detected" over "Merging topic into main" (M12-05).
+    let header: Element<'_, Message> = match &operation {
+        Some(status) => {
+            let mut lines = Column::new().spacing(2);
+            if let Some(heading) = status.conflicts_heading() {
+                lines = lines.push(text(heading).size(12).style(theme::text_warning));
+            }
+            lines.push(text(status.title.clone())).into()
+        }
+        None => text(format!(
+            "{} file changes on {}",
+            tree.len(),
+            view.snapshot.branch_label()
+        ))
+        .into(),
+    };
 
     // Conflicts get their own section above the unstaged files (M4-03).
     let (conflicted, unstaged_files): (Vec<_>, Vec<_>) = tree
@@ -104,8 +159,15 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
     let conflicts = (!conflicted.is_empty()).then(|| {
         file_section(
             format!("Conflicted Files ({})", conflicted.len()),
-            // Staging a file marks it resolved; the conflict view comes in M4-05.
-            space::horizontal().into(),
+            // Stages every conflicted file; files with markers are named
+            // in a confirmation first (M12-05).
+            all_button(
+                view,
+                "Mark all resolved",
+                button::success,
+                true,
+                Message::MarkAllResolved,
+            ),
             conflicted
                 .iter()
                 .map(|file| file_row(view, file, DiffKind::Unstaged)),
@@ -143,8 +205,24 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
         }),
     );
 
+    // Files resolved during the operation get their own list (M12-05).
+    let resolved_files = view.resolved_files();
+    let resolved = operation.as_ref().map(|_| {
+        file_section(
+            format!("Resolved Files ({})", resolved_files.len()),
+            space::horizontal().into(),
+            resolved_files
+                .iter()
+                .map(|file| file_row(view, file, DiffKind::Staged)),
+        )
+    });
+    let staged_files: Vec<&FileChange> = tree
+        .staged
+        .iter()
+        .filter(|f| !resolved_files.iter().any(|r| r.path == f.path))
+        .collect();
     let staged = file_section_with_menu(
-        format!("Staged Files ({})", tree.staged.len()),
+        format!("Staged Files ({})", staged_files.len()),
         all_button(
             view,
             "Unstage all changes",
@@ -152,14 +230,15 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
             !tree.staged.is_empty(),
             Message::UnstageAll,
         ),
-        tree.staged
-            .iter()
+        staged_files
+            .into_iter()
             .map(|file| file_row(view, file, DiffKind::Staged)),
         Some(Message::StagedHeaderMenu),
     );
 
-    column![container(text(header)).padding([10, 12])]
+    column![container(header).padding([10, 12])]
         .push(conflicts)
+        .push(resolved)
         .push(unstaged)
         .push(staged)
         .push(commit_box(view))
@@ -222,10 +301,11 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     }
 
     let staged = view.snapshot.working_tree.staged.len();
-    let continues = view.snapshot.state.operation();
+    let operation = view.operation();
+    let continues = operation.as_ref().and_then(|s| s.commit_label());
     let label = match (view.amend, continues, staged) {
         (true, _, _) => "Amend previous commit".to_string(),
-        (false, Some(operation), _) => format!("Continue {operation}"),
+        (false, Some(label), _) => label,
         (false, None, 1) => "Commit changes to 1 file".to_string(),
         (false, None, n) => format!("Commit changes to {n} files"),
     };
@@ -264,6 +344,9 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     ]
     .spacing(8)
     .padding(12);
+    if let Some(status) = &operation {
+        content = content.push(operation_buttons(view, status));
+    }
     // A rebase always runs on a detached HEAD; the warning would be noise.
     let rebasing = matches!(view.snapshot.state, git_core::RepoState::Rebasing { .. });
     if matches!(view.snapshot.head, git_core::Head::Detached { .. }) && !rebasing {
@@ -284,6 +367,88 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         content = content.push(muted(hint).size(11));
     }
     content.into()
+}
+
+/// Buttons below the commit button while an operation runs (M12-05):
+/// "Abort merge" (Skip for rebase and cherry-pick); for a stash "Undo",
+/// "Drop stash" and "Keep stash" (M9); for orphaned conflicts "Discard
+/// conflicted files…" (ADR-044).
+fn operation_buttons<'a>(
+    view: &'a RepoView,
+    status: &crate::operation::OperationStatus,
+) -> Element<'a, Message> {
+    use crate::operation::OpKind;
+    use crate::repo_view::ConflictBanner;
+    let idle = view.write_block.is_none() && view.busy.is_none();
+    let action = |label: String,
+                  style: fn(&iced::Theme, button::Status) -> button::Style,
+                  message: Option<Message>|
+     -> Element<'a, Message> {
+        let button = button(text(label).size(12).width(Fill).align_x(iced::Center))
+            .width(Fill)
+            .padding([5, 8])
+            .style(style);
+        if view.write_block.is_some() {
+            return write_tooltip(button.into(), view);
+        }
+        button.on_press_maybe(message.filter(|_| idle)).into()
+    };
+    let mut buttons = row![].spacing(6);
+    match &status.kind {
+        OpKind::Git(operation) => {
+            if operation.can_skip() && !status.finishing {
+                buttons = buttons.push(action(
+                    "Skip".into(),
+                    button::secondary,
+                    Some(Message::SkipOperation),
+                ));
+            }
+            let abort = if status.finishing {
+                Message::FlowFinishAbort
+            } else {
+                Message::AbortOperation
+            };
+            buttons = buttons.push(action(
+                status.abort_label().unwrap_or_default(),
+                button::danger,
+                Some(abort),
+            ));
+        }
+        OpKind::Stash(ConflictBanner::StashConflicts { undo, .. }) => {
+            if *undo {
+                buttons = buttons.push(action(
+                    "Undo".into(),
+                    button::secondary,
+                    Some(Message::Undo),
+                ));
+            }
+            buttons = buttons.push(with_tooltip_text(
+                action("Drop stash".into(), button::secondary, None),
+                "Resolve the conflicts first".into(),
+            ));
+        }
+        OpKind::Stash(ConflictBanner::StashResolved { id, .. }) => {
+            buttons = buttons
+                .push(action(
+                    "Drop stash".into(),
+                    button::primary,
+                    Some(Message::StashDropConfirmed(id.clone())),
+                ))
+                .push(action(
+                    "Keep stash".into(),
+                    button::secondary,
+                    Some(Message::KeepStash),
+                ));
+        }
+        OpKind::Stash(ConflictBanner::Orphaned) | OpKind::Orphaned => {
+            buttons = buttons.push(action(
+                "Discard conflicted files…".into(),
+                button::danger,
+                Some(Message::Discard(DiscardTarget::Conflicted)),
+            ));
+        }
+    }
+    buttons.into()
 }
 
 /// "Committing as <name> <email>" above the summary (M8-04): the identity

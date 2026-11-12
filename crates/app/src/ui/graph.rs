@@ -230,9 +230,15 @@ pub fn view<'a>(
                 .map(Message::GraphWheel)
         });
         let mut table = match &repo.search {
-            Some(search) => column![search_bar(search), header, list],
-            None => column![header, list],
+            Some(search) => column![search_bar(search), header],
+            None => column![header],
         };
+        // A running operation: a row in the warning color above the
+        // commits (M12-05); a click shows the WIP panel.
+        if let Some(status) = repo.operation() {
+            table = table.push(operation_row(status.row));
+        }
+        let mut table = table.push(list);
         if layout.max_offset > 0.0 {
             table = table.push(horizontal_bar(repo, viewport, layout.max_offset));
         }
@@ -319,6 +325,28 @@ fn search_bar(search: &crate::search::SearchState) -> Element<'_, Message> {
     container(content)
         .width(Fill)
         .style(theme::column_header)
+        .into()
+}
+
+/// "A file conflict was found when attempting to merge into main".
+fn operation_row<'a>(label: String) -> Element<'a, Message> {
+    let content = container(
+        row![
+            icons::tinted(Icon::Alert, 14.0, |p| p.warning),
+            text(label).size(13).wrapping(text::Wrapping::None),
+        ]
+        .spacing(8)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(ROW_HEIGHT)
+    .width(Fill)
+    .clip(true)
+    .padding([0, 12])
+    .align_y(alignment::Vertical::Center)
+    .style(theme::operation_row);
+    iced::widget::mouse_area(content)
+        .on_press(Message::WipSelected)
+        .interaction(mouse::Interaction::Pointer)
         .into()
 }
 

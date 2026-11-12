@@ -93,11 +93,11 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 
 ## 7c. New in M9 (Windows required, Linux checked in CI)
 
-- [ ] Stash conflict: stash a staged change, merge a branch that changes the same lines, Pop: the banner "Stash '…' applied with conflicts. The stash was kept." appears, no error dialog; the conflict view says "Updated upstream" / "Stashed changes"; Stash, Pop and Apply are disabled with the reason.
-- [ ] Undo in the banner (and Ctrl+Z) after that pop: files, staged changes and the stash list are exactly as before (`git status`, `git stash list`); Ctrl+Y applies it again. Edit a conflicted file first: Undo asks before discarding the edit.
-- [ ] Resolve the stash conflict and stage it: the banner offers Drop stash / Keep stash; Drop stash removes the stash.
+- [ ] Stash conflict: stash a staged change, merge a branch that changes the same lines, Pop: the graph row "A file conflict was found when attempting to apply stash '…'" and the panel title "Applying stash '…'" appear, no error dialog; the conflict view says "Updated upstream" / "Stashed changes"; Stash, Pop and Apply are disabled with the reason.
+- [ ] Undo below the commit button (and Ctrl+Z) after that pop: files, staged changes and the stash list are exactly as before (`git status`, `git stash list`); Ctrl+Y applies it again. Edit a conflicted file first: Undo asks before discarding the edit.
+- [ ] Resolve the stash conflict and stage it: the panel offers Drop stash / Keep stash; Drop stash removes the stash.
 - [ ] Undo of a clean Pop of an older stash (`stash@{1}`): it is back at its position in the list.
-- [ ] Discard a conflicted file (context menu) and "Discard conflicted files…" in the banner after a restart: the confirmation names both sides; Ctrl+Z brings the conflict back.
+- [ ] Discard a conflicted file (context menu) and "Discard conflicted files…" below the commit button after a restart: the confirmation names both sides; Ctrl+Z brings the conflict back.
 - [ ] Reset on the HEAD commit with conflicted files: Soft disabled with "HEAD is already at this commit"; Mixed keeps the files and clears the conflicts; Ctrl+Z restores them; Hard likewise.
 - [ ] Icons at 110 % and 125 % (Windows scaling and Gitloom zoom): toolbar, left panel headers (the "+" of REMOTE and GITFLOW) and file lists are sharp, not blurry.
 - [ ] Left panel order: GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES; GITFLOW is a tree (develop, feature, master, release) like GitKraken.
