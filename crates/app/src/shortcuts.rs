@@ -124,12 +124,12 @@ mod tests {
             shortcut(&Key::Named(Named::End), Modifiers::COMMAND),
             nav(Move::Last)
         );
-        // Plain Home/End are not graph shortcuts; Alt+arrows reorder the
-        // interactive rebase panel.
+        // Plain Home/End are not graph shortcuts; Alt+arrows step through
+        // the conflicts (and reorder the interactive rebase panel).
         assert_eq!(shortcut(&Key::Named(Named::Home), none), None);
         assert_eq!(
             shortcut(&Key::Named(Named::ArrowDown), Modifiers::ALT),
-            Some(Shortcut::Reorder { up: false })
+            Some(Shortcut::ConflictStep { next: true })
         );
         assert_eq!(shortcut(&ch("p"), none), Some(Shortcut::TodoKey('p')));
         assert_eq!(shortcut(&ch("d"), none), Some(Shortcut::TodoKey('d')));

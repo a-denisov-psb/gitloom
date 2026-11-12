@@ -448,6 +448,13 @@ impl RepoSnapshot {
     /// Readable name of `id`: a branch or tag pointing at it (local
     /// branches first), otherwise the short id.
     pub fn commit_name(&self, id: &str) -> String {
+        self.ref_name(id)
+            .unwrap_or_else(|| id[..id.len().min(7)].to_owned())
+    }
+
+    /// Name of the reference at commit `id`, local branches first, then
+    /// remote branches, then tags.
+    pub fn ref_name(&self, id: &str) -> Option<String> {
         let rank = |r: &&Reference| match r.kind {
             git_core::RefKind::LocalBranch => 0,
             git_core::RefKind::RemoteBranch => 1,
@@ -457,7 +464,7 @@ impl RepoSnapshot {
             .iter()
             .filter(|r| r.target == id)
             .min_by_key(rank)
-            .map_or_else(|| id[..id.len().min(7)].to_owned(), |r| r.name.clone())
+            .map(|r| r.name.clone())
     }
 
     /// Banner text for the operation in progress, like GitKraken's
@@ -488,7 +495,9 @@ impl RepoSnapshot {
                     .unwrap_or_else(|| self.commit_name(merge_head));
                 format!("Merging {source} into {target}")
             }
-            RepoState::Rebasing { branch, onto, step } => {
+            RepoState::Rebasing {
+                branch, onto, step, ..
+            } => {
                 let mut text = format!("Rebasing {}", branch.as_deref().unwrap_or("HEAD"));
                 if let Some(onto) = onto {
                     text.push_str(&format!(" onto {}", self.commit_name(onto)));
@@ -736,6 +745,7 @@ mod tests {
             branch: Some("topic".into()),
             onto: Some("a".into()),
             step: Some((2, 5)),
+            commit: None,
         };
         assert_eq!(
             s.state_banner().unwrap(),

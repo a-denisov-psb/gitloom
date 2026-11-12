@@ -22,6 +22,9 @@ pub enum RepoState {
         onto: Option<Oid>,
         /// Current step and total number of steps, if known.
         step: Option<(usize, usize)>,
+        /// Commit being replayed when the rebase stopped (`REBASE_HEAD`),
+        /// if known (M12-04: header of the incoming side).
+        commit: Option<Oid>,
     },
     /// `git cherry-pick` stopped; `commit` is the one being picked, if known.
     CherryPicking { commit: Option<Oid> },
@@ -91,7 +94,7 @@ pub fn detect(git_dir: &Path) -> RepoState {
         let dir = git_dir.join(dir);
         // `git am` also uses rebase-apply; it marks itself with `applying`.
         if dir.is_dir() && !dir.join("applying").exists() {
-            return rebase_state(&dir);
+            return rebase_state(git_dir, &dir);
         }
     }
     if let Some(merge_head) = read_oid(&git_dir.join("MERGE_HEAD")) {
@@ -117,7 +120,7 @@ pub fn detect(git_dir: &Path) -> RepoState {
     }
 }
 
-fn rebase_state(dir: &Path) -> RepoState {
+fn rebase_state(git_dir: &Path, dir: &Path) -> RepoState {
     let branch = read_trimmed(&dir.join("head-name"))
         .filter(|name| name != "detached HEAD")
         .map(|name| {
@@ -133,6 +136,9 @@ fn rebase_state(dir: &Path) -> RepoState {
         branch,
         onto: read_oid(&dir.join("onto")),
         step,
+        commit: read_oid(&git_dir.join("REBASE_HEAD"))
+            .or_else(|| read_oid(&dir.join("stopped-sha")))
+            .or_else(|| read_oid(&dir.join("original-commit"))),
     }
 }
 

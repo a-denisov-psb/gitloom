@@ -57,8 +57,9 @@ Right click a conflicted file → **Discard changes**, "Discard all" or the bann
 
 Conflicted files have their own section above the unstaged files. Click one to open the conflict view:
 
-- "ours" on the left and "theirs" on the right, each hunk and line with a checkbox;
+- A (your side, HEAD) on the left and B (the incoming side) on the right, each headed "Commit <short SHA> on <branch>", each hunk and line with a checkbox; a stash conflict keeps Git's "Updated upstream" / "Stashed changes";
 - **Take all ours** / **Take all theirs**, or pick hunks and single lines;
+- "conflict n of N" above the output with ↑/↓ arrows (or Alt+↑/↓) jumps between the open conflicts; past the last one it starts again at the first;
 - the output below can be edited by hand (then picks no longer change it; **Reset output** starts over);
 - **Save and mark resolved** writes the file and stages it.
 
