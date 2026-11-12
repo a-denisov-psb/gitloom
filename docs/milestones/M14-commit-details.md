@@ -72,11 +72,13 @@ Open:
 
 ## Tasks
 
-### [ ] M14-01 Details header and message box
+### [x] M14-01 Details header and message box
 
 - Header and framed message box per the decisions table.
 
 Acceptance: app test: click on the header copies the full sha; snapshots with a one-line and a long message in all three themes.
+
+Note (M14-01): two themes since ADR-054 (Dark, Light). The message is shown in read-only text editors (iced has no selectable plain text): mouse and keyboard select, Ctrl+C copies, edits are ignored. The header button has the tooltip "Copy the full sha". The 40 % limit is measured with `responsive` on the panel's height.
 
 ### [ ] M14-02 Author block, co-authors, parent links
 

@@ -741,6 +741,32 @@ pub fn input(
     style
 }
 
+/// Framed box of the commit message in the details (M14-01).
+pub fn message_box(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.bg_graph)),
+        border: Border::default().rounded(4).width(1).color(p.border),
+        text_color: Some(p.text),
+        ..container::Style::default()
+    }
+}
+
+/// Read-only text inside [`message_box`]: no frame of its own.
+pub fn message_text(
+    theme: &Theme,
+    status: iced::widget::text_editor::Status,
+) -> iced::widget::text_editor::Style {
+    let p = palette(theme);
+    iced::widget::text_editor::Style {
+        background: Background::Color(Color::TRANSPARENT),
+        border: Border::default(),
+        placeholder: p.text_muted,
+        value: p.text,
+        ..iced::widget::text_editor::default(theme, status)
+    }
+}
+
 /// Multi-line editor with the same focus ring as [`input`].
 pub fn editor(
     theme: &Theme,

@@ -1046,6 +1046,74 @@ mod tests {
         }
     }
 
+    /// `ready_app` whose commits carry real messages and authors (M14).
+    pub(crate) fn details_app(messages: &[(&str, &str, &str)]) -> App {
+        let ids: Vec<&str> = messages.iter().map(|(id, _, _)| *id).collect();
+        let mut app = ready_app(&ids);
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        for (commit, (_, summary, body)) in commits.iter_mut().zip(messages) {
+            commit.summary = (*summary).into();
+            commit.body = (*body).into();
+            commit.author = "Ana Lyst".into();
+            commit.email = "ana@example.com".into();
+        }
+        snapshot.commits = std::sync::Arc::new(commits);
+        view.snapshot = std::sync::Arc::new(snapshot);
+        app
+    }
+
+    /// A click on "commit: <short sha>" copies the full sha (M14-01).
+    /// Layout only, so part of every test run.
+    #[test]
+    fn details_header_click_copies_the_full_sha() {
+        let full = "0123456789abcdef0123456789abcdef01234567";
+        let mut app = details_app(&[(full, "Summary", ""), ("c1", "Initial", "")]);
+        let _ = app.update(Message::CommitSelected(full.into()));
+        let messages: Vec<Message> = {
+            let mut sim = simulator(&app);
+            sim.click("commit:")
+                .unwrap_or_else(|e| panic!("no header: {e}"));
+            sim.into_messages().collect()
+        };
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::CopyToClipboard(t) if t == full)),
+            "{messages:?}"
+        );
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.status, "Copied to the clipboard");
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_details_message_box() {
+        let long_body = (1..=40)
+            .map(|i| format!("Line {i} of a long description that wraps in the panel."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut app = details_app(&[
+            ("c3", "Fix the graph header", ""),
+            ("c2", "Add the message box", &long_body),
+            ("c1", "Initial commit", ""),
+        ]);
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for (id, name) in [("c3", "one-line"), ("c2", "long")] {
+                let _ = app.update(Message::CommitSelected(id.into()));
+                snapshot(&app, &format!("details-message-{name}-{theme}"));
+            }
+        }
+    }
+
     /// Preferences → Repository → Commit (M10-06).
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
