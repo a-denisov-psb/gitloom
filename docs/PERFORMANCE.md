@@ -90,6 +90,9 @@ and `GITLOOM_PERF_REPO=<repo> cargo test -p git-core --release --test perf file_
 Synthetic unit timings (no repository): commit search over 100 000 commits with bodies
 8.7–12.4 ms (`search_speed`), hide toggle 66 ms (`filter_speed`), palette filter 3.5–8.1 ms
 (`palette_filter_speed`), all `cargo test --release -p gitloom <name> -- --ignored --nocapture`.
+Time markers (M14-06, `perf_time_markers`): 60 visible rows 10.7 µs per frame (only visible
+rows are built); all 100 000 rows at once 16 ms. The 100k layout benchmark is unchanged
+(markers are drawn per visible row, the layout does not know them).
 
 ### Idle memory with avatars
 

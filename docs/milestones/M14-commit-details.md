@@ -112,11 +112,13 @@ Acceptance: app tests: click opens the editor only when allowed; Ctrl+Enter save
 
 Note (M14-05): An editable message is shown as plain text so a click opens the editor (text selection is available in the editor); blocked messages stay selectable and carry the reason as tooltip. Enter in the summary also saves (like Ctrl+Enter). A write block (read-only, Git missing) and an operation started after the check also block, with their own reason. After saving the rewritten commit is selected; Ctrl+Z moves the branch back. Stashes cannot be edited ("Stashes cannot be edited").
 
-### [ ] M14-06 Time markers in the graph
+### [x] M14-06 Time markers in the graph
 
 - Bucket function and pill drawing per the decisions table.
 
 Acceptance: unit tests for the buckets around every boundary (with a fixed clock); snapshot of a graph spanning minutes to years in all three themes; performance unchanged on the 100k-commit benchmark (`docs/PERFORMANCE.md`).
+
+Note (M14-06): Buckets count calendar days in UTC like the date column ("yesterday" starts at midnight; 7–34 days are weeks, 35–364 days months as days/30, then years as days/365). The pill uses the hover background with the normal text color: muted text on it measured 4.1:1 (below WCAG AA). Two themes since ADR-054. Commit rows have no hover actions over the message, so the pill is never hidden. Measured in `docs/PERFORMANCE.md`.
 
 ### [ ] M14-07 Documentation
 

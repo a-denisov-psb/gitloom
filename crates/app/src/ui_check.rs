@@ -1255,6 +1255,109 @@ mod tests {
         }
     }
 
+    /// `ready_app` whose commits are `ages` seconds old (newest first).
+    fn aged_app(ages: &[i64], now: i64) -> App {
+        let ids: Vec<String> = (0..ages.len()).map(|i| format!("c{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&refs);
+        app.now = now;
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        let mut commits = (*snapshot.commits).clone();
+        for (i, (commit, age)) in commits.iter_mut().zip(ages).enumerate() {
+            commit.author_time = now - age;
+            commit.summary = format!("Commit {i}");
+            commit.author = "Ana Lyst".into();
+        }
+        snapshot.commits = std::sync::Arc::new(commits);
+        view.snapshot = std::sync::Arc::new(snapshot);
+        app
+    }
+
+    /// Markers only where the relative date changes (M14-06).
+    #[test]
+    fn time_markers_where_the_label_changes() {
+        let now = 1_794_484_800; // 2026-11-12 12:00 UTC
+        let app = aged_app(
+            &[10, 30, 600, 7_200, 7_300, 90_000, 400_000, 4_000_000],
+            now,
+        );
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        let markers: Vec<Option<String>> = (0..8)
+            .map(|i| crate::ui::graph::time_marker(snapshot, i, now))
+            .collect();
+        assert_eq!(
+            markers,
+            [
+                Some("just now".into()),
+                None,
+                Some("10 minutes ago".into()),
+                Some("2 hours ago".into()),
+                None,
+                Some("yesterday".into()),
+                Some("5 days ago".into()),
+                Some("1 month ago".into()),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_time_markers() {
+        let now = 1_794_484_800;
+        let day = 86_400;
+        let mut app = aged_app(
+            &[
+                5,
+                40,
+                1_500,
+                1_600,
+                10_000,
+                day + 3_600,
+                3 * day,
+                3 * day + 10,
+                9 * day,
+                70 * day,
+                400 * day,
+                800 * day,
+            ],
+            now,
+        );
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            snapshot(&app, &format!("time-markers-{theme}"));
+        }
+    }
+
+    /// Time markers of 100 000 rows (only visible rows are built per
+    /// frame): `cargo test -p gitloom --release perf_time_markers --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore = "performance measurement"]
+    fn perf_time_markers() {
+        let now = 1_794_484_800;
+        let ages: Vec<i64> = (0..100_000).map(|i| i * 600).collect();
+        let app = aged_app(&ages, now);
+        let snapshot = &app.tabs[0].view().unwrap().snapshot;
+        let start = std::time::Instant::now();
+        let shown = (0..100_000)
+            .filter(|&i| crate::ui::graph::time_marker(snapshot, i, now).is_some())
+            .count();
+        let all = start.elapsed();
+        let start = std::time::Instant::now();
+        for i in 0..60 {
+            let _ = crate::ui::graph::time_marker(snapshot, i, now);
+        }
+        let visible = start.elapsed();
+        eprintln!(
+            "time markers: all 100k rows {all:?} ({shown} markers), 60 visible rows {visible:?}"
+        );
+    }
+
     /// A click on "commit: <short sha>" copies the full sha (M14-01).
     /// Layout only, so part of every test run.
     #[test]

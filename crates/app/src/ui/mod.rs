@@ -17,7 +17,7 @@ mod conflict;
 pub mod context_area;
 pub(crate) mod diff;
 mod file_history;
-mod graph;
+pub(crate) mod graph;
 mod inert;
 mod shift;
 #[cfg(test)]
@@ -228,7 +228,9 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
         let content = match kind {
             PaneKind::Sidebar => sidebar::view(view),
             PaneKind::Center => match &view.center {
-                CenterView::Graph => graph::view(view, &app.avatars, &app.settings.appearance),
+                CenterView::Graph => {
+                    graph::view(view, &app.avatars, &app.settings.appearance, app.now)
+                }
                 CenterView::Diff(diff) => diff::view(view, diff, app.settings.diff.view_mode),
                 CenterView::Conflict(conflict) => {
                     with_background(conflict::view(view, conflict, &app.editor_style()))
