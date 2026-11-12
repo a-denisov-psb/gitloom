@@ -13671,24 +13671,13 @@ pub(crate) mod tests {
 
     #[test]
     fn panel_toggles_follow_the_shortcuts() {
-        use crate::ui::statusbar::{panel_tooltip, PanelToggle};
+        use crate::icons::Icon;
+        use crate::ui::statusbar::{panel_icon, PanelToggle};
         let mut app = ready_app(&["c"]);
         assert!(app.panes.sidebar_visible && app.panes.panel_visible);
-        // macOS names the keys with ⌘.
-        let key = |k: &str| {
-            if crate::actions::MAC {
-                format!("⌘{k}")
-            } else {
-                format!("Ctrl+{k}")
-            }
-        };
         assert_eq!(
-            panel_tooltip(PanelToggle::Left, true),
-            format!("Hide left panel ({})", key("J"))
-        );
-        assert_eq!(
-            panel_tooltip(PanelToggle::Right, true),
-            format!("Hide commit panel ({})", key("K"))
+            panel_icon(PanelToggle::Left, app.panes.sidebar_visible),
+            Icon::PanelLeftFilled
         );
         // The buttons send what the shortcuts send.
         let _ = app.update(Message::ShortcutChecked {
@@ -13697,16 +13686,16 @@ pub(crate) mod tests {
         });
         assert!(!app.panes.sidebar_visible);
         assert_eq!(
-            panel_tooltip(PanelToggle::Left, app.panes.sidebar_visible),
-            format!("Show left panel ({})", key("J"))
+            panel_icon(PanelToggle::Left, app.panes.sidebar_visible),
+            Icon::PanelLeft
         );
         let _ = app.update(checked(Shortcut::ToggleSidebar, false));
         assert!(app.panes.sidebar_visible);
         let _ = app.update(checked(Shortcut::TogglePanel, false));
         assert!(!app.panes.panel_visible);
         assert_eq!(
-            panel_tooltip(PanelToggle::Right, app.panes.panel_visible),
-            format!("Show commit panel ({})", key("K"))
+            panel_icon(PanelToggle::Right, app.panes.panel_visible),
+            Icon::PanelRight
         );
     }
 
