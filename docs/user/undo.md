@@ -7,6 +7,7 @@
 | Commit and amend | The changes of an undone commit stay staged. |
 | Discard (file, hunk, lines, all) | The content before the discard is restored. Discarding a conflicted file is undone as well: both sides and the conflict come back. |
 | Checkout, create/delete/rename branch, create/delete tag | Local only: a branch renamed on the remote stays renamed there. Restored annotated tags are new tag objects with the same message. |
+| Deleting several branches and tags at once (left panel selection) | All local branches and tags of one bulk delete come back in one step, with their upstreams, also the ones deleted after "Delete anyway". Remote branches of the same delete cannot be undone (see below). |
 | Merge, fast-forward, rebase, interactive rebase, cherry-pick, revert, reword, squash | An operation that stopped with conflicts gets its entry when it is completed; an aborted operation leaves none. |
 | Reset (soft, mixed, hard), also on the HEAD commit | A hard reset restores the discarded changes; conflicted files cleared by a reset come back as conflicts. |
 | Pop stash, Apply stash | With or without conflicts: the files, the index and the stash list return exactly to the state before; a popped stash goes back to its place in the list. If you already edited a conflicted file, Gitloom asks before throwing that work away. Redo applies the same stash again (not possible once it was deleted). |
@@ -26,7 +27,7 @@ Nothing is undone if the repository changed in the meantime (for example HEAD or
 
 | Action | Why |
 |---|---|
-| Push, deleting or renaming a branch or tag on a remote | The remote is shared: others may already have fetched the change. Push the old state again if needed. |
+| Push, deleting or renaming a branch or tag on a remote (also in a bulk delete) | The remote is shared: others may already have fetched the change. Push the old state again if needed. |
 | Fetch (also the fetch part of a pull) | It only updates the remote-tracking branches to what the remote has; your work is not touched. Undoing it would hide the remote's real state. Fetch, pull and push clear the redo list. |
 | Clone and "Start a local repo" | They create a new folder; delete it yourself if you no longer need it. |
 | Settings in the Preferences and the Git config (identity, SSH key, Gitflow, signing, commit template, default branch name, external editor, prune, long paths and others) | They are settings, not changes to your work: change them back in the Preferences. |

@@ -352,7 +352,19 @@ pub enum Message {
     FolderToggled(String),
     /// "Show All" in the left panel: clears hide and solo.
     ShowAllBranches,
-    RefClicked(String),
+    /// Click on a branch or tag row of the left panel; Ctrl and Shift
+    /// extend the selection (M12-11).
+    RefClicked {
+        name: String,
+        kind: git_core::RefKind,
+    },
+    /// "Delete <n> branches…" for the left panel selection (M12-11).
+    BulkDeleteStart,
+    BulkDeleteConfirmed,
+    /// `git branch -D` for the branches `-d` refused in a bulk delete.
+    BulkForceDelete(Vec<String>),
+    /// "Hide in graph" / "Show in graph" for the selected branches.
+    HideSelected(bool),
     WipSelected,
     CommitSelected(String),
     DiffOpened(DiffRequest),
@@ -3003,6 +3015,11 @@ impl App {
                     if view.search.take().is_some() {
                         return Task::none();
                     }
+                    // A multi-selection in the left panel (M12-11).
+                    if view.ref_selection.len() > 1 {
+                        view.ref_selection.clear();
+                        return Task::none();
+                    }
                     view.center = CenterView::Graph;
                 }
             }
@@ -3705,6 +3722,28 @@ impl App {
                         UndoAction::Stash(record)
                     } else {
                         UndoAction::Stash(Box::new(git_core::redo_stash(git, &root, &record)?))
+                    }
+                }
+                UndoAction::Refs {
+                    label,
+                    changes,
+                    merge,
+                    report,
+                } => {
+                    if undo {
+                        for change in changes.iter().rev() {
+                            change.apply(git, true)?;
+                        }
+                    } else {
+                        for change in &changes {
+                            change.apply(git, false)?;
+                        }
+                    }
+                    UndoAction::Refs {
+                        label,
+                        changes,
+                        merge,
+                        report,
                     }
                 }
                 UndoAction::StashRename(rename) => {
@@ -4748,6 +4787,97 @@ impl App {
             Report::Toast(toast) => {
                 self.toasts.push(toast);
             }
+        }
+    }
+
+    /// Deletes the left panel selection (M12-11): local branches and tags
+    /// as one undo step, then the remote branches with one push per remote.
+    fn bulk_delete(&mut self) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let plan = crate::ref_selection::BulkPlan::new(
+            &view.ref_selection.items,
+            checked_out_branch(&view.snapshot),
+            &view.snapshot.remotes,
+        );
+        view.ref_selection.clear();
+        let mut requests: std::collections::VecDeque<NetworkRequest> = plan
+            .remote
+            .iter()
+            .map(|(remote, branches)| NetworkRequest {
+                label: match branches.len() {
+                    1 => format!("Delete {remote}/{}", branches[0]),
+                    n => format!("Delete {n} branches on {remote}"),
+                },
+                kind: NetworkKind::PushBranch,
+                args: git_core::delete_remote_branches_args(remote, branches),
+                background: false,
+                undo: crate::repo_view::NetworkUndo::None,
+            })
+            .collect();
+        if plan.local.is_empty() && plan.tags.is_empty() {
+            let Some(first) = requests.pop_front() else {
+                return Task::none();
+            };
+            view.network_chain = requests;
+            return self.run_network(tab, first);
+        }
+        view.network_chain = requests;
+        let label = plan.undo_label();
+        let entry = label.clone();
+        let (branches, tags) = (plan.local, plan.tags);
+        self.run_undoable(tab, label, move |git| {
+            let outcome = git_core::delete_refs(git, &branches, &tags, false)?;
+            Ok(Some(History::Push(UndoAction::Refs {
+                label: entry.clone(),
+                changes: outcome.changes,
+                merge: false,
+                report: Some(crate::undo::BulkReport {
+                    unmerged: outcome.unmerged,
+                    failed: outcome.failed,
+                }),
+            })))
+        })
+    }
+
+    /// After a bulk delete: one toast for the failures, one confirmation
+    /// for the branches that are not merged (M12-11).
+    fn bulk_report(&mut self, report: crate::undo::BulkReport) {
+        if !report.failed.is_empty() {
+            let list: Vec<String> = report
+                .failed
+                .iter()
+                .map(|(name, reason)| format!("{name}: {}", reason.lines().last().unwrap_or("")))
+                .collect();
+            let details: Vec<String> = report
+                .failed
+                .iter()
+                .map(|(name, reason)| format!("{name}:\n{reason}"))
+                .collect();
+            self.toasts.push(crate::toast::Toast::error_with(
+                "Some items were not deleted",
+                format!("The others were deleted. Not deleted: {}", list.join("; ")),
+                details.join("\n\n"),
+            ));
+        }
+        if !report.unmerged.is_empty() {
+            let names: Vec<String> = report.unmerged.iter().map(|b| format!("• {b}")).collect();
+            self.modal = Some(Modal::confirm(
+                "Branches not merged",
+                format!(
+                    "These branches have commits that are not merged into the current branch \
+                     or their upstream. Deleting them loses those commits (they can only be \
+                     found in the reflog).\n{}",
+                    names.join("\n")
+                ),
+                "Delete anyway",
+                true,
+                Message::BulkForceDelete(report.unmerged),
+            ));
         }
     }
 
@@ -6891,6 +7021,28 @@ impl App {
                     .apply_diff_lines(|diff, h, l| diff.selection.contains(&(h as u32, l as u32)))
             }
             Message::WriteFinished { tab, label, result } => {
+                // A bulk delete carries its partial failures (M12-11); an
+                // empty one leaves no undo entry.
+                let mut bulk_report = None;
+                let result = match result {
+                    Ok(Some(History::Push(UndoAction::Refs {
+                        label,
+                        changes,
+                        merge,
+                        report,
+                    }))) => {
+                        bulk_report = report;
+                        Ok(
+                            (!changes.is_empty()).then_some(History::Push(UndoAction::Refs {
+                                label,
+                                changes,
+                                merge,
+                                report: None,
+                            })),
+                        )
+                    }
+                    other => other,
+                };
                 let mut queued = None;
                 // `Some(show_notice)` for an auto-fetch: its errors appear once
                 // in the status bar (until a fetch works again), never as a dialog.
@@ -6993,6 +7145,19 @@ impl App {
                         _ => {}
                     }
                     match &result {
+                        // The forced part of a bulk delete joins its step.
+                        Ok(Some(History::Push(UndoAction::Refs {
+                            changes,
+                            merge: true,
+                            ..
+                        }))) if matches!(view.undo.last(), Some(UndoAction::Refs { .. })) => {
+                            if let Some(UndoAction::Refs { changes: last, .. }) =
+                                view.undo.last_mut()
+                            {
+                                last.extend(changes.iter().cloned());
+                            }
+                            view.redo.clear();
+                        }
                         Ok(Some(History::Push(action))) => {
                             view.undo.push(action.clone());
                             view.redo.clear();
@@ -7112,7 +7277,18 @@ impl App {
                         }
                     }
                 }
+                if let Some(report) = bulk_report {
+                    self.bulk_report(report);
+                }
                 let refresh = self.refresh(tab);
+                // Remote deletions of a bulk delete run one remote after the
+                // other, also when one of them failed (M12-11).
+                let then_network = then_network.or_else(|| {
+                    self.tab_mut(tab)
+                        .and_then(Tab::view_mut)
+                        .filter(|v| v.queued.is_none())
+                        .and_then(|v| v.network_chain.pop_front())
+                });
                 if let Some(request) = then_network {
                     return Task::batch([refresh, self.run_network(tab, request)]);
                 }
@@ -7285,6 +7461,30 @@ impl App {
                 let Some(view) = self.active_tab().and_then(Tab::view) else {
                     return Task::none();
                 };
+                // Right click on one of several selected rows: actions for
+                // all of them (M12-11).
+                if view.ref_selection.len() > 1 && view.ref_selection.contains(kind, &name) {
+                    let plan = crate::ref_selection::BulkPlan::new(
+                        &view.ref_selection.items,
+                        checked_out_branch(&view.snapshot),
+                        &view.snapshot.remotes,
+                    );
+                    let branches: Vec<&crate::ref_selection::RefKey> = view
+                        .ref_selection
+                        .items
+                        .iter()
+                        .filter(|(k, _)| *k != git_core::RefKind::Tag)
+                        .collect();
+                    let all_hidden = !branches.is_empty()
+                        && branches
+                            .iter()
+                            .all(|(k, n)| view.ref_filter.is_hidden(n, *k));
+                    self.context_menu = Some(ContextMenu::new(
+                        position,
+                        crate::menus::bulk(&plan, !branches.is_empty(), all_hidden, writable),
+                    ));
+                    return Task::none();
+                }
                 let entries = match kind {
                     git_core::RefKind::LocalBranch => {
                         let local = view
@@ -8197,7 +8397,74 @@ impl App {
             Message::FilterChanged(filter) => {
                 if let Some(view) = self.active_view_mut() {
                     view.filter = filter;
+                    view.prune_ref_selection();
                 }
+            }
+            Message::BulkDeleteStart => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let plan = crate::ref_selection::BulkPlan::new(
+                    &view.ref_selection.items,
+                    checked_out_branch(&view.snapshot),
+                    &view.snapshot.remotes,
+                );
+                if plan.is_empty() {
+                    return Task::none();
+                }
+                let title = plan.menu_label().trim_end_matches('…').to_owned();
+                self.modal = Some(Modal::confirm(
+                    title,
+                    plan.dialog_text(),
+                    "Delete",
+                    true,
+                    Message::BulkDeleteConfirmed,
+                ));
+            }
+            Message::BulkDeleteConfirmed => return self.bulk_delete(),
+            Message::BulkForceDelete(branches) => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let label = match branches.len() {
+                    1 => "Delete 1 branch".to_owned(),
+                    n => format!("Delete {n} branches"),
+                };
+                let entry = label.clone();
+                return self.run_undoable(tab, label, move |git| {
+                    let outcome = git_core::delete_refs(git, &branches, &[], true)?;
+                    Ok(Some(History::Push(UndoAction::Refs {
+                        label: entry.clone(),
+                        changes: outcome.changes,
+                        merge: true,
+                        report: Some(crate::undo::BulkReport {
+                            unmerged: Vec::new(),
+                            failed: outcome.failed,
+                        }),
+                    })))
+                });
+            }
+            Message::HideSelected(hide) => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let head = checked_out_branch(&view.snapshot).map(str::to_owned);
+                let branches: Vec<(String, git_core::RefKind)> = view
+                    .ref_selection
+                    .items
+                    .iter()
+                    .filter(|(kind, name)| {
+                        *kind != git_core::RefKind::Tag
+                            && !(*kind == git_core::RefKind::LocalBranch
+                                && Some(name) == head.as_ref())
+                    })
+                    .map(|(kind, name)| (name.clone(), *kind))
+                    .collect();
+                return self.change_filter(move |filter, _| {
+                    for (name, kind) in &branches {
+                        filter.set_hidden(name, *kind, hide);
+                    }
+                });
             }
             Message::DiffModeChanged(mode) => {
                 if self.settings.diff.view_mode == mode {
@@ -8351,6 +8618,7 @@ impl App {
                     if !view.folders_collapsed.remove(&key) {
                         view.folders_collapsed.insert(key);
                     }
+                    view.prune_ref_selection();
                 }
                 return self.persist();
             }
@@ -8365,14 +8633,25 @@ impl App {
                     if !view.collapsed.remove(&section) {
                         view.collapsed.insert(section);
                     }
+                    view.prune_ref_selection();
                 }
             }
-            Message::RefClicked(name) => {
+            Message::RefClicked { name, kind } => {
+                let (toggle, range) = (self.modifiers.command(), self.modifiers.shift());
+                if let Some(view) = self.active_view_mut() {
+                    let order = view.visible_refs();
+                    view.ref_selection
+                        .click((kind, name.clone()), &order, toggle, range);
+                }
+                // Ctrl and Shift only change the selection.
+                if toggle || range {
+                    return Task::none();
+                }
                 let target = self.active_tab().and_then(Tab::view).and_then(|view| {
                     view.snapshot
                         .refs
                         .iter()
-                        .find(|r| r.name == name)
+                        .find(|r| r.name == name && r.kind == kind)
                         .map(|r| r.target.clone())
                 });
                 if let Some(target) = target {
@@ -10412,6 +10691,18 @@ fn short_id(id: &str) -> &str {
     &id[..id.len().min(7)]
 }
 
+/// The checked-out local branch: from HEAD, or the reference marked as
+/// checked out.
+fn checked_out_branch(snapshot: &RepoSnapshot) -> Option<&str> {
+    snapshot.head.branch().or_else(|| {
+        snapshot
+            .refs
+            .iter()
+            .find(|r| r.is_head && r.kind == git_core::RefKind::LocalBranch)
+            .map(|r| r.name.as_str())
+    })
+}
+
 /// Name of the checked-out branch for menu labels, "HEAD" when detached.
 fn head_name(snapshot: &RepoSnapshot) -> &str {
     snapshot.head.branch().unwrap_or("HEAD")
@@ -11601,6 +11892,182 @@ pub(crate) mod tests {
         view.ref_filter
             .toggle_hidden("develop", git_core::RefKind::LocalBranch);
         app
+    }
+
+    fn ref_click(
+        app: &mut App,
+        kind: git_core::RefKind,
+        name: &str,
+        modifiers: keyboard::Modifiers,
+    ) {
+        app.modifiers = modifiers;
+        let _ = app.update(Message::RefClicked {
+            name: name.into(),
+            kind,
+        });
+        app.modifiers = keyboard::Modifiers::empty();
+    }
+
+    fn ref_selection(app: &App) -> Vec<String> {
+        app.tabs[0]
+            .view()
+            .unwrap()
+            .ref_selection
+            .items
+            .iter()
+            .map(|(_, n)| n.clone())
+            .collect()
+    }
+
+    #[test]
+    fn left_panel_multi_selection() {
+        use git_core::RefKind::{LocalBranch, RemoteBranch, Tag};
+        use keyboard::Modifiers;
+        let mut app = sidebar_app();
+        ref_click(&mut app, LocalBranch, "develop", Modifiers::empty());
+        // Shift: the range in visible order; the collapsed hotfix folder's
+        // branch is not part of it.
+        ref_click(&mut app, RemoteBranch, "origin/main", Modifiers::SHIFT);
+        assert_eq!(
+            ref_selection(&app),
+            [
+                "develop",
+                "main",
+                "feature/sidebar-tree",
+                "feature/ui/diff-modes",
+                "feature/ui/toolbar-pickers",
+                "origin/develop",
+                "origin/main"
+            ]
+        );
+        // Ctrl toggles rows, also a tag.
+        ref_click(
+            &mut app,
+            LocalBranch,
+            "feature/sidebar-tree",
+            Modifiers::COMMAND,
+        );
+        ref_click(&mut app, Tag, "v1.0.0-rc.2", Modifiers::COMMAND);
+        assert_eq!(ref_selection(&app).len(), 7);
+        assert!(!ref_selection(&app).contains(&"feature/sidebar-tree".to_owned()));
+        // The menu acts on all of them; the checked-out branch is skipped.
+        let _ = app.update(Message::BranchContextMenu {
+            name: "main".into(),
+            kind: LocalBranch,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        let labels: Vec<String> = menu
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                MenuEntry::Item { label, .. } => Some(label.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, ["Delete 6 branches and tags…", "Hide in graph"]);
+        let _ = app.update(Message::BulkDeleteStart);
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Delete 6 branches and tags");
+        assert!(modal.text.starts_with(
+            "Local branches:\n• develop\n• feature/ui/diff-modes\n• feature/ui/toolbar-pickers\n• main (checked out, skipped)"
+        ));
+        assert!(modal
+            .text
+            .contains("Remote branches on origin:\n• develop\n• main"));
+        assert!(modal.text.contains("Tags:\n• v1.0.0-rc.2"));
+        assert!(modal
+            .text
+            .ends_with("Remote branches cannot be restored with Undo."));
+        // A row outside the selection keeps its own menu.
+        let _ = app.update(Message::BranchContextMenu {
+            name: "feature/sidebar-tree".into(),
+            kind: LocalBranch,
+            position: iced::Point::ORIGIN,
+        });
+        assert!(!format!("{:?}", app.context_menu.take().unwrap().entries).contains("Delete 6"));
+        // The filter drops rows that are no longer shown; Esc clears.
+        let _ = app.update(Message::FilterChanged("ui".into()));
+        assert_eq!(
+            ref_selection(&app),
+            ["feature/ui/diff-modes", "feature/ui/toolbar-pickers"]
+        );
+        let _ = app.update(checked(Shortcut::Close, false));
+        assert!(ref_selection(&app).is_empty());
+        // A plain click selects one row and jumps (as before).
+        ref_click(&mut app, Tag, "v1.0.0-rc.2", Modifiers::empty());
+        assert_eq!(ref_selection(&app), ["v1.0.0-rc.2"]);
+    }
+
+    #[test]
+    fn bulk_delete_runs_local_then_remote_and_reports() {
+        use git_core::RefKind::{LocalBranch, RemoteBranch};
+        use keyboard::Modifiers;
+        let mut app = sidebar_app();
+        let tab = app.tabs[0].id;
+        ref_click(&mut app, LocalBranch, "develop", Modifiers::empty());
+        ref_click(&mut app, RemoteBranch, "origin/develop", Modifiers::COMMAND);
+        ref_click(&mut app, RemoteBranch, "origin/main", Modifiers::COMMAND);
+        let _ = app.update(Message::BulkDeleteConfirmed);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Delete 1 branch"));
+        assert_eq!(view.network_chain.len(), 1);
+        assert!(view.ref_selection.items.is_empty());
+        // develop was not merged, another branch failed: one toast, one
+        // confirmation; the remote deletion follows.
+        let change = git_core::RefChange::DeleteBranch {
+            name: "x".into(),
+            target: "c".into(),
+            upstream: None,
+        };
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Delete 1 branch".into(),
+            result: Ok(Some(History::Push(UndoAction::Refs {
+                label: "Delete 1 branch".into(),
+                changes: vec![change.clone()],
+                merge: false,
+                report: Some(crate::undo::BulkReport {
+                    unmerged: vec!["develop".into()],
+                    failed: vec![("gone".into(), "error: not found".into())],
+                }),
+            }))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.busy.as_deref(), Some("Delete 2 branches on origin"));
+        assert!(view.network_chain.is_empty());
+        assert!(matches!(
+            view.undo.last(),
+            Some(UndoAction::Refs { report: None, .. })
+        ));
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.title, "Some items were not deleted");
+        assert!(toast.text.contains("gone: error: not found"));
+        let modal = app.modal.clone().unwrap();
+        assert_eq!(modal.title, "Branches not merged");
+        assert!(modal.text.ends_with("• develop"));
+        // The forced delete joins the same undo step.
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Delete 2 branches on origin".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Delete 1 branch".into(),
+            result: Ok(Some(History::Push(UndoAction::Refs {
+                label: "Delete 1 branch".into(),
+                changes: vec![change],
+                merge: true,
+                report: Some(crate::undo::BulkReport {
+                    unmerged: Vec::new(),
+                    failed: Vec::new(),
+                }),
+            }))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.undo.len(), 1);
+        assert!(matches!(&view.undo[0], UndoAction::Refs { changes, .. } if changes.len() == 2));
     }
 
     fn selected(app: &App) -> Option<Selection> {

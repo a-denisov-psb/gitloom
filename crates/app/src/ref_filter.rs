@@ -69,6 +69,17 @@ impl RefFilter {
         }
     }
 
+    /// Hides (or shows) one branch (bulk "Hide in graph", M12-11).
+    pub fn set_hidden(&mut self, name: &str, kind: RefKind, hide: bool) {
+        if let Some(full) = full_name(name, kind) {
+            if hide {
+                self.hidden.insert(full);
+            } else {
+                self.hidden.remove(&full);
+            }
+        }
+    }
+
     pub fn toggle_soloed(&mut self, name: &str, kind: RefKind) {
         if let Some(full) = full_name(name, kind) {
             if !self.soloed.remove(&full) {

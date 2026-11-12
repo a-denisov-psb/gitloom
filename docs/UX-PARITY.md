@@ -157,6 +157,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 
 | Deviation | Reason |
 |---|---|
+| Multi-selection of branches and tags in the left panel (Ctrl/Shift+click) with bulk delete and hide/show | Gitloom extension (M12-11, maintainer request; whether GitKraken 7.5.2 offers it is an open verification item); a plain click behaves as before |
 | A hotfix finished while a release branch exists is merged into the development branch | GitKraken's documentation; the `git-flow` CLI merges into the release branch instead (M7-09, GitKraken check open) |
 | Ctrl+O opens a folder dialog directly | Quick access to the folder dialog (the palette list is Ctrl+Shift+O); does not collide with a GitKraken shortcut |
 | F5 reloads the whole repository | Manual full reload in addition to the file watcher (M2) |

@@ -729,6 +729,48 @@ mod tests {
         }
     }
 
+    /// Multi-selection in the left panel (M12-11): selected rows, the bulk
+    /// menu and the grouped dialog; dark and light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_bulk_delete() {
+        use git_core::RefKind::{LocalBranch, RemoteBranch, Tag};
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::sidebar_app();
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            for (kind, name, toggle) in [
+                (LocalBranch, "main", false),
+                (LocalBranch, "feature/ui/diff-modes", true),
+                (RemoteBranch, "origin/develop", true),
+                (Tag, "v1.0.0-rc.2", true),
+            ] {
+                let _ = app.update(Message::ModifiersChanged(if toggle {
+                    iced::keyboard::Modifiers::COMMAND
+                } else {
+                    iced::keyboard::Modifiers::empty()
+                }));
+                let _ = app.update(Message::RefClicked {
+                    name: name.into(),
+                    kind,
+                });
+            }
+            let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::empty()));
+            let _ = app.update(Message::BranchContextMenu {
+                name: "origin/develop".into(),
+                kind: RemoteBranch,
+                position: iced::Point::new(150.0, 330.0),
+            });
+            snapshot(&app, &format!("bulk-0-menu-{theme}"));
+            app.context_menu = None;
+            let _ = app.update(Message::BulkDeleteStart);
+            snapshot(&app, &format!("bulk-1-dialog-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.
@@ -1806,7 +1848,7 @@ mod tests {
         assert!(
             !messages
                 .iter()
-                .any(|m| matches!(m, Message::SettingsClosed | Message::RefClicked(_))),
+                .any(|m| matches!(m, Message::SettingsClosed | Message::RefClicked { .. })),
             "{messages:?}"
         );
     }
