@@ -140,6 +140,9 @@ pub struct Commit {
     pub author_time: i64,
     /// Committer time as Unix timestamp in seconds (UTC); used for ordering.
     pub commit_time: i64,
+    /// Committer name after the mailmap when the committer is not the
+    /// author (name or email differ); empty otherwise (M14-02).
+    pub committer: String,
 }
 
 impl Commit {

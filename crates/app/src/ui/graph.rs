@@ -1353,6 +1353,7 @@ mod tests {
             email: String::new(),
             author_time: 0,
             commit_time: 0,
+            committer: String::new(),
         }
     }
 

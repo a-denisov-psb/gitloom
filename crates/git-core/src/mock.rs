@@ -88,6 +88,7 @@ impl MockBackend {
                 email: format!("{}@example.com", author.to_lowercase().replace(' ', ".")),
                 author_time: BASE_TIME - hours * 3600,
                 commit_time: BASE_TIME - hours * 3600,
+                committer: String::new(),
             })
             .collect();
 

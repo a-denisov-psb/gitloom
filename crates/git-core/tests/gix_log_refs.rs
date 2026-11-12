@@ -56,6 +56,26 @@ fn author_and_commit_time_differ() {
 }
 
 #[test]
+fn committer_is_only_set_when_it_differs_from_the_author() {
+    // The test identities differ: author "Test Author", committer "Test Committer".
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "1\n", "Applied");
+    repo.git(&[
+        "commit",
+        "--allow-empty",
+        "--quiet",
+        "-m",
+        "Own commit",
+        "--author",
+        "Test Committer <committer@example.com>",
+    ]);
+    let log = open(&repo).log(10).unwrap();
+    assert_eq!(log.commits[0].committer, "", "same person");
+    assert_eq!(log.commits[1].author, "Test Author");
+    assert_eq!(log.commits[1].committer, "Test Committer");
+}
+
+#[test]
 fn log_respects_limit_and_marks_truncation() {
     let repo = TestRepo::new();
     repo.commit("a.txt", "1\n", "One");

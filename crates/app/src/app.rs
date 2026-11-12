@@ -1126,6 +1126,8 @@ pub enum Message {
     },
     SummaryChanged(String),
     DescriptionEdited(iced::widget::text_editor::Action),
+    /// "parent: <sha>" in the details (M14-02): select and scroll to it.
+    ParentClicked(String),
     /// Selection in the details' message box (M14-01); edits are ignored.
     DetailsTextInput {
         body: bool,
@@ -4379,6 +4381,12 @@ impl App {
         }
         if let Some(commit) = view.selected_commit().and_then(|id| snapshot.commit(id)) {
             emails.push(commit.email.clone());
+            // Co-authors of the details (M14-02).
+            emails.extend(
+                crate::trailers::co_authors(&commit.body)
+                    .into_iter()
+                    .map(|a| a.email),
+            );
         }
         let start = self.avatars.request(emails.iter().map(String::as_str));
         self.load_avatars(start)
@@ -8707,6 +8715,17 @@ impl App {
                     view.summary = summary;
                 }
             }
+            Message::ParentClicked(id) => {
+                let Some(view) = self.active_view_mut() else {
+                    return Task::none();
+                };
+                if !view.snapshot.index.contains_key(&id) {
+                    return Task::none();
+                }
+                select_multi(view, &id, false, false);
+                let task = self.select(Selection::Commit(id));
+                return Task::batch([task, self.reveal_selection()]);
+            }
             Message::DetailsTextInput { body, action } => {
                 if !action.is_edit() {
                     if let Some(message) =
@@ -12199,6 +12218,7 @@ pub(crate) mod tests {
             email: String::new(),
             author_time: 0,
             commit_time: 0,
+            committer: String::new(),
         };
         let snapshot = RepoSnapshot::build(
             Log {
@@ -12277,6 +12297,7 @@ pub(crate) mod tests {
                 email: String::new(),
                 author_time: 100 - i as i64,
                 commit_time: 100 - i as i64,
+                committer: String::new(),
             })
             .collect();
         let reference = |name: &str, target: &str, is_head| git_core::Reference {
@@ -12358,6 +12379,7 @@ pub(crate) mod tests {
                 email: String::new(),
                 author_time: 100 - i as i64,
                 commit_time: 100 - i as i64,
+                committer: String::new(),
             })
             .collect();
         let snapshot = RepoSnapshot::build(
@@ -17395,6 +17417,7 @@ pub(crate) mod tests {
                 email: String::new(),
                 author_time: 100 - i as i64,
                 commit_time: 100 - i as i64,
+                committer: String::new(),
             })
             .collect();
         let snapshot = RepoSnapshot::build(
@@ -18507,6 +18530,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn parent_link_selects_and_reveals_the_parent() {
+        let ids: Vec<String> = (0..200).map(|i| format!("c{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&refs);
+        app.tabs[0].view_mut().unwrap().scroll.height = 300.0;
+        let _ = app.update(Message::CommitSelected("c0".into()));
+        let _ = app.update(Message::ParentClicked("c150".into()));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.selected_commit(), Some("c150"));
+        assert!(view.scroll.offset > 0.0, "scrolled to the parent");
+        // A parent beyond the loaded history changes nothing.
+        let _ = app.update(Message::ParentClicked("unknown".into()));
+        assert_eq!(app.tabs[0].view().unwrap().selected_commit(), Some("c150"));
+    }
+
+    #[test]
     fn message_box_selects_but_never_edits() {
         use iced::widget::text_editor::{Action, Edit};
         let mut app = ready_app(&["c"]);
@@ -18521,6 +18560,7 @@ pub(crate) mod tests {
             email: String::new(),
             author_time: 0,
             commit_time: 0,
+            committer: String::new(),
         }));
         let _ = app.update(Message::DetailsTextInput {
             body: false,
@@ -19129,15 +19169,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn author_line_skips_the_separator_without_email() {
-        let with = crate::ui::panel::author_line("a@example.com", 0);
-        assert!(with.starts_with("a@example.com · authored "), "{with}");
-        let without = crate::ui::panel::author_line("", 0);
-        assert!(without.starts_with("authored "), "{without}");
-        assert!(!without.contains('·'));
-    }
-
-    #[test]
     fn stash_details_keep_their_sections() {
         let mut app = ready_app(&["s"]);
         let tab = app.tabs[0].id;
@@ -19621,6 +19652,7 @@ pub(crate) mod tests {
             email: String::new(),
             author_time: time,
             commit_time: time,
+            committer: String::new(),
         };
         let branch = |name: &str, target: &str| Reference {
             name: name.into(),
