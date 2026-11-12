@@ -667,7 +667,8 @@ fn table() -> Vec<Action> {
         "Command palette",
         PaletteAndSearch,
         Global,
-        &[ch('p').cmd()],
+        // Ctrl+Shift+P as in VS Code (M12-12); GitKraken has no binding there.
+        &[ch('p').cmd(), ch('p').cmd().shift()],
     );
     add(
         A::SearchCommits,

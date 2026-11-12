@@ -4,6 +4,8 @@
 
 ![Preferences](../screenshots/m6-settings-general-dark.png)
 
+**From the command palette** (Ctrl+P or Ctrl+Shift+P): every on/off setting has an entry "Toggle: <setting> (on/off)"; "Set: Theme ›", "Set: Diff view ›", "Set: Stash message template ›" and "Set: External editor ›" (with a repository tab also "Repository: External editor ›") open a list of values; "Preferences: <page>" and "Preferences: <setting>" open the Preferences at that page and highlight the setting for a moment. Search words like "profile", "gravatar" or Git config names (`init.defaultBranch`) find them too. Repository entries appear only with a repository tab.
+
 | Category | Setting |
 |---|---|
 | General | **Auto-fetch interval** in minutes (default 5, 0 turns it off). **Prune remote branches on fetch** (on: fetch, auto-fetch and pull remove remote branches deleted on the remote; off: Git's `fetch.prune` applies). **Support long paths** (Windows: `core.longpaths` in the global Git config). **Default branch name** of new repositories (`init.defaultBranch`, global Git config; empty removes it). **Check for updates** (off by default, see [Privacy](privacy.md)). |

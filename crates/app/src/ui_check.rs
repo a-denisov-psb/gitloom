@@ -771,6 +771,29 @@ mod tests {
         }
     }
 
+    /// Palette settings entries and a deep link (M12-12): "toggle"
+    /// filtered, then Preferences → General with "Default branch name"
+    /// highlighted; dark and light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_palette_settings() {
+        use crate::shortcuts::Shortcut;
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let mut app = crate::app::tests::staging_app(&[], &[]);
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let _ = app.update(crate::app::tests::checked(Shortcut::CommandPalette, false));
+            let _ = app.update(Message::PaletteQuery("toggle".into()));
+            snapshot(&app, &format!("palette-settings-0-{theme}"));
+            let _ = app.update(Message::PaletteQuery("Preferences: Default branch".into()));
+            let _ = app.update(crate::app::tests::checked(Shortcut::Confirm, true));
+            snapshot(&app, &format!("palette-settings-1-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

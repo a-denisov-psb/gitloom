@@ -21,6 +21,8 @@ pub enum Mode {
     Files,
     /// Remotes with a website (M12-03).
     RemoteWebsites,
+    /// Values of a setting (M12-12).
+    Choice(crate::settings_registry::Choice),
 }
 
 impl Mode {
@@ -32,6 +34,7 @@ impl Mode {
             Self::ChooseIdentity => "Choose identity: type a name or email",
             Self::Files => "File history: type a file path",
             Self::RemoteWebsites => "Open remote in browser: type a remote name",
+            Self::Choice(choice) => choice.placeholder(),
         }
     }
 }
@@ -51,6 +54,19 @@ pub enum Target {
     Identity(crate::app::IdentityChoice),
     /// A web page (M12-03).
     Link(String),
+    /// A setting entry (M12-12).
+    Setting(SettingTarget),
+}
+
+/// What a settings entry of the palette does (M12-12).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SettingTarget {
+    /// Switch a boolean setting.
+    Toggle(crate::settings_registry::Toggle),
+    /// Set a choice to a value.
+    Choose(crate::settings_registry::Choice, String),
+    /// Open the Preferences at a page, at a field (highlighted).
+    Open(crate::settings::Category, Option<&'static str>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +77,8 @@ pub struct Entry {
     /// Why the entry cannot run; it is listed anyway.
     pub disabled: Option<String>,
     pub target: Target,
+    /// Extra words the search matches, not shown (M12-12, e.g. "profile").
+    pub keywords: Option<String>,
 }
 
 impl Entry {
@@ -70,7 +88,13 @@ impl Entry {
             detail: None,
             disabled: None,
             target,
+            keywords: None,
         }
+    }
+
+    pub fn keywords(mut self, keywords: impl Into<String>) -> Self {
+        self.keywords = Some(keywords.into());
+        self
     }
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {
@@ -136,8 +160,15 @@ impl Palette {
     }
 
     fn refilter(&mut self) {
-        self.matches =
-            crate::fuzzy::rank(&self.query, self.entries.iter().map(|e| e.label.as_str()));
+        let texts: Vec<std::borrow::Cow<'_, str>> = self
+            .entries
+            .iter()
+            .map(|e| match &e.keywords {
+                Some(words) => format!("{} {words}", e.label).into(),
+                None => e.label.as_str().into(),
+            })
+            .collect();
+        self.matches = crate::fuzzy::rank(&self.query, texts.iter().map(|t| t.as_ref()));
         self.matches.truncate(MAX_SHOWN);
         self.selected = 0;
     }

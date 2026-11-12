@@ -40,6 +40,7 @@ mod search;
 mod selection;
 mod session;
 mod settings;
+mod settings_registry;
 mod shortcuts;
 mod snapshot;
 mod stash_template;

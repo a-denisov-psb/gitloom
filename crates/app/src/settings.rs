@@ -466,6 +466,8 @@ impl Category {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Page {
     pub category: Category,
+    /// Field opened from the palette, highlighted for a moment (M12-12).
+    pub highlight: Option<&'static str>,
     /// Text of the auto-fetch input (may be invalid while typing).
     pub auto_fetch_input: String,
     /// Why the typed interval is not applied.
@@ -573,6 +575,7 @@ impl Page {
     pub fn new(settings: &Settings) -> Self {
         Self {
             category: Category::General,
+            highlight: None,
             auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
             error: None,
             tools: None,
