@@ -36,6 +36,16 @@ Fetch, pull and push cannot be undone.
 
 Changes made outside Gitloom (new remotes, upstreams, `.git/config`) show up automatically.
 
+## Submodules
+
+The SUBMODULES section lists every submodule, nested ones indented under their parent, with an icon for its state (tooltip): up to date, **not initialized**, **out of date** (the checked-out commit differs from the one the repository records), **modified** (local changes) or **conflict**.
+
+- Double click a submodule to open it in its own tab (or switch to that tab).
+- Right click: **Update** (`git submodule update --init --recursive`, with progress and Cancel like fetch; credentials are asked the same way), **Open in new tab**, **Open in file manager**, **Copy path**. Right click on the section header: **Update all submodules**.
+- After a checkout, pull, merge or rebase that leaves submodules out of date, a notification "Submodules are out of date" offers **Update**.
+
+Adding, removing or moving submodules is done with the Git command line.
+
 ## SSH key per repository
 
 Preferences → Repository → SSH key chooses the key Git uses for this repository's fetch, pull and push: **System default** (ssh-agent and `~/.ssh/config`), one of the keys in `~/.ssh` (files with a matching `.pub`), or any key file (**Browse…** or a typed path). Gitloom writes `core.sshCommand = ssh -i "<key>" -o IdentitiesOnly=yes` to the repository's Git config, so `git` in a terminal uses the same key; the key itself is never copied. A `core.sshCommand` you set yourself is shown and only replaced after **Replace…**; one from the global Git config is shown as inherited. A key with a passphrase asks for it in Gitloom's prompt; the passphrase is not stored.

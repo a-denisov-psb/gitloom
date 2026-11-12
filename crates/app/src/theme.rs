@@ -355,14 +355,6 @@ pub fn column_header(theme: &Theme) -> container::Style {
     filled(palette(theme).header_band)
 }
 
-/// Section without content yet (e.g. submodules): faded text.
-pub fn faded(theme: &Theme) -> container::Style {
-    container::Style {
-        text_color: Some(palette(theme).text_muted.scale_alpha(0.6)),
-        ..container::Style::default()
-    }
-}
-
 pub fn panes(theme: &Theme) -> pane_grid::Style {
     let accent = palette(theme).accent;
     let highlight = pane_grid::Highlight {

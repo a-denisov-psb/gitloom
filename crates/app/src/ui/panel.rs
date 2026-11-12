@@ -805,11 +805,6 @@ fn all_button<'a>(
         .into()
 }
 
-/// Wraps a disabled control in the standard "Not available yet" tooltip.
-pub(crate) fn with_tooltip(content: Element<'_, Message>) -> Element<'_, Message> {
-    with_tooltip_text(content, NOT_AVAILABLE.to_owned())
-}
-
 /// Tooltip for a disabled write action: why writing is blocked, if it is.
 pub(crate) fn write_tooltip<'a>(
     content: Element<'a, Message>,

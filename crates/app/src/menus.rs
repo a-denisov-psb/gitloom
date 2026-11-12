@@ -544,6 +544,33 @@ pub fn stash(id: &str, writable: bool, restorable: bool) -> Vec<MenuEntry> {
     ]
 }
 
+/// Context menu of a submodule row (M12-06).
+pub fn submodule(path: &str, writable: bool) -> Vec<MenuEntry> {
+    vec![
+        action(
+            "Update",
+            writable,
+            Message::SubmoduleUpdate(Some(path.into())),
+        ),
+        MenuEntry::item("Open in new tab", Message::OpenSubmodule(path.into())),
+        MenuEntry::item(
+            "Open in file manager",
+            Message::OpenFileLocation(path.into()),
+        ),
+        MenuEntry::Separator,
+        MenuEntry::item("Copy path", Message::CopyToClipboard(path.into())),
+    ]
+}
+
+/// Context menu of the SUBMODULES header (M12-06).
+pub fn submodules_header(enabled: bool) -> Vec<MenuEntry> {
+    vec![action(
+        "Update all submodules",
+        enabled,
+        Message::SubmoduleUpdate(None),
+    )]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

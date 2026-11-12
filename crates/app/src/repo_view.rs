@@ -652,6 +652,8 @@ pub enum NetworkKind {
     Push,
     /// Push of another branch: rejections show the plain error.
     PushBranch,
+    /// `git submodule update` (M12-06).
+    SubmoduleUpdate,
 }
 
 /// A running network operation (fetch, pull, push) of a tab.
@@ -809,6 +811,10 @@ pub struct RepoView {
     /// "Resolved Files" (M12-05); `None` when the operation was already
     /// running when the tab opened (then every staged file counts).
     pub operation_conflicts: Option<std::collections::BTreeSet<String>>,
+    /// Submodules with their states (M12-06), read after each refresh.
+    pub submodules: Vec<git_core::submodule::Submodule>,
+    /// HEAD when the submodules were read last; `None` before the first read.
+    pub submodules_head: Option<Option<String>>,
     /// Error of a failed pull, shown once the refresh tells whether it
     /// stopped in a conflict (Git reports merge conflicts on stdout).
     pub pull_failure: Option<String>,
@@ -1086,7 +1092,7 @@ impl RepoView {
             signatures: std::collections::HashMap::new(),
             center: CenterView::Graph,
             filter: String::new(),
-            collapsed: HashSet::from([Section::Submodules]),
+            collapsed: HashSet::new(),
             folders_collapsed: Default::default(),
             flow_finishing: false,
             flow_resumed_at: None,
@@ -1120,6 +1126,8 @@ impl RepoView {
             pending_history: None,
             stash_conflict: None,
             operation_conflicts: None,
+            submodules: Vec::new(),
+            submodules_head: None,
             pull_failure: None,
             network: None,
             queued: None,
