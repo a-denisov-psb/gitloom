@@ -504,6 +504,12 @@ pub fn flat(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// A button without background or border in every state (the status bar
+/// panel toggles; their icon shows hover and state).
+pub fn bare(theme: &Theme, _status: button::Status) -> button::Style {
+    button_style(None, palette(theme).text)
+}
+
 pub fn section_header(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
     let text_color = match status {

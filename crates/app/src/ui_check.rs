@@ -1727,39 +1727,27 @@ mod tests {
         snapshot_scaled_sized(&app, "readme-main-dark", 1.0, (1600.0, 900.0));
     }
 
-    /// Panel toggles (M11-14): a click on a toolbar toggle hides the panel
-    /// and the button's state follows; not on the start screen. Layout only.
+    /// The toolbar has no panel toggles any more (fix 2026-11-12): right
+    /// of "Settings" nothing reacts. Layout only.
     #[test]
-    fn panel_toggles_in_the_toolbar() {
+    fn toolbar_has_no_panel_toggles() {
         let mut app = crate::app::tests::graph_app();
-        let mut sim = simulator(&app);
-        assert!(sim.find("Branch").is_ok(), "repository toolbar");
-        drop(sim);
-        // Press the left toggle: it is the second to last widget of the
-        // toolbar; find it by its position at the right end.
-        let size = SIZE;
         let mut sim = simulator(&app);
         let settings = sim.find("Settings").unwrap_or_else(|e| panic!("{e}"));
         let settings = iced_test::selector::Bounded::bounds(&settings);
-        // Right of "Settings": 8 px gap, then the left and the right toggle.
-        let left = iced::Point::new(
+        sim.point_at(iced::Point::new(
             settings.x + settings.width + 8.0 + 15.0,
             settings.center_y(),
-        );
-        assert!(left.x < size.0);
-        sim.point_at(left);
+        ));
         let _ = sim.simulate(iced_test::simulator::click());
         for message in sim.into_messages().collect::<Vec<_>>() {
             let _ = app.update(message);
         }
-        assert!(!app.panes.sidebar_visible);
-        // The start screen has no toolbar and no toggles.
-        let (start, _) = App::new(Vec::new(), None);
-        let mut sim = simulator(&start);
-        assert!(sim.find("Branch").is_err());
+        assert!(app.panes.sidebar_visible && app.panes.panel_visible);
     }
 
-    /// Toolbar with both panels shown and hidden (M11-14).
+    /// Toolbar (without toggles since the fix of 2026-11-12) with both
+    /// panels shown and hidden.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_panel_toggles() {
@@ -1863,6 +1851,93 @@ mod tests {
                 let _ = app.update(Message::WipSelected);
                 snapshot(&app, &format!("prompt-button-{name}-{theme}"));
             }
+        }
+    }
+
+    /// Panel toggles in the status bar (fix 2026-11-12): a click on the
+    /// left one and the right one sends the same as Ctrl+J / Ctrl+K and
+    /// hides/shows the panels; the start screen has none, the toolbar none.
+    #[test]
+    fn status_bar_panel_toggles() {
+        let version = concat!("v", env!("CARGO_PKG_VERSION"));
+        let click = |app: &mut App, left: bool| {
+            let messages: Vec<Message> = {
+                let mut sim = simulator(app);
+                let label = sim.find(version).unwrap_or_else(|e| panic!("{e}"));
+                let bounds = iced_test::selector::Bounded::bounds(&label);
+                // Left: 12 px padding + half the 22 px area; right: after the
+                // version with the 16 px spacing.
+                let x = if left {
+                    12.0 + 11.0
+                } else {
+                    bounds.x + bounds.width + 16.0 + 11.0
+                };
+                sim.point_at(iced::Point::new(x, bounds.center_y()));
+                let _ = sim.simulate(iced_test::simulator::click());
+                sim.into_messages().collect()
+            };
+            for message in messages {
+                let _ = app.update(message);
+            }
+        };
+        let mut app = crate::app::tests::staging_app(&[], &[]);
+        assert!(app.panes.sidebar_visible && app.panes.panel_visible);
+        click(&mut app, true);
+        assert!(!app.panes.sidebar_visible);
+        click(&mut app, false);
+        assert!(!app.panes.panel_visible);
+        // The shortcut toggles the same state back.
+        let _ = app.update(crate::app::tests::checked(
+            crate::shortcuts::Shortcut::ToggleSidebar,
+            false,
+        ));
+        assert!(app.panes.sidebar_visible);
+        click(&mut app, false);
+        assert!(app.panes.panel_visible);
+        // Start screen: the left end of the status bar is not a toggle.
+        let (mut start, _) = App::new(Vec::new(), None);
+        let before = start.panes.sidebar_visible;
+        click(&mut start, true);
+        assert_eq!(start.panes.sidebar_visible, before);
+        // Icons follow the state.
+        use crate::icons::Icon;
+        use crate::ui::statusbar::{panel_icon, PanelToggle};
+        assert_eq!(panel_icon(PanelToggle::Left, true), Icon::PanelLeftFilled);
+        assert_eq!(panel_icon(PanelToggle::Right, false), Icon::PanelRight);
+    }
+
+    /// Status bar with both panels shown, both hidden and mixed; three
+    /// themes at 100 % and the toggles at 125 % (fix 2026-11-12).
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_status_bar_toggles() {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [
+            (ThemeChoice::Dark, "dark"),
+            (ThemeChoice::Light, "light"),
+            (ThemeChoice::ClassicDark, "classic-dark"),
+        ] {
+            for (left, right, name) in [
+                (true, true, "both"),
+                (false, false, "none"),
+                (false, true, "mixed"),
+            ] {
+                let mut app = crate::app::tests::staging_app(&[], &[]);
+                app.settings.appearance.theme = choice;
+                app.panes.sidebar_visible = true;
+                app.panes.panel_visible = true;
+                if !left {
+                    app.panes.toggle_sidebar();
+                }
+                if !right {
+                    app.panes.toggle_panel();
+                }
+                snapshot(&app, &format!("statusbar-{name}-{theme}"));
+            }
+            let mut app = crate::app::tests::staging_app(&[], &[]);
+            app.settings.appearance.theme = choice;
+            let _ = app.update(Message::SystemScaleChanged(1.25));
+            snapshot_scaled(&app, &format!("statusbar-125-{theme}"), 1.25);
         }
     }
 

@@ -8,7 +8,13 @@ use crate::theme;
 use crate::ui::muted;
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let mut content = row![].spacing(16).padding([3, 12]);
+    let repository = app.active_tab().and_then(|t| t.view()).is_some();
+    let mut content = row![].spacing(16).padding([3, 12]).align_y(iced::Center);
+    // Panel toggles at both ends like Zed (fix 2026-11-12), only in
+    // repository tabs.
+    if repository {
+        content = content.push(panel_toggle(PanelToggle::Left, app.panes.sidebar_visible));
+    }
     if let Some(crash) = &app.crash_notice {
         content = content.push(crash_notice(crash));
     }
@@ -56,8 +62,76 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
 
     content = content.push(muted(concat!("v", env!("CARGO_PKG_VERSION"))).size(12));
+    if repository {
+        content = content.push(panel_toggle(PanelToggle::Right, app.panes.panel_visible));
+    }
 
     container(content).width(Fill).style(theme::chrome).into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelToggle {
+    Left,
+    Right,
+}
+
+/// Tooltip of a panel toggle: what a click does, with its shortcut; the
+/// state is in the text, not only in the icon.
+pub fn panel_tooltip(toggle: PanelToggle, shown: bool) -> String {
+    let (name, action) = match toggle {
+        PanelToggle::Left => ("left panel", crate::actions::ActionId::ToggleSidebar),
+        PanelToggle::Right => ("commit panel", crate::actions::ActionId::TogglePanel),
+    };
+    let verb = if shown { "Hide" } else { "Show" };
+    match action.shortcut_text() {
+        Some(keys) => format!("{verb} {name} ({keys})"),
+        None => format!("{verb} {name}"),
+    }
+}
+
+/// Icon of a panel toggle: filled side part while the panel is shown,
+/// outline while hidden (like VS Code).
+pub fn panel_icon(toggle: PanelToggle, shown: bool) -> crate::icons::Icon {
+    use crate::icons::Icon;
+    match (toggle, shown) {
+        (PanelToggle::Left, true) => Icon::PanelLeftFilled,
+        (PanelToggle::Left, false) => Icon::PanelLeft,
+        (PanelToggle::Right, true) => Icon::PanelRightFilled,
+        (PanelToggle::Right, false) => Icon::PanelRight,
+    }
+}
+
+/// Toggle of the left or the commit panel in the status bar (fix
+/// 2026-11-12, replaces the toolbar toggles of M11-14): a 14 px icon in a
+/// 22 × 20 px click area, no background in any state; muted, the text
+/// color on hover.
+fn panel_toggle<'a>(toggle: PanelToggle, shown: bool) -> Element<'a, Message> {
+    use crate::shortcuts::Shortcut;
+    let shortcut = match toggle {
+        PanelToggle::Left => Shortcut::ToggleSidebar,
+        PanelToggle::Right => Shortcut::TogglePanel,
+    };
+    let icon = crate::icons::hover_tinted(
+        panel_icon(toggle, shown),
+        14.0,
+        |p| p.text_muted,
+        |p| p.text,
+        4.0,
+    );
+    crate::ui::panel::with_tooltip_text(
+        button(container(icon).center(Fill))
+            // Like the shortcut, without asking which widget has the focus.
+            .on_press(Message::ShortcutChecked {
+                shortcut,
+                text_input_focused: false,
+            })
+            .padding(0)
+            .width(22)
+            .height(20)
+            .style(theme::bare)
+            .into(),
+        panel_tooltip(toggle, shown),
+    )
 }
 
 /// "Fetch: Receiving objects 45%" (phase and percentage once Git reports them).

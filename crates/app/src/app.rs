@@ -13675,7 +13675,7 @@ pub(crate) mod tests {
 
     #[test]
     fn panel_toggles_follow_the_shortcuts() {
-        use crate::ui::toolbar::{panel_tooltip, PanelToggle};
+        use crate::ui::statusbar::{panel_tooltip, PanelToggle};
         let mut app = ready_app(&["c"]);
         assert!(app.panes.sidebar_visible && app.panes.panel_visible);
         // macOS names the keys with ⌘.

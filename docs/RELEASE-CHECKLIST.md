@@ -127,7 +127,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Left panel: branches before folders in LOCAL, REMOTE, GITFLOW and TAGS; tag folders collapse; the checked-out branch has a check next to its branch icon, also inside a folder.
 - [ ] Start screen: the three buttons have one size and the accent color in all themes, the "Ctrl+O" line is readable.
 - [ ] Preferences open as a centered window over the dimmed app; × and Esc close it, a click beside it does not, Tab stays inside; a small window shows them full size.
-- [ ] Toolbar toggles hide and show the left and the commit panel, in step with Ctrl+J / Ctrl+K.
+- [ ] The status bar toggles (left end: left panel, right end: commit panel) hide and show the panels, in step with Ctrl+J / Ctrl+K; filled icon = shown, outline = hidden, no background; sharp at 125 %; none on the start screen; the toolbar has no toggles.
 - [ ] The README screenshot matches the app.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
