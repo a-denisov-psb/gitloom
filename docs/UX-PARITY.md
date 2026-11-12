@@ -45,13 +45,13 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Click branch in left panel | Jump to and select its commit | done |
 | Double click local branch | Checkout | done (M3; sidebar and graph pill) |
 | Double click remote branch | Create tracking branch and checkout | done (M3; an existing local branch with that name is checked out instead) |
-| Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet") |
+| Right click commit/branch | Context menu | done (M3; graph rows, ref pills, sidebar; M4 actions disabled with "Not available yet"); M13-06 branch and remote branch menus ordered like GitKraken, labels name the branch, plus Create branch here, Reset `<head>` to this commit…, Copy commit sha |
 | Branch context menu: merge and rebase | "Merge X into Y", "Rebase Y onto X"; "Fast-forward Y to X" when possible; remote branch: "Fast-forward L to origin/L" for a local branch behind it | done (M4-04, M4-06) |
 | Drag branch onto branch | Menu: Fast-forward, Merge, Rebase, Interactive rebase | done (M4-11): graph pills and sidebar branches, drop target outlined; items that need another checked-out branch are disabled with "Check out <branch> first" (verify in GitKraken: disabled or automatic checkout?) |
 | Toolbar Pull dropdown | Fetch all, Pull (ff if possible), Pull (ff only), Pull (rebase); last choice becomes default | done (M3) |
 | Push without upstream | Dialog to choose remote and branch name, sets upstream | done (M3) |
 | Push rejected | Offer Pull or Force push (with lease) | done (M3; force push asks once more) |
-| Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu) |
+| Branch button / Ctrl+B | Inline name input at the selected commit; creates and checks out | done (M3; also "Create branch here" in the commit menu; M13-06 also in branch, remote branch and tag menus, with a dialog when the commit has no row) |
 | Auto-fetch | Periodic fetch in the background | done (M3, every 5 min; interval in Preferences → General since M5-02) |
 | Hover file in staging | Stage/Unstage and Discard buttons appear | done (M2); since M12-01 only Stage/Unstage (deviation below) |
 | Right click file in staging | Context menu: Stage/Unstage, Discard, Ignore, Open file location | done (M2, plus Copy file path); M8 "Open in external editor" |
@@ -69,7 +69,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Right click stash | Apply, Pop, Delete | done (M2, sidebar and graph) |
 | Right click remote | Fetch, Edit URL, Rename, Remove | done (M3); M6-18 remotes defined outside the repository config cannot be removed, renamed or edited |
 | "+" in the remote section | Add a remote (name, URL) | done (M3) |
-| Right click tag | Push to remote, Delete local, Delete on remote, Copy name | done (M3, sidebar and graph pill) |
+| Right click tag | Push, merge/rebase entries, Create branch here, Reset to this commit, Delete locally / from remote, Copy tag name / commit sha | done (M3, sidebar and graph pill; M13-06 GitKraken order and labels) |
 | Create tag here (commit menu) | Name and optional message (annotated if a message is given) | done (M3) |
 | Amend | "Amend previous commit" checkbox fills message from HEAD | done (M2) |
 | Merge in progress | Orange graph row "A file conflict was found when attempting to merge into develop", details header "1 file conflict in working directory · View conflict", panel "Merge conflicts detected – Merging X into Y" with Conflicted Files, Resolved Files, "Mark all resolved", "Commit and Merge", "Abort Merge" | done (M2-09, M2-13, M4-03; like GitKraken since M12-05, banner removed); also rebase, cherry-pick, revert ("Continue rebase", "Abort rebase", Skip for rebase and cherry-pick); "Commit and merge" is disabled while conflicts are unresolved (tooltip lists the files); "Mark all resolved" names files that still contain conflict markers and asks first; the graph row stays above the commits while scrolling |
@@ -195,3 +195,6 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | SSH key per repository instead of one global key | ADR-041; uses Git's own `core.sshCommand`, so the command line behaves the same |
 | Toolbar button "Editor" and Alt+E for the external editor | M8 plan; mirrors Terminal (Alt+T) |
 | No accounts, integrations, AI, cloud features | Project scope (see ROADMAP non-goals) |
+| Ref menus (branch, remote branch, tag) do not offer Cherry pick commit, Revert commit, Edit commit message, Create annotated tag here, Push and start a pull request, tag Hide/Solo, Hide/Show all tags, Annotate tag | M13-06: only actions used often on a ref are taken over; commit actions stay in the commit menu, the tag form covers annotated tags, no provider APIs |
+| "Create branch here" of a ref whose commit has no row in the graph opens a small "Create branch at <ref>" dialog | M13-06, ADR-044: no dead end when the branch is hidden or the commit is beyond the loaded history |
+| With several remotes or none, the tag entries read "Push `<tag>`…" / "Delete `<tag>` from remote…" and ask which remote | M13-06: GitKraken names the remote; the remote is only known when there is exactly one |

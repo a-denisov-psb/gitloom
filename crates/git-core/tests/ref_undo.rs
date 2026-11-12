@@ -175,3 +175,27 @@ fn commits_only_reachable_from_a_detached_head() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn branch_at_a_remote_branch_or_tag_commit_has_no_upstream_and_undoes() {
+    // "Create branch here" from a ref menu (M13-06) starts at the ref's
+    // commit, so the branch tracks nothing.
+    let (repo, cli) = repo();
+    repo.fake_upstream("origin", "topic", "topic");
+    repo.git(&["tag", "-a", "v1", "-m", "Release 1"]);
+    let from = head(&cli);
+    for (name, reference) in [("from-remote", "origin/topic"), ("from-tag", "v1^{commit}")] {
+        let target = repo.git(&["rev-parse", reference]);
+        cli.create_branch(name, &target).unwrap();
+        assert_eq!(git_core::branch_upstream(&cli, name).unwrap(), None);
+        assert_eq!(repo.git(&["rev-parse", name]), target);
+        let change = RefChange::CreateBranch {
+            name: name.into(),
+            target,
+            from: from.clone(),
+        };
+        change.apply(&cli, true).unwrap();
+        assert!(!exists(&repo, &format!("refs/heads/{name}")));
+        assert_eq!(head(&cli), from);
+    }
+}
