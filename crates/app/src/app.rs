@@ -15900,6 +15900,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn prompt_button_is_disabled_without_staged_changes() {
+        let app = staging_app(&["a"], &[]);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            crate::ui::panel::prompt_button_state(view),
+            (false, "Stage changes first")
+        );
+        let mut app = staging_app(&[], &["a"]);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            crate::ui::panel::prompt_button_state(view),
+            (true, "Copy commit message prompt…")
+        );
+        // The button sends CopyPromptRequested, which builds the prompt in
+        // the background and then opens the modal.
+        let task = app.update(Message::CopyPromptRequested);
+        assert!(app.status.is_empty());
+        drop(task);
+    }
+
+    #[test]
     fn copy_commit_prompt_needs_staged_changes() {
         let mut app = staging_app(&["a"], &[]);
         assert_eq!(

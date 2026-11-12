@@ -65,10 +65,12 @@ pub enum Icon {
     /// Toolbar toggles of the left and the commit panel (M11-14).
     PanelLeft,
     PanelRight,
+    /// Commit message prompt button (M12-13).
+    Sparkles,
 }
 
 impl Icon {
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 44] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -112,6 +114,7 @@ impl Icon {
         Self::Editor,
         Self::PanelLeft,
         Self::PanelRight,
+        Self::Sparkles,
     ];
 
     /// SVG source of the icon.
@@ -165,6 +168,7 @@ impl Icon {
             Self::Editor => lucide!("code-xml"),
             Self::PanelLeft => lucide!("panel-left"),
             Self::PanelRight => lucide!("panel-right"),
+            Self::Sparkles => lucide!("sparkles"),
         }
     }
 

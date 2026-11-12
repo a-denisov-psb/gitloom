@@ -337,7 +337,13 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
 
     let mut content = column![
         row![muted("Commit"), space::horizontal(), amend].align_y(iced::Center),
-        identity_line(view),
+        // The identity takes the room left of the fixed-size button.
+        row![
+            container(identity_line(view)).width(Fill).clip(true),
+            prompt_button(view)
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
         summary,
         description,
         commit,
@@ -491,6 +497,36 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
             .into(),
         tip,
     )
+}
+
+/// Small sparkle button at the right end of "Committing as …" (M12-13):
+/// opens "Commit message prompt" (M10-07); disabled without staged
+/// changes. Gitloom only copies the prompt.
+fn prompt_button(view: &RepoView) -> Element<'_, Message> {
+    let (enabled, tip) = prompt_button_state(view);
+    with_tooltip_text(
+        button(crate::icons::button_icon(
+            crate::icons::Icon::Sparkles,
+            14.0,
+            enabled,
+        ))
+        .on_press_maybe(enabled.then_some(Message::CopyPromptRequested))
+        .padding(3)
+        .width(22)
+        .height(22)
+        .style(theme::flat)
+        .into(),
+        tip.to_owned(),
+    )
+}
+
+/// Whether the prompt button is enabled, and its tooltip.
+pub(crate) fn prompt_button_state(view: &RepoView) -> (bool, &'static str) {
+    if view.snapshot.working_tree.staged.is_empty() {
+        (false, "Stage changes first")
+    } else {
+        (true, "Copy commit message prompt…")
+    }
 }
 
 /// GitKraken counts down from 72 characters for the summary.
