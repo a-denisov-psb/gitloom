@@ -284,6 +284,78 @@ impl RepoSnapshot {
         })
     }
 
+    /// Git flow type of every loaded commit (M13-01), indexed by graph id;
+    // Drawn by the Git flow layout (M13-02).
+    #[allow(dead_code)]
+    /// `None` without Git flow configuration. Stash rows take the segment
+    /// of their base commit.
+    pub fn flow_classification(&self) -> Option<git_graph::flow::Classification> {
+        use git_graph::flow::{classify, FlowInput, FlowNames, FlowTip};
+        let config = self.flow.as_ref()?;
+        let graph = &self.graph;
+        // Merge subjects by graph id (`order[row]` is the id of `commits[row]`).
+        let mut subjects: Vec<Option<String>> = vec![None; graph.commits.len()];
+        for (commit, id) in self.commits.iter().zip(&graph.order) {
+            if commit.parents.len() > 1 {
+                if let Some(slot) = subjects.get_mut(id.index()) {
+                    *slot = Some(commit.summary.clone());
+                }
+            }
+        }
+        let tips: Vec<FlowTip> = self
+            .refs
+            .iter()
+            .filter(|r| r.kind != git_core::RefKind::Tag)
+            .filter_map(|r| {
+                let row = *self.index.get(&r.target)?;
+                Some(FlowTip {
+                    name: r.local_name().to_owned(),
+                    commit: graph.order[row],
+                    remote: r.kind == git_core::RefKind::RemoteBranch,
+                })
+            })
+            .collect();
+        // Stashes are not part of the history: classify without them.
+        let stash: std::collections::HashSet<git_graph::Id> =
+            graph.dashed.iter().copied().collect();
+        let commits: Vec<GraphCommit> = graph
+            .commits
+            .iter()
+            .map(|c| GraphCommit {
+                id: c.id,
+                parents: if stash.contains(&c.id) {
+                    Vec::new()
+                } else {
+                    c.parents.clone()
+                },
+                time: c.time,
+            })
+            .collect();
+        let mut result = classify(&FlowInput {
+            commits: &commits,
+            subjects: &subjects,
+            tips: &tips,
+            names: FlowNames {
+                production: &config.production,
+                development: &config.development,
+                feature: &config.feature,
+                release: &config.release,
+                hotfix: &config.hotfix,
+            },
+        })
+        .ok()?;
+        for id in &graph.dashed {
+            let base = graph.commits[id.index()]
+                .parents
+                .first()
+                .and_then(|p| result.commit_segment.get(p.index()).copied());
+            if let (Some(base), Some(slot)) = (base, result.commit_segment.get_mut(id.index())) {
+                *slot = base;
+            }
+        }
+        Some(result)
+    }
+
     /// The history restricted to commits reachable from the branches
     /// `filter` shows and HEAD; tags and stashes stay when their commit
     /// does. Without an active filter: the whole history. Keeps this
@@ -1276,6 +1348,93 @@ mod perf {
             bodies / 1_000_000,
             segments * std::mem::size_of::<git_graph::Segment>() / 1_000_000,
             snapshot.layout.max_width,
+        );
+    }
+}
+
+/// The Git flow classification on a real repository (M13-01): the classic
+/// diagram built with the `git` CLI, topic branches deleted after
+/// finishing.
+#[cfg(test)]
+mod flow_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    #[test]
+    fn classic_git_flow_history_with_deleted_branches() {
+        let repo = crate::test_repo::TestRepo::new();
+        repo.commit("a.txt", "1\n", "v1.0");
+        repo.git(&["switch", "--quiet", "-c", "develop"]);
+        repo.commit("d.txt", "1\n", "develop work");
+        for feature in ["a", "b"] {
+            repo.git(&[
+                "switch",
+                "--quiet",
+                "-c",
+                &format!("feature/{feature}"),
+                "develop",
+            ]);
+            repo.commit(
+                &format!("feature-{feature}.txt"),
+                "1\n",
+                &format!("feature {feature}"),
+            );
+            repo.git(&["switch", "--quiet", "develop"]);
+            repo.merge(
+                &format!("feature/{feature}"),
+                &format!("Merge branch 'feature/{feature}' into develop"),
+            );
+            repo.git(&["branch", "-D", &format!("feature/{feature}")]);
+        }
+        repo.git(&["switch", "--quiet", "-c", "release/2.0", "develop"]);
+        repo.commit("version.txt", "2.0\n", "bump 2.0");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.merge("release/2.0", "Merge branch 'release/2.0'");
+        repo.git(&["switch", "--quiet", "develop"]);
+        repo.merge("release/2.0", "Merge branch 'release/2.0' into develop");
+        repo.git(&["branch", "-D", "release/2.0"]);
+        repo.git(&["switch", "--quiet", "-c", "hotfix/2.1", "main"]);
+        repo.commit("fix.txt", "1\n", "fix 2.1");
+        repo.git(&["switch", "--quiet", "main"]);
+        repo.merge("hotfix/2.1", "Merge branch 'hotfix/2.1'");
+        repo.git(&["switch", "--quiet", "develop"]);
+        repo.merge("hotfix/2.1", "Merge branch 'hotfix/2.1' into develop");
+        repo.git(&["branch", "-D", "hotfix/2.1"]);
+
+        let backend = git_core::GixBackend::discover(repo.path()).unwrap();
+        let mut snapshot = super::RepoSnapshot::load(&backend).unwrap();
+        snapshot.flow = Some(git_core::FlowConfig::defaults(&["main"]));
+        let result = snapshot.flow_classification().unwrap();
+        let mut seen: Vec<String> = snapshot
+            .commits
+            .iter()
+            .zip(&snapshot.graph.order)
+            .map(|(commit, id)| {
+                let segment = result.segment_of(*id).unwrap();
+                format!(
+                    "{} → {}/{}",
+                    commit.summary,
+                    segment.kind.label(),
+                    segment.name.as_deref().unwrap_or("-")
+                )
+            })
+            .collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            [
+                "Merge branch 'feature/a' into develop → development/develop",
+                "Merge branch 'feature/b' into develop → development/develop",
+                "Merge branch 'hotfix/2.1' into develop → development/develop",
+                "Merge branch 'hotfix/2.1' → production/main",
+                "Merge branch 'release/2.0' into develop → development/develop",
+                "Merge branch 'release/2.0' → production/main",
+                "bump 2.0 → release/release/2.0",
+                "develop work → development/develop",
+                "feature a → feature/feature/a",
+                "feature b → feature/feature/b",
+                "fix 2.1 → hotfix/hotfix/2.1",
+                "v1.0 → production/main",
+            ]
         );
     }
 }

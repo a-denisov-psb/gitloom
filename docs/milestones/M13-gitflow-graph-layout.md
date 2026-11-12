@@ -78,12 +78,14 @@ Open:
 
 ## Tasks
 
-### [ ] M13-01 Classifier in git-graph
+### [x] M13-01 Classifier in git-graph
 
 - Pure module (e.g. `git_graph::flow`) with the input/output of the decisions table and steps 1–4; merge subject parser.
 - App side: collect merge subjects and ref tips in the snapshot step (background).
 
 Acceptance: unit tests on hand-built histories for every rule and edge case (compact text snapshots "commit → type/name/source"); integration test in git-core/app building the classic diagram with the `git` CLI (branches deleted after finishing) and checking every commit; parser tests for all three subject forms and non-matching subjects.
+
+Note: `git_graph::flow::classify` returns segments (one per first-parent chain: tip, kind, name, source) and the segment of every commit, so labels (M13-04) and the feature sub-palette (M13-02) work per segment. Step 3 builds a segment from every still free commit in topological order (newest first); its targets are all merges that have one of its commits as a non-first parent, its fork point the first parent of its oldest commit; a segment no merge reaches stays unknown (step 4), which also covers tag-only chains. One segment per branch name (a remote twin of a local branch is skipped; `origin/main` serves when `main` is not local). Topology rules as in the table; "origin release/feature with a target in production" counts as release (the table's "origin unknown" rule). App: `RepoSnapshot::flow_classification` collects merge subjects (summaries of merge commits) and branch tips from the loaded snapshot; stash rows take their base commit's segment. Tests: `merge_subjects`, `classic_history_by_merge_messages`, `classic_history_by_topology`, `live_branches_win_and_remote_twins_are_skipped`, `production_wins_and_remote_main_counts`, `pull_merges_nested_features_fast_forward_and_unknown`, `hotfix_into_develop_only_and_missing_parents`; app `classic_git_flow_history_with_deleted_branches` (real repository built with the `git` CLI, topic branches deleted).
 
 ### [ ] M13-02 Lane groups and colors
 
