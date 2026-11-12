@@ -36,45 +36,15 @@ pub struct ThemePalette {
     pub lanes: [Color; 8],
     /// Dimmed backdrop behind dialogs.
     pub backdrop: Color,
-    /// Style tokens (ADR-048): what differs between themes besides colors.
-    /// Graph rows tinted in their lane color at this alpha (0 = off).
-    pub row_tint_alpha: f32,
-    pub ref_pill: PillStyle,
-    /// A line in the lane color from a ref pill to its node.
-    pub ref_connector: bool,
-    /// Background of the graph's column header.
+    /// Background of the graph's column header (ADR-048 token).
     pub header_band: Color,
-    /// Lines between the graph columns (transparent = none).
-    pub column_separator: Color,
-    /// Shadow at the edges of the side panels.
-    pub panel_shadow: bool,
-    pub node_style: NodeStyle,
 }
 
-/// How ref pills (branch and tag labels) are drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PillStyle {
-    /// Outline in the lane color (Dark, Light).
-    Outline,
-    /// Filled with the lane color, white text (Classic Dark).
-    Filled,
-}
-
-/// How commit nodes are drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NodeStyle {
-    /// Avatar or initials circle (today's look).
-    Standard,
-    /// Classic Dark: the same shapes with a ring in the lane color.
-    Ringed,
-}
-
-/// The three themes (M11-01).
+/// The themes (ADR-054: Dark and Light).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeKind {
     Dark,
     Light,
-    ClassicDark,
 }
 
 pub const DARK: ThemePalette = ThemePalette {
@@ -102,13 +72,7 @@ pub const DARK: ThemePalette = ThemePalette {
         hex(0x98c379),
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
-    row_tint_alpha: 0.0,
-    ref_pill: PillStyle::Outline,
-    ref_connector: false,
     header_band: hex(0x252a33),
-    column_separator: Color::TRANSPARENT,
-    panel_shadow: false,
-    node_style: NodeStyle::Standard,
 };
 
 pub const LIGHT: ThemePalette = ThemePalette {
@@ -136,57 +100,12 @@ pub const LIGHT: ThemePalette = ThemePalette {
         hex(0x5c8f1e),
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-    row_tint_alpha: 0.0,
-    ref_pill: PillStyle::Outline,
-    ref_connector: false,
     header_band: hex(0xf4f5f7),
-    column_separator: Color::TRANSPARENT,
-    panel_shadow: false,
-    node_style: NodeStyle::Standard,
 };
 
-/// "Classic Dark" (M11-01, ADR-048): the look of GitKraken 7.5 with own
-/// colors.
-pub const CLASSIC_DARK: ThemePalette = ThemePalette {
-    bg_graph: hex(0x1e2128),
-    bg_panel: hex(0x262a31),
-    bg_chrome: hex(0x1b1d22),
-    bg_hover: hex(0x2c313a),
-    bg_selected: hex(0x1d4a5c),
-    border: hex(0x323842),
-    text: hex(0xd8dde4),
-    text_muted: hex(0x8b94a3),
-    accent: hex(0x1aa3c8),
-    success: hex(0x2ebf91),
-    warning: hex(0xf2a93b),
-    danger: hex(0xe04b4b),
-    node_text: Color::WHITE,
-    lanes: [
-        hex(0x1aa3c8),
-        hex(0xe0247a),
-        hex(0x8b5cc9),
-        hex(0x2ebf91),
-        hex(0xf2a93b),
-        hex(0xe04b4b),
-        hex(0x3d7be0),
-        hex(0xc9b42c),
-    ],
-    backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
-    row_tint_alpha: 0.15,
-    ref_pill: PillStyle::Filled,
-    ref_connector: true,
-    header_band: hex(0x2a2f37),
-    column_separator: hex(0x323842),
-    panel_shadow: true,
-    node_style: NodeStyle::Ringed,
-};
-
-/// Palette of the theme a style function is called with (the background
-/// color tells Classic Dark from Dark without allocating).
+/// Palette of the theme a style function is called with.
 pub fn palette(theme: &Theme) -> &'static ThemePalette {
-    if theme.palette().background == CLASSIC_DARK.bg_graph {
-        &CLASSIC_DARK
-    } else if theme.extended_palette().is_dark {
+    if theme.extended_palette().is_dark {
         &DARK
     } else {
         &LIGHT
@@ -198,7 +117,6 @@ impl ThemeKind {
         match self {
             Self::Dark => &DARK,
             Self::Light => &LIGHT,
-            Self::ClassicDark => &CLASSIC_DARK,
         }
     }
 
@@ -206,7 +124,6 @@ impl ThemeKind {
         match self {
             Self::Dark => "Dark",
             Self::Light => "Light",
-            Self::ClassicDark => "Classic Dark",
         }
     }
 }
@@ -522,18 +439,8 @@ pub fn section_header(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// Ref pill (branch or tag label): outline in the kind's color.
 pub fn ref_pill(kind: RefKind, is_head: bool) -> impl Fn(&Theme) -> container::Style {
-    ref_pill_in(kind, is_head, None)
-}
-
-/// Ref pill of a graph row whose commit has the lane color `lane`: outline
-/// in the kind's color (Dark, Light), or filled with the lane color and
-/// white text (Classic Dark, M11-04).
-pub fn ref_pill_in(
-    kind: RefKind,
-    is_head: bool,
-    lane: Option<u32>,
-) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let p = palette(theme);
         let color = match kind {
@@ -542,68 +449,10 @@ pub fn ref_pill_in(
             RefKind::RemoteBranch => p.text_muted,
             RefKind::Tag => p.warning,
         };
-        match p.ref_pill {
-            PillStyle::Outline => container::Style {
-                background: Some(Background::Color(color.scale_alpha(0.25))),
-                border: Border::default().rounded(3).width(1).color(color),
-                text_color: Some(p.text),
-                ..container::Style::default()
-            },
-            PillStyle::Filled => {
-                let fill = lane.map_or(color, |lane| lane_color(p, lane));
-                container::Style {
-                    background: Some(Background::Color(fill)),
-                    border: Border::default().rounded(3).width(1).color(fill),
-                    text_color: Some(p.node_text),
-                    ..container::Style::default()
-                }
-            }
-        }
-    }
-}
-
-/// Icons on a ref pill: the text color, white on filled pills.
-pub fn pill_icon(p: &ThemePalette) -> Color {
-    match p.ref_pill {
-        PillStyle::Outline => p.text,
-        PillStyle::Filled => p.node_text,
-    }
-}
-
-/// Muted icons on a ref pill (the remote cloud).
-pub fn pill_icon_muted(p: &ThemePalette) -> Color {
-    match p.ref_pill {
-        PillStyle::Outline => p.text_muted,
-        PillStyle::Filled => p.node_text.scale_alpha(0.8),
-    }
-}
-
-/// Line from a ref pill to its node (Classic Dark, M11-04).
-pub fn ref_connector(lane: u32) -> impl Fn(&Theme) -> container::Style {
-    move |theme| filled(lane_color(palette(theme), lane))
-}
-
-/// Line between two header cells (`column_separator`, transparent in Dark
-/// and Light).
-pub fn column_separator(theme: &Theme) -> container::Style {
-    filled(palette(theme).column_separator)
-}
-
-/// Shadow at an edge of the graph next to a side panel (`panel_shadow`):
-/// dark at the panel, fading into the graph.
-pub fn panel_shadow(left: bool) -> impl Fn(&Theme) -> container::Style {
-    move |theme| {
-        if !palette(theme).panel_shadow {
-            return container::Style::default();
-        }
-        let dark = Color::from_rgba(0.0, 0.0, 0.0, 0.35);
-        let clear = Color::from_rgba(0.0, 0.0, 0.0, 0.0);
-        let (from, to) = if left { (dark, clear) } else { (clear, dark) };
-        let gradient = iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
-            .add_stop(0.0, from)
-            .add_stop(1.0, to);
         container::Style {
-            background: Some(Background::Gradient(gradient.into())),
+            background: Some(Background::Color(color.scale_alpha(0.25))),
+            border: Border::default().rounded(3).width(1).color(color),
+            text_color: Some(p.text),
             ..container::Style::default()
         }
     }
@@ -954,11 +803,7 @@ mod tests {
 
     #[test]
     fn start_buttons_reach_wcag_aa() {
-        for (name, p) in [
-            ("dark", &DARK),
-            ("light", &LIGHT),
-            ("classic", &CLASSIC_DARK),
-        ] {
+        for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
             let icon = on_fill(p.accent);
             for status in [
                 button::Status::Active,
@@ -979,11 +824,7 @@ mod tests {
 
     #[test]
     fn text_reaches_wcag_aa_in_all_palettes() {
-        for (name, p) in [
-            ("dark", &DARK),
-            ("light", &LIGHT),
-            ("classic", &CLASSIC_DARK),
-        ] {
+        for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
             for (bg_name, bg) in [
                 ("graph", p.bg_graph),
                 ("panel", p.bg_panel),
@@ -1012,11 +853,7 @@ mod tests {
 
     #[test]
     fn lanes_stay_visible_and_distinct() {
-        for (name, p) in [
-            ("dark", &DARK),
-            ("light", &LIGHT),
-            ("classic", &CLASSIC_DARK),
-        ] {
+        for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
             for (i, lane) in p.lanes.iter().enumerate() {
                 // WCAG 1.4.11: graphical objects need 3:1.
                 let ratio = contrast(*lane, p.bg_graph);
@@ -1032,19 +869,13 @@ mod tests {
     fn palette_follows_the_theme() {
         assert_eq!(palette(&app_theme(ThemeKind::Dark)), &DARK);
         assert_eq!(palette(&app_theme(ThemeKind::Light)), &LIGHT);
-        assert_eq!(palette(&app_theme(ThemeKind::ClassicDark)), &CLASSIC_DARK);
     }
 
     #[test]
     fn dark_and_light_keep_their_look() {
-        // The tokens reproduce the look before M11 (ADR-048).
+        // The header band is the panel color (ADR-048, ADR-054).
         for p in [&DARK, &LIGHT] {
-            assert_eq!(p.row_tint_alpha, 0.0);
-            assert_eq!(p.ref_pill, PillStyle::Outline);
-            assert!(!p.ref_connector && !p.panel_shadow);
             assert_eq!(p.header_band, p.bg_panel);
-            assert_eq!(p.column_separator, Color::TRANSPARENT);
-            assert_eq!(p.node_style, NodeStyle::Standard);
         }
     }
 }

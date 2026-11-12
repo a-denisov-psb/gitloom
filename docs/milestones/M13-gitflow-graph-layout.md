@@ -35,7 +35,7 @@ Out of scope:
 | Step 4: rest | Commits still unclassified (e.g. only reachable from tags) = unknown, feature group, neutral color, tooltip "Branch type unknown". Stash rows take the group of their base commit. |
 | Priority | Live ref prefix > merge message > topology > unknown. A hotfix branched from development by mistake keeps its hotfix name. |
 | Edge cases | Fast-forward, squash and rebase merges leave commits on the development chain: shown as development (correct by history). Gitloom's own finish uses `--no-ff` (M7). |
-| Colors | Theme tokens (ADR-048) `flow_colors`: production green, hotfix cyan, release blue, development violet, features cycle through a sub-palette of four colors (pink, red, orange, yellow) per segment, unknown gray. Values per theme (Dark, Light, Classic Dark) chosen by eye after the classic diagram. |
+| Colors | Theme tokens (ADR-048) `flow_colors`: production green, hotfix cyan, release blue, development violet, features cycle through a sub-palette of four colors (pink, red, orange, yellow) per segment, unknown gray. Values per theme (Dark, Light; ADR-054) chosen by eye after the classic diagram. |
 | Labels | In the Branch/Tag column, at the tip row of a segment without a live ref: a faded pill with a dashed outline showing the inferred name (or the type when no name is known). Tooltip on nodes and faded pills: "<type> · <name> (from the merge message / inferred from the history)". |
 | Toggle | Per repository, stored as `gitloom.flowLayout` in the repository config (like M10's repository options), default off. Entry points: graph column menu (M11) "Gitflow layout", palette "Toggle Gitflow layout", Preferences → Repository → Gitflow "Show the graph in the Gitflow layout". Disabled with "Initialize Gitflow first" when Git flow is not configured. Everything else (selection, menus, search, hide/solo) works unchanged; hidden branches are left out before classifying. |
 | Performance | Classification is part of the snapshot layout step in the background, linear in the number of commits; no frame over 50 ms; measured on the 100k-commit benchmark history with generated Git flow merges (`docs/PERFORMANCE.md`). |
@@ -85,7 +85,7 @@ Acceptance: unit tests on hand-built histories for every rule and edge case (com
 
 - `LaneHints` from the classification; `flow_colors` tokens for all themes; feature sub-palette per segment.
 
-Acceptance: layout snapshots (text) for the classic history: production lane 0, hotfix, release, development, features right of it; development column stays constant over the whole history; snapshots of the graph in all three themes checked by eye.
+Acceptance: layout snapshots (text) for the classic history: production lane 0, hotfix, release, development, features right of it; development column stays constant over the whole history; snapshots of the graph in Dark and Light checked by eye.
 
 ### [ ] M13-03 Toggle and persistence
 

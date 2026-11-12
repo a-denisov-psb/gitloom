@@ -6,7 +6,6 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
-- Theme "Classic Dark" (Preferences → Appearance) with the colors and graph look of older GitKraken versions: rows tinted in their lane color, branch and tag labels filled with the lane color and joined to their commit by a line, rings around the commit dots, column separators in the header and shadows at the side panels.
 - Clone a repository from the start screen: URL, where to clone to, folder name (derived from the URL), full path preview and "Clone submodules"; progress and Cancel in the dialog, credentials asked like for fetch; the clone opens in the tab. A failed or cancelled clone leaves no new folder behind.
 - Start a local repository from the start screen: name, folder, default branch, README.md and a `.gitignore` template (C++, Go, Java, JetBrains, macOS, Node, Python, Rust, VisualStudio, Windows from github/gitignore); the files are committed as "Initial commit" when a Git identity is set.
 - Preferences → General → Default branch name (`init.defaultBranch` in the global Git config).

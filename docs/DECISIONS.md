@@ -539,11 +539,11 @@ Architecture decision records in short form. New entries at the bottom. Change a
 - Decision: syntax highlighting uses `syntect` with the `two-face` syntax and theme sets in a pure app module (`highlight`) that runs in background tasks. Whole old and new files are highlighted and mapped to diff lines; results are cached per blob id and theme; files over 1 MB or 20,000 lines stay plain. Each Gitloom theme maps to one embedded syntect theme (recorded here when M11-08 picks them); Gitloom keeps its own diff backgrounds.
 - Why: syntect is the de-facto Rust highlighter (also behind iced's highlighter); two-face adds the broad language set of bat without hand-maintained grammars.
 - Consequences: binary size grows by the syntax set (measured in M11-10); licenses of the bundled syntaxes go into the third-party notices; highlighting never blocks the UI thread.
-- Implementation (M11-08): `syntect` 5.3 and `two-face` 0.5 with the pure Rust regex engine (`regex-fancy`; no oniguruma C library, so the Windows GNU and MSVC builds and cross builds need nothing extra). Themes: Dark and Classic Dark use "OneHalfDark", Light uses "GitHub" (two-face has no "Visual Studio Dark+"; both keep good contrast on Gitloom's diff backgrounds). Syntax by extension, then file name (`Makefile`), then first line (shebang); "Plain Text" counts as unknown. Results are spans per line (byte ranges, RGBA, bold/italic); `highlight::Cache` keeps 64 results per blob id and theme. The bundled syntax and theme licenses come from `two_face::acknowledgement` into `crates/app/assets/syntax-acknowledgements.md` (checked by a unit test) and from there into the notices.
+- Implementation (M11-08): `syntect` 5.3 and `two-face` 0.5 with the pure Rust regex engine (`regex-fancy`; no oniguruma C library, so the Windows GNU and MSVC builds and cross builds need nothing extra). Themes: Dark uses "OneHalfDark", Light uses "GitHub" (two-face has no "Visual Studio Dark+"; both keep good contrast on Gitloom's diff backgrounds). Syntax by extension, then file name (`Makefile`), then first line (shebang); "Plain Text" counts as unknown. Results are spans per line (byte ranges, RGBA, bold/italic); `highlight::Cache` keeps 64 results per blob id and theme. The bundled syntax and theme licenses come from `two_face::acknowledgement` into `crates/app/assets/syntax-acknowledgements.md` (checked by a unit test) and from there into the notices.
 
 ## ADR-048 Theme style tokens and Classic Dark
 
-- Status: accepted (M11 plan, 2026-11-11)
+- Status: Superseded in part by ADR-054
 - Decision: `ThemePalette` carries style tokens (row tint, pill style, connector line, header band, column separators, panel shadow, node style) in addition to colors. Dark and Light keep their look through token values; "Classic Dark" uses them for the look of GitKraken 7.5 with own colors (no GitKraken assets).
 - Why: one rendering path for all themes instead of theme-specific branches in the views.
 - Consequences: new visual details are added as tokens; snapshot tests guard the existing themes.
@@ -611,3 +611,10 @@ Decision:
 - Agent and protocol are designed in the WSL mode milestone after 1.0.0 (own ADR).
 
 Consequences: small discipline costs now; no behavior change for local repositories; the WSL notice tells users why such repositories are slow.
+
+## ADR-054 Remove Classic Dark
+
+- Status: accepted (2026-11-12)
+- Context: maintainer decision: Gitloom offers only Dark and Light (plus System, which picks one of them from the operating system).
+- Decision: the theme "Classic Dark" (M11-01, M11-04) and its graph-only style tokens are removed: row tint, filled ref pills, the line from a pill to its node, ringed nodes, header column separators and panel shadows (`row_tint_alpha`, `ref_pill`/`PillStyle`, `ref_connector`, `column_separator`, `panel_shadow`, `node_style`/`NodeStyle`). The token `header_band` stays. A stored `"theme": "classic-dark"` in `settings.json` is read as Dark.
+- Consequences: Dark and Light are unchanged pixel for pixel (snapshot comparison); new visual details still go into `ThemePalette` (ADR-048), with values for Dark and Light only.

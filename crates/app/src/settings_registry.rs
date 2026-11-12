@@ -118,9 +118,7 @@ impl Choice {
                 .map(|p| p.label().to_owned())
         };
         match self {
-            Self::Theme => ["Dark", "Light", "Classic Dark", "System"]
-                .map(str::to_owned)
-                .to_vec(),
+            Self::Theme => ["Dark", "Light", "System"].map(str::to_owned).to_vec(),
             Self::DiffView => DiffMode::ALL.iter().map(|m| m.label().to_owned()).collect(),
             Self::StashTemplate => crate::stash_template::PRESETS
                 .iter()
@@ -139,7 +137,6 @@ impl Choice {
             Self::Theme => {
                 let theme = match value {
                     "Light" => ThemeChoice::Light,
-                    "Classic Dark" => ThemeChoice::ClassicDark,
                     "System" => ThemeChoice::System,
                     _ => ThemeChoice::Dark,
                 };
