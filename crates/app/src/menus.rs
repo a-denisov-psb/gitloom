@@ -1,4 +1,5 @@
-//! Context menus of commits, branches, tags, remotes and stashes (M3-11),
+//! Context menus of commits, branches, tags, remotes, stashes (M3-11) and
+//! files (M13-07),
 //! built from plain facts so the enable rules are testable.
 
 use crate::app::{CheckoutTarget, Message};
@@ -730,6 +731,176 @@ pub fn submodules_header(enabled: bool) -> Vec<MenuEntry> {
     )]
 }
 
+/// Hint of the diff tool entry when Preferences has none set.
+pub const NO_DIFF_TOOL: &str = "Set a diff tool in Preferences → External tools";
+
+/// Facts about a file row for its menu (M13-07).
+#[derive(Debug, Clone)]
+pub struct FileFacts<'a> {
+    pub file: &'a git_core::FileChange,
+    pub area: crate::app::FileArea,
+    pub writable: bool,
+    /// Commit of a file in the commit details (history and blame start there).
+    pub commit: Option<&'a str>,
+    /// First parent of `commit` (`None`: root commit).
+    pub parent: Option<&'a str>,
+    /// A diff tool is chosen in Preferences (or Git's configured one).
+    pub diff_tool: bool,
+    /// "Open in external editor" (built by the app from its settings).
+    pub editor: MenuEntry,
+    /// Absolute path with native separators for "Copy file path".
+    pub copy_path: String,
+}
+
+fn item_with_hint(label: &str, reason: Option<&str>, message: Message) -> MenuEntry {
+    MenuEntry::Item {
+        label: label.into(),
+        shortcut: None,
+        enabled: reason.is_none(),
+        message: Box::new(message),
+        hint: reason.map(str::to_owned),
+    }
+}
+
+/// File menus like GitKraken's (M13-07): unstaged, staged and commit files.
+pub fn file(facts: FileFacts<'_>) -> Vec<MenuEntry> {
+    use crate::app::{DiscardTarget, FileArea};
+    use git_core::ChangeKind;
+    let FileFacts {
+        file,
+        area,
+        writable,
+        commit,
+        parent,
+        diff_tool,
+        editor,
+        copy_path,
+    } = facts;
+    let path = file.path.clone();
+    let write = |label: &str, shortcut: Option<&str>, message: Message| MenuEntry::Item {
+        label: label.into(),
+        shortcut: shortcut.map(str::to_owned),
+        enabled: writable,
+        message: Box::new(message),
+        hint: None,
+    };
+    let mut entries = Vec::new();
+    match area {
+        FileArea::Unstaged => entries.extend([
+            write("Stage", Some("S"), Message::Stage(file.clone())),
+            write(
+                "Discard changes",
+                None,
+                Message::Discard(DiscardTarget::File(file.clone())),
+            ),
+            write("Ignore", None, Message::IgnoreFile(path.clone())),
+            MenuEntry::Separator,
+        ]),
+        FileArea::Staged => entries.extend([
+            write("Unstage", Some("U"), Message::Unstage(file.clone())),
+            write(
+                "Discard changes",
+                None,
+                Message::Discard(DiscardTarget::Staged(file.clone())),
+            ),
+            action(
+                "Copy commit message prompt…",
+                true,
+                Message::CopyPromptRequested,
+            ),
+            MenuEntry::Separator,
+        ]),
+        FileArea::Commit => {}
+    }
+    if file.kind == ChangeKind::Conflicted {
+        entries.push(write(
+            "Open in merge tool",
+            None,
+            Message::OpenMergeTool(path.clone()),
+        ));
+    }
+    let untracked = file.kind == ChangeKind::Untracked;
+    let untracked_hint = untracked.then_some("Untracked files have no history");
+    // History of the file (M5-09); from a commit it starts there.
+    entries.push(item_with_hint(
+        "File history",
+        untracked_hint,
+        Message::FileHistoryOpened {
+            path: path.clone(),
+            start: commit.map(str::to_owned),
+        },
+    ));
+    // Blame (M5-10): the working copy, or the file at the commit; a file
+    // deleted there is blamed at the parent, where it still exists.
+    let (blame_reason, blame_rev) = match (area, file.kind) {
+        (_, ChangeKind::Untracked) => (untracked_hint, None),
+        (FileArea::Commit, ChangeKind::Added) => (Some("Added in this commit"), None),
+        (FileArea::Commit, ChangeKind::Deleted) => match parent {
+            Some(parent) => (None, Some(parent.to_owned())),
+            None => (Some("Deleted in this commit"), None),
+        },
+        (FileArea::Commit, _) => (None, commit.map(str::to_owned)),
+        (_, ChangeKind::Added) => (Some("Not committed yet"), None),
+        // Deleted in the working copy: blame the committed version.
+        (_, ChangeKind::Deleted) => (None, Some("HEAD".to_owned())),
+        _ => (None, None),
+    };
+    entries.push(item_with_hint(
+        "File blame",
+        blame_reason,
+        Message::FileBlameOpened {
+            path: path.clone(),
+            start: commit.map(str::to_owned),
+            rev: blame_rev,
+        },
+    ));
+    entries.push(MenuEntry::Separator);
+    // External diff tool (M5/M8): the sides of the diff the row shows.
+    let target = match area {
+        FileArea::Unstaged => git_core::DiffTarget::Unstaged,
+        FileArea::Staged => git_core::DiffTarget::Staged,
+        FileArea::Commit => git_core::DiffTarget::Commit {
+            id: commit.unwrap_or_default().to_owned(),
+            parent: parent.map(str::to_owned),
+        },
+    };
+    let diff_reason = if !diff_tool {
+        Some(NO_DIFF_TOOL)
+    } else if untracked {
+        Some("Untracked files have no previous version")
+    } else if file.kind == ChangeKind::Conflicted {
+        Some("Use the merge tool for conflicts")
+    } else if area == FileArea::Commit && commit.is_none() {
+        Some("Select one commit")
+    } else {
+        None
+    };
+    entries.push(item_with_hint(
+        "Open in external diff tool",
+        diff_reason,
+        Message::ExternalDiffFile {
+            target,
+            path: path.clone(),
+            old_path: file.old_path.clone(),
+        },
+    ));
+    entries.push(editor);
+    // A file deleted in a commit is not in the working tree; others are
+    // checked when the entry runs (no file I/O on the UI thread).
+    let location_reason = (area == FileArea::Commit && file.kind == ChangeKind::Deleted)
+        .then_some(crate::app::NOT_IN_WORKTREE);
+    entries.push(item_with_hint(
+        "Open file location",
+        location_reason,
+        Message::OpenFileLocation(path),
+    ));
+    entries.extend([
+        MenuEntry::Separator,
+        action("Copy file path", true, Message::CopyToClipboard(copy_path)),
+    ]);
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1274,6 +1445,185 @@ mod tests {
         let (enabled, disabled) = summary(&menu);
         assert!(enabled.contains(&"Hide all"));
         assert!(disabled.iter().any(|(l, _)| *l == "Show all"));
+    }
+
+    fn change(kind: git_core::ChangeKind) -> git_core::FileChange {
+        git_core::FileChange {
+            path: "src/a.rs".into(),
+            kind,
+            old_path: None,
+        }
+    }
+
+    fn file_menu(
+        change: &git_core::FileChange,
+        area: crate::app::FileArea,
+        writable: bool,
+        diff_tool: bool,
+    ) -> Vec<MenuEntry> {
+        let commit = (area == crate::app::FileArea::Commit).then_some("c2");
+        super::file(FileFacts {
+            file: change,
+            area,
+            writable,
+            commit,
+            parent: commit.map(|_| "c1"),
+            diff_tool,
+            editor: action("Open in external editor", true, Message::OpenInEditor(None)),
+            copy_path: "/repo/src/a.rs".into(),
+        })
+    }
+
+    #[test]
+    fn file_menus_are_ordered_like_gitkraken() {
+        use crate::app::FileArea;
+        use git_core::ChangeKind;
+        let modified = change(ChangeKind::Modified);
+        let tail = [
+            "---",
+            "Open in external diff tool",
+            "Open in external editor",
+            "Open file location",
+            "---",
+            "Copy file path",
+        ];
+        let with_tail = |head: &[&'static str]| -> Vec<&'static str> {
+            head.iter().copied().chain(tail).collect()
+        };
+        assert_eq!(
+            layout(&file_menu(&modified, FileArea::Unstaged, true, true)),
+            with_tail(&[
+                "Stage",
+                "Discard changes",
+                "Ignore",
+                "---",
+                "File history",
+                "File blame",
+            ])
+        );
+        assert_eq!(
+            layout(&file_menu(&modified, FileArea::Staged, true, true)),
+            with_tail(&[
+                "Unstage",
+                "Discard changes",
+                "Copy commit message prompt…",
+                "---",
+                "File history",
+                "File blame",
+            ])
+        );
+        assert_eq!(
+            layout(&file_menu(&modified, FileArea::Commit, true, true)),
+            with_tail(&["File history", "File blame"])
+        );
+        // Conflicted files add the merge tool before the history.
+        let conflicted = change(ChangeKind::Conflicted);
+        assert_eq!(
+            layout(&file_menu(&conflicted, FileArea::Unstaged, true, true))[4..7],
+            ["Open in merge tool", "File history", "File blame"]
+        );
+        let menu = file_menu(&conflicted, FileArea::Unstaged, true, true);
+        assert_eq!(
+            hint_of(&menu, "Open in external diff tool"),
+            Some("Use the merge tool for conflicts")
+        );
+    }
+
+    #[test]
+    fn file_menu_messages() {
+        use crate::app::{DiscardTarget, FileArea};
+        use git_core::{ChangeKind, DiffTarget};
+        let modified = change(ChangeKind::Modified);
+        let staged = file_menu(&modified, FileArea::Staged, true, true);
+        assert!(matches!(
+            message_of(&staged, "Discard changes"),
+            Some(Message::Discard(DiscardTarget::Staged(f))) if f.path == "src/a.rs"
+        ));
+        assert!(matches!(
+            message_of(&staged, "Open in external diff tool"),
+            Some(Message::ExternalDiffFile {
+                target: DiffTarget::Staged,
+                ..
+            })
+        ));
+        assert!(matches!(
+            message_of(&staged, "File blame"),
+            Some(Message::FileBlameOpened {
+                start: None,
+                rev: None,
+                ..
+            })
+        ));
+        // Commit files: parent against commit, blame and history at the commit.
+        let commit = file_menu(&modified, FileArea::Commit, true, true);
+        assert!(matches!(
+            message_of(&commit, "Open in external diff tool"),
+            Some(Message::ExternalDiffFile {
+                target: DiffTarget::Commit { id, parent: Some(p) },
+                ..
+            }) if id == "c2" && p == "c1"
+        ));
+        assert!(matches!(
+            message_of(&commit, "File blame"),
+            Some(Message::FileBlameOpened { start: Some(s), rev: Some(r), .. })
+                if s == "c2" && r == "c2"
+        ));
+        assert!(matches!(
+            message_of(&commit, "Copy file path"),
+            Some(Message::CopyToClipboard(p)) if p == "/repo/src/a.rs"
+        ));
+        // Deleted in the commit: blame at the parent, not in the worktree.
+        let deleted_file = change(ChangeKind::Deleted);
+        let deleted = file_menu(&deleted_file, FileArea::Commit, true, true);
+        assert!(matches!(
+            message_of(&deleted, "File blame"),
+            Some(Message::FileBlameOpened { rev: Some(r), .. }) if r == "c1"
+        ));
+        assert_eq!(
+            hint_of(&deleted, "Open file location"),
+            Some(crate::app::NOT_IN_WORKTREE)
+        );
+        // Deleted in the working copy: blame the committed version.
+        let gone = file_menu(&deleted_file, FileArea::Unstaged, true, true);
+        assert!(matches!(
+            message_of(&gone, "File blame"),
+            Some(Message::FileBlameOpened { rev: Some(r), .. }) if r == "HEAD"
+        ));
+    }
+
+    #[test]
+    fn file_menu_enable_rules() {
+        use crate::app::FileArea;
+        use git_core::ChangeKind;
+        let untracked_file = change(ChangeKind::Untracked);
+        let untracked = file_menu(&untracked_file, FileArea::Unstaged, true, true);
+        for label in ["File history", "File blame"] {
+            assert_eq!(
+                hint_of(&untracked, label),
+                Some("Untracked files have no history")
+            );
+        }
+        assert!(hint_of(&untracked, "Open in external diff tool").is_some());
+        let added_file = change(ChangeKind::Added);
+        let added = file_menu(&added_file, FileArea::Commit, true, true);
+        assert_eq!(hint_of(&added, "File blame"), Some("Added in this commit"));
+        assert!(summary(&added).0.contains(&"File history"));
+        // No diff tool chosen.
+        let modified = change(ChangeKind::Modified);
+        let menu = file_menu(&modified, FileArea::Unstaged, true, false);
+        assert_eq!(
+            hint_of(&menu, "Open in external diff tool"),
+            Some(NO_DIFF_TOOL)
+        );
+        // Read-only: only the write entries are disabled.
+        for area in [FileArea::Unstaged, FileArea::Staged] {
+            let menu = file_menu(&modified, area, false, true);
+            let (enabled, disabled) = summary(&menu);
+            let disabled: Vec<_> = disabled.iter().map(|(l, _)| *l).collect();
+            assert!(disabled.contains(&"Discard changes"), "{area:?}");
+            assert!(enabled.contains(&"File blame") && enabled.contains(&"Copy file path"));
+            assert!(enabled.contains(&"Open in external diff tool"));
+        }
     }
 
     fn facts(writable: bool, external: Option<git_core::ConfigScope>) -> RemoteFacts {

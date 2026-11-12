@@ -152,6 +152,8 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] The palette entry and the Preferences → Repository → Gitflow toggle switch the same setting; it survives a restart; without Git flow the entries say "Initialize Gitflow first"; off, the graph looks as before.
 - [ ] Hide a feature branch while the layout is on: the rest keeps its groups.
 - [ ] Right click a local branch, a remote branch and a tag in the left panel and on their graph labels: order and labels as in GitKraken (no Checkout for the checked-out branch, remote menu starts with merge entries, "Push v1 to origin"); Create branch here opens the name field at the ref's commit; Reset … to this commit opens Soft/Mixed/Hard; Copy commit sha copies the full sha (the commit's, for an annotated tag).
+- [ ] File menus (unstaged, staged, commit details): order as in GitKraken; File blame opens Blame mode (commit file: at that commit); Discard changes on a staged file asks, resets the file to HEAD and Ctrl+Z brings index and working tree back.
+- [ ] On Windows with a diff tool set (e.g. WinMerge or Meld): Open in external diff tool on a file in the commit details shows the parent's and the commit's version; the temporary files are gone after closing the tool.
 - [ ] Hide a branch, then use Create branch here from its left panel menu: a "Create branch at <branch>" dialog asks for the name; the new branch is created and checked out; Undo deletes it.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)

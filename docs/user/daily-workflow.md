@@ -43,7 +43,8 @@ Select the **WIP** row at the top of the graph. The right panel lists unstaged, 
 - With a file's diff open: **S** stages it, **U** unstages it; the next file's diff opens.
 - In the diff: **Stage hunk** in a hunk header (Hunk view) or **Stage block** above a change (Inline, Split), or select lines (click, Shift+click, Ctrl+click; in Split removed lines on the left, added lines on the right) and **Stage selected lines**.
 - **Discard** works per file, hunk, selected lines or for all changes. It always asks first and can be undone (Ctrl+Z). "Discard all" with staged changes asks whether to discard those too.
-- File menu: **Ignore** (adds the file to `.gitignore`), **Open file location**, **Copy file path**, **File history**.
+- File menus are ordered like GitKraken's. Unstaged: **Stage**, **Discard changes**, **Ignore** (adds the file to `.gitignore`); staged: **Unstage**, **Discard changes** (staged and unstaged changes of the file, back to HEAD; undoable), **Copy commit message prompt…**. All file menus, also in the commit details: **File history**, **File blame**, **Open in external diff tool**, **Open in external editor**, **Open file location**, **Copy file path**.
+- **Open in external diff tool** uses the diff tool from Preferences → External tools: unstaged files compare the index with the working tree, staged files HEAD with the index, files of a commit its first parent with the commit (Git writes both versions to temporary files and removes them afterwards).
 
 ## Committing
 
@@ -63,7 +64,7 @@ With a detached HEAD, the commit panel reminds you to create a branch.
 
 ## File history and blame
 
-Right click a file → **File history**, the **History** button of a diff, or Ctrl+Shift+H to pick any tracked file. The list shows every commit that changed the file, following renames, with its diff; **Show in graph** jumps to the commit.
+Right click a file → **File history** or **File blame** (opens the blame directly: the working copy, or the file at the commit whose details you are viewing; a file deleted there is blamed at the parent), the **History** button of a diff, or Ctrl+Shift+H to pick any tracked file. The list shows every commit that changed the file, following renames, with its diff; **Show in graph** jumps to the commit.
 
 ![File history](../screenshots/m5-history-dark-100.png)
 
