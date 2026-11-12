@@ -51,6 +51,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Select several branches and tags in the left panel with Ctrl+click and Shift+click and delete them in one step (local part undoable in one step, remote branches with one push per remote) or hide/show them in the graph.
 - Command palette: Ctrl+Shift+P opens it too; every on/off setting can be toggled from it, Theme, Diff view, Stash message template and External editor have value lists, and "Preferences: …" entries open the Preferences at a page or setting (highlighted for a moment).
 - A small sparkle button at the right end of "Committing as …" opens "Copy commit message prompt…" (disabled until changes are staged).
+- Repositories Git refuses because their folder belongs to another user ("dubious ownership") show a plain explanation with "Trust this repository…" (adds them to `safe.directory` after a confirmation, then opens them); failed actions offer the same in their notification.
+- Windows: repositories inside WSL (`\\wsl$\…`, `\\wsl.localhost\…`) show a notice why they are slow (with "Don't show again"), a "WSL: <distro>" badge in the recent list, and are watched by polling every 2 seconds.
 
 ### Changed
 

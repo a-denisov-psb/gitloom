@@ -168,18 +168,19 @@ fn recent(app: &App) -> Element<'_, Message> {
             || repo.path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        button(
-            column![
-                text(name).style(link_text),
-                muted(repo.path.display().to_string()).size(11)
-            ]
-            .spacing(1),
-        )
-        .on_press(Message::OpenRecent(repo.path.clone()))
-        .padding([4, 10])
-        .width(Fill)
-        .style(theme::list_item(false))
-        .into()
+        // Repositories inside WSL carry a badge (M12-14).
+        let mut title = row![text(name).style(link_text)]
+            .spacing(8)
+            .align_y(iced::Center);
+        if let Some(badge) = crate::app::wsl_badge(&repo.path) {
+            title = title.push(muted(badge).size(11));
+        }
+        button(column![title, muted(repo.path.display().to_string()).size(11)].spacing(1))
+            .on_press(Message::OpenRecent(repo.path.clone()))
+            .padding([4, 10])
+            .width(Fill)
+            .style(theme::list_item(false))
+            .into()
     }))
     .spacing(2)
     .into()

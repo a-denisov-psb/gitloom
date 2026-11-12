@@ -160,7 +160,27 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
             muted(path.display().to_string()),
         ]),
         TabState::Failed { path, error } => {
-            let mut content = column![banner(error, tab.id), muted(path.display().to_string())];
+            // Git refuses a repository owned by another user: say so in
+            // plain words and offer to trust it (M12-14, ADR-044).
+            let mut content = match git_core::dubious_ownership(error) {
+                Some(git_path) => column![
+                    text("Git does not trust this repository").size(16),
+                    muted(
+                        "The folder belongs to another user, so Git refuses to work in it. \
+                         Trust it if you know where it comes from."
+                    ),
+                    button(text("Trust this repository…").size(12))
+                        .on_press(Message::TrustRepository {
+                            tab: tab.id,
+                            path: git_path.to_owned(),
+                        })
+                        .padding([3, 10])
+                        .style(button::primary),
+                    muted(path.display().to_string()),
+                ]
+                .spacing(10),
+                None => column![banner(error, tab.id), muted(path.display().to_string())],
+            };
             if app.session.is_recent(path) {
                 content = content.push(
                     button(text("Remove from recent").size(12))
@@ -200,6 +220,9 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
                 view.snapshot.flow_finish.as_ref(),
             ) {
                 content = content.push(finish_banner(view, plan));
+            }
+            if let Some(notice) = app.wsl_notice(view) {
+                content = content.push(wsl_banner(notice, view.backend.path()));
             }
             if let Some(error) = &view.error {
                 content = content.push(banner(error, tab.id));
@@ -355,6 +378,27 @@ fn finish_banner<'a>(
     .padding([6, 12])
     .width(Fill)
     .style(theme::state_banner)
+    .into()
+}
+
+/// Repository inside WSL (M12-14): why it is slow, "Don't show again".
+fn wsl_banner(notice: String, path: &std::path::Path) -> Element<'_, Message> {
+    container(
+        row![
+            crate::icons::tinted(crate::icons::Icon::Info, 15.0, |p| p.warning),
+            text(notice).style(theme::text_normal),
+            space::horizontal(),
+            button(text("Don't show again").size(12))
+                .on_press(Message::WslNoticeDismissed(path.to_path_buf()))
+                .padding([3, 10])
+                .style(button::secondary),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+    )
+    .padding([8, 12])
+    .width(Fill)
+    .style(theme::notice_banner)
     .into()
 }
 

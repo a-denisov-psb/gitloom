@@ -1053,6 +1053,22 @@ pub enum Message {
     RenameStashStart(String),
     /// The highlight of a field opened from the palette ends (M12-12).
     SettingsHighlightEnded(u64),
+    /// "Don't show again" on the WSL notice of this repository (M12-14).
+    WslNoticeDismissed(PathBuf),
+    /// "Trust this repository…" for Git's path of a repository it refuses
+    /// (dubious ownership, M12-14): asks first.
+    TrustRepository {
+        tab: TabId,
+        path: String,
+    },
+    TrustConfirmed {
+        tab: TabId,
+        path: String,
+    },
+    Trusted {
+        tab: TabId,
+        result: Result<(), String>,
+    },
     /// "Mark all resolved" (M12-05): checks the conflicted files for
     /// markers, then stages them (after a confirmation if any has markers).
     MarkAllResolved,
@@ -3097,6 +3113,14 @@ impl App {
             blocking(move || {
                 let backend: Arc<dyn GitBackend> =
                     Arc::new(GixBackend::discover(&path).map_err(|e| e.to_string())?);
+                // gitoxide opens repositories of other users with reduced
+                // trust; Git refuses them. Ask Git first (M12-14).
+                if let Err(error) = git_core::check_repository_access(backend.path()) {
+                    let error = error.to_string();
+                    if git_core::dubious_ownership(&error).is_some() {
+                        return Err(error);
+                    }
+                }
                 let mut snapshot = RepoSnapshot::load(backend.as_ref())?;
                 let mut filter = filters.get(backend.path()).cloned().unwrap_or_default();
                 filter.prune(&snapshot.refs);
@@ -5043,6 +5067,14 @@ impl App {
                 Message::BulkForceDelete(report.unmerged),
             ));
         }
+    }
+
+    /// The WSL notice of `view`'s repository, unless dismissed (M12-14).
+    pub fn wsl_notice(&self, view: &RepoView) -> Option<String> {
+        wsl_notice_text(
+            view.backend.path(),
+            &self.settings.general.wsl_notice_dismissed,
+        )
     }
 
     /// Reads the submodules of tab `tab` in the background (M12-06).
@@ -7424,6 +7456,21 @@ impl App {
                                     error,
                                 ));
                             }
+                            None if git_core::dubious_ownership(&error).is_some() => {
+                                let path = git_core::dubious_ownership(&error)
+                                    .unwrap_or_default()
+                                    .to_owned();
+                                self.toasts.push(
+                                    crate::toast::Toast::git_error(
+                                        format!("{label} failed"),
+                                        error,
+                                    )
+                                    .with_action(
+                                        "Trust this repository…",
+                                        Message::TrustRepository { tab, path },
+                                    ),
+                                );
+                            }
                             None => {
                                 let title = format!("{label} failed");
                                 self.toasts.push(match auth_hint_with_key(&error, &ssh) {
@@ -8274,6 +8321,51 @@ impl App {
                     view.stash_conflict = None;
                 }
             }
+            Message::WslNoticeDismissed(path) => {
+                if !self.settings.general.wsl_notice_dismissed.contains(&path) {
+                    self.settings.general.wsl_notice_dismissed.push(path);
+                }
+                return self.save_settings();
+            }
+            Message::TrustRepository { tab, path } => {
+                self.modal = Some(Modal::confirm(
+                    "Trust this repository?",
+                    format!(
+                        "Git refuses to work in {path} because the folder belongs to another \
+                         user. Trusting it adds it to safe.directory in your global Git config, \
+                         so Git (and Gitloom) work in it. Only trust folders you know. This is \
+                         a setting: remove it from the global Git config to undo it."
+                    ),
+                    "Trust",
+                    false,
+                    Message::TrustConfirmed { tab, path },
+                ));
+            }
+            Message::TrustConfirmed { tab, path } => {
+                return Task::perform(
+                    blocking(move || git_core::trust_directory(&path).map_err(|e| e.to_string())),
+                    move |result| Message::Trusted { tab, result },
+                );
+            }
+            Message::Trusted { tab, result } => match result {
+                // Open the repository again (a failed tab), or refresh.
+                Ok(()) => {
+                    let failed = self
+                        .tabs
+                        .iter()
+                        .any(|t| t.id == tab && matches!(t.state, TabState::Failed { .. }));
+                    if failed {
+                        return self.update(Message::Retry(tab));
+                    }
+                    return self.refresh(tab);
+                }
+                Err(error) => {
+                    self.toasts.push(crate::toast::Toast::git_error(
+                        "Could not trust the repository",
+                        error,
+                    ));
+                }
+            },
             Message::SettingsHighlightEnded(seq) => {
                 if seq == self.highlight_seq {
                     if let Some(page) = self.settings_page.as_mut() {
@@ -10862,6 +10954,55 @@ fn short_id(id: &str) -> &str {
     &id[..id.len().min(7)]
 }
 
+/// The WSL location of a repository path (M12-14). Tests parse the path
+/// on every platform; the app only on Windows.
+pub fn wsl_of(path: &std::path::Path) -> Option<git_core::wsl::WslLocation> {
+    if cfg!(test) {
+        git_core::wsl::parse_wsl_path(&path.to_string_lossy())
+    } else {
+        git_core::wsl::wsl_location(path)
+    }
+}
+
+/// Text of the WSL notice for the repository at `root`, unless its
+/// notice was dismissed (M12-14).
+pub fn wsl_notice_text(root: &std::path::Path, dismissed: &[PathBuf]) -> Option<String> {
+    let location = wsl_of(root)?;
+    if dismissed.iter().any(|p| p == root) {
+        return None;
+    }
+    Some(format!(
+        "This repository is inside WSL ({}). Gitloom uses Windows Git here, which is slow \
+         and can show wrong file modes or line endings. A WSL mode is planned.",
+        location.distro
+    ))
+}
+
+/// Badge of a recent repository inside WSL: "WSL: <distro>".
+pub fn wsl_badge(path: &std::path::Path) -> Option<String> {
+    wsl_of(path).map(|location| format!("WSL: {}", location.distro))
+}
+
+/// How the file watcher of a repository works (M12-14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatcherMode {
+    /// The platform's change notifications.
+    Native,
+    /// Scans every 2 s: Windows notifications on `\\wsl$` are unreliable.
+    Polling,
+}
+
+pub fn watcher_mode(root: &std::path::Path) -> WatcherMode {
+    if wsl_of(root).is_some() {
+        WatcherMode::Polling
+    } else {
+        WatcherMode::Native
+    }
+}
+
+/// Poll interval of [`WatcherMode::Polling`].
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
+
 /// The checked-out local branch: from HEAD, or the reference marked as
 /// checked out.
 fn checked_out_branch(snapshot: &RepoSnapshot) -> Option<&str> {
@@ -11499,14 +11640,23 @@ fn watch_repository(data: &(u64, PathBuf)) -> impl iced::futures::Stream<Item = 
         16,
         async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
             use iced::futures::{SinkExt as _, StreamExt as _};
-            use notify::Watcher as _;
-
             let (sender, mut events) = iced::futures::channel::mpsc::unbounded();
-            let watcher = notify::recommended_watcher(move |event| {
+            let handler = move |event: notify::Result<notify::Event>| {
                 if forward_event(&event) {
                     let _ = sender.unbounded_send(event);
                 }
-            });
+            };
+            // Repositories inside WSL are polled (M12-14).
+            let watcher: notify::Result<Box<dyn notify::Watcher + Send>> = match watcher_mode(&root)
+            {
+                WatcherMode::Native => notify::recommended_watcher(handler)
+                    .map(|w| Box::new(w) as Box<dyn notify::Watcher + Send>),
+                WatcherMode::Polling => notify::PollWatcher::new(
+                    handler,
+                    notify::Config::default().with_poll_interval(POLL_INTERVAL),
+                )
+                .map(|w| Box::new(w) as Box<dyn notify::Watcher + Send>),
+            };
             let mut watcher = match watcher {
                 Ok(watcher) => watcher,
                 Err(error) => {
@@ -15918,6 +16068,76 @@ pub(crate) mod tests {
         let task = app.update(Message::CopyPromptRequested);
         assert!(app.status.is_empty());
         drop(task);
+    }
+
+    #[test]
+    fn wsl_notice_badge_and_watcher() {
+        let wsl = PathBuf::from(r"\\wsl.localhost\Ubuntu-24.04\home\me\repo");
+        let other = PathBuf::from(r"\\wsl$\Debian\srv\x");
+        let text = wsl_notice_text(&wsl, &[]).unwrap();
+        assert!(text.starts_with("This repository is inside WSL (Ubuntu-24.04)."));
+        // "Don't show again" is per path.
+        let mut app = staging_app(&[], &[]);
+        let _ = app.update(Message::WslNoticeDismissed(wsl.clone()));
+        let _ = app.update(Message::WslNoticeDismissed(wsl.clone()));
+        let dismissed = &app.settings.general.wsl_notice_dismissed;
+        assert_eq!(dismissed, std::slice::from_ref(&wsl));
+        assert_eq!(wsl_notice_text(&wsl, dismissed), None);
+        assert!(wsl_notice_text(&other, dismissed).is_some());
+        // Local repositories get neither notice, badge nor polling.
+        let local = PathBuf::from("/home/me/repo");
+        assert_eq!(wsl_notice_text(&local, &[]), None);
+        assert_eq!(wsl_badge(&wsl).as_deref(), Some("WSL: Ubuntu-24.04"));
+        assert_eq!(wsl_badge(&local), None);
+        assert_eq!(watcher_mode(&wsl), WatcherMode::Polling);
+        assert_eq!(watcher_mode(&local), WatcherMode::Native);
+    }
+
+    #[test]
+    fn trusting_a_refused_repository() {
+        let mut app = staging_app(&[], &[]);
+        let tab = app.tabs[0].id;
+        let path = PathBuf::from("/srv/shared");
+        app.tabs[0].state = TabState::Failed {
+            path: path.clone(),
+            error: "fatal: detected dubious ownership in repository at '/srv/shared'".into(),
+        };
+        let _ = app.update(Message::TrustRepository {
+            tab,
+            path: "/srv/shared".into(),
+        });
+        let modal = app.modal.take().unwrap();
+        assert_eq!(modal.title, "Trust this repository?");
+        assert!(modal.text.contains("safe.directory"));
+        // After trusting, the repository opens again.
+        let _ = app.update(Message::Trusted {
+            tab,
+            result: Ok(()),
+        });
+        assert!(matches!(&app.tabs[0].state, TabState::Loading { path: p } if *p == path));
+        // A failure is a toast.
+        let _ = app.update(Message::Trusted {
+            tab,
+            result: Err("error: could not lock config file".into()),
+        });
+        assert_eq!(
+            app.toasts.list.last().unwrap().title,
+            "Could not trust the repository"
+        );
+        // A write refused by Git offers "Trust this repository…" in its toast.
+        let mut app = staging_app(&[], &[]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Stage all changes".into(),
+            result: Err("fatal: detected dubious ownership in repository at '/mock'".into()),
+        });
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.text, "Git refuses to work in this folder because it belongs to another user. Trust the repository if you know the folder (Trust this repository…).");
+        assert!(matches!(
+            toast.action.as_ref().map(|(_, m)| m.as_ref()),
+            Some(Message::TrustRepository { path, .. }) if path == "/mock"
+        ));
     }
 
     #[test]

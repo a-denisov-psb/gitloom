@@ -794,6 +794,38 @@ mod tests {
         }
     }
 
+    /// M12-14: the trust screen of a repository Git refuses, and the start
+    /// screen with a WSL badge in the recent list; dark and light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_trust_and_wsl() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let choice = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let mut app = crate::app::tests::staging_app(&[], &[]);
+            app.settings.appearance.theme = choice;
+            app.tabs[0].state = crate::app::TabState::Failed {
+                path: "/srv/shared/project".into(),
+                error: "fatal: detected dubious ownership in repository at '/srv/shared/project'"
+                    .into(),
+            };
+            snapshot(&app, &format!("trust-{theme}"));
+            let (mut start, _) = App::new(Vec::new(), None);
+            start.settings.appearance.theme = choice;
+            start.session.touch_recent(
+                std::path::Path::new(r"\\wsl.localhost\Ubuntu\home\me\gitloom"),
+                2,
+            );
+            start
+                .session
+                .touch_recent(std::path::Path::new("/home/me/local-repo"), 1);
+            snapshot(&start, &format!("start-wsl-badge-{theme}"));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

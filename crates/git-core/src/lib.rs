@@ -46,12 +46,14 @@ pub mod submodule;
 mod todo;
 mod watch;
 pub mod work_undo;
+pub mod wsl;
 
 pub use blame::{blame, parse_porcelain, Blame, BlameCommit, BlameGroup, UNCOMMITTED};
 pub use cli_backend::{
-    branch_not_merged, checkout_blocked, detect_git, global_config, global_identity,
-    missing_remote, set_global_config, write_global_identity, CliBackend, GitAvailability,
-    GitOutput, GitVersion, GitWriter, RunOptions, MIN_GIT_VERSION,
+    branch_not_merged, check_repository_access, checkout_blocked, detect_git, dubious_ownership,
+    global_config, global_identity, missing_remote, set_global_config, trust_directory,
+    write_global_identity, CliBackend, GitAvailability, GitOutput, GitVersion, GitWriter,
+    RunOptions, MIN_GIT_VERSION,
 };
 pub use conflict::{
     files_with_conflict_markers, has_conflict_markers, with_line_endings, Chunk, ConflictHunk,

@@ -240,6 +240,9 @@ pub struct General {
     /// Fetch, auto-fetch and the fetch of pull use `--prune` (GitKraken
     /// "Auto-Prune", M10-08); on by default.
     pub prune_on_fetch: bool,
+    /// Repositories inside WSL whose notice was dismissed with "Don't show
+    /// again" (M12-14).
+    pub wsl_notice_dismissed: Vec<std::path::PathBuf>,
 }
 
 impl Default for General {
@@ -248,6 +251,7 @@ impl Default for General {
             auto_fetch_minutes: crate::fetch::DEFAULT_INTERVAL_MINUTES,
             check_updates: false,
             prune_on_fetch: true,
+            wsl_notice_dismissed: Vec::new(),
         }
     }
 }
