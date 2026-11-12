@@ -242,7 +242,7 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                     &app.editor_style(),
                 )),
             },
-            PaneKind::Panel => panel::view(view, &app.avatars),
+            PaneKind::Panel => panel::view(view, &app.avatars, app.settings.file_list),
         };
         pane_grid::Content::new(content)
     })

@@ -46,6 +46,9 @@ pub enum Loadable<T> {
 pub struct CommitDetails {
     pub id: String,
     pub changes: Loadable<DetailChanges>,
+    /// Every file of the commit's tree for "View all files" (M14-03);
+    /// `None` until it is turned on.
+    pub all_files: Option<Loadable<Vec<String>>>,
 }
 
 /// Message of the selected commit in the details' framed box (M14-01):
@@ -761,6 +764,8 @@ pub struct RepoView {
     pub details: Option<CommitDetails>,
     /// Message box of the selected commit (M14-01).
     pub message_box: Option<MessageBox>,
+    /// Collapsed folders of the details' file tree (M14-03), per session.
+    pub file_tree_collapsed: HashSet<String>,
     /// Signature status per commit, requested once when a commit is
     /// selected (M10-05).
     pub signatures:
@@ -1140,6 +1145,7 @@ impl RepoView {
             multi: crate::selection::MultiSelection::default(),
             details: None,
             message_box: None,
+            file_tree_collapsed: HashSet::new(),
             signatures: std::collections::HashMap::new(),
             center: CenterView::Graph,
             filter: String::new(),
