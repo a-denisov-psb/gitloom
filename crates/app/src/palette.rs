@@ -19,6 +19,8 @@ pub enum Mode {
     ChooseIdentity,
     /// Tracked files at HEAD, for the file history.
     Files,
+    /// Remotes with a website (M12-03).
+    RemoteWebsites,
 }
 
 impl Mode {
@@ -29,6 +31,7 @@ impl Mode {
             Self::CheckoutBranch => "Checkout branch: type a branch name",
             Self::ChooseIdentity => "Choose identity: type a name or email",
             Self::Files => "File history: type a file path",
+            Self::RemoteWebsites => "Open remote in browser: type a remote name",
         }
     }
 }
@@ -46,6 +49,8 @@ pub enum Target {
     File(String),
     /// An identity menu entry (M8-04).
     Identity(crate::app::IdentityChoice),
+    /// A web page (M12-03).
+    Link(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

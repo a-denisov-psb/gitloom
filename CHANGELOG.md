@@ -35,6 +35,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Preferences → Editor like GitKraken: font (the monospace fonts installed), font size, tab size and line numbers for diffs, blame, file history and the conflict view.
 - Stashes look like GitKraken's: a dashed square with a stash icon in the graph, labelled "WIP on <branch>" for Git's default message (or the message you gave, without the "On <branch>:" prefix) in the graph, STASHES and the details. Stashing without a message no longer passes an empty message to Git.
 - Gear at the right end of the graph header: show or hide Author, Date and SHA, and "Reset column widths"; the same options are in Preferences → Appearance ("Show commit author / date and time / SHA in graph").
+- "Open on GitHub" / "Open on GitLab" / "Open on Bitbucket" / "Open in browser" in the remote menu and "Open remote in browser" in the command palette open the repository's web page (derived from the remote URL, also for SSH remotes).
 - Release packages for Windows on ARM64 (portable zip) and Linux ARM64 (AppImage, tar.gz), best effort, and a `.deb` package for Linux x64.
 
 - A stash pop or apply that stops in conflicts is no longer an error: a banner says the stash was kept, offers Undo and, once the conflicts are resolved, "Drop stash" / "Keep stash"; the conflict view names the sides "Updated upstream" and "Stashed changes".

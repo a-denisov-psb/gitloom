@@ -455,7 +455,7 @@ pub fn tag(name: &str, writable: bool) -> Vec<MenuEntry> {
 /// `any_shown` / `any_hidden`: some of the remote's branches are shown /
 /// hidden in the graph.
 /// Facts for the remote menu.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RemoteFacts {
     pub writable: bool,
     pub any_shown: bool,
@@ -463,6 +463,8 @@ pub struct RemoteFacts {
     /// Defined outside the repository config: `git remote` cannot change it.
     pub external: Option<git_core::ConfigScope>,
     pub has_url: bool,
+    /// The remote's website (M12-03), if its URL has one.
+    pub website: Option<String>,
 }
 
 pub fn remote(name: &str, facts: &RemoteFacts) -> Vec<MenuEntry> {
@@ -472,7 +474,10 @@ pub fn remote(name: &str, facts: &RemoteFacts) -> Vec<MenuEntry> {
         any_hidden,
         external,
         has_url,
-    } = *facts;
+        ref website,
+    } = facts;
+    let (writable, any_shown, any_hidden, external, has_url) =
+        (*writable, *any_shown, *any_hidden, *external, *has_url);
     // Outside the repository config: only Fetch (if it has a URL).
     let config_entry = |label: &str, message: Message| match external {
         Some(scope) => MenuEntry::Item {
@@ -484,12 +489,18 @@ pub fn remote(name: &str, facts: &RemoteFacts) -> Vec<MenuEntry> {
         },
         None => action(label, writable, message),
     };
-    vec![
-        action(
-            "Fetch",
-            writable && (external.is_none() || has_url),
-            Message::FetchRemote(name.into()),
-        ),
+    let mut entries = vec![action(
+        "Fetch",
+        writable && (external.is_none() || has_url),
+        Message::FetchRemote(name.into()),
+    )];
+    if let Some(url) = website {
+        entries.push(MenuEntry::item(
+            git_core::remote_web::web_label(url),
+            Message::OpenLink(url.clone()),
+        ));
+    }
+    entries.extend([
         MenuEntry::Separator,
         config_entry("Edit URL…", Message::EditRemoteUrl(name.into())),
         config_entry("Rename…", Message::RenameRemoteStart(name.into())),
@@ -511,7 +522,8 @@ pub fn remote(name: &str, facts: &RemoteFacts) -> Vec<MenuEntry> {
                 hide: false,
             },
         ),
-    ]
+    ]);
+    entries
 }
 
 /// `restorable`: apply/pop are allowed (no merge or rebase in progress).
@@ -876,6 +888,7 @@ mod tests {
             any_hidden: false,
             external,
             has_url: true,
+            website: None,
         }
     }
 
