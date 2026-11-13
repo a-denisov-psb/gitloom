@@ -108,7 +108,9 @@ Note: `init.defaultBranch` is read from the global config when the Preferences o
 
 Acceptance: unit tests for all four cases of the order; app test: initialization form in a repository with only `trunk` and `init.defaultBranch=trunk2` proposes `trunk2`.
 
-### [ ] M15-04 GITFLOW finish on hover, Gitflow layout experimental
+### [x] M15-04 GITFLOW finish on hover, Gitflow layout experimental
+
+Note: the blocked reason (repository blocked or busy, or "Cannot merge while a merge is in progress") is shared by the flag and the branch menu entry, which now carries it as a hint; the checked-out flow branch has a flag but no eye; the Preferences search entry is "Gitflow layout (experimental)" too.
 
 - Hover flag on feature, release and hotfix rows; blocked state; experimental pill, note and labels.
 
