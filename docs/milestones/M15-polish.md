@@ -20,6 +20,7 @@ In scope:
 - Commit details: edit icon, tooltip only on the icon, prompt button in the editor (#34)
 - Start screen buttons (#35)
 - Diff header as icons with Blame; diff minimap (#36)
+- Change the author of unpushed commits: commit context menu (also multi-selection) and the message editor of the commit details, which looks like the commit panel (#37)
 
 Out of scope:
 
@@ -41,6 +42,7 @@ Out of scope:
 | Start buttons (#35) | Fill like the initials tile of the commit details (`theme::avatar`: accent at 25 % alpha); title, hint and icon in the normal text color; hover 35 %, pressed 45 %; radius 6. Height about three quarters of today's, title 14, hint 11, icon 18; all three buttons keep one size. WCAG AA in Dark and Light (adapt `start_buttons_reach_wcag_aa`). |
 | Diff header (#36) | Icons like GitKraken, order from left after the path: Blame, History, change arrows ↑/↓, Hunk / Inline / Split as an icon segmented toggle, External, Close. Lucide icons, 15 px, hit area 22×22, tooltips with name and shortcut. Suggested: Hunk `list-collapse`, Inline `align-justify`, Split `columns-2`, External `square-arrow-out-up-right`, History `history` (exists); for Blame choose a fitting Lucide icon and justify it in the task note. Blame is new in the header: opens the blame view like "File blame" in the file menu (M13-07), at the commit of a commit diff, otherwise for the working file; disabled with the menu's reason for untracked files, stashes and deleted files. The selection actions ("Stage selected lines" …) stay text buttons. New icons go into the icon set with their license (Lucide ISC, as before). |
 | Minimap (#36) | Inline and Split only. A 14 px strip at the right edge of the diff, right of the vertical scrollbar (like GitKraken). Every change line becomes a mark at its row position (rows after word wrap), at least 2 px high: removed red, added green with the theme's diff colors; Split: removed in the left half, added in the right half. The visible range is a translucent rectangle. A click centers the view on that position, dragging moves it, the mouse wheel scrolls like over the text. Marks are computed once per diff layout, not per frame. |
+| Change author (#37) | Engine: `reword_unpushed` becomes a wrapper of `rewrite_unpushed(git, edits)` with `CommitEdit { commit, message: Option<String>, author: Option<Identity> }` (ADR-051 amendment); author date kept, committer = current identity, signing as in ADR-051. Context menu of one or several selected commits: "Change author…" after the message entry; disabled when any selected commit is not eligible, tooltip "<short sha>: <reason>" (M14-05 texts); not for stashes. Dialog "Change author": "Changes the author of <n> commit(s)", the saved identities (M8) with the repository's current identity first, "Other…" with name and e-mail (validated like Preferences → Identities), the note about branches and tags that keep the old commits (union of all edited commits), Cancel / "Change author". Message editor of the commit details (M15-06) uses the commit panel's components, so it looks the same (maintainer screenshot 2026-11-13): first row "Authored by <name> <email>" with chevron, the identity picker of "Committing as …" with "Keep original author" as first entry (preselected), and the sparkle button at the right end of this row (moved from the summary row); then Summary with the counter inside, Description, Save / Cancel. One save rewrites message and author in one step. Undo entries: "Change author", or "Edit commit" when message and author changed; "Edit commit message" as before when only the message changed. |
 
 ## GitKraken verification items
 
@@ -50,6 +52,7 @@ Out of scope:
 | Does GitKraken's GITFLOW section show hover buttons (e.g. finish)? | M15-04 |
 | Does GitKraken show the minimap in the Hunk view too? | M15-09 |
 | Which icons does GitKraken use for Blame and History in the diff header (text or icon)? | M15-08 |
+| Can GitKraken change the author of a commit (context menu or details)? | M15-11 |
 
 ## Milestone acceptance
 
@@ -61,6 +64,7 @@ Out of scope:
 - [ ] The message is edited through the pencil icon only; the tooltip appears only on the icon; the editor offers the prompt for that commit.
 - [ ] Start screen buttons look calmer and keep AA contrast in Dark and Light.
 - [ ] Diff header as icons with Blame; minimap in Inline and Split.
+- [ ] The author of one or several unpushed commits can be changed from the context menu and in the message editor, which looks like the commit panel; one undo step restores the branch.
 - [ ] User guide, UX-PARITY, release checklist 7i and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
@@ -76,7 +80,8 @@ Out of scope:
 | M15-07 | Start screen buttons | – |
 | M15-08 | Diff header icons and Blame | – |
 | M15-09 | Diff minimap | M15-08 |
-| M15-10 | Documentation | M15-01 … M15-09 |
+| M15-10 | Documentation | M15-01 … M15-09, M15-11 |
+| M15-11 | Change author of unpushed commits | M15-06 |
 
 ---
 
@@ -156,12 +161,18 @@ Note: runs of touching change rows form one mark; marks are cached per load, lay
 
 Acceptance: unit tests for the mark mapping (with and without word wrap, Split halves); app tests: a click scrolls to the position, dragging follows; snapshots of a long file with changes at the top, middle and end in Inline and Split; no measurable cost while scrolling a 20,000-line diff.
 
+### [ ] M15-11 Change author of unpushed commits
+
+- `rewrite_unpushed` with message and author edits (ADR-051 amendment); "Change author…" in the commit menu for one or several commits with its dialog; the message editor of the commit details rebuilt from the commit panel's components with the author row, picker and sparkle button.
+
+Acceptance: integration tests: author of HEAD; of two non-adjacent commits three and five back with a merge between them (merge rebuilt, second parent unchanged); message and author of one commit in one step; author date kept, committer updated; working tree and index untouched; one blocked commit in a selection refuses the whole change; undo and redo restore the exact branch oid. App tests: menu entry for a multi-selection, disabled with "<short sha>: <reason>"; dialog with saved identities and "Other…"; editor row "Authored by …" preselects "Keep original author"; saving with a changed author selects the rewritten commit; snapshots of the dialog and of the editor next to the commit panel in Dark and Light (same paddings, fields and button positions).
+
 ### [ ] M15-10 Documentation
 
 Progress (2026-11-13): the docs of M15-01 … M15-09 are merged (user guide incl. `merge-rebase-conflicts.md`, UX-PARITY, checklist 7i, M15 verification items in section 8, CHANGELOG); the M15-11 parts and the tick follow after M15-11 (planning update 6).
 
-- User guide (`daily-workflow.md`, `coming-from-gitkraken.md`, Git flow page), UX-PARITY: rows for the overflow slot (#30), the pencil-only editing (#34, replaces the M14-05 row "Editable messages are plain text until clicked"), the diff header Blame and the minimap, the GITFLOW hover flag (Gitloom extension until verified); update the UTF-16 row (conflict view now handles UTF-16).
-- `docs/RELEASE-CHECKLIST.md` section "7i. New in M15" (UTF-16 conflict from a PowerShell-written file, editor picker, production fallback, hover finish, experimental label, narrow graph, pencil and commit prompt, start buttons, diff icons and Blame, minimap).
+- User guide (`daily-workflow.md`, `coming-from-gitkraken.md`, Git flow page), UX-PARITY: rows for the overflow slot (#30), the pencil-only editing (#34, replaces the M14-05 row "Editable messages are plain text until clicked"), the diff header Blame and the minimap, the GITFLOW hover flag (Gitloom extension until verified); update the UTF-16 row (conflict view now handles UTF-16); a row "Change author of unpushed commits (menu, multi-selection, details editor)" as Gitloom extension until the GitKraken item is answered; `docs/user/undo.md` entries "Change author" and "Edit commit".
+- `docs/RELEASE-CHECKLIST.md` section "7i. New in M15" (UTF-16 conflict from a PowerShell-written file, editor picker, production fallback, hover finish, experimental label, narrow graph, pencil and commit prompt, change author (menu with multi-selection, editor row), start buttons, diff icons and Blame, minimap).
 - CHANGELOG `[Unreleased]`.
 
 Acceptance: docs reviewed against the implemented behavior.
