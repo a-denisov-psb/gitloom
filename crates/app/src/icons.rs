@@ -73,10 +73,17 @@ pub enum Icon {
     PanelRightFilled,
     /// Finish a Git flow branch from the GITFLOW section (M15-04).
     Flag,
+    /// Diff header (M15-08): Hunk, Inline and Split view, external diff
+    /// tool, blame.
+    ListCollapse,
+    AlignJustify,
+    Columns2,
+    ExternalTool,
+    Blame,
 }
 
 impl Icon {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 52] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -124,6 +131,11 @@ impl Icon {
         Self::PanelLeftFilled,
         Self::PanelRightFilled,
         Self::Flag,
+        Self::ListCollapse,
+        Self::AlignJustify,
+        Self::Columns2,
+        Self::ExternalTool,
+        Self::Blame,
     ];
 
     /// SVG source of the icon.
@@ -181,6 +193,12 @@ impl Icon {
             Self::PanelLeftFilled => lucide!("panel-left-filled"),
             Self::PanelRightFilled => lucide!("panel-right-filled"),
             Self::Flag => lucide!("flag"),
+            Self::ListCollapse => lucide!("list-collapse"),
+            Self::AlignJustify => lucide!("align-justify"),
+            Self::Columns2 => lucide!("columns-2"),
+            Self::ExternalTool => lucide!("square-arrow-out-up-right"),
+            // A file with a person: who wrote each line.
+            Self::Blame => lucide!("file-user"),
         }
     }
 
