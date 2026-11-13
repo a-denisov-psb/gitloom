@@ -2619,8 +2619,9 @@ mod tests {
         }
     }
 
-    /// Resized graph columns (M11-02): a Graph column of one lane clips the
-    /// lanes with a fade; wider Branch/Tag and Author columns; both themes.
+    /// Resized graph columns (M11-02): a Graph column of one lane puts every
+    /// node on one line (M15-05); wider Branch/Tag and Author columns; both
+    /// themes.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_graph_columns() {
@@ -2640,6 +2641,43 @@ mod tests {
             snapshot(&app, &format!("graph-columns-narrow-{theme}"));
             app.settings.appearance.graph_columns.graph = Some(160.0);
             snapshot(&app, &format!("graph-columns-wide-{theme}"));
+        }
+    }
+
+    /// Narrow Graph column (M15-05): the fixture graph and the Git flow
+    /// fixture at full, half and minimum width; overflowing lanes' nodes in
+    /// the last slot; both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_graph_overflow() {
+        let (_repo, flow) = crate::snapshot::flow_tests::classic_snapshot();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            for fixture in ["graph", "flow"] {
+                let mut app = crate::app::tests::graph_app();
+                app.settings.appearance.theme = if light {
+                    crate::settings::ThemeChoice::Light
+                } else {
+                    crate::settings::ThemeChoice::Dark
+                };
+                if fixture == "flow" {
+                    let view = app.tabs[0].view_mut().unwrap();
+                    view.snapshot = std::sync::Arc::new(flow.with_flow_layout(true).unwrap());
+                }
+                let lanes = app.tabs[0].view().unwrap().snapshot.layout.max_width;
+                let full = crate::ui::graph::lanes_width(lanes);
+                for (width, name) in [
+                    (full, "full"),
+                    (full / 2.0, "half"),
+                    (crate::ui::MIN_GRAPH_WIDTH, "min"),
+                ] {
+                    app.settings.appearance.graph_columns.graph = Some(width);
+                    snapshot_sized(
+                        &app,
+                        &format!("graph-overflow-{fixture}-{name}-{theme}"),
+                        (1200.0, 520.0),
+                    );
+                }
+            }
         }
     }
 

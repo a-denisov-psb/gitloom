@@ -30,10 +30,9 @@ const HBAR_HEIGHT: f32 = 10.0;
 /// Room the table needs besides its columns: row paddings and scrollbar.
 const FIXED_WIDTH: f32 = 2.0 * ROW_PADDING as f32 + SCROLLBAR_WIDTH;
 const MIN_LANES: u16 = 2;
-/// Narrowest Graph column: one lane (M11-02).
-pub const MIN_GRAPH_WIDTH: f32 = GRAPH_PADDING * 2.0 + LANE_WIDTH;
-/// Width of the fade at the right edge of a clipped Graph column.
-const FADE_WIDTH: f32 = 12.0;
+/// Narrowest Graph column: one whole lane (M11-02; with the cell padding
+/// since M15-05, so the overflow slot's nodes are not cut off).
+pub const MIN_GRAPH_WIDTH: f32 = CELL_PADDING + GRAPH_PADDING * 2.0 + LANE_WIDTH;
 /// Horizontal padding of a table cell (both sides).
 const CELL_PADDING: f32 = 4.0;
 /// Header label size.
@@ -68,8 +67,9 @@ pub fn view<'a>(
     let lanes = repo.snapshot.layout.max_width;
     let widths = appearance.graph_columns.sanitized(MIN_GRAPH_WIDTH);
     let graph_width = column_width(&widths, ColumnId::Graph, graph_width(lanes));
-    // A Graph column narrower than the lanes fades out at its right edge.
-    let clipped = graph_width < lanes_width(lanes);
+    // A Graph column narrower than the lanes draws the overflowing lanes'
+    // nodes in its last slot (M15-05).
+    let overflow = overflow_slot(graph_width, lanes);
     let columns = Columns::shown(appearance);
     let table = responsive(move |size| {
         // Every column has its own width (M11-16): the table is as wide as
@@ -202,7 +202,7 @@ pub fn view<'a>(
                     &RowLayout {
                         widths: &widths,
                         graph_width,
-                        clipped,
+                        overflow,
                         columns,
                         message_width,
                         now,
@@ -548,6 +548,28 @@ pub fn graph_width(lanes: u16) -> f32 {
     lanes_width(lanes.clamp(MIN_LANES, MAX_LANES))
 }
 
+/// Lanes a Graph column `width` wide has room for, at least one (M15-05).
+pub fn capacity(width: f32) -> u16 {
+    // The same room as `lanes_width`: cell and graph paddings.
+    let room = (width - CELL_PADDING - GRAPH_PADDING * 2.0) / LANE_WIDTH;
+    // Saturating float-to-int cast; `room` is finite for finite widths.
+    (room.floor().max(1.0) as u16).max(1)
+}
+
+/// The overflow slot of a Graph column `width` wide showing `lanes` lanes
+/// (M15-05): `None` when they fit, else the last lane of the column, where
+/// the nodes of every lane from it on are drawn without lines. Decided per
+/// column, so lines never break between rows.
+pub fn overflow_slot(width: f32, lanes: u16) -> Option<u16> {
+    let capacity = capacity(width);
+    (lanes > capacity).then(|| capacity - 1)
+}
+
+/// Lane a node of `lane` is drawn in: its own, or the overflow slot.
+fn shown_lane(lane: u16, slot: Option<u16>) -> u16 {
+    slot.map_or(lane, |slot| lane.min(slot))
+}
+
 /// Width all `lanes` need (at least one): the optimal Graph width. The
 /// canvas starts at the column edge and `lane_x` adds `CELL_PADDING`, so
 /// it counts here too; without it the node in the last lane lost 2 px
@@ -561,8 +583,9 @@ pub fn lanes_width(lanes: u16) -> f32 {
 pub struct RowLayout<'w> {
     pub widths: &'w ColumnWidths,
     pub graph_width: f32,
-    /// The Graph column is narrower than the lanes (fade).
-    pub clipped: bool,
+    /// The Graph column is narrower than the lanes: the overflow slot
+    /// (M15-05).
+    pub overflow: Option<u16>,
     pub columns: Columns,
     /// Fill, or the minimum when the window is too narrow.
     pub message_width: Length,
@@ -623,7 +646,7 @@ pub fn graph_row<'a>(
     let RowLayout {
         widths,
         graph_width,
-        clipped,
+        overflow,
         columns,
         message_width,
         now,
@@ -658,11 +681,8 @@ pub fn graph_row<'a>(
         let content = row![
             cell(refs, widths.refs),
             graph_column(
-                graph_cell(layout_row, row_index, Node::Wip, false),
+                graph_cell(layout_row, row_index, Node::Wip, false, overflow),
                 graph_width,
-                clipped,
-                repo.selection == Some(Selection::Wip),
-                color,
             ),
             cell(summary, message_width),
         ];
@@ -721,7 +741,7 @@ pub fn graph_row<'a>(
             None => cell(ref_pills(labels, repo.drag.as_ref()), widths.refs),
         },
     };
-    let graph = graph_with_avatar(layout_row, row_index, node, dimmed);
+    let graph = graph_with_avatar(layout_row, row_index, node, dimmed, overflow);
     // The node's branch type in the Git flow layout (M13-04).
     let graph = match snapshot.flow_tooltip(index) {
         Some(tip) => tooltip(
@@ -736,7 +756,7 @@ pub fn graph_row<'a>(
     };
     let mut content = row![
         refs_cell,
-        graph_column(graph, graph_width, clipped, selected, color,),
+        graph_column(graph, graph_width),
         cell(
             message_with_marker(
                 summary.wrapping(text::Wrapping::None).into(),
@@ -1001,42 +1021,17 @@ fn pill<'a>(label: &RefLabel, drag: Option<&crate::repo_view::BranchDrag>) -> El
     }
 }
 
-/// Graph cell `width` wide, with a fade at its right edge when it clips the
-/// lanes (M11-02).
-fn graph_column(
-    graph: Element<'_, Message>,
-    width: f32,
-    clipped: bool,
-    selected: bool,
-    lane_color: u32,
-) -> Element<'_, Message> {
+/// Graph cell `width` wide; the canvas clips at the cell edge.
+fn graph_column(graph: Element<'_, Message>, width: f32) -> Element<'_, Message> {
     // No left padding: the canvas starts at the column edge and `lane_x`
     // adds the padding (kept from M11-04; same pixels either way).
-    let graph: Element<'_, Message> = container(graph)
+    container(graph)
         .width(width)
         .height(Fill)
         .padding(iced::Padding::default().right(CELL_PADDING))
         .align_y(alignment::Vertical::Center)
         .clip(true)
-        .into();
-    if !clipped {
-        return graph;
-    }
-    iced::widget::Stack::with_children([
-        graph,
-        container(
-            container(space::horizontal())
-                .width(FADE_WIDTH)
-                .height(Fill)
-                .style(theme::graph_fade(selected, lane_color)),
-        )
-        .width(width)
-        .height(Fill)
-        .align_x(alignment::Horizontal::Right)
-        .into(),
-    ])
-    .width(width)
-    .into()
+        .into()
 }
 
 /// Faded label of a deleted branch (M13-04): muted text in a muted
@@ -1109,11 +1104,19 @@ struct GraphCell {
     node: Node,
     /// The commit does not match the search: faint node.
     dimmed: bool,
+    /// Overflow slot of a narrow Graph column (M15-05).
+    overflow: Option<u16>,
 }
 
 /// Graph cell; an avatar is an image widget on top of the node, because the
 /// canvas does not round images (M5-11).
-fn graph_with_avatar<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> Element<'a, Message> {
+fn graph_with_avatar<'a>(
+    row: Row,
+    index: usize,
+    node: Node,
+    dimmed: bool,
+    overflow: Option<u16>,
+) -> Element<'a, Message> {
     let avatar = match &node {
         Node::Commit {
             avatar: Some(handle),
@@ -1121,10 +1124,10 @@ fn graph_with_avatar<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> El
         } => Some(handle.clone()),
         _ => None,
     };
-    let x = lane_x(row.lane);
+    let x = lane_x(shown_lane(row.lane, overflow));
     let lane = row.color.0;
     let stash = matches!(node, Node::Stash);
-    let cell = graph_cell(row, index, node, dimmed);
+    let cell = graph_cell(row, index, node, dimmed, overflow);
     if stash {
         let alpha = if dimmed { 0.3 } else { 1.0 };
         let icon = icons::colored(Icon::Stash, STASH_ICON, move |theme| {
@@ -1160,12 +1163,19 @@ fn graph_with_avatar<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> El
     .into()
 }
 
-fn graph_cell<'a>(row: Row, index: usize, node: Node, dimmed: bool) -> Element<'a, Message> {
+fn graph_cell<'a>(
+    row: Row,
+    index: usize,
+    node: Node,
+    dimmed: bool,
+    overflow: Option<u16>,
+) -> Element<'a, Message> {
     canvas::Canvas::new(GraphCell {
         row,
         index,
         node,
         dimmed,
+        overflow,
     })
     .width(Fill)
     .height(Fill)
@@ -1195,37 +1205,23 @@ impl canvas::Program<Message> for GraphCell {
         let mut frame = Frame::new(renderer, bounds.size());
         let height = bounds.height;
         let mid = height / 2.0;
-        let node = Point::new(lane_x(self.row.lane), mid);
+        let node = Point::new(lane_x(shown_lane(self.row.lane, self.overflow)), mid);
 
         for segment in &self.row.segments {
-            let (ops, color, dashed) = match *segment {
-                Segment::Through {
-                    lane,
-                    color,
-                    dashed,
-                } => {
-                    let x = lane_x(lane);
-                    (
-                        vec![
-                            Op::Move(Point::new(x, line_top(self.index, dashed))),
-                            Op::Line(Point::new(x, height + EDGE_OVERLAP)),
-                        ],
-                        color,
-                        dashed,
-                    )
-                }
-                Segment::IntoNode {
-                    from,
-                    color,
-                    dashed,
-                } => (
-                    into_node(lane_x(from), line_top(self.index, dashed), node),
-                    color,
-                    dashed,
-                ),
-                Segment::FromNode { to, color, dashed } => {
-                    (from_node(node, lane_x(to), height), color, dashed)
-                }
+            let (color, dashed) = match *segment {
+                Segment::Through { color, dashed, .. }
+                | Segment::IntoNode { color, dashed, .. }
+                | Segment::FromNode { color, dashed, .. } => (color, dashed),
+            };
+            let Some(ops) = segment_ops(
+                *segment,
+                self.row.lane,
+                node,
+                line_top(self.index, dashed),
+                height,
+                self.overflow,
+            ) else {
+                continue;
             };
             let path = to_path(&ops);
             frame.stroke(&path, line(theme::lane_color(p, color.0), dashed));
@@ -1281,6 +1277,46 @@ impl canvas::Program<Message> for GraphCell {
         }
 
         vec![frame.into_geometry()]
+    }
+}
+
+/// Path of one edge segment of a row whose node (in `lane`) is drawn at
+/// `node`. With an overflow slot (M15-05) lanes from the slot on draw no
+/// lines: edges between a visible lane and an overflowing one end at the
+/// slot's left border; edges among overflowing lanes are not drawn.
+fn segment_ops(
+    segment: Segment,
+    lane: u16,
+    node: Point,
+    top: f32,
+    height: f32,
+    overflow: Option<u16>,
+) -> Option<Vec<Op>> {
+    let hidden = |l: u16| overflow.is_some_and(|slot| l >= slot);
+    let border = overflow.map(|slot| lane_x(slot) - LANE_WIDTH / 2.0);
+    let edge = Point::new(border.unwrap_or(node.x), node.y);
+    match segment {
+        Segment::Through { lane: through, .. } => {
+            let x = lane_x(through);
+            (!hidden(through)).then(|| {
+                vec![
+                    Op::Move(Point::new(x, top)),
+                    Op::Line(Point::new(x, height + EDGE_OVERLAP)),
+                ]
+            })
+        }
+        Segment::IntoNode { from, .. } => match (hidden(from), hidden(lane)) {
+            (false, false) => Some(into_node(lane_x(from), top, node)),
+            (false, true) => Some(into_node(lane_x(from), top, edge)),
+            (true, false) => Some(vec![Op::Move(edge), Op::Line(node)]),
+            (true, true) => None,
+        },
+        Segment::FromNode { to, .. } => match (hidden(lane), hidden(to)) {
+            (false, false) => Some(from_node(node, lane_x(to), height)),
+            (true, false) => Some(from_node(edge, lane_x(to), height)),
+            (false, true) => Some(vec![Op::Move(node), Op::Line(edge)]),
+            (true, true) => None,
+        },
     }
 }
 
@@ -1450,6 +1486,112 @@ mod tests {
         let labels = ref_labels(&refs, &head, &commit());
         assert_eq!(texts(&labels), ["HEAD", "v2"]);
         assert_eq!(labels[0].kind, LabelKind::DetachedHead);
+    }
+
+    /// M15-05: capacity of a Graph column and the overflow slot.
+    #[test]
+    fn capacity_and_overflow_slot() {
+        // Fits: the optimal width of 5 lanes holds 5.
+        assert_eq!(capacity(lanes_width(5)), 5);
+        assert_eq!(overflow_slot(lanes_width(5), 5), None);
+        assert_eq!(overflow_slot(lanes_width(5) + 30.0, 5), None);
+        // One lane short: lanes 0 … 2 as before, lane 3 is the slot.
+        assert_eq!(capacity(lanes_width(5) - 1.0), 4);
+        assert_eq!(overflow_slot(lanes_width(5) - 1.0, 5), Some(3));
+        // Half width.
+        let half = lanes_width(10) / 2.0;
+        let slot = overflow_slot(half, 10).unwrap();
+        assert_eq!(slot, capacity(half) - 1);
+        assert!(slot > 0 && slot < 9);
+        // Minimum width: one lane, every node in lane 0.
+        assert_eq!(capacity(MIN_GRAPH_WIDTH), 1);
+        assert_eq!(capacity(0.0), 1);
+        assert_eq!(overflow_slot(MIN_GRAPH_WIDTH, 3), Some(0));
+        assert_eq!(overflow_slot(MIN_GRAPH_WIDTH, 1), None);
+        // Node lanes.
+        assert_eq!(shown_lane(2, Some(3)), 2);
+        assert_eq!(shown_lane(3, Some(3)), 3);
+        assert_eq!(shown_lane(7, Some(3)), 3);
+        assert_eq!(shown_lane(7, None), 7);
+    }
+
+    /// M15-05: lines of overflowing lanes are left out; edges between a
+    /// visible and an overflowing lane end at the slot's left border.
+    #[test]
+    fn overflow_slot_clips_edges() {
+        let color = git_graph::ColorId(0);
+        let through = |lane| Segment::Through {
+            lane,
+            color,
+            dashed: false,
+        };
+        let into = |from| Segment::IntoNode {
+            from,
+            color,
+            dashed: false,
+        };
+        let out = |to| Segment::FromNode {
+            to,
+            color,
+            dashed: false,
+        };
+        let slot = Some(2);
+        let border = lane_x(2) - LANE_WIDTH / 2.0;
+        let ops = |segment, lane: u16| {
+            let node = Point::new(lane_x(shown_lane(lane, slot)), 10.0);
+            segment_ops(segment, lane, node, -2.0, 20.0, slot)
+        };
+        let last_x = |ops: Vec<Op>| match ops.last() {
+            Some(Op::Line(p) | Op::Move(p) | Op::Corner { to: p, .. }) => p.x,
+            None => f32::NAN,
+        };
+        // Visible lanes as before.
+        assert!(ops(through(1), 0).is_some());
+        assert_eq!(
+            ops(into(1), 0),
+            Some(into_node(lane_x(1), -2.0, Point::new(lane_x(0), 10.0)))
+        );
+        // Overflowing lanes draw no lines.
+        assert_eq!(ops(through(2), 0), None);
+        assert_eq!(ops(through(5), 0), None);
+        assert_eq!(ops(into(4), 3), None);
+        assert_eq!(ops(out(2), 6), None);
+        // Visible ↔ overflowing: up to the slot's left border.
+        assert_eq!(
+            ops(into(5), 0),
+            Some(vec![
+                Op::Move(Point::new(border, 10.0)),
+                Op::Line(Point::new(lane_x(0), 10.0))
+            ])
+        );
+        assert_eq!(
+            ops(out(4), 1),
+            Some(vec![
+                Op::Move(Point::new(lane_x(1), 10.0)),
+                Op::Line(Point::new(border, 10.0))
+            ])
+        );
+        assert_eq!(last_x(ops(into(0), 4).unwrap()), border);
+        let from_overflow = ops(out(1), 4).unwrap();
+        assert_eq!(
+            from_overflow.first(),
+            Some(&Op::Move(Point::new(border, 10.0)))
+        );
+        // Minimum width: slot 0, no lines at all.
+        let min = |segment, lane| {
+            segment_ops(
+                segment,
+                lane,
+                Point::new(lane_x(0), 10.0),
+                -2.0,
+                20.0,
+                Some(0),
+            )
+        };
+        for segment in [through(0), through(3), into(0), into(2), out(0), out(1)] {
+            assert_eq!(min(segment, 1), None);
+            assert_eq!(min(segment, 0), None);
+        }
     }
 
     #[test]

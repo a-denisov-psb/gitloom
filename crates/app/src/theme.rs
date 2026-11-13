@@ -236,36 +236,6 @@ pub fn graph(theme: &Theme) -> container::Style {
     filled(palette(theme).bg_graph)
 }
 
-/// Fade at the right edge of a Graph column that clips its lanes (M11-02):
-/// from transparent to the row background (graph background, or the
-/// selected row's color).
-pub fn graph_fade(selected: bool, lane: u32) -> impl Fn(&Theme) -> container::Style {
-    move |theme| {
-        let p = palette(theme);
-        fade_to(if selected {
-            selected_row(p, lane)
-        } else {
-            p.bg_graph
-        })
-    }
-}
-
-fn fade_to(background: Color) -> container::Style {
-    let gradient = iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
-        .add_stop(
-            0.0,
-            Color {
-                a: 0.0,
-                ..background
-            },
-        )
-        .add_stop(1.0, background);
-    container::Style {
-        background: Some(Background::Gradient(gradient.into())),
-        ..container::Style::default()
-    }
-}
-
 pub fn selected(theme: &Theme) -> container::Style {
     filled(palette(theme).bg_selected)
 }

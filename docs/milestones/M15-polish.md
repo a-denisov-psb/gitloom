@@ -116,7 +116,9 @@ Note: the blocked reason (repository blocked or busy, or "Cannot merge while a m
 
 Acceptance: app tests: flag opens the finish dialog for each type; no flag on development and production; blocked during a merge with the reason; snapshots of a hovered GITFLOW row and of Preferences → Gitflow in both themes.
 
-### [ ] M15-05 Narrow Graph column: overflow slot
+### [x] M15-05 Narrow Graph column: overflow slot
+
+Note: `MIN_GRAPH_WIDTH` grew by the cell padding (4 px) so the slot's nodes are not cut off at the minimum; the 100k benchmark concerns `git-graph`, which this task does not touch (numbers of this container in `docs/PERFORMANCE.md`).
 
 - Capacity, overflow slot and edge clipping per the decisions table; the fade code is removed.
 
