@@ -16,6 +16,7 @@ mod conflict;
 mod crash;
 mod diff_blocks;
 mod diff_hscroll;
+mod diff_minimap;
 mod diff_wrap;
 mod editor_style;
 mod fetch;

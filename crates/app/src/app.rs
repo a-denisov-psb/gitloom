@@ -395,6 +395,11 @@ pub enum Message {
     /// Wheel or touchpad scrolled the diff text horizontally by pixels (M7-16).
     DiffWheel(f32),
     /// The horizontal scrollbar of the diff moved: offset and largest offset.
+    /// A click or drag on the diff minimap (M15-09): center the view on
+    /// this fraction of the diff.
+    DiffMinimapSeek(f32),
+    /// The mouse wheel over the minimap: scroll by these pixels.
+    DiffMinimapWheel(f32),
     DiffHScrolled {
         offset: f32,
         max: f32,
@@ -9637,6 +9642,24 @@ impl App {
                     }
                 }
             }
+            Message::DiffMinimapSeek(at) => {
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    let offset = crate::diff_minimap::centered_offset(
+                        at,
+                        diff.content_height(),
+                        diff.scroll.height,
+                    );
+                    diff.scroll.offset = offset;
+                    return scroll_by_id(diff.scroll_id.clone(), offset);
+                }
+            }
+            Message::DiffMinimapWheel(pixels) => {
+                if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
+                    let offset = diff.clamp_offset(diff.scroll.offset + pixels);
+                    diff.scroll.offset = offset;
+                    return scroll_by_id(diff.scroll_id.clone(), offset);
+                }
+            }
             Message::DiffHScrolled { offset, max } => {
                 if let Some(diff) = self.active_view_mut().and_then(|v| v.center.diff_mut()) {
                     diff.h_max = Some(max);
@@ -13677,6 +13700,50 @@ pub(crate) mod tests {
 
     fn inline_app(lines: u32, changed: u32, removed: u32) -> App {
         mode_app(settings::DiffMode::Inline, lines, changed, removed)
+    }
+
+    /// A 600-line file in `mode` with changes at the top, in the middle and
+    /// at the end (M15-09).
+    pub(crate) fn minimap_app(mode: settings::DiffMode) -> App {
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "a".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old: String = (1..=600).map(|i| format!("line {i}\n")).collect();
+        let new: String = (1..=600)
+            .filter_map(|i| match i {
+                3..=6 | 300..=303 => Some(format!("changed {i}\n")),
+                590..=598 => None,
+                _ => Some(format!("line {i}\n")),
+            })
+            .chain(["added at the end\n".to_owned()])
+            .collect();
+        let text =
+            git_core::text_diff_with(old.as_bytes(), new.as_bytes(), git_core::DiffContext::Full);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: git_core::DiffContext::Full,
+            result: Ok(git_core::FileDiff {
+                old_path: Some("a".into()),
+                new_path: Some("a".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+            width: 900.0,
+        });
+        app
     }
 
     /// Inline view of a file of `lines` lines: line `changed` changed,

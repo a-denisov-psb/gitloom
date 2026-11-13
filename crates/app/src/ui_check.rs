@@ -361,6 +361,117 @@ mod tests {
         assert!(has(&|m| matches!(m, Message::DiffClosed)));
     }
 
+    /// Messages of a press at `from`, a move to `to` and a release.
+    fn drag(app: &App, from: iced::Point, to: iced::Point) -> Vec<Message> {
+        use iced::mouse::{Button, Event as Mouse};
+        use iced::Event;
+        let mut sim = simulator(app);
+        sim.point_at(from);
+        let _ = sim.simulate(vec![
+            Event::Mouse(Mouse::CursorMoved { position: from }),
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+            Event::Mouse(Mouse::CursorMoved { position: to }),
+            Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+        ]);
+        sim.into_messages().collect()
+    }
+
+    /// The diff minimap (M15-09): a click centers the view on that
+    /// position, dragging follows, the wheel scrolls. Inline and Split
+    /// only. Layout only, so part of every test run.
+    #[test]
+    fn diff_minimap_click_drag_and_wheel() {
+        use crate::settings::DiffMode;
+        let seeks = |messages: &[Message]| -> Vec<f32> {
+            messages
+                .iter()
+                .filter_map(|m| match m {
+                    Message::DiffMinimapSeek(at) => Some(*at),
+                    _ => None,
+                })
+                .collect()
+        };
+        for mode in [DiffMode::Inline, DiffMode::Split, DiffMode::Hunk] {
+            let mut app = crate::app::tests::mode_app(mode, 400, 20, 380);
+            let _ = app.update(Message::DiffScrolled {
+                offset: 0.0,
+                height: 500.0,
+                width: 900.0,
+            });
+            // The strip: scan the middle line of the diff for it.
+            let y = SIZE.1 / 2.0;
+            let mut x = SIZE.0 / 2.0;
+            let mut found = None;
+            while x < SIZE.0 && found.is_none() {
+                let at = iced::Point::new(x, y);
+                if !seeks(&drag(&app, at, at)).is_empty() {
+                    found = Some(x);
+                }
+                x += 2.0;
+            }
+            if mode == DiffMode::Hunk {
+                assert_eq!(found, None, "no minimap in the Hunk view");
+                continue;
+            }
+            let x = found.unwrap_or_else(|| panic!("no minimap in {mode:?}"));
+            // Drag from the upper to the lower part of the strip.
+            let messages = drag(
+                &app,
+                iced::Point::new(x, y - 100.0),
+                iced::Point::new(x, y + 100.0),
+            );
+            let seeks = seeks(&messages);
+            assert_eq!(seeks.len(), 2, "{mode:?}: {messages:?}");
+            assert!(seeks[1] > seeks[0], "{seeks:?}");
+            // The click centers the view there.
+            let _ = app.update(Message::DiffMinimapSeek(0.5));
+            let diff = crate::app::tests::open_diff(&app);
+            let content = diff.content_height();
+            assert!((diff.scroll.offset - (content / 2.0 - 250.0)).abs() < 0.5);
+            // The wheel scrolls by pixels, clamped.
+            let before = diff.scroll.offset;
+            let _ = app.update(Message::DiffMinimapWheel(120.0));
+            assert_eq!(
+                crate::app::tests::open_diff(&app).scroll.offset,
+                before + 120.0
+            );
+            let _ = app.update(Message::DiffMinimapWheel(-1e9));
+            assert_eq!(crate::app::tests::open_diff(&app).scroll.offset, 0.0);
+            // The wheel over the strip asks for it.
+            let mut sim = simulator(&app);
+            let at = iced::Point::new(x, y);
+            sim.point_at(at);
+            let _ = sim.simulate(vec![iced::Event::Mouse(
+                iced::mouse::Event::WheelScrolled {
+                    delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+                },
+            )]);
+            let messages: Vec<Message> = sim.into_messages().collect();
+            assert!(
+                messages
+                    .iter()
+                    .any(|m| matches!(m, Message::DiffMinimapWheel(p) if *p == 60.0)),
+                "{messages:?}"
+            );
+        }
+    }
+
+    /// Minimap snapshots (M15-09): a long file with changes at the top, in
+    /// the middle and at the end, Inline and Split, both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_diff_minimap() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            for mode in [DiffMode::Inline, DiffMode::Split] {
+                let mut app = crate::app::tests::minimap_app(mode);
+                app.settings.appearance.theme = choice;
+                let name = mode.label().to_lowercase();
+                snapshot(&app, &format!("diff-minimap-{name}-{theme}"));
+            }
+        }
+    }
+
     /// Diff header in Hunk, Inline and Split (M15-08), both themes.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

@@ -299,27 +299,160 @@ fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> El
 
     // The horizontal range depends on the width: decided per layout pass.
     iced::widget::responsive(move |size| {
+        // The minimap of Inline and Split (M15-09) takes its strip from
+        // the right edge, right of the vertical scrollbar.
+        let minimap = matches!(
+            diff.layout,
+            crate::repo_view::DiffLayout::Inline | crate::repo_view::DiffLayout::Split
+        );
+        let width = if minimap {
+            (size.width - crate::diff_minimap::WIDTH).max(1.0)
+        } else {
+            size.width
+        };
         // Word wrap (M11-07): no horizontal scrolling.
-        let wrap = diff.wrap_layout(size.width);
+        let wrap = diff.wrap_layout(width);
         let max = if wrap.is_some() {
             0.0
         } else {
-            diff_hscroll::max_offset(diff.layout, diff.text_width, size.width, &diff.style)
+            diff_hscroll::max_offset(diff.layout, diff.text_width, width, &diff.style)
         };
         let offset = diff.h_offset.min(max);
         let list = crate::ui::context_area::wheel_observer(
-            rows(repo, diff, file, offset, wrap, size.width),
+            rows(repo, diff, file, offset, wrap.clone(), width),
             |delta, shift| {
                 diff_hscroll::wheel_to_horizontal(delta, shift, cfg!(target_os = "macos"))
                     .map(Message::DiffWheel)
             },
         );
+        let list: Element<'_, Message> = match diff.minimap_marks(wrap.as_ref(), width) {
+            Some(marks) if minimap => row![list, minimap_strip(diff, marks)].into(),
+            _ => list,
+        };
         if max <= 0.0 {
             return list;
         }
-        column![list, horizontal_bar(diff, size.width, max)].into()
+        column![list, horizontal_bar(diff, width, max)].into()
     })
     .into()
+}
+
+/// The minimap strip (M15-09): change marks, the visible range as a
+/// translucent rectangle; click and drag center the view, the wheel
+/// scrolls.
+fn minimap_strip<'a>(
+    diff: &DiffView,
+    marks: std::sync::Arc<crate::diff_minimap::Marks>,
+) -> Element<'a, Message> {
+    let content = (marks.total.max(1) as f32) * diff.style.line_height();
+    let view = (
+        (diff.scroll.offset / content).clamp(0.0, 1.0),
+        ((diff.scroll.offset + diff.scroll.height) / content).clamp(0.0, 1.0),
+    );
+    iced::widget::canvas(Minimap { marks, view })
+        .width(crate::diff_minimap::WIDTH)
+        .height(Fill)
+        .into()
+}
+
+/// Canvas program of the minimap.
+struct Minimap {
+    marks: std::sync::Arc<crate::diff_minimap::Marks>,
+    /// Visible range as fractions of the diff.
+    view: (f32, f32),
+}
+
+impl iced::widget::canvas::Program<Message> for Minimap {
+    /// The left button went down on the strip and is still held.
+    type State = bool;
+
+    fn update(
+        &self,
+        dragging: &mut bool,
+        event: &iced::widget::canvas::Event,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        use iced::mouse::{Button, Event as Mouse, ScrollDelta};
+        use iced::widget::Action;
+        let at = |y: f32| ((y - bounds.y) / bounds.height.max(1.0)).clamp(0.0, 1.0);
+        match event {
+            iced::Event::Mouse(Mouse::ButtonPressed(Button::Left)) => {
+                let position = cursor.position_over(bounds)?;
+                *dragging = true;
+                Some(Action::publish(Message::DiffMinimapSeek(at(position.y))).and_capture())
+            }
+            iced::Event::Mouse(Mouse::CursorMoved { position }) if *dragging => {
+                Some(Action::publish(Message::DiffMinimapSeek(at(position.y))).and_capture())
+            }
+            iced::Event::Mouse(Mouse::ButtonReleased(Button::Left)) if *dragging => {
+                *dragging = false;
+                Some(Action::capture())
+            }
+            iced::Event::Mouse(Mouse::WheelScrolled { delta }) => {
+                cursor.position_over(bounds)?;
+                // Like the scrollable: 60 px per line.
+                let pixels = match *delta {
+                    ScrollDelta::Lines { y, .. } => -y * 60.0,
+                    ScrollDelta::Pixels { y, .. } => -y,
+                };
+                Some(Action::publish(Message::DiffMinimapWheel(pixels)).and_capture())
+            }
+            _ => None,
+        }
+    }
+
+    fn draw(
+        &self,
+        _dragging: &bool,
+        renderer: &iced::Renderer,
+        theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use crate::diff_minimap::{mark_rect, Half};
+        use iced::widget::canvas::{Frame, Path};
+        use iced::{Point, Size};
+        let p = theme::palette(theme);
+        let mut frame = Frame::new(renderer, bounds.size());
+        let (width, height) = (bounds.width, bounds.height);
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), p.bg_panel);
+        for mark in &self.marks.marks {
+            let (top, size) = mark_rect(mark, self.marks.total, height);
+            let (x, w) = match mark.half {
+                Half::Full => (2.0, width - 4.0),
+                Half::Left => (2.0, width / 2.0 - 2.5),
+                Half::Right => (width / 2.0 + 0.5, width / 2.0 - 2.5),
+            };
+            let color = if mark.added { p.success } else { p.danger };
+            frame.fill_rectangle(Point::new(x, top), Size::new(w, size), color);
+        }
+        // The visible range.
+        let top = self.view.0 * height;
+        let size = ((self.view.1 - self.view.0) * height).max(4.0);
+        let rect = Path::rectangle(Point::new(0.5, top), Size::new(width - 1.0, size));
+        frame.fill(&rect, p.text.scale_alpha(0.14));
+        frame.stroke(
+            &rect,
+            iced::widget::canvas::Stroke::default()
+                .with_color(p.text.scale_alpha(0.35))
+                .with_width(1.0),
+        );
+        vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        dragging: &bool,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> iced::mouse::Interaction {
+        if *dragging || cursor.is_over(bounds) {
+            iced::mouse::Interaction::Pointer
+        } else {
+            iced::mouse::Interaction::default()
+        }
+    }
 }
 
 /// Horizontal scrollbar under the code text (M7-16): its range is the
