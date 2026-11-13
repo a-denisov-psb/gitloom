@@ -391,6 +391,43 @@ impl EditorPreset {
     }
 }
 
+/// Name of the editor an editor command starts (M15-02), for labels: the
+/// preset by its template, else by the program's file name (first token,
+/// quotes removed, stem compared case-insensitively), else the program's
+/// file name. "none" for an empty command.
+pub fn editor_name(command: &str) -> String {
+    let command = command.trim();
+    if command.is_empty() {
+        return "none".to_owned();
+    }
+    match EditorPreset::of(command) {
+        EditorPreset::Custom | EditorPreset::None => {}
+        preset => return preset.label().to_owned(),
+    }
+    let program = match command.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or(rest),
+        None => command.split_whitespace().next().unwrap_or(command),
+    };
+    let file = program
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|f| !f.is_empty())
+        .unwrap_or(program);
+    let stem = match file.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => file,
+    };
+    let preset = match stem.to_lowercase().as_str() {
+        "code" => Some(EditorPreset::VsCode),
+        "codium" => Some(EditorPreset::VsCodium),
+        "subl" | "sublime_text" => Some(EditorPreset::SublimeText),
+        "idea" | "idea64" => Some(EditorPreset::IntellijIdea),
+        "zed" => Some(EditorPreset::Zed),
+        _ => None,
+    };
+    preset.map_or_else(|| file.to_owned(), |p| p.label().to_owned())
+}
+
 impl std::fmt::Display for EditorPreset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.label())

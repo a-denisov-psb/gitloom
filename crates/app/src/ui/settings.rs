@@ -606,7 +606,18 @@ fn repository_editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         .collect();
     let picker = iced::widget::pick_list(options, Some(selected), Message::RepoEditorChosen)
         .width(Length::Fixed(320.0));
-    let mut content = column![picker].spacing(10);
+    // The full global command below the picker (M15-02); wraps.
+    let global_line = if global.trim().is_empty() {
+        "Global: none".to_owned()
+    } else {
+        format!("Global: {}", global.trim())
+    };
+    let mut content = column![column![
+        picker,
+        muted(global_line).size(12).width(Length::Fixed(320.0))
+    ]
+    .spacing(4)]
+    .spacing(10);
     if current.is_some() || page.repo_editor_custom {
         let changed = page.repo_editor_input.trim() != current.as_deref().unwrap_or("");
         content = content.push(
