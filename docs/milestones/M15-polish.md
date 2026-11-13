@@ -132,7 +132,9 @@ Note: `prompt::gather_from` with `PromptSource::{Staged, Commit}`; the diff sect
 
 Acceptance: app tests: a click on the text does not open the editor, the icon does; the blocked icon carries each M14-05 reason; no icon for stashes; the commit prompt contains the commit's diff (root and merge commits included) and not the staged diff; snapshots of the box with the hovered icon (enabled, blocked) and of the editor with the sparkle button in both themes.
 
-### [ ] M15-07 Start screen buttons
+### [x] M15-07 Start screen buttons
+
+Note: height 45 (was 60); the contrast test composites the fill over the start screen background (`bg_graph`); `on_fill` and its constant were only used by the old buttons and are removed.
 
 - Style per the decisions table.
 
