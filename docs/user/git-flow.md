@@ -8,10 +8,12 @@ Gitloom supports Git flow like GitKraken: feature, release and hotfix branches w
 
 | Field | Default |
 |---|---|
-| Production branch | `main` if it exists, otherwise `master` |
+| Production branch | `main` if it exists, else `master` if it exists, else the Default branch name of Preferences → General (`init.defaultBranch`), else `main` |
 | Development branch | `develop` |
 | Feature / release / hotfix prefix | `feature/`, `release/`, `hotfix/` |
 | Version tag prefix | empty (e.g. `v` makes `v1.2.0`) |
+
+The production branch names an existing branch of this repository ("Releases and hotfixes are merged and tagged here"); the Default branch name of Preferences → General only applies to new repositories.
 
 **Initialize Gitflow** writes the settings and creates missing branches: the development branch from the production branch, the production branch from the current commit. Afterwards the same page edits the settings (**Save**) or removes them (**Remove Gitflow**; branches stay).
 
@@ -29,7 +31,7 @@ Type a name (a version for releases and hotfixes). Features and releases start f
 
 ## Finish
 
-Right click the branch → **Finish feature …** / **Finish release …** / **Finish hotfix …**, or "Finish current Gitflow branch" in the palette while it is checked out.
+Hover the branch in the GITFLOW section and click the flag left of the eye, right click the branch → **Finish feature …** / **Finish release …** / **Finish hotfix …**, or use "Finish current Gitflow branch" in the palette while it is checked out. While finishing is not possible (for example during a merge) the flag is muted and its tooltip says why.
 
 | Type | What happens | Options |
 |---|---|---|
@@ -46,7 +48,7 @@ A hotfix finished while a release branch exists is merged into the development b
 
 ## Gitflow layout
 
-With Git flow initialized, the graph can be drawn like the classic Git flow diagram: **production** at the left, then **hotfix**, **release**, **development** and the **features** at the right, one color per branch type (green, cyan, blue, violet; features in pink, red, orange and yellow, one per branch). Turn it on in the gear menu above the graph (**Gitflow layout**), with "Toggle Gitflow layout" in the command palette, or in Preferences → Repository → Gitflow; the choice is stored in the repository (`gitloom.flowLayout`). Without Git flow the entries are disabled ("Initialize Gitflow first").
+With Git flow initialized, the graph can be drawn like the classic Git flow diagram: **production** at the left, then **hotfix**, **release**, **development** and the **features** at the right, one color per branch type (green, cyan, blue, violet; features in pink, red, orange and yellow, one per branch). The layout is experimental: it can look messy when the history did not follow Git flow. Turn it on in the gear menu above the graph (**Gitflow layout (experimental)**), with "Toggle Gitflow layout (experimental)" in the command palette, or in Preferences → Repository → Gitflow; the choice is stored in the repository (`gitloom.flowLayout`). Without Git flow the entries are disabled ("Initialize Gitflow first").
 
 How a commit gets its type:
 

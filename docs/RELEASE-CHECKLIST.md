@@ -165,6 +165,19 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] A pushed commit, a commit of another branch and a commit during a merge cannot be edited; hovering says why. A branch or tag that also contains the commit is named in the editor ("… keeps the old commit").
 - [ ] Time markers on the graph rows ("just now" … "years ago") where the age changes, readable in Dark and Light; they update after a minute.
 
+## 7i. New in M15 (Windows required, Linux checked in CI)
+
+- [ ] Conflict from a PowerShell-written file: in PowerShell 5 write `"asdf" > readme.md` (UTF-16 LE with BOM), commit it, change it differently on two branches and merge: the conflict view shows the lines, "UTF-16 LE" next to the path; pick lines, **Save and mark resolved**; the file is still UTF-16 LE with BOM and CRLF (e.g. `Format-Hex readme.md` starts with `FF FE`), and the merge commits. The same with a Latin-1 file (ä, ö, ü saved as ANSI) keeps its bytes. A UTF-16 file against a UTF-8 version says "The sides use different encodings (UTF-16 LE, UTF-8)" and offers the whole sides.
+- [ ] Preferences → Repository → External editor: choose Custom, type a command without saving, then "Use global setting (…)": the picker shows the global entry and the input is gone; the same from a preset and from a saved repository command. The entries name the editor (e.g. "Use global setting (Zed)" for `"C:\…\Zed.exe" {path}`); the full global command is shown below the picker.
+- [ ] Gitflow in a repository whose only branch is `trunk`, with Default branch name `trunk2` in Preferences → General: the Gitflow form proposes `trunk2` as production branch; both notes explain the difference.
+- [ ] GITFLOW section: hover a feature, release and hotfix row: a flag left of the eye opens the finish dialog; during a merge the flag is muted and its tooltip says why; development and production have no flag.
+- [ ] The Gitflow layout shows "Experimental" in Preferences → Repository → Gitflow, "Gitflow layout (experimental)" in the gear menu and "Toggle Gitflow layout (experimental)" in the palette.
+- [ ] Narrow the Graph column step by step on a repository with many lanes: every commit stays visible, nodes of lanes that do not fit sit in the last lane in their colors; at the narrowest width all nodes are on one line; a double click on the border fits all lanes again.
+- [ ] Commit details: hover the message box of an unpushed commit, click the pencil: the editor opens; a click on the text only selects it; a pushed commit shows a muted pencil whose tooltip says why (the box itself has no tooltip); stashes have no pencil. In the editor the sparkle opens "Commit message prompt for commit <sha>" with that commit's diff (try a merge and the root commit too).
+- [ ] Start screen: the three buttons are light accent tiles with normal text, readable in Dark and Light, hover and press visible.
+- [ ] Diff header: Blame, History, change arrows, Hunk / Inline / Split icons, External, Close; the tooltips name the action and its shortcut; Blame opens the blame view (at the commit of a commit diff) and is disabled with a reason for an untracked file and a stash.
+- [ ] Minimap in Inline and Split on a long file with changes at the top, middle and end: red and green marks (Split: left and right half), the visible range as a rectangle; click and drag jump there, the mouse wheel over the strip scrolls; no minimap in the Hunk view; scrolling a 20,000-line diff stays smooth.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
@@ -176,3 +189,7 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] File history and blame layout: list left / diff right, blame as a mode of the history view? (Gitloom: History / Blame toggle in one view.)
 - [ ] Command palette sub-lists (checkout branch, open repository): same structure and Backspace behavior?
 - [ ] Wording of the empty cherry-pick dialog ("Skip" / "Commit empty").
+- [ ] M15: what does GitKraken draw when the Graph column is a little narrower than its lanes (not at the minimum)? (Gitloom: the nodes of the lanes that do not fit sit in the last lane.)
+- [ ] M15: does GitKraken's GITFLOW section show hover buttons, e.g. finish? (Gitloom: a flag.)
+- [ ] M15: does GitKraken show the diff minimap in the Hunk view too? (Gitloom: Inline and Split only.)
+- [ ] M15: which icons (or text) does GitKraken use for Blame and History in the diff header? (Gitloom: `file-user` and `history`.)
