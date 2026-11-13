@@ -20,10 +20,10 @@ Hand-off from the planning phase (claude.ai chat with the maintainer) to impleme
 - Read via gitoxide; write via the `git` CLI (from M2).
 - Details: `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/UX-PARITY.md`.
 
-## Current state (single release line to 1.0.0, ADR-042; M15 planned, final check after M15, 2026-11-13)
+## Current state (single release line to 1.0.0, ADR-042; M15 done, final check next, 2026-11-13)
 
-- M15 (planned 2026-11-13): polish before 1.0.0, findings #28–#36 of the planning chat (`docs/milestones/M15-polish.md`). The final check moves behind M15 and gains checklist section 7i.
-- Next: M15, then the maintainer's final check (whole `docs/RELEASE-CHECKLIST.md`, sections 1 … 8 including 7 … 7i), then 1.0.0 (M6-15) on request.
+- All planned milestones are done. Next: the maintainer's final check (whole `docs/RELEASE-CHECKLIST.md`, sections 1 … 8 including 7 … 7i), then 1.0.0 (M6-15) on request.
+- M15 (2026-11-13, on `develop`): done. Polish before 1.0.0 (findings #28–#37): conflict view for UTF-16 and 8-bit text (encoding kept byte for byte), repository editor picker fixed with short labels, Git flow production fallback to `init.defaultBranch`, GITFLOW finish flag on hover, Gitflow layout marked experimental, narrow Graph column with an overflow slot instead of the fade, pencil icon for editing commit messages and the commit prompt per commit, calmer start buttons, diff header icons with Blame, diff minimap, change author of unpushed commits (planning update 6, ADR-051 amendment). Headless snapshots show the read-only `text_editor` message boxes empty (simulator artifact, also before M15); the real app was checked under Xvfb.
 - M14 (2026-11-12, on `develop`): done. Commit details like GitKraken: "commit: <sha>" header (click copies), framed selectable message box, author block with committer line, co-authors and parent links, file list with summary, sort, Path/Tree and "View all files"; editing the message of unpushed commits by a click (ADR-051: chain rebuilt with `commit-tree`, branch moved with `update-ref`, one undo step); relative time markers in the graph.
 
 - M13 (2026-11-12, on `develop`): done. Git flow graph layout: classifier in `git-graph::flow` (live prefixes, Git's merge messages, topology), lane groups production | hotfix | release | development | features with type colors, toggle in the column menu, palette and Preferences (per repository, `gitloom.flowLayout`), faded labels and tooltips for deleted branches, performance in `docs/PERFORMANCE.md`. Planning update 4: ref menus (M13-06) and file menus (M13-07) like GitKraken. Fixes on the way: toggle tooltips removed, Date/SHA columns with fixed width, last-lane clipping.
@@ -72,7 +72,7 @@ Not done / known limitations:
 
 Tasks only the maintainer can do. Claude Code adds new items here and ticks them off when done.
 
-- [ ] Final check before 1.0.0 (ADR-042): after M15; run the whole `docs/RELEASE-CHECKLIST.md` on Windows (all sections 1 … 8, including 7, 7a, 7b, 7c, 7d, 7e, 7f, 7g, 7h and 7i; release dry-run artifacts or a local build), answer the GitKraken verification items still open in the milestone files (M13: development column position; M14: editing pushed commits, header icon, committer line, time marker buckets, Path/Tree in the staging lists; M15: narrow graph, GITFLOW hover buttons, minimap in the Hunk view, diff header icons), then ask Claude Code for 1.0.0.
+- [ ] Final check before 1.0.0 (ADR-042): M15 is done; run the whole `docs/RELEASE-CHECKLIST.md` on Windows (all sections 1 … 8, including 7, 7a, 7b, 7c, 7d, 7e, 7f, 7g, 7h and 7i; release dry-run artifacts or a local build), answer the GitKraken verification items still open in the milestone files (M13: development column position; M14: editing pushed commits, header icon, committer line, time marker buckets, Path/Tree in the staging lists; M15: narrow graph, GITFLOW hover buttons, minimap in the Hunk view, diff header icons, change author; also listed in section 8 of the checklist), then ask Claude Code for 1.0.0.
 - [ ] Install `just` in WSL (`cargo install --locked just`) and on Windows (`winget install Casey.Just`), then try `just`, `just portable` (WSL, needs `sudo apt install mingw-w64`) and `just build win-x64` (Windows); see CONTRIBUTING → Building (ADR-052).
 - [x] M6-18: restart Gitloom and report whether the empty remote `github-fc` is still shown. (root cause: empty section, fixed in M6-20)
 - [x] rc.3: tag `v1.0.0-rc.3` pushed by the maintainer (the draft pre-release stays unpublished; rc.4 supersedes it).

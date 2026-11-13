@@ -56,16 +56,16 @@ Out of scope:
 
 ## Milestone acceptance
 
-- [ ] A UTF-16 LE file with BOM and an 8-bit text file conflict like UTF-8 files; the resolved file keeps its encoding byte for byte; binary files and mixed encodings say why only whole-file choices exist.
-- [ ] "Use global setting" in Preferences → Repository → External editor works from every state; the labels fit the field.
-- [ ] Git flow initialization proposes `init.defaultBranch` (else `main`) when neither `main` nor `master` exists; the notes explain both settings.
-- [ ] GITFLOW rows finish by the hover flag; the Gitflow layout is marked experimental everywhere it is switched.
-- [ ] A narrow Graph column shows every commit; at the minimum all nodes sit on one line.
-- [ ] The message is edited through the pencil icon only; the tooltip appears only on the icon; the editor offers the prompt for that commit.
-- [ ] Start screen buttons look calmer and keep AA contrast in Dark and Light.
-- [ ] Diff header as icons with Blame; minimap in Inline and Split.
-- [ ] The author of one or several unpushed commits can be changed from the context menu and in the message editor, which looks like the commit panel; one undo step restores the branch.
-- [ ] User guide, UX-PARITY, release checklist 7i and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] A UTF-16 LE file with BOM and an 8-bit text file conflict like UTF-8 files; the resolved file keeps its encoding byte for byte; binary files and mixed encodings say why only whole-file choices exist.
+- [x] "Use global setting" in Preferences → Repository → External editor works from every state; the labels fit the field.
+- [x] Git flow initialization proposes `init.defaultBranch` (else `main`) when neither `main` nor `master` exists; the notes explain both settings.
+- [x] GITFLOW rows finish by the hover flag; the Gitflow layout is marked experimental everywhere it is switched.
+- [x] A narrow Graph column shows every commit; at the minimum all nodes sit on one line.
+- [x] The message is edited through the pencil icon only; the tooltip appears only on the icon; the editor offers the prompt for that commit.
+- [x] Start screen buttons look calmer and keep AA contrast in Dark and Light.
+- [x] Diff header as icons with Blame; minimap in Inline and Split.
+- [x] The author of one or several unpushed commits can be changed from the context menu and in the message editor, which looks like the commit panel; one undo step restores the branch.
+- [x] User guide, UX-PARITY, release checklist 7i and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
