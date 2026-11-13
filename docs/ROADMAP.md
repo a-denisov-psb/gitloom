@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M14 – Commit details like GitKraken** → [`milestones/M14-commit-details.md`](milestones/M14-commit-details.md)
+**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7h); 1.0.0 is released from `develop` when the maintainer asks.
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M14 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -30,7 +30,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M11 | 1.0.0 | Graph columns, themes and syntax highlighting | Done |
 | M12 | 1.0.0 | Workflow polish | Done |
 | M13 | 1.0.0 | Git flow graph layout | Done |
-| M14 | 1.0.0 | Commit details like GitKraken | Current |
+| M14 | 1.0.0 | Commit details like GitKraken | Done |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -119,7 +119,7 @@ When Git flow is initialized, an optional layout draws the graph like the classi
 
 Details: [`milestones/M13-gitflow-graph-layout.md`](milestones/M13-gitflow-graph-layout.md).
 
-### M14 – Commit details like GitKraken (current)
+### M14 – Commit details like GitKraken (done)
 
 Commit details like GitKraken: framed message box that edits unpushed commits by a click without a rebase (ADR-051), author block with co-authors and parent links, file list with summary, sort, Path/Tree and all files, relative time markers in the graph. Details: [`milestones/M14-commit-details.md`](milestones/M14-commit-details.md).
 
