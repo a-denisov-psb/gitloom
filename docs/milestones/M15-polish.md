@@ -148,7 +148,9 @@ Note: Blame uses Lucide `file-user` (a file with a person: who wrote each line; 
 
 Acceptance: app tests: each button sends its message; Blame disabled with its reason for untracked, stash and deleted files; snapshots of the header in Hunk, Inline and Split, Dark and Light.
 
-### [ ] M15-09 Diff minimap
+### [x] M15-09 Diff minimap
+
+Note: runs of touching change rows form one mark; marks are cached per load, layout and wrap columns (`DiffView::minimap`); the wheel uses the scrollable's 60 px per line; the visible range is at least 4 px high. Timings in `docs/PERFORMANCE.md`.
 
 - Strip, marks, viewport rectangle, click, drag, wheel; Inline and Split only.
 

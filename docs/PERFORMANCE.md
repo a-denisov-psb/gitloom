@@ -98,6 +98,11 @@ width and the lane count; per visible row it only moves the node and skips or sh
 segments, `git-graph` is untouched. `cargo bench -p git-graph` on the M15 cloud container
 (slower than the reference machine above): topo 8.9 ms, layout 10.7 ms, both 19.3 ms; the
 100k layout benchmark is unchanged by construction.
+Diff minimap (M15-09): marks are computed once per load, layout and wrap width (cached in
+`DiffView::minimap`); a frame only draws them. `perf_large_diff_modes` (50 000 lines, debug
+build on the M15 container, 60 positions): Inline median 57.5 ms with the minimap vs. 54.8 ms
+before, Split 83.4 vs. 83.2 ms, Hunk (no minimap) 54.3 vs. 51.9 ms, i.e. within run-to-run
+variance; the first frame after loading computes the marks (Split max 114 ms vs. 84 ms).
 
 ### Idle memory with avatars
 

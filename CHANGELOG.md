@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Diff minimap in the Inline and Split views like GitKraken: a strip right of the scrollbar marks every removed (red) and added (green) line (Split: removed left, added right) and shows the visible range; click or drag to jump there, the mouse wheel scrolls.
 - GITFLOW section: feature, release and hotfix rows show a flag on hover that opens the finish dialog; while finishing is blocked (e.g. during a merge) the flag is muted and its tooltip says why (also in the branch menu).
 - Time markers in the graph like GitKraken: a small pill at the right of the commit message where the relative date changes ("just now", "25 minutes ago", "yesterday", "3 days ago", "1 week ago", "2 months ago", "1 year ago"); updated every minute.
 
