@@ -17014,6 +17014,7 @@ pub(crate) mod tests {
             result: Ok(git_core::LoadedConflict {
                 path: "a.txt".into(),
                 stages: git_core::ConflictStages::default(),
+                encoding: git_core::ConflictEncoding::Utf8,
                 content: git_core::ConflictContent::Text(git_core::ConflictText {
                     chunks: vec![hunk("1"), hunk("2")],
                     eol: "\n",
@@ -17446,6 +17447,7 @@ pub(crate) mod tests {
             result: Ok(git_core::LoadedConflict {
                 path: "src/lib.rs".into(),
                 stages: git_core::ConflictStages::default(),
+                encoding: git_core::ConflictEncoding::Utf8,
                 content: git_core::ConflictContent::Text(text),
             }),
         });
@@ -17503,6 +17505,7 @@ pub(crate) mod tests {
             result: Ok(git_core::LoadedConflict {
                 path: "a.txt".into(),
                 stages: git_core::ConflictStages::default(),
+                encoding: git_core::ConflictEncoding::Utf8,
                 content: git_core::ConflictContent::Text(text),
             }),
         });

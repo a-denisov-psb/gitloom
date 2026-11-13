@@ -566,28 +566,40 @@ mod tests {
                 })
             };
             let clean = |line: &str| Chunk::Clean(vec![format!("{line}\n")]);
+            let loaded = git_core::LoadedConflict {
+                path: "src/lib.rs".into(),
+                stages: git_core::ConflictStages::default(),
+                encoding: git_core::ConflictEncoding::Utf8,
+                content: git_core::ConflictContent::Text(git_core::ConflictText {
+                    chunks: vec![
+                        clean("fn one() {"),
+                        hunk("1"),
+                        clean("}"),
+                        clean("fn two() {"),
+                        hunk("2"),
+                        clean("}"),
+                        hunk("3"),
+                    ],
+                    eol: "\n",
+                }),
+            };
+            let _ = app.update(Message::ConflictLoaded {
+                tab,
+                path: "src/lib.rs".into(),
+                result: Ok(loaded.clone()),
+            });
+            let _ = app.update(Message::ConflictStep { next: true });
+            snapshot(&app, &format!("conflict-navigation-{theme}"));
+            // M15-01: a UTF-16 conflict shows its encoding next to the path.
             let _ = app.update(Message::ConflictLoaded {
                 tab,
                 path: "src/lib.rs".into(),
                 result: Ok(git_core::LoadedConflict {
-                    path: "src/lib.rs".into(),
-                    stages: git_core::ConflictStages::default(),
-                    content: git_core::ConflictContent::Text(git_core::ConflictText {
-                        chunks: vec![
-                            clean("fn one() {"),
-                            hunk("1"),
-                            clean("}"),
-                            clean("fn two() {"),
-                            hunk("2"),
-                            clean("}"),
-                            hunk("3"),
-                        ],
-                        eol: "\n",
-                    }),
+                    encoding: git_core::ConflictEncoding::Utf16Le,
+                    ..loaded
                 }),
             });
-            let _ = app.update(Message::ConflictStep { next: true });
-            snapshot(&app, &format!("conflict-navigation-{theme}"));
+            snapshot(&app, &format!("conflict-utf16-{theme}"));
         }
     }
 

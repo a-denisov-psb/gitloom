@@ -186,6 +186,8 @@ fn conflict_in_the_first_merge_resumes_after_a_restart() {
     assert_eq!(plan.next, 2, "checkout and merge started");
     // Resume while the merge still waits: nothing happens.
     assert_eq!(flow_finish::resume(&cli).unwrap(), FinishOutcome::Conflicts);
+    // M15-01: the topic branch stays until the merge is committed.
+    assert!(exists(&repo, "refs/heads/release/2.0"));
 
     resolve(&repo);
     assert!(matches!(
@@ -209,6 +211,10 @@ fn conflict_in_the_second_merge_resumes() {
     assert_eq!(flow_finish::pending(&cli).unwrap().unwrap().next, 5);
     assert_eq!(head_branch(&repo), "develop");
     assert!(exists(&repo, "refs/tags/v2.0"), "tag done before");
+    assert!(
+        exists(&repo, "refs/heads/release/2.0"),
+        "kept until resolved"
+    );
     resolve(&repo);
     assert!(matches!(
         flow_finish::resume(&cli).unwrap(),

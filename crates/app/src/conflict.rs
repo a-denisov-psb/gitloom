@@ -214,13 +214,14 @@ impl ConflictView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git_core::{Chunk, ConflictHunk, ConflictStages};
+    use git_core::{Chunk, ConflictEncoding, ConflictHunk, ConflictStages};
 
     fn loaded(eol: &'static str) -> LoadedConflict {
         let line = |s: &str| format!("{s}{eol}");
         LoadedConflict {
             path: "a.txt".into(),
             stages: ConflictStages::default(),
+            encoding: ConflictEncoding::Utf8,
             content: ConflictContent::Text(ConflictText {
                 chunks: vec![
                     Chunk::Clean(vec![line("a")]),
@@ -306,6 +307,7 @@ mod tests {
         view.set_loaded(Ok(LoadedConflict {
             path: "a.txt".into(),
             stages: ConflictStages::default(),
+            encoding: ConflictEncoding::Utf8,
             content: ConflictContent::Text(ConflictText {
                 chunks: vec![
                     hunk("1"),
