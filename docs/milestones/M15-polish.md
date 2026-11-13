@@ -92,7 +92,9 @@ Note: ASCII-only versions fit UTF-8 and 8-bit text but not UTF-16 (mixed); UTF-8
 
 Acceptance: integration tests: UTF-16 LE with BOM and CRLF (the maintainer's bytes), UTF-16 BE, UTF-8 with BOM, 8-bit text with bytes ≥ 0x80 → text conflicts; after picking lines the working tree file and stage 0 are byte-identical to the expected encoding (BOM, byte order, CRLF); a binary file and a UTF-16/UTF-8 mix → whole-file choice with the right message; app snapshot of a UTF-16 conflict with its label.
 
-### [ ] M15-02 Repository editor picker
+### [x] M15-02 Repository editor picker
+
+Note: an empty global command reads "Global: none"; unsetting a key that is not set was already no error (covered by `external_tools.rs`).
 
 - Reset of the custom state, labels by program name, "Global: <command>" line.
 
