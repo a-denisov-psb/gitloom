@@ -441,7 +441,7 @@ pub const SETTINGS: &[Setting] = &[
         &["git flow", "feature", "release", "hotfix"],
     ),
     setting(
-        "Gitflow layout",
+        "Gitflow layout (experimental)",
         C::Gitflow,
         "Show the graph in the Gitflow layout",
         F,

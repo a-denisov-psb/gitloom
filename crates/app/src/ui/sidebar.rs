@@ -373,11 +373,12 @@ fn gitflow<'a>(
                 index,
                 label,
             } => match repo.snapshot.refs.get(index) {
-                Some(reference) => ref_item(
+                Some(reference) => ref_item_with(
                     repo,
                     reference,
                     label.to_owned(),
                     1 + u16::try_from(depth).unwrap_or(0),
+                    config.classify(&reference.name),
                 ),
                 None => space::horizontal().width(0).into(),
             },
@@ -581,6 +582,45 @@ fn ref_item<'a>(
     label: String,
     depth: u16,
 ) -> Element<'a, Message> {
+    ref_item_with(repo, reference, label, depth, None)
+}
+
+/// Flag of a feature, release or hotfix row in GITFLOW (M15-04): opens the
+/// finish dialog; muted with the reason when finishing is blocked.
+pub fn finish_flag<'a>(
+    repo: &RepoView,
+    reference: &Reference,
+    branch: &git_core::FlowBranch,
+) -> Element<'a, Message> {
+    let block = repo.finish_block();
+    let tint: fn(&theme::ThemePalette) -> iced::Color = if block.is_some() {
+        |p| p.text_muted
+    } else {
+        |p| p.text
+    };
+    let tip = block
+        .clone()
+        .unwrap_or_else(|| format!("Finish {} {}…", branch.kind.noun(), branch.name));
+    let button = button(icons::tinted(Icon::Flag, 13.0, tint))
+        .on_press_maybe(
+            block
+                .is_none()
+                .then(|| Message::FlowFinishRequested(reference.name.clone())),
+        )
+        .padding([3, 6])
+        .style(theme::flat);
+    crate::ui::panel::with_tooltip_text(button.into(), tip)
+}
+
+/// A branch or tag row; `flow` marks a feature, release or hotfix row of
+/// the GITFLOW section, which gets the finish flag on hover (M15-04).
+fn ref_item_with<'a>(
+    repo: &RepoView,
+    reference: &'a Reference,
+    label: String,
+    depth: u16,
+    flow: Option<git_core::FlowBranch>,
+) -> Element<'a, Message> {
     // Branches carry a branch icon, tags a tag icon. Like GitKraken the
     // checked-out branch keeps its icon and gets a check in the gutter to
     // its left (the indent column of the parent level), so icons and
@@ -672,33 +712,36 @@ fn ref_item<'a>(
         .as_ref()
         .is_some_and(|d| d.targets(&reference.name, reference.kind));
     let item = crate::ui::draggable_branch(item, &reference.name, reference.kind, highlight);
+    let mut overlay = row![space::horizontal()]
+        .padding(iced::Padding::default().right(4))
+        .align_y(iced::Center);
+    // The finish flag left of the eye (M15-04).
+    if let Some(branch) = &flow {
+        overlay = overlay.push(finish_flag(repo, reference, branch));
+    }
     // Eye on hover hides or shows the branch; the checked-out one stays.
-    if reference.is_head {
+    if !reference.is_head {
+        // The eye shows the current state (like GitKraken): open = shown.
+        let (icon, tip) = if hidden {
+            (Icon::EyeOff, "Show in the graph")
+        } else {
+            (Icon::Eye, "Hide in the graph")
+        };
+        overlay = overlay.push(crate::ui::panel::with_tooltip_text(
+            button(icons::tinted(icon, 13.0, |p| p.text))
+                .on_press(Message::ToggleHidden {
+                    name: reference.name.clone(),
+                    kind: reference.kind,
+                })
+                .padding([3, 6])
+                .style(theme::flat)
+                .into(),
+            tip.to_owned(),
+        ));
+    } else if flow.is_none() {
         return item;
     }
-    // The eye shows the current state (like GitKraken): open = shown.
-    let (icon, tip) = if hidden {
-        (Icon::EyeOff, "Show in the graph")
-    } else {
-        (Icon::Eye, "Hide in the graph")
-    };
-    let eye = crate::ui::panel::with_tooltip_text(
-        button(icons::tinted(icon, 13.0, |p| p.text))
-            .on_press(Message::ToggleHidden {
-                name: reference.name.clone(),
-                kind: reference.kind,
-            })
-            .padding([3, 6])
-            .style(theme::flat)
-            .into(),
-        tip.to_owned(),
-    );
-    iced::widget::hover(
-        item,
-        row![space::horizontal(), eye]
-            .padding(iced::Padding::default().right(4))
-            .align_y(iced::Center),
-    )
+    iced::widget::hover(item, overlay)
 }
 
 /// Inline rename input in place of the branch entry; red border on an error.

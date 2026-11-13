@@ -430,14 +430,24 @@ fn gitflow<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
             .active_tab()
             .and_then(crate::app::Tab::view)
             .is_some_and(|v| v.snapshot.flow_layout);
+        // Marked experimental (M15-04): a muted pill after the toggle.
+        let pill = container(text("Experimental").size(11))
+            .padding([1, 6])
+            .style(theme::time_marker);
         content = content.push(field(
             "Show the graph in the Gitflow layout",
-            iced::widget::toggler(on)
-                .on_toggle(Message::FlowLayoutSet)
-                .label(if on { "On" } else { "Off" })
-                .into(),
+            row![
+                iced::widget::toggler(on)
+                    .on_toggle(Message::FlowLayoutSet)
+                    .label(if on { "On" } else { "Off" }),
+                pill,
+            ]
+            .spacing(10)
+            .align_y(iced::Center)
+            .into(),
             "Production left, then hotfix, release, development and features, one color per \
-             branch type, also for deleted branches.",
+             branch type, also for deleted branches. Experimental: can look messy when the \
+             history did not follow Git flow.",
         ));
     }
     content.into()

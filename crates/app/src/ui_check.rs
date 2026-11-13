@@ -458,6 +458,19 @@ mod tests {
             crate::settings::Category::Gitflow,
         ));
         snapshot(&app, "gitflow-preferences");
+        // M15-04: initialized, with the experimental layout switch.
+        let mut app = crate::app::tests::flow_app();
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let _ = app.update(Message::SettingsOpenedAt(
+                crate::settings::Category::Gitflow,
+            ));
+            snapshot(&app, &format!("gitflow-preferences-initialized-{theme}"));
+        }
     }
 
     #[test]
@@ -471,6 +484,17 @@ mod tests {
                 crate::settings::ThemeChoice::Dark
             };
             snapshot(&app, &format!("gitflow-section-{theme}"));
+            // M15-04: the hovered feature row with its finish flag.
+            let path = fresh_path(&format!("gitflow-section-hover-{theme}"));
+            let mut sim = simulator(&app);
+            let row = sim.find("login").unwrap();
+            let at = iced_test::selector::Bounded::bounds(&row).center();
+            sim.point_at(at);
+            let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: at,
+            })]);
+            let snap = sim.snapshot(&app.theme()).unwrap();
+            assert!(snap.matches_image(&path).unwrap());
         }
     }
 
@@ -1719,6 +1743,105 @@ mod tests {
             position: iced::Point::new(1100.0, 200.0),
         });
         snapshot(&app, "file-menu-staged");
+    }
+
+    /// Messages of a click at every few pixels of the row showing `label`
+    /// while the pointer hovers it (the hover buttons appear then).
+    fn row_clicks(app: &App, label: &str) -> Vec<Message> {
+        use iced::mouse::{Button, Event as Mouse};
+        use iced::{Event, Point};
+        let bounds = {
+            let mut sim = simulator(app);
+            let found = sim
+                .find(label)
+                .unwrap_or_else(|e| panic!("no row {label:?}: {e}"));
+            iced_test::selector::Bounded::bounds(&found)
+        };
+        let mut messages = Vec::new();
+        let mut x = bounds.x;
+        while x < bounds.x + 360.0 {
+            let at = Point::new(x, bounds.center_y());
+            let mut sim = simulator(app);
+            sim.point_at(at);
+            let _ = sim.simulate(vec![
+                Event::Mouse(Mouse::CursorMoved { position: at }),
+                Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+                Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+            ]);
+            messages.extend(sim.into_messages());
+            x += 4.0;
+        }
+        messages
+    }
+
+    fn finish_requests(messages: &[Message]) -> Vec<String> {
+        let mut names: Vec<String> = messages
+            .iter()
+            .filter_map(|m| match m {
+                Message::FlowFinishRequested(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        names.dedup();
+        names
+    }
+
+    /// GITFLOW rows (M15-04): the hover flag of feature, release and hotfix
+    /// rows opens the finish dialog; development and production have none;
+    /// during a merge the flag is disabled. Layout only, so part of every
+    /// test run.
+    #[test]
+    fn gitflow_rows_finish_by_the_hover_flag() {
+        let mut app = crate::app::tests::flow_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs.push(git_core::Reference {
+            name: "hotfix/1.0.1".into(),
+            kind: git_core::RefKind::LocalBranch,
+            target: "c".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        view.snapshot = std::sync::Arc::new(snapshot);
+        for (label, branch, title) in [
+            ("login", "feature/login", "Finish feature login"),
+            ("1.2.0", "release/1.2.0", "Finish release 1.2.0"),
+            ("1.0.1", "hotfix/1.0.1", "Finish hotfix 1.0.1"),
+        ] {
+            assert_eq!(finish_requests(&row_clicks(&app, label)), [branch]);
+            let _ = app.update(Message::FlowFinishRequested(branch.into()));
+            assert_eq!(app.form.as_ref().map(|f| f.title.as_str()), Some(title));
+            app.form = None;
+        }
+        for label in ["develop", "main"] {
+            assert!(
+                finish_requests(&row_clicks(&app, label)).is_empty(),
+                "{label}"
+            );
+        }
+        // During a merge: disabled, with the reason of the menu entry.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.state = git_core::RepoState::Merging {
+            merge_head: "x".into(),
+        };
+        view.snapshot = std::sync::Arc::new(snapshot);
+        assert!(finish_requests(&row_clicks(&app, "login")).is_empty());
+        let reason = "Cannot merge while a merge is in progress";
+        assert_eq!(
+            app.tabs[0].view().unwrap().finish_block().as_deref(),
+            Some(reason)
+        );
+        let _ = app.update(Message::BranchContextMenu {
+            name: "feature/login".into(),
+            kind: git_core::RefKind::LocalBranch,
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            crate::overlay::MenuEntry::Item { label, enabled: false, hint: Some(h), .. }
+                if label == "Finish feature login" && h == reason)));
     }
 
     /// Dragging the border right of BRANCH / TAG with real mouse events

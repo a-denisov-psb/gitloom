@@ -971,6 +971,15 @@ impl RepoView {
 
     /// Why `action` is disabled by the operation in progress, if it is.
     /// Committing concludes a merge, cherry-pick or revert and stays allowed.
+    /// Why a Git flow branch cannot be finished right now (M15-04): the
+    /// repository is blocked or busy, or an operation is in progress.
+    pub fn finish_block(&self) -> Option<String> {
+        self.write_block
+            .clone()
+            .or_else(|| self.busy.as_ref().map(|busy| format!("Busy: {busy}")))
+            .or_else(|| self.state_block(Guarded::Merge))
+    }
+
     pub fn state_block(&self, action: Guarded) -> Option<String> {
         let state = &self.snapshot.state;
         // Git cannot stash or apply a stash while the index has conflicts.
