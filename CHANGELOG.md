@@ -62,6 +62,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Start screen buttons are calmer: a light accent fill like the initials tile of the commit details (stronger on hover and press), title, shortcut and icon in the normal text color, about a quarter lower.
 - Commit details: the message is always selectable text; a pencil at the top right of the message box (shown on hover) opens the editor of unpushed commits, muted with the reason as its tooltip when the message cannot be edited. A click on the text no longer opens the editor. The editor has a sparkle button that opens "Copy commit message prompt…" for that commit (its diff against the first parent, the commits before it).
 - A Graph column narrower than its lanes no longer fades out: the nodes of every lane that does not fit are drawn in the column's last lane in their own colors and node styles (without lines), so every commit stays visible; at the minimum width all nodes sit on one line like GitKraken's collapsed graph. The minimum width now holds one whole lane.
 - The Gitflow layout is marked experimental: "Experimental" pill and note in Preferences → Repository → Gitflow, "Gitflow layout (experimental)" in the graph column menu, "Toggle Gitflow layout (experimental)" in the command palette.

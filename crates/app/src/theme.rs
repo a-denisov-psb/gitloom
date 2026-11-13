@@ -286,7 +286,8 @@ pub fn panes(theme: &Theme) -> pane_grid::Style {
     }
 }
 
-/// WCAG relative luminance.
+/// WCAG relative luminance (contrast tests).
+#[cfg(test)]
 pub(crate) fn luminance(c: Color) -> f32 {
     let channel = |v: f32| {
         if v <= 0.039_28 {
@@ -298,13 +299,15 @@ pub(crate) fn luminance(c: Color) -> f32 {
     0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
 }
 
-/// WCAG contrast ratio of two colors.
+/// WCAG contrast ratio of two colors (contrast tests).
+#[cfg(test)]
 pub(crate) fn contrast(a: Color, b: Color) -> f32 {
     let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
 /// `a` moved towards `b` by `t` (0 … 1).
+#[cfg(test)]
 fn mix(a: Color, b: Color, t: f32) -> Color {
     Color::from_rgb(
         a.r + (b.r - a.r) * t,
@@ -313,50 +316,43 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
     )
 }
 
-/// Dark text on light fills.
-const ON_LIGHT: Color = Color::from_rgb(0.067, 0.078, 0.094);
-
-/// Text on a filled background: white or near-black, whichever has more
-/// contrast.
-pub fn on_fill(fill: Color) -> Color {
-    if contrast(Color::WHITE, fill) >= contrast(ON_LIGHT, fill) {
-        Color::WHITE
-    } else {
-        ON_LIGHT
+/// Accent alpha of a start screen button (M15-07): like the initials tile
+/// of the commit details (`avatar`, 25 %), stronger on hover and press.
+fn start_button_alpha(status: button::Status) -> f32 {
+    match status {
+        button::Status::Hovered => 0.35,
+        button::Status::Pressed => 0.45,
+        button::Status::Active | button::Status::Disabled => 0.25,
     }
 }
 
-/// Fill of a start screen button (M11-12): the accent color (as the recent
-/// repository links); hover and press move it away from the text color,
-/// so the text keeps its contrast and color in every state.
+/// Fill of a start screen button (M15-07, calmer than the solid accent of
+/// M11-12): the accent at 25 / 35 / 45 % alpha.
 pub fn start_button_fill(p: &ThemePalette, status: button::Status) -> Color {
-    let away = if on_fill(p.accent) == Color::WHITE {
-        Color::BLACK
-    } else {
-        Color::WHITE
-    };
-    match status {
-        button::Status::Hovered => mix(p.accent, away, 0.12),
-        button::Status::Pressed => mix(p.accent, away, 0.24),
-        button::Status::Active | button::Status::Disabled => p.accent,
-    }
+    p.accent.scale_alpha(start_button_alpha(status))
+}
+
+/// The fill as it looks on the start screen's background (for contrast).
+#[cfg(test)]
+fn start_button_on_background(p: &ThemePalette, status: button::Status) -> Color {
+    mix(p.bg_graph, p.accent, start_button_alpha(status))
 }
 
 /// Large start screen buttons "Open a repo", "Clone a repo", "Start a
-/// local repo" (M11-12).
+/// local repo" (M11-12, M15-07): title, hint and icon in the text color.
 pub fn start_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
     button::Style {
         background: Some(Background::Color(start_button_fill(p, status))),
-        text_color: on_fill(p.accent),
+        text_color: p.text,
         border: Border::default().rounded(6),
         ..button::Style::default()
     }
 }
 
-/// Icon color on a start screen button.
+/// Icon color on a start screen button: the text color (M15-07).
 pub fn start_button_icon(theme: &Theme) -> Color {
-    on_fill(palette(theme).accent)
+    palette(theme).text
 }
 
 fn button_style(background: Option<Color>, text_color: Color) -> button::Style {
@@ -856,20 +852,15 @@ mod tests {
     #[test]
     fn start_buttons_reach_wcag_aa() {
         for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
-            let icon = on_fill(p.accent);
             for status in [
                 button::Status::Active,
                 button::Status::Hovered,
                 button::Status::Pressed,
             ] {
-                let fill = start_button_fill(p, status);
-                let text = on_fill(p.accent);
-                // Label and shortcut line use the same color.
-                let ratio = contrast(text, fill);
+                // Title, hint and icon use the text color (M15-07).
+                let fill = start_button_on_background(p, status);
+                let ratio = contrast(p.text, fill);
                 assert!(ratio >= 4.5, "{name} {status:?}: {ratio:.2}");
-                // The icon has the text color.
-                assert_eq!(icon, text, "{name} {status:?}");
-                assert_eq!(on_fill(fill), text, "{name} {status:?}: best text color");
             }
         }
     }
