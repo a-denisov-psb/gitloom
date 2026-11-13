@@ -579,6 +579,8 @@ Decision:
 
 Consequences: no conflicts, also across merges; works with a dirty working tree; signatures of rebuilt commits are renewed or dropped (dialog note when `commit.gpgSign` is false and a rebuilt commit was signed). The old commits stay reachable through the reflog until Git prunes them.
 
+Amendment (2026-11-13, M15-11): the same rebuild also changes the author of one or more eligible commits. Each edited commit may get a new message, a new author (name and e-mail; the author date is kept), or both; all edited commits are rebuilt in one pass from the oldest of them to HEAD and moved with one `update-ref`, so one undo step covers them. Eligibility is checked for every edited commit; a single blocked commit blocks the whole change. Co-author trailers are not touched.
+
 ## ADR-052 Task runner just and the dist profile
 
 Status: accepted (2026-11-11, maintainer planning update 2)
