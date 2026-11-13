@@ -475,8 +475,15 @@ pub fn prompt_dialog(prompt: &git_core::prompt::Prompt) -> Element<'_, Message> 
     .padding(8)
     .width(Fill)
     .style(theme::dialog_details);
+    let title = match &prompt.source {
+        git_core::prompt::PromptSource::Staged => "Commit message prompt".to_owned(),
+        git_core::prompt::PromptSource::Commit(id) => format!(
+            "Commit message prompt for commit {}",
+            id.get(..7).unwrap_or(id)
+        ),
+    };
     let content = column![
-        text("Commit message prompt").size(17),
+        text(title).size(17),
         preview,
         info,
         row![
