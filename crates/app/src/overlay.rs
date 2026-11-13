@@ -229,6 +229,14 @@ pub enum FormAction {
         /// Use the new identity in this tab's repository afterwards.
         apply: Option<crate::app::TabId>,
     },
+    /// Change the author of commits `ids` (M15-11): author choice, name,
+    /// e-mail.
+    ChangeAuthor {
+        tab: crate::app::TabId,
+        ids: Vec<String>,
+    },
+    /// "Other…" author of the message editor (M15-11): name, e-mail.
+    EditorAuthor { tab: crate::app::TabId },
     /// Finish Git flow branch `branch` (options; M7-10).
     FinishFlow {
         tab: crate::app::TabId,

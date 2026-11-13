@@ -64,9 +64,9 @@ impl Reworded {
             (&self.new_head, &self.old_head)
         };
         let reason = crate::identity::reflog_message(if undo {
-            "undo edit message"
+            "undo edit commit"
         } else {
-            "redo edit message"
+            "redo edit commit"
         });
         move_branch(git, &self.branch, to, from, &reason).map_err(|_| {
             Error::Backend(format!(
@@ -247,6 +247,24 @@ fn sign_commits(git: &dyn GitWriter) -> Result<bool> {
     Ok(code == Some(0) && output.stdout_text().trim() == "true")
 }
 
+/// [`edit_facts`] for several commits (M15-11): refs that keep any of the
+/// old commits, and whether any rebuilt commit loses its signature.
+pub fn edit_facts_many(git: &dyn GitWriter, commits: &[Oid]) -> Result<EditFacts> {
+    let mut facts = EditFacts::default();
+    for commit in commits {
+        let one = edit_facts(git, commit)?;
+        facts.branch = one.branch;
+        for name in one.keep_old {
+            if !facts.keep_old.contains(&name) {
+                facts.keep_old.push(name);
+            }
+        }
+        facts.drops_signature |= one.drops_signature;
+    }
+    facts.keep_old.sort();
+    Ok(facts)
+}
+
 /// The note before saving: the moved branch, refs that keep the old
 /// commits and whether a signature would be dropped.
 pub fn edit_facts(git: &dyn GitWriter, commit: &str) -> Result<EditFacts> {
@@ -297,29 +315,119 @@ fn move_branch(
     .map(drop)
 }
 
+/// One commit of a rewrite (ADR-051 amendment, M15-11): a new message, a
+/// new author (name and e-mail; the author date is kept), or both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitEdit {
+    pub commit: Oid,
+    pub message: Option<String>,
+    pub author: Option<crate::Identity>,
+}
+
 /// Gives `commit` the message `message` (ADR-051). Refused when
 /// [`edit_block`] names a reason or the branch moved meanwhile.
 pub fn reword_unpushed(git: &dyn GitWriter, commit: &str, message: &str) -> Result<Reworded> {
-    if let Some(block) = edit_block(git, commit)? {
-        return Err(Error::Backend(block.reason()));
+    rewrite_unpushed(
+        git,
+        &[CommitEdit {
+            commit: commit.to_owned(),
+            message: Some(message.to_owned()),
+            author: None,
+        }],
+    )
+}
+
+/// What edits rebuild: every commit on the ancestry paths from the edited
+/// commits to HEAD, parents before children.
+fn rebuild_order(git: &dyn GitWriter, commits: &[Oid]) -> Result<Vec<(Oid, RawCommit)>> {
+    let mut ids: Vec<Oid> = Vec::new();
+    for commit in commits {
+        for id in chain(git, commit)? {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    let mut pending: Vec<(Oid, RawCommit)> = ids
+        .into_iter()
+        .map(|id| raw_commit(git, &id).map(|raw| (id, raw)))
+        .collect::<Result<_>>()?;
+    // Parents inside the set come first (Kahn's algorithm, stable).
+    let mut ordered: Vec<(Oid, RawCommit)> = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let ready = pending.iter().position(|(_, raw)| {
+            raw.parents
+                .iter()
+                .all(|p| !pending.iter().any(|(id, _)| id == p))
+        });
+        let Some(index) = ready else {
+            return Err(Error::Backend("the history has a cycle".into()));
+        };
+        ordered.push(pending.remove(index));
+    }
+    Ok(ordered)
+}
+
+/// Applies `edits` to unpushed commits of the checked-out branch in one
+/// pass (ADR-051 and its amendment): the commits from the oldest edited one
+/// to HEAD are rebuilt with `git commit-tree` and the branch is moved with
+/// one `update-ref`. Refused when any edited commit is blocked
+/// ([`edit_block`]) or the branch moved meanwhile.
+pub fn rewrite_unpushed(git: &dyn GitWriter, edits: &[CommitEdit]) -> Result<Reworded> {
+    if edits.is_empty() {
+        return Err(Error::Backend("nothing to change".into()));
+    }
+    for edit in edits {
+        if let Some(block) = edit_block(git, &edit.commit)? {
+            let short = &edit.commit[..edit.commit.len().min(7)];
+            return Err(Error::Backend(if edits.len() > 1 {
+                format!("{short}: {}", block.reason())
+            } else {
+                block.reason()
+            }));
+        }
     }
     let branch =
         head_branch(git)?.ok_or_else(|| Error::Backend(EditBlock::NotOnBranch.reason()))?;
     let old_head = text(git, &["rev-parse", "HEAD"])?;
-    let chain = chain(git, commit)?;
+    // Full ids of the edited commits.
+    let edits: Vec<CommitEdit> = edits
+        .iter()
+        .map(|edit| {
+            text(
+                git,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    &format!("{}^{{commit}}", edit.commit),
+                ],
+            )
+            .map(|commit| CommitEdit {
+                commit,
+                ..edit.clone()
+            })
+        })
+        .collect::<Result<_>>()?;
+    let targets: Vec<Oid> = edits.iter().map(|e| e.commit.clone()).collect();
+    let order = rebuild_order(git, &targets)?;
     let sign = sign_commits(git)?;
-    let mut message = message.trim_end().to_owned();
-    message.push('\n');
     let mut rebuilt: HashMap<String, String> = HashMap::new();
-    for (index, id) in chain.iter().enumerate() {
-        let raw = raw_commit(git, id)?;
-        let target = index == 0;
+    for (id, raw) in &order {
+        let edit = edits.iter().find(|e| e.commit == *id);
+        let message = edit.and_then(|e| e.message.as_ref()).map(|m| {
+            let mut m = m.trim_end().to_owned();
+            m.push('\n');
+            m
+        });
+        let author = edit.and_then(|e| e.author.as_ref());
         let parents: Vec<String> = raw
             .parents
             .iter()
             .map(|p| rebuilt.get(p).cloned().unwrap_or_else(|| p.clone()))
             .collect();
-        let encoding = (!target)
+        // A new message is UTF-8; a kept one keeps its encoding.
+        let encoding = message
+            .is_none()
             .then_some(raw.encoding.as_deref())
             .flatten()
             .map(|e| format!("i18n.commitEncoding={e}"));
@@ -334,15 +442,18 @@ pub fn reword_unpushed(git: &dyn GitWriter, commit: &str, message: &str) -> Resu
         if sign {
             args.push("-S");
         }
+        let (name, email) = match author {
+            Some(author) => (author.name.as_str(), author.email.as_str()),
+            None => (raw.author.name.as_str(), raw.author.email.as_str()),
+        };
         let env = [
-            ("GIT_AUTHOR_NAME", raw.author.name.as_str()),
-            ("GIT_AUTHOR_EMAIL", raw.author.email.as_str()),
+            ("GIT_AUTHOR_NAME", name),
+            ("GIT_AUTHOR_EMAIL", email),
             ("GIT_AUTHOR_DATE", raw.author.date.as_str()),
         ];
-        let body: &[u8] = if target {
-            message.as_bytes()
-        } else {
-            &raw.message
+        let body: &[u8] = match &message {
+            Some(message) => message.as_bytes(),
+            None => &raw.message,
         };
         let output = git.run_with_env(
             &args,
@@ -355,24 +466,29 @@ pub fn reword_unpushed(git: &dyn GitWriter, commit: &str, message: &str) -> Resu
         rebuilt.insert(id.clone(), output.stdout_text().trim().to_owned());
     }
     let new_commit = rebuilt
-        .get(&chain[0])
+        .get(&edits[0].commit)
         .cloned()
         .ok_or_else(|| Error::Backend("nothing rebuilt".into()))?;
     let new_head = rebuilt
         .get(&old_head)
         .cloned()
         .ok_or_else(|| Error::Backend("HEAD is not on the ancestry path".into()))?;
-    let short = &commit[..commit.len().min(7)];
+    let what = if edits.len() == 1 {
+        let short = &edits[0].commit[..edits[0].commit.len().min(7)];
+        format!("edit commit {short}")
+    } else {
+        format!("edit {} commits", edits.len())
+    };
     move_branch(
         git,
         &branch,
         &new_head,
         &old_head,
-        &crate::identity::reflog_message(&format!("edit message of {short}")),
+        &crate::identity::reflog_message(&what),
     )
     .map_err(|_| {
         Error::Backend(format!(
-            "Cannot edit the message: the branch {branch} changed"
+            "Cannot change the commits: the branch {branch} changed"
         ))
     })?;
     Ok(Reworded {

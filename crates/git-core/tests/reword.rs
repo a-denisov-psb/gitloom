@@ -249,3 +249,154 @@ fn signed_rebuild_with_an_ssh_key() {
     repo.git(&["config", "commit.gpgSign", "false"]);
     assert!(edit_facts(&cli, &done.new_commit).unwrap().drops_signature);
 }
+
+// M15-11: changing the author (ADR-051 amendment).
+
+use git_core::reword::{edit_facts_many, rewrite_unpushed, CommitEdit};
+use git_core::Identity;
+
+fn bo() -> Identity {
+    Identity {
+        name: "Bo Kim".into(),
+        email: "bo@example.com".into(),
+    }
+}
+
+fn author_edit(commit: &str) -> CommitEdit {
+    CommitEdit {
+        commit: commit.to_owned(),
+        message: None,
+        author: Some(bo()),
+    }
+}
+
+fn author_date(repo: &TestRepo, rev: &str) -> String {
+    repo.git(&["log", "-1", "--format=%ad", "--date=raw", rev])
+}
+
+#[test]
+fn author_of_head() {
+    let (repo, cli) = repo();
+    repo.commit("a.txt", "a\n", "One");
+    let head = repo.commit(
+        "a.txt",
+        "b\n",
+        "Two\n\nBody\n\nCo-authored-by: Cy <cy@example.com>",
+    );
+    let date = author_date(&repo, "HEAD");
+    // Index and working tree changes stay.
+    repo.write("a.txt", "dirty\n");
+    repo.write("staged.txt", "s\n");
+    repo.git(&["add", "staged.txt"]);
+    let status = repo.git(&["status", "--porcelain"]);
+
+    let done = rewrite_unpushed(&cli, &[author_edit(&head)]).unwrap();
+    assert_eq!(repo.head(), done.new_head);
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%an <%ae>"]),
+        "Bo Kim <bo@example.com>"
+    );
+    assert_eq!(author_date(&repo, "HEAD"), date, "author date kept");
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%cn <%ce>"]),
+        "Gitloom Test <test@example.com>"
+    );
+    // The message (with its co-author trailer) is untouched.
+    assert_eq!(
+        message(&repo, "HEAD"),
+        "Two\n\nBody\n\nCo-authored-by: Cy <cy@example.com>"
+    );
+    assert_eq!(repo.git(&["status", "--porcelain"]), status);
+    // One undo step back to the exact oid, redo forward.
+    done.apply(&cli, true).unwrap();
+    assert_eq!(repo.head(), head);
+    done.apply(&cli, false).unwrap();
+    assert_eq!(repo.head(), done.new_head);
+}
+
+#[test]
+fn authors_of_two_commits_across_a_merge() {
+    let (repo, cli) = repo();
+    repo.commit("a.txt", "1\n", "c6");
+    // The side branch forks before the edited commits: it stays.
+    repo.branch("topic");
+    let five = repo.commit("a.txt", "2\n", "c5 back");
+    repo.commit("a.txt", "3\n", "c4");
+    repo.checkout("topic");
+    let side = repo.commit("t.txt", "t\n", "side");
+    repo.checkout("main");
+    repo.merge("topic", "Merge topic");
+    let three = repo.commit("a.txt", "4\n", "c3 back");
+    repo.commit("a.txt", "5\n", "c2");
+    let head = repo.commit("a.txt", "6\n", "c1");
+    let before = subjects(&repo);
+    let tree = repo.git(&["rev-parse", "HEAD^{tree}"]);
+
+    let done = rewrite_unpushed(&cli, &[author_edit(&three), author_edit(&five)]).unwrap();
+    assert_eq!(subjects(&repo), before, "same shape");
+    assert_eq!(repo.git(&["rev-parse", "HEAD^{tree}"]), tree);
+    let author_of = |subject: &str| {
+        repo.git(&[
+            "log",
+            "--format=%an",
+            "-1",
+            "--grep",
+            &format!("^{subject}$"),
+        ])
+    };
+    assert_eq!(author_of("c5 back"), "Bo Kim");
+    assert_eq!(author_of("c3 back"), "Bo Kim");
+    assert_ne!(author_of("c4"), "Bo Kim");
+    assert_ne!(author_of("c1"), "Bo Kim");
+    // The merge was rebuilt; its second parent is the unchanged side.
+    let merge = repo.git(&["log", "--format=%H", "-1", "--grep", "^Merge topic$"]);
+    let parents = repo.parents(&merge);
+    assert_eq!(parents.len(), 2);
+    assert_eq!(parents[1], side);
+    done.apply(&cli, true).unwrap();
+    assert_eq!(repo.head(), head);
+}
+
+#[test]
+fn message_and_author_in_one_step() {
+    let (repo, cli) = repo();
+    repo.commit("a.txt", "a\n", "One");
+    let target = repo.commit("a.txt", "b\n", "Tpyo");
+    let head = repo.commit("a.txt", "c\n", "Three");
+    let done = rewrite_unpushed(
+        &cli,
+        &[CommitEdit {
+            commit: target.clone(),
+            message: Some("Typo fixed".into()),
+            author: Some(bo()),
+        }],
+    )
+    .unwrap();
+    assert_ne!(repo.head(), head);
+    assert_eq!(message(&repo, "HEAD~1"), "Typo fixed");
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%an <%ae>", "HEAD~1"]),
+        "Bo Kim <bo@example.com>"
+    );
+    assert_eq!(done.new_commit, repo.git(&["rev-parse", "HEAD~1"]));
+    assert_eq!(subjects(&repo), ["Three", "Typo fixed", "One"]);
+}
+
+#[test]
+fn one_blocked_commit_refuses_the_whole_change() {
+    let (repo, cli) = repo();
+    let pushed = repo.commit("a.txt", "a\n", "One");
+    repo.fake_upstream("origin", "main", &pushed);
+    let free = repo.commit("a.txt", "b\n", "Two");
+    let head = repo.head();
+    let error = rewrite_unpushed(&cli, &[author_edit(&free), author_edit(&pushed)])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains(&format!("{}: ", &pushed[..7])), "{error}");
+    assert!(error.contains("Already pushed to origin/main"), "{error}");
+    assert_eq!(repo.head(), head, "nothing changed");
+    // Facts of several commits: refs that keep any old commit.
+    repo.git(&["tag", "v1", &free]);
+    let facts = edit_facts_many(&cli, &[free.clone(), head.clone()]).unwrap();
+    assert_eq!(facts.keep_old, ["v1"]);
+}

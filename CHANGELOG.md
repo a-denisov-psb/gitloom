@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Change the author of unpushed commits: "Change author…" in the commit menu (also for several selected commits; disabled with the reason of the first blocked commit) opens a dialog with the repository's identity, the saved identities and "Other…"; the message editor of the commit details looks like the commit panel and has an "Authored by …" row whose menu changes the author ("Keep original author" first). Author dates are kept; one undo step ("Change author", or "Edit commit" with a new message too).
 - Diff minimap in the Inline and Split views like GitKraken: a strip right of the scrollbar marks every removed (red) and added (green) line (Split: removed left, added right) and shows the visible range; click or drag to jump there, the mouse wheel scrolls.
 - GITFLOW section: feature, release and hotfix rows show a flag on hover that opens the finish dialog; while finishing is blocked (e.g. during a merge) the flag is muted and its tooltip says why (also in the branch menu).
 - Time markers in the graph like GitKraken: a small pill at the right of the commit message where the relative date changes ("just now", "25 minutes ago", "yesterday", "3 days ago", "1 week ago", "2 months ago", "1 year ago"); updated every minute.

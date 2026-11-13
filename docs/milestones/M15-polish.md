@@ -161,7 +161,9 @@ Note: runs of touching change rows form one mark; marks are cached per load, lay
 
 Acceptance: unit tests for the mark mapping (with and without word wrap, Split halves); app tests: a click scrolls to the position, dragging follows; snapshots of a long file with changes at the top, middle and end in Inline and Split; no measurable cost while scrolling a 20,000-line diff.
 
-### [ ] M15-11 Change author of unpushed commits
+### [x] M15-11 Change author of unpushed commits
+
+Note: eligibility for the menu is computed from the loaded history (stash, operation, detached HEAD, not an ancestor of HEAD, contained in a remote-tracking branch; M14-05 texts with the short sha); `rewrite_unpushed` checks again with Git and names the blocked commit. A chosen identity fills name and e-mail in the dialog, "Other…" empties them; the editor's "Other…" opens a small name/e-mail dialog. The editor's description is 90 px high like the commit panel's (was 120). The undo variant carries its label (`UndoAction::Reword { done, label }`).
 
 - `rewrite_unpushed` with message and author edits (ADR-051 amendment); "Change author…" in the commit menu for one or several commits with its dialog; the message editor of the commit details rebuilt from the commit panel's components with the author row, picker and sparkle button.
 

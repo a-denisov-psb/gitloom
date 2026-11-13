@@ -1528,6 +1528,67 @@ mod tests {
         }
     }
 
+    /// M15-11: the message editor next to the commit panel (same parts,
+    /// paddings and button positions) and the "Change author" dialog,
+    /// Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_change_author() {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = details_app(&[
+                ("c2", "Fix the typo in the header", "Explain why."),
+                ("c1", "Initial", ""),
+            ]);
+            app.settings.appearance.theme = choice;
+            app.settings.identities.list = vec![crate::settings::SavedIdentity {
+                name: "Bo Kim".into(),
+                email: "bo@example.com".into(),
+            }];
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("c2".into()));
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(None),
+            });
+            let _ = app.update(Message::CommitEditStart);
+            snapshot(&app, &format!("change-author-editor-{theme}"));
+            let _ = app.update(Message::EditAuthorChosen(Some(git_core::Identity {
+                name: "Bo Kim".into(),
+                email: "bo@example.com".into(),
+            })));
+            snapshot(&app, &format!("change-author-editor-chosen-{theme}"));
+            // The commit panel for comparison.
+            let _ = app.update(Message::CommitEditCancel);
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("change-author-commit-panel-{theme}"));
+            // The dialog.
+            let _ = app.update(Message::ChangeAuthorStart(vec!["c2".into(), "c1".into()]));
+            if app.form.is_none() {
+                // The fixture is detached: open the dialog directly.
+                let view = app.tabs[0].view_mut().unwrap();
+                let mut snapshot = (*view.snapshot).clone();
+                snapshot.head = git_core::Head::Branch {
+                    name: "main".into(),
+                    target: "c2".into(),
+                };
+                view.snapshot = std::sync::Arc::new(snapshot);
+                let _ = app.update(Message::ChangeAuthorStart(vec!["c2".into(), "c1".into()]));
+            }
+            let _ = app.update(Message::ChangeAuthorFactsLoaded {
+                tab,
+                ids: vec!["c2".into(), "c1".into()],
+                result: Ok(git_core::reword::EditFacts {
+                    branch: "main".into(),
+                    keep_old: vec!["v1.0".into()],
+                    drops_signature: false,
+                }),
+            });
+            snapshot(&app, &format!("change-author-dialog-{theme}"));
+        }
+    }
+
     /// `ready_app` whose commits are `ages` seconds old (newest first).
     fn aged_app(ages: &[i64], now: i64) -> App {
         let ids: Vec<String> = (0..ages.len()).map(|i| format!("c{i}")).collect();

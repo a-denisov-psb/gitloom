@@ -105,6 +105,25 @@ pub struct IdentityOption {
 /// table): the saved identities, "Use global identity (<name>)" when the
 /// repository has its own values, "Save as identity" when the current one
 /// is not saved, "Add identity…" without one, "Manage identities…".
+/// "Other…" of the author choice (M15-11).
+pub const OTHER_AUTHOR: &str = "Other…";
+
+/// Authors to choose from (M15-11): the repository's current identity
+/// first, then the saved identities (without repeats).
+pub fn author_choices(
+    resolved: &git_core::ResolvedIdentity,
+    saved: &[settings::SavedIdentity],
+) -> Vec<git_core::Identity> {
+    let mut choices: Vec<git_core::Identity> = resolved.identity().into_iter().collect();
+    for entry in saved {
+        let identity = entry.identity();
+        if !choices.contains(&identity) {
+            choices.push(identity);
+        }
+    }
+    choices
+}
+
 pub fn identity_options(
     resolved: &git_core::ResolvedIdentity,
     saved: &[settings::SavedIdentity],
@@ -1150,6 +1169,20 @@ pub enum Message {
         id: String,
         result: Result<git_core::reword::EditFacts, String>,
     },
+    /// "Change author…" of the commit menu for these commits (M15-11).
+    ChangeAuthorStart(Vec<String>),
+    /// Refs that keep the old commits, for the note of the dialog.
+    ChangeAuthorFactsLoaded {
+        tab: TabId,
+        ids: Vec<String>,
+        result: Result<git_core::reword::EditFacts, String>,
+    },
+    /// Chevron of the message editor's "Authored by" row (M15-11).
+    EditAuthorMenu(iced::Point),
+    /// Author of the message editor: `None` keeps the original one.
+    EditAuthorChosen(Option<git_core::Identity>),
+    /// "Other…" in the editor's author menu: name and e-mail dialog.
+    EditAuthorOther,
     /// Save (Ctrl+Enter) / Cancel (Esc) of the message editor.
     CommitEditSave,
     CommitEditCancel,
@@ -2254,6 +2287,49 @@ impl App {
             return Task::none();
         };
         match form.action.clone() {
+            FormAction::ChangeAuthor { tab, ids } => {
+                let (name, email) = (form.value(1).to_owned(), form.value(2).to_owned());
+                if let Some(problem) = git_core::identity_problem(&name, &email) {
+                    form.error = Some(problem.to_owned());
+                    return Task::none();
+                }
+                self.form = None;
+                let author = git_core::Identity { name, email };
+                let edits: Vec<git_core::reword::CommitEdit> = ids
+                    .iter()
+                    .map(|id| git_core::reword::CommitEdit {
+                        commit: id.clone(),
+                        message: None,
+                        author: Some(author.clone()),
+                    })
+                    .collect();
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    view.multi.clear();
+                }
+                self.run_undoable(tab, "Change author", move |git| {
+                    let done = git_core::reword::rewrite_unpushed(git, &edits)?;
+                    Ok(Some(History::Push(UndoAction::Reword {
+                        done,
+                        label: "Change author".into(),
+                    })))
+                })
+            }
+            FormAction::EditorAuthor { tab } => {
+                let (name, email) = (form.value(0).to_owned(), form.value(1).to_owned());
+                if let Some(problem) = git_core::identity_problem(&name, &email) {
+                    form.error = Some(problem.to_owned());
+                    return Task::none();
+                }
+                self.form = None;
+                if let Some(edit) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.message_edit.as_mut())
+                {
+                    edit.author = Some(git_core::Identity { name, email });
+                }
+                Task::none()
+            }
             FormAction::SetUpstream { tab, local } => {
                 let upstream = form.value(0).to_owned();
                 self.form = None;
@@ -3930,9 +4006,9 @@ impl App {
                     git_core::work_undo::switch_stash_rename(git, &rename, undo)?;
                     UndoAction::StashRename(rename)
                 }
-                UndoAction::Reword(done) => {
+                UndoAction::Reword { done, label } => {
                     done.apply(git, undo)?;
-                    UndoAction::Reword(done)
+                    UndoAction::Reword { done, label }
                 }
                 UndoAction::Remote(change) => {
                     git_core::remote_undo::switch_remote_change(git, &change, undo)?;
@@ -4441,6 +4517,7 @@ impl App {
             body: iced::widget::text_editor::Content::with_text(&commit.body),
             facts: Loadable::Loading,
             error: None,
+            author: None,
         });
         let writer = Arc::clone(&view.writer);
         let facts = Task::perform(
@@ -4460,6 +4537,69 @@ impl App {
             facts,
             iced::widget::operation::focus(crate::ui::panel::MESSAGE_EDIT_SUMMARY),
         ])
+    }
+
+    /// "Change author" dialog for `ids` (M15-11): the repository's
+    /// identity first, then the saved ones, "Other…"; the note about refs
+    /// that keep the old commits arrives in the background.
+    fn change_author_dialog(&mut self, ids: Vec<String>) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        if let Some(reason) = crate::repo_view::author_change_block(&view.snapshot, &ids)
+            .or_else(|| self.write_block())
+        {
+            self.status = reason;
+            return Task::none();
+        }
+        let choices = author_choices(&view.snapshot.identity, &self.settings.identities.list);
+        let first = choices.first().cloned();
+        let mut options: Vec<String> = choices.iter().map(git_core::Identity::label).collect();
+        options.push(OTHER_AUTHOR.to_owned());
+        let (name, email) = first
+            .as_ref()
+            .map_or_else(Default::default, |i| (i.name.clone(), i.email.clone()));
+        let count = ids.len();
+        let writer = Arc::clone(&view.writer);
+        self.form = Some(Form {
+            title: "Change author".into(),
+            text: format!(
+                "Changes the author of {count} commit{}. The author dates are kept.",
+                if count == 1 { "" } else { "s" }
+            ),
+            fields: vec![
+                FormField::choice(
+                    "Author",
+                    first.map_or_else(|| OTHER_AUTHOR.to_owned(), |i| i.label()),
+                    options,
+                ),
+                FormField::text("Name", name),
+                FormField::text("E-mail", email),
+            ],
+            submit: "Change author".into(),
+            action: FormAction::ChangeAuthor {
+                tab,
+                ids: ids.clone(),
+            },
+            error: None,
+        });
+        Task::perform(
+            blocking({
+                let ids = ids.clone();
+                move || {
+                    git_core::reword::edit_facts_many(writer.as_ref(), &ids)
+                        .map_err(|e| e.to_string())
+                }
+            }),
+            move |result| Message::ChangeAuthorFactsLoaded {
+                tab,
+                ids: ids.clone(),
+                result,
+            },
+        )
     }
 
     /// Saves the edited message (ADR-051); one undo entry.
@@ -4482,9 +4622,31 @@ impl App {
             format!("{summary}\n\n{body}")
         };
         let id = edit.id.clone();
-        self.run_undoable(tab, "Edit commit message", move |git| {
-            let done = git_core::reword::reword_unpushed(git, &id, &message)?;
-            Ok(Some(History::Push(UndoAction::Reword(done))))
+        let author = edit.author.clone();
+        // Message only, author only, or both in one step (M15-11).
+        let unchanged = self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.snapshot.commit(&id))
+            .is_some_and(|commit| full_message(commit).trim_end() == message.trim_end());
+        let (label, message) = match (&author, unchanged) {
+            (Some(_), true) => ("Change author", None),
+            (Some(_), false) => ("Edit commit", Some(message)),
+            (None, _) => ("Edit commit message", Some(message)),
+        };
+        self.run_undoable(tab, label, move |git| {
+            let done = git_core::reword::rewrite_unpushed(
+                git,
+                &[git_core::reword::CommitEdit {
+                    commit: id.clone(),
+                    message: message.clone(),
+                    author: author.clone(),
+                }],
+            )?;
+            Ok(Some(History::Push(UndoAction::Reword {
+                done,
+                label: label.to_owned(),
+            })))
         })
     }
 
@@ -7746,7 +7908,7 @@ impl App {
                         }
                         Ok(Some(History::Push(action))) => {
                             // The rewritten commit stays selected (M14-05).
-                            if let UndoAction::Reword(done) = action {
+                            if let UndoAction::Reword { done, .. } = action {
                                 view.selection = Some(Selection::Commit(done.new_commit.clone()));
                                 view.message_edit = None;
                             }
@@ -8053,9 +8215,23 @@ impl App {
                         }
                     })
                     .unwrap_or_default();
+                // "Change author…" for the multi-selection when the
+                // clicked commit belongs to it (M15-11); not for stashes.
+                let author = self.active_tab().and_then(Tab::view).and_then(|view| {
+                    if view.snapshot.is_stash(&id) {
+                        return None;
+                    }
+                    let ids = if view.multi.len() > 1 && view.multi.contains(&id) {
+                        view.multi.ids().to_vec()
+                    } else {
+                        vec![id.clone()]
+                    };
+                    let block = crate::repo_view::author_change_block(&view.snapshot, &ids);
+                    Some(crate::menus::AuthorChange { ids, block })
+                });
                 self.context_menu = Some(ContextMenu::new(
                     position,
-                    crate::menus::commit(&id, &message, writable, facts, &head),
+                    crate::menus::commit(&id, &message, writable, facts, &head, author),
                 ));
             }
             Message::BranchContextMenu {
@@ -8550,6 +8726,31 @@ impl App {
                 ));
             }
             Message::FormInput { field, value } => {
+                // Change author (M15-11): a chosen identity fills name and
+                // e-mail; "Other…" empties them for typing.
+                let fill = match self.form.as_ref().map(|f| &f.action) {
+                    Some(FormAction::ChangeAuthor { .. }) if field == 0 => {
+                        let choices = self.active_tab().and_then(Tab::view).map(|view| {
+                            author_choices(&view.snapshot.identity, &self.settings.identities.list)
+                        });
+                        Some(
+                            choices
+                                .unwrap_or_default()
+                                .into_iter()
+                                .find(|identity| identity.label() == value)
+                                .map_or_else(Default::default, |i| (i.name, i.email)),
+                        )
+                    }
+                    _ => None,
+                };
+                if let Some(form) = self.form.as_mut() {
+                    if let Some((name, email)) = fill {
+                        if let [_, name_field, email_field] = form.fields.as_mut_slice() {
+                            name_field.value = name;
+                            email_field.value = email;
+                        }
+                    }
+                }
                 if let Some(field) = self.form.as_mut().and_then(|f| f.fields.get_mut(field)) {
                     field.value = value;
                 }
@@ -9024,6 +9225,82 @@ impl App {
                 }
             }
             Message::CommitEditSave => return self.save_message_edit(),
+            Message::ChangeAuthorStart(ids) => return self.change_author_dialog(ids),
+            Message::ChangeAuthorFactsLoaded { tab, ids, result } => {
+                if let Some(form) = self.form.as_mut().filter(|f| {
+                    matches!(&f.action, FormAction::ChangeAuthor { tab: t, ids: i } if *t == tab && *i == ids)
+                }) {
+                    match result {
+                        Ok(facts) => {
+                            for name in &facts.keep_old {
+                                form.text.push_str(&format!("\n{name} keeps the old commit"));
+                            }
+                            if facts.drops_signature {
+                                form.text.push_str(
+                                    "\nSignatures of the rewritten commits are removed (signing \
+                                     is off)",
+                                );
+                            }
+                        }
+                        Err(error) => form.error = Some(error),
+                    }
+                }
+            }
+            Message::EditAuthorMenu(position) => {
+                let Some(view) = self.active_tab().and_then(Tab::view) else {
+                    return Task::none();
+                };
+                let Some(edit) = view.message_edit.as_ref() else {
+                    return Task::none();
+                };
+                let mut entries = vec![MenuEntry::Item {
+                    label: "Keep original author".into(),
+                    shortcut: edit.author.is_none().then(|| "current".to_owned()),
+                    enabled: true,
+                    hint: None,
+                    message: Box::new(Message::EditAuthorChosen(None)),
+                }];
+                for identity in author_choices(&view.snapshot.identity, &self.settings.identities.list)
+                {
+                    entries.push(MenuEntry::Item {
+                        label: identity.label(),
+                        shortcut: (edit.author.as_ref() == Some(&identity))
+                            .then(|| "current".to_owned()),
+                        enabled: true,
+                        hint: None,
+                        message: Box::new(Message::EditAuthorChosen(Some(identity))),
+                    });
+                }
+                entries.push(MenuEntry::Separator);
+                entries.push(MenuEntry::item("Other…", Message::EditAuthorOther));
+                self.context_menu = Some(ContextMenu::new(position, entries));
+            }
+            Message::EditAuthorChosen(author) => {
+                if let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) {
+                    edit.author = author;
+                }
+            }
+            Message::EditAuthorOther => {
+                let Some(tab) = self.active_tab().map(|t| t.id) else {
+                    return Task::none();
+                };
+                let current = self
+                    .active_tab()
+                    .and_then(Tab::view)
+                    .and_then(|v| v.message_edit.as_ref())
+                    .and_then(|e| e.author.clone());
+                let (name, email) = current.map_or_else(Default::default, |a| (a.name, a.email));
+                self.form = Some(Form {
+                    title: "Author".into(),
+                    text: "The author of this commit after saving. The author date is kept."
+                        .into(),
+                    fields: vec![FormField::text("Name", name), FormField::text("E-mail", email)],
+                    submit: "Use".into(),
+                    action: FormAction::EditorAuthor { tab },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
             Message::MinuteTick => self.now = unix_now(),
             Message::FileListSortToggled => {
                 self.settings.file_list.descending = !self.settings.file_list.descending;
@@ -19242,6 +19519,239 @@ pub(crate) mod tests {
         app
     }
 
+    /// `editable_app` on branch `main` at c3 with c3, c2, c1 and a saved
+    /// identity (M15-11).
+    fn author_app() -> App {
+        let mut app = ready_app(&["c3", "c2", "c1"]);
+        let _ = app.update(git_available());
+        app.settings.identities.list = vec![settings::SavedIdentity {
+            name: "Bo Kim".into(),
+            email: "bo@example.com".into(),
+        }];
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.head = git_core::Head::Branch {
+            name: "main".into(),
+            target: "c3".into(),
+        };
+        let mut commits = (*snapshot.commits).clone();
+        for commit in &mut commits {
+            commit.summary = format!("Summary of {}", commit.id);
+        }
+        snapshot.commits = Arc::new(commits);
+        view.snapshot = Arc::new(snapshot);
+        app
+    }
+
+    fn author_entry(app: &mut App, id: &str) -> (bool, Option<String>, Message) {
+        let _ = app.update(Message::CommitContextMenu {
+            id: id.into(),
+            position: iced::Point::ORIGIN,
+        });
+        let menu = app.context_menu.take().unwrap();
+        menu.entries
+            .iter()
+            .find_map(|e| match e {
+                MenuEntry::Item {
+                    label,
+                    enabled,
+                    hint,
+                    message,
+                    ..
+                } if label == "Change author…" => {
+                    Some((*enabled, hint.clone(), message.as_ref().clone()))
+                }
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    /// M15-11: "Change author…" for a multi-selection, disabled with
+    /// "<short sha>: <reason>"; the dialog with the identities and
+    /// "Other…"; the undo label.
+    #[test]
+    fn change_author_menu_and_dialog() {
+        let mut app = author_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        view.multi.single("c3");
+        view.multi.toggle("c1", &["c3", "c2", "c1"]);
+        let (enabled, hint, message) = author_entry(&mut app, "c1");
+        assert!(enabled && hint.is_none());
+        assert!(matches!(&message, Message::ChangeAuthorStart(ids) if ids == &["c3", "c1"]));
+        // Outside the selection: only the clicked commit.
+        let (_, _, single) = author_entry(&mut app, "c2");
+        assert!(matches!(&single, Message::ChangeAuthorStart(ids) if ids == &["c2"]));
+        // One pushed commit blocks the whole change.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.refs.push(git_core::Reference {
+            name: "origin/main".into(),
+            kind: git_core::RefKind::RemoteBranch,
+            target: "c1".into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        });
+        view.snapshot = Arc::new(snapshot.clone());
+        let (enabled, hint, _) = author_entry(&mut app, "c1");
+        assert!(!enabled);
+        assert_eq!(
+            hint.as_deref(),
+            Some("c1: Already pushed to origin/main. Use interactive rebase to change pushed history.")
+        );
+        snapshot.refs.pop();
+        app.tabs[0].view_mut().unwrap().snapshot = Arc::new(snapshot);
+
+        // The dialog: the saved identity, "Other…", the count.
+        let _ = app.update(message);
+        let form = app.form.as_ref().unwrap();
+        assert_eq!(form.title, "Change author");
+        assert!(form.text.starts_with("Changes the author of 2 commits."));
+        let crate::overlay::FieldKind::Choice(options) = &form.fields[0].kind else {
+            panic!("no choice");
+        };
+        // The repository's identity first.
+        assert_eq!(
+            options,
+            &[
+                "Test Author <author@example.com>",
+                "Bo Kim <bo@example.com>",
+                OTHER_AUTHOR
+            ]
+        );
+        assert_eq!(
+            (form.value(1), form.value(2)),
+            ("Test Author", "author@example.com")
+        );
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: "Bo Kim <bo@example.com>".into(),
+        });
+        let form = app.form.as_ref().unwrap();
+        assert_eq!((form.value(1), form.value(2)), ("Bo Kim", "bo@example.com"));
+        // "Other…" empties name and e-mail; a bad e-mail is refused.
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: OTHER_AUTHOR.into(),
+        });
+        assert_eq!(app.form.as_ref().unwrap().value(1), "");
+        let _ = app.update(Message::FormInput {
+            field: 1,
+            value: "Cy Dee".into(),
+        });
+        let _ = app.update(Message::FormInput {
+            field: 2,
+            value: "not an email".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.as_ref().unwrap().error.is_some());
+        let _ = app.update(Message::FormInput {
+            field: 2,
+            value: "cy@example.com".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert!(app.form.is_none());
+        assert_eq!(running_args(&app), ["Change author"]);
+    }
+
+    /// M15-11: the editor's author row preselects "Keep original author";
+    /// saving with another author selects the rewritten commit and names
+    /// the undo step.
+    #[test]
+    fn editor_author_row_and_save() {
+        let mut app = author_app();
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::CommitEditStart);
+        assert_eq!(
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .message_edit
+                .as_ref()
+                .unwrap()
+                .author,
+            None
+        );
+        let _ = app.update(Message::EditAuthorMenu(iced::Point::ORIGIN));
+        let menu = app.context_menu.take().unwrap();
+        assert!(matches!(&menu.entries[0],
+            MenuEntry::Item { label, shortcut: Some(s), .. }
+                if label == "Keep original author" && s == "current"));
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, .. } if label == "Other…")));
+        let bo = git_core::Identity {
+            name: "Bo Kim".into(),
+            email: "bo@example.com".into(),
+        };
+        let _ = app.update(Message::EditAuthorChosen(Some(bo.clone())));
+        // Only the author changed.
+        let _ = app.update(Message::CommitEditSave);
+        assert_eq!(running_args(&app), ["Change author"]);
+        let done = git_core::reword::Reworded {
+            branch: "main".into(),
+            old_head: "c3".into(),
+            new_head: "n3".into(),
+            new_commit: "n2".into(),
+        };
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Change author".into(),
+            result: Ok(Some(History::Push(UndoAction::Reword {
+                done,
+                label: "Change author".into(),
+            }))),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.selection, Some(Selection::Commit("n2".into())));
+        assert!(view.message_edit.is_none());
+        assert_eq!(
+            view.undo.last().map(UndoAction::label).as_deref(),
+            Some("Change author")
+        );
+        // Message and author: "Edit commit"; "Other…" opens name and e-mail.
+        let mut app = author_app();
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab: app.tabs[0].id,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::CommitEditStart);
+        let _ = app.update(Message::EditAuthorOther);
+        assert_eq!(app.form.as_ref().unwrap().fields.len(), 2);
+        let _ = app.update(Message::FormInput {
+            field: 0,
+            value: "Cy Dee".into(),
+        });
+        let _ = app.update(Message::FormInput {
+            field: 1,
+            value: "cy@example.com".into(),
+        });
+        let _ = app.update(Message::FormSubmit);
+        assert_eq!(
+            app.tabs[0]
+                .view()
+                .unwrap()
+                .message_edit
+                .as_ref()
+                .unwrap()
+                .author,
+            Some(git_core::Identity {
+                name: "Cy Dee".into(),
+                email: "cy@example.com".into()
+            })
+        );
+        let _ = app.update(Message::CommitEditSummary("New summary".into()));
+        let _ = app.update(Message::CommitEditSave);
+        assert_eq!(running_args(&app), ["Edit commit"]);
+    }
+
     #[test]
     fn message_edit_opens_only_when_allowed() {
         let mut app = editable_app();
@@ -19349,7 +19859,10 @@ pub(crate) mod tests {
         let _ = app.update(Message::WriteFinished {
             tab,
             label: "Edit commit message".into(),
-            result: Ok(Some(History::Push(UndoAction::Reword(done)))),
+            result: Ok(Some(History::Push(UndoAction::Reword {
+                done,
+                label: "Edit commit message".into(),
+            }))),
         });
         let view = app.tabs[0].view().unwrap();
         assert!(view.message_edit.is_none());
