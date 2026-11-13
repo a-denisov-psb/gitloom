@@ -5966,6 +5966,29 @@ impl App {
 
     /// Writes the repository's editor (`None`: use the global setting) and
     /// reloads the tab (M10-11).
+    /// Start values of Preferences → Gitflow: the repository's
+    /// configuration, or the defaults when it is not initialized (the
+    /// production branch falls back to `init.defaultBranch`, M15-03).
+    fn flow_form_config(&self) -> Option<git_core::FlowConfig> {
+        let default_branch = self
+            .settings_page
+            .as_ref()
+            .and_then(|page| page.default_branch.clone())
+            .flatten();
+        self.active_tab().and_then(Tab::view).map(|view| {
+            let snapshot = &view.snapshot;
+            snapshot.flow.clone().unwrap_or_else(|| {
+                let local: Vec<&str> = snapshot
+                    .refs
+                    .iter()
+                    .filter(|r| r.kind == git_core::RefKind::LocalBranch)
+                    .map(|r| r.name.as_str())
+                    .collect();
+                git_core::FlowConfig::defaults_with(&local, default_branch.as_deref())
+            })
+        })
+    }
+
     fn write_repo_editor(&mut self, command: Option<String>) -> Task<Message> {
         let Some(writer) = self
             .active_tab()
@@ -6959,18 +6982,7 @@ impl App {
             Message::SettingsCategory(category) => {
                 // Gitflow: the form starts from the repository's values, or
                 // the defaults when it is not initialized.
-                let flow = self.active_tab().and_then(Tab::view).map(|view| {
-                    let snapshot = &view.snapshot;
-                    snapshot.flow.clone().unwrap_or_else(|| {
-                        let local: Vec<&str> = snapshot
-                            .refs
-                            .iter()
-                            .filter(|r| r.kind == git_core::RefKind::LocalBranch)
-                            .map(|r| r.name.as_str())
-                            .collect();
-                        git_core::FlowConfig::defaults(&local)
-                    })
-                });
+                let flow = self.flow_form_config();
                 // Repository categories need an open repository (the list
                 // shows them disabled otherwise).
                 let repo = self.active_repo_path();
@@ -10485,6 +10497,9 @@ impl App {
             }
             Message::SigningRefresh => return self.load_signing(),
             Message::DefaultBranchLoaded(result) => {
+                // The Gitflow form may have proposed its production branch
+                // before `init.defaultBranch` was known (M15-03).
+                let proposed = self.flow_form_config().map(|c| c.production);
                 if let Some(page) = self.settings_page.as_mut() {
                     match result {
                         Ok(value) => {
@@ -10492,6 +10507,18 @@ impl App {
                             page.default_branch = Some(value);
                         }
                         Err(error) => page.default_branch_error = Some(error),
+                    }
+                }
+                let initialized = self.active_flow_initialized() == Some(true);
+                let production = self.flow_form_config().map(|c| c.production);
+                if let (Some(page), false, Some(before), Some(after)) = (
+                    self.settings_page.as_mut(),
+                    initialized,
+                    proposed,
+                    production,
+                ) {
+                    if let Some(form) = page.flow.as_mut().filter(|f| f.values[0] == before) {
+                        form.values[0] = after;
                     }
                 }
             }
@@ -16441,6 +16468,57 @@ pub(crate) mod tests {
             use_global_editor_label("vim {path}"),
             "Use global setting (vim)"
         );
+    }
+
+    /// M15-03: without main and master the form proposes
+    /// `init.defaultBranch`, also when it arrives after the form opened.
+    #[test]
+    fn gitflow_form_proposes_the_default_branch_name() {
+        let production = |app: &App| {
+            app.settings_page
+                .as_ref()
+                .unwrap()
+                .flow
+                .as_ref()
+                .unwrap()
+                .values[0]
+                .clone()
+        };
+        let trunk_app = || {
+            let mut app = staging_app(&[], &[]);
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut repo = (*view.snapshot).clone();
+            let target = repo.commits[0].id.clone();
+            repo.flow = None;
+            repo.refs = vec![git_core::Reference {
+                name: "trunk".into(),
+                kind: git_core::RefKind::LocalBranch,
+                target,
+                is_head: true,
+                upstream: None,
+                ahead_behind: None,
+            }];
+            view.apply_snapshot(Arc::new(repo));
+            app
+        };
+        // The value arrives after the Gitflow page opened.
+        let mut app = trunk_app();
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Gitflow));
+        assert_eq!(production(&app), "main");
+        let _ = app.update(Message::DefaultBranchLoaded(Ok(Some("trunk2".into()))));
+        assert_eq!(production(&app), "trunk2");
+        // Known before the page opens.
+        let mut app = trunk_app();
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::General));
+        let _ = app.update(Message::DefaultBranchLoaded(Ok(Some("trunk2".into()))));
+        let _ = app.update(Message::SettingsCategory(settings::Category::Gitflow));
+        assert_eq!(production(&app), "trunk2");
+        // A value typed by the user stays.
+        let mut app = trunk_app();
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Gitflow));
+        let _ = app.update(Message::FlowFieldChanged(0, "prod".into()));
+        let _ = app.update(Message::DefaultBranchLoaded(Ok(Some("trunk2".into()))));
+        assert_eq!(production(&app), "prod");
     }
 
     #[test]

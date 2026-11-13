@@ -370,7 +370,10 @@ fn gitflow<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let fields = Column::with_children(crate::settings::FLOW_FIELDS.iter().enumerate().map(
         |(index, label)| {
             let note = match index {
-                0 => Some("Releases and hotfixes are merged and tagged here."),
+                0 => Some(
+                    "Releases and hotfixes are merged and tagged here. Usually main or master \
+                     of this repository.",
+                ),
                 1 => Some("Features start here; releases start from it."),
                 5 => Some("Put before the version in tag names, e.g. \"v\" for v1.2.0."),
                 _ => None,
@@ -1135,8 +1138,8 @@ fn general<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
         field(
             "Default branch name",
             default_branch.into(),
-            "Used when creating new repositories (init.defaultBranch in the global Git config); \
-             empty removes it.",
+            "Used for new repositories (init.defaultBranch in the global Git config). Empty: \
+             main is suggested. Existing repositories keep their branches.",
         ),
         field(
             "Check for updates",
