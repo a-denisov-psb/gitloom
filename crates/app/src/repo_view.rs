@@ -157,6 +157,16 @@ pub struct DiffView {
     /// Counts loads, so a late highlighting result of an older load is
     /// ignored.
     pub generation: u64,
+    /// Minimap marks of the current layout (M15-09), computed once per
+    /// load, layout and wrap width rather than per frame.
+    pub minimap: std::cell::RefCell<Option<MinimapCache>>,
+}
+
+/// Minimap marks and what they were computed for.
+#[derive(Debug, Clone)]
+pub struct MinimapCache {
+    key: (u64, usize, Option<usize>, DiffLayout),
+    pub marks: Arc<crate::diff_minimap::Marks>,
 }
 
 /// A branch being dragged: its name and kind, and the branch under the
@@ -320,6 +330,7 @@ impl DiffView {
             width: 0.0,
             highlight: None,
             generation: 0,
+            minimap: std::cell::RefCell::new(None),
         }
     }
 
@@ -333,6 +344,54 @@ impl DiffView {
             .as_deref()
             .filter(|sides| sides.theme == self.style.code_theme)
             .and_then(|sides| sides.spans_for(line))
+    }
+
+    /// Wrap columns of a diff `width` wide, `None` without word wrap.
+    fn wrap_columns(&self, width: f32) -> Option<usize> {
+        if !self.style.wrap || width <= 0.0 {
+            return None;
+        }
+        let area = crate::diff_hscroll::text_area(self.layout, width, &self.style);
+        Some(crate::diff_wrap::columns(area, self.char_width))
+    }
+
+    /// Minimap marks (M15-09) of the loaded diff laid out with `wrap` in a
+    /// diff `width` wide; from the cache while load, layout and wrap width
+    /// are unchanged.
+    pub fn minimap_marks(
+        &self,
+        wrap: Option<&crate::diff_wrap::WrapLayout>,
+        width: f32,
+    ) -> Option<Arc<crate::diff_minimap::Marks>> {
+        let Loadable::Ready(file) = &self.diff else {
+            return None;
+        };
+        let columns = wrap.and(self.wrap_columns(width));
+        let key = (self.generation, self.rows.len(), columns, self.layout);
+        if let Some(cache) = self.minimap.borrow().as_ref().filter(|c| c.key == key) {
+            return Some(Arc::clone(&cache.marks));
+        }
+        let marks = Arc::new(crate::diff_minimap::marks(&self.rows, file, wrap));
+        *self.minimap.borrow_mut() = Some(MinimapCache {
+            key,
+            marks: Arc::clone(&marks),
+        });
+        Some(marks)
+    }
+
+    /// Height of all rows in pixels (wrapped rows count their visual
+    /// lines).
+    pub fn content_height(&self) -> f32 {
+        let lines = match self.wrap_layout(self.width) {
+            Some(layout) => layout.total(),
+            None => self.rows.len() as u32,
+        };
+        lines as f32 * self.style.line_height()
+    }
+
+    /// Scroll offset after a minimap seek or wheel (M15-09), clamped.
+    pub fn clamp_offset(&self, offset: f32) -> f32 {
+        offset.clamp(0.0, (self.content_height() - self.scroll.height).max(0.0))
     }
 
     /// Word wrap layout for a diff `width` wide, `None` without wrapping
