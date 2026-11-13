@@ -65,12 +65,25 @@ impl Omitted {
     }
 }
 
+/// What the prompt describes (M15-06).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PromptSource {
+    /// The staged changes (M10-07).
+    #[default]
+    Staged,
+    /// A commit: its diff against the first parent (the empty tree for a
+    /// root commit), the commits before it.
+    Commit(String),
+}
+
 /// Everything the prompt is built from.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PromptInput {
+    pub source: PromptSource,
     /// Checked-out branch, or "detached HEAD".
     pub branch: String,
-    /// Summaries of the last commits of HEAD, newest first.
+    /// Summaries of the last commits of HEAD (or before the commit of a
+    /// [`PromptSource::Commit`]), newest first.
     pub recent: Vec<String>,
     pub files: Vec<PromptFile>,
 }
@@ -78,6 +91,7 @@ pub struct PromptInput {
 /// The finished prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
+    pub source: PromptSource,
     pub text: String,
     /// Notes for the dialog, e.g. "2 diffs omitted (size limit reached)".
     pub notes: Vec<String>,
@@ -110,7 +124,13 @@ pub fn build(instruction: &str, template: Option<&str>, input: &PromptInput) -> 
         };
         text.push_str(&format!("{} {}{counts}\n", file.status, file.path));
     }
-    text.push_str("\nStaged diff:\n");
+    match &input.source {
+        PromptSource::Staged => text.push_str("\nStaged diff:\n"),
+        PromptSource::Commit(id) => {
+            let short = id.get(..7).unwrap_or(id);
+            text.push_str(&format!("\nDiff of commit {short}:\n"));
+        }
+    }
     let mut used = 0usize;
     let mut omitted: Vec<(String, Omitted)> = Vec::new();
     for file in &input.files {
@@ -141,7 +161,11 @@ pub fn build(instruction: &str, template: Option<&str>, input: &PromptInput) -> 
             notes.push(format!("{count} {what} omitted ({})", reason.reason()));
         }
     }
-    Prompt { text, notes }
+    Prompt {
+        source: input.source.clone(),
+        text,
+        notes,
+    }
 }
 
 fn read() -> RunOptions<'static> {
@@ -161,23 +185,69 @@ fn nul_fields(stdout: &[u8]) -> Vec<String> {
 
 /// Collects branch, recent commits and the staged files with their diffs.
 pub fn gather(git: &dyn GitWriter) -> Result<PromptInput> {
+    gather_from(git, &PromptSource::Staged)
+}
+
+/// Collects the prompt input for `source` (M15-06): for a commit its files
+/// and diff against the first parent (a root commit against the empty
+/// tree) and the summaries of the first-parent commits before it.
+pub fn gather_from(git: &dyn GitWriter, source: &PromptSource) -> Result<PromptInput> {
     let (code, output) = git.run_status(&["symbolic-ref", "--short", "-q", "HEAD"], read())?;
     let branch = if code == Some(0) {
         output.stdout_text().trim().to_owned()
     } else {
         "detached HEAD".to_owned()
     };
-    let (code, output) = git.run_status(&["log", "-10", "--format=%s"], read())?;
+    let log: Vec<&str> = match source {
+        PromptSource::Staged => vec!["log", "-10", "--format=%s"],
+        PromptSource::Commit(id) => vec![
+            "log",
+            "-10",
+            "--first-parent",
+            "--skip=1",
+            "--format=%s",
+            id.as_str(),
+        ],
+    };
+    let (code, output) = git.run_status(&log, read())?;
     let recent = if code == Some(0) {
         output.stdout_text().lines().map(str::to_owned).collect()
     } else {
         Vec::new() // unborn branch
     };
+    // What is compared: the index with HEAD, or the commit with its first
+    // parent.
+    let range: Vec<String> = match source {
+        PromptSource::Staged => vec!["--cached".to_owned()],
+        PromptSource::Commit(id) => {
+            let parent = format!("{id}^1");
+            let (code, output) =
+                git.run_status(&["rev-parse", "--verify", "-q", &parent], read())?;
+            let base = if code == Some(0) {
+                output.stdout_text().trim().to_owned()
+            } else {
+                crate::external_tools::empty_tree(git)?
+            };
+            vec![base, id.clone()]
+        }
+    };
+    let diff_args = |extra: &[&str], path: Option<&str>| -> Vec<String> {
+        let mut args = vec!["diff".to_owned()];
+        args.extend(range.iter().cloned());
+        args.push("--no-renames".to_owned());
+        args.extend(extra.iter().map(|a| (*a).to_owned()));
+        if let Some(path) = path {
+            args.push("--".to_owned());
+            args.push(path.to_owned());
+        }
+        args
+    };
+    let run = |args: Vec<String>| {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        git.run(&args, read())
+    };
     // `<added>\t<removed>\t<path>\0`, "-" for binary files.
-    let numstat = git.run(
-        &["diff", "--cached", "--no-renames", "--numstat", "-z"],
-        read(),
-    )?;
+    let numstat = run(diff_args(&["--numstat", "-z"], None))?;
     let counts: Vec<(String, Option<(u64, u64)>)> = nul_fields(&numstat.stdout)
         .into_iter()
         .filter_map(|record| {
@@ -187,10 +257,7 @@ pub fn gather(git: &dyn GitWriter) -> Result<PromptInput> {
             Some((path.to_owned(), counts))
         })
         .collect();
-    let status = git.run(
-        &["diff", "--cached", "--no-renames", "--name-status", "-z"],
-        read(),
-    )?;
+    let status = run(diff_args(&["--name-status", "-z"], None))?;
     let fields = nul_fields(&status.stdout);
     let mut files = Vec::new();
     for pair in fields.chunks(2) {
@@ -198,25 +265,29 @@ pub fn gather(git: &dyn GitWriter) -> Result<PromptInput> {
         let counts = counts.iter().find(|(p, _)| p == path).and_then(|(_, c)| *c);
         let diff = if counts.is_none() {
             Err(Omitted::Binary)
-        } else if staged_size(git, path)? > MAX_FILE_BYTES {
+        } else if blob_size(git, source, path)? > MAX_FILE_BYTES {
             Err(Omitted::TooLarge)
         } else {
-            Ok(git
-                .run(&["diff", "--cached", "--no-renames", "--", path], read())?
-                .stdout_text())
+            Ok(run(diff_args(&[], Some(path)))?.stdout_text())
         };
         files.push(PromptFile::new(letter, path, counts, diff));
     }
     Ok(PromptInput {
+        source: source.clone(),
         branch,
         recent,
         files,
     })
 }
 
-/// Size of the staged blob of `path` (0 for a deleted file).
-fn staged_size(git: &dyn GitWriter, path: &str) -> Result<u64> {
-    let (code, output) = git.run_status(&["cat-file", "-s", &format!(":{path}")], read())?;
+/// Size of the staged blob of `path`, or of `path` in the commit (0 for a
+/// deleted file).
+fn blob_size(git: &dyn GitWriter, source: &PromptSource, path: &str) -> Result<u64> {
+    let object = match source {
+        PromptSource::Staged => format!(":{path}"),
+        PromptSource::Commit(id) => format!("{id}:{path}"),
+    };
+    let (code, output) = git.run_status(&["cat-file", "-s", &object], read())?;
     Ok(if code == Some(0) {
         output.stdout_text().trim().parse().unwrap_or(0)
     } else {
@@ -230,6 +301,7 @@ mod tests {
 
     fn input(files: Vec<PromptFile>) -> PromptInput {
         PromptInput {
+            source: PromptSource::Staged,
             branch: "main".into(),
             recent: vec!["Add parser".into(), "Fix tests".into()],
             files,

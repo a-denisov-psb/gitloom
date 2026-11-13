@@ -597,39 +597,34 @@ fn message_box<'a>(
     if let Some(edit) = view.message_edit.as_ref().filter(|e| e.id == commit.id) {
         return message_editor(edit);
     }
-    let block = view.message_edit_block(&commit.id);
-    let editable = block == Some(None) && view.busy.is_none();
     let plain = || -> Element<'a, Message> {
         column![text(&commit.summary).size(16)]
             .push((!commit.body.is_empty()).then(|| text(&commit.body)))
             .spacing(8)
             .into()
     };
-    let inner: Element<'a, Message> = if editable {
-        // A click opens the editor (M14-05); plain text so the click is
-        // not taken by the selection.
-        plain()
-    } else {
-        match view.message_box.as_ref().filter(|m| m.id == commit.id) {
-            Some(message) => {
-                let summary = text_editor(&message.summary)
-                    .size(16)
+    // Always the selectable text (M15-06): a click on it no longer opens
+    // the editor, the pencil does.
+    let inner: Element<'a, Message> = match view.message_box.as_ref().filter(|m| m.id == commit.id)
+    {
+        Some(message) => {
+            let summary = text_editor(&message.summary)
+                .size(16)
+                .padding(0)
+                .style(theme::message_text)
+                .on_action(|action| Message::DetailsTextInput {
+                    body: false,
+                    action,
+                });
+            let body = (!commit.body.is_empty()).then(|| {
+                text_editor(&message.body)
                     .padding(0)
                     .style(theme::message_text)
-                    .on_action(|action| Message::DetailsTextInput {
-                        body: false,
-                        action,
-                    });
-                let body = (!commit.body.is_empty()).then(|| {
-                    text_editor(&message.body)
-                        .padding(0)
-                        .style(theme::message_text)
-                        .on_action(|action| Message::DetailsTextInput { body: true, action })
-                });
-                column![summary].push(body).spacing(8).into()
-            }
-            None => plain(),
+                    .on_action(|action| Message::DetailsTextInput { body: true, action })
+            });
+            column![summary].push(body).spacing(8).into()
         }
+        None => plain(),
     };
     let framed: Element<'a, Message> =
         container(crate::ui::vscroll(container(inner).padding(10).width(Fill)))
@@ -637,17 +632,54 @@ fn message_box<'a>(
             .width(Fill)
             .style(theme::message_box)
             .into();
-    if editable {
-        let clickable = iced::widget::mouse_area(framed)
-            .on_press(Message::CommitEditStart)
-            .interaction(iced::mouse::Interaction::Text);
-        with_tooltip_text(clickable.into(), "Click to edit the message".into())
-    } else {
-        match block {
-            Some(Some(reason)) => with_tooltip_text(framed, reason),
-            _ => framed,
-        }
+    match edit_icon(view, &commit.id) {
+        Some(icon) => iced::widget::hover(
+            framed,
+            container(icon)
+                .width(Fill)
+                .align_x(iced::Right)
+                .padding(iced::Padding::ZERO.top(4).right(6)),
+        ),
+        None => framed,
     }
+}
+
+/// The edit state of the details' commit `id` as the pencil shows it
+/// (M15-06): `None` without a pencil (stashes, still checking),
+/// `Some(Ok(()))` enabled, `Some(Err(reason))` muted with the reason.
+pub(crate) fn edit_icon_state(view: &RepoView, id: &str) -> Option<Result<(), String>> {
+    if view.snapshot.is_stash(id) {
+        return None;
+    }
+    match view.message_edit_block(id)? {
+        Some(reason) => Some(Err(reason)),
+        None => match &view.busy {
+            Some(busy) => Some(Err(format!("Busy: {busy}"))),
+            None => Some(Ok(())),
+        },
+    }
+}
+
+/// Pencil at the top right of the message box, shown while the box is
+/// hovered (M15-06); the tooltip is on the icon only.
+fn edit_icon<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>> {
+    let state = edit_icon_state(view, id)?;
+    let tint: fn(&theme::ThemePalette) -> iced::Color = if state.is_ok() {
+        |p| p.text
+    } else {
+        |p| p.text_muted
+    };
+    let icon = crate::icons::tinted(crate::icons::Icon::Pencil, 14.0, tint);
+    let button = button(container(icon).center(Fill))
+        .on_press_maybe(state.is_ok().then_some(Message::CommitEditStart))
+        .padding(0)
+        .width(22)
+        .height(22)
+        .style(theme::flat);
+    let tip = state
+        .err()
+        .unwrap_or_else(|| "Edit the commit message".to_owned());
+    Some(with_tooltip_text(button.into(), tip))
 }
 
 /// Inline message editor (M14-05): summary with the commit panel's
@@ -676,6 +708,26 @@ fn message_editor(edit: &crate::repo_view::MessageEdit) -> Element<'_, Message> 
             .align_y(iced::Center)
             .padding(iced::Padding::ZERO.right(8)),
     ];
+    // Prompt for this commit at the right of the summary row (M15-06), like
+    // the sparkle of "Committing as …".
+    let sparkle = with_tooltip_text(
+        button(
+            container(crate::icons::tinted(
+                crate::icons::Icon::Sparkles,
+                13.0,
+                |p| p.text_muted,
+            ))
+            .center(Fill),
+        )
+        .on_press(Message::CommitPromptRequested(edit.id.clone()))
+        .padding(0)
+        .width(22)
+        .height(22)
+        .style(theme::flat)
+        .into(),
+        "Copy commit message prompt…".to_owned(),
+    );
+    let summary = row![summary, sparkle].spacing(4).align_y(iced::Center);
     let body = text_editor(&edit.body)
         .placeholder("Description")
         .padding(6)

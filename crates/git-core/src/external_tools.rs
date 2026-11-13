@@ -211,7 +211,7 @@ pub fn run_mergetool(
 }
 
 /// Id of the empty tree in this repository's hash format.
-fn empty_tree(git: &dyn GitWriter) -> Result<String> {
+pub(crate) fn empty_tree(git: &dyn GitWriter) -> Result<String> {
     let output = git.run(
         &["mktree"],
         RunOptions {

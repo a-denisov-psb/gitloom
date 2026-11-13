@@ -1226,10 +1226,33 @@ mod tests {
         snapshot(&app, "file-list-path-all-light");
     }
 
-    /// Message editor in the details with the note about other refs
-    /// (M14-05); a click on the box opens it. Layout part runs always.
+    /// Messages of hovering and clicking every few pixels along the line
+    /// `y` from `x` for `length` pixels.
+    fn clicks_along(app: &App, x: f32, y: f32, length: f32) -> Vec<Message> {
+        use iced::mouse::{Button, Event as Mouse};
+        use iced::{Event, Point};
+        let mut messages = Vec::new();
+        let mut at_x = x;
+        while at_x < x + length {
+            let at = Point::new(at_x, y);
+            let mut sim = simulator(app);
+            sim.point_at(at);
+            let _ = sim.simulate(vec![
+                Event::Mouse(Mouse::CursorMoved { position: at }),
+                Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+                Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+            ]);
+            messages.extend(sim.into_messages());
+            at_x += 3.0;
+        }
+        messages
+    }
+
+    /// The message box (M15-06): a click on the text does not open the
+    /// editor, the pencil at its top right does; a blocked pencil does
+    /// nothing. Layout only, so part of every test run.
     #[test]
-    fn message_box_click_opens_the_editor() {
+    fn message_box_pencil_opens_the_editor() {
         let mut app = details_app(&[("c2", "Fix the typo", "Body text"), ("c1", "Initial", "")]);
         let _ = app.update(Message::CommitSelected("c2".into()));
         let tab = app.tabs[0].id;
@@ -1238,18 +1261,38 @@ mod tests {
             id: "c2".into(),
             result: Ok(None),
         });
-        let messages: Vec<Message> = {
-            let mut sim = simulator(&app);
-            sim.click("Body text")
-                .unwrap_or_else(|e| panic!("no box: {e}"));
-            sim.into_messages().collect()
-        };
-        assert!(
+        let starts = |messages: &[Message]| {
             messages
                 .iter()
-                .any(|m| matches!(m, Message::CommitEditStart)),
-            "{messages:?}"
-        );
+                .any(|m| matches!(m, Message::CommitEditStart))
+        };
+        // The box lies below "commit: <sha>"; the pencil at its top right.
+        let header = {
+            let mut sim = simulator(&app);
+            let found = sim.find("commit:").unwrap();
+            iced_test::selector::Bounded::bounds(&found)
+        };
+        let top = header.y + header.height;
+        // A click on the text (left part of the box) does not edit.
+        let text_clicks = clicks_along(&app, header.x - 60.0, top + 30.0, 120.0);
+        assert!(!starts(&text_clicks), "{text_clicks:?}");
+        let pencil = |app: &App| {
+            let mut messages = Vec::new();
+            let mut y = top + 4.0;
+            while y < top + 50.0 {
+                messages.extend(clicks_along(app, SIZE.0 - 90.0, y, 90.0));
+                y += 4.0;
+            }
+            messages
+        };
+        assert!(starts(&pencil(&app)));
+        // Blocked: the pencil is shown muted and does nothing.
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(Some("Check out a branch that contains this commit".into())),
+        });
+        assert!(!starts(&pencil(&app)));
     }
 
     #[test]
@@ -1271,6 +1314,41 @@ mod tests {
             result: Ok(None),
         });
         snapshot(&app, "message-edit-idle");
+        // M15-06: the hovered box with its pencil, enabled and blocked.
+        let hovered = |app: &App, name: &str| {
+            let path = fresh_path(name);
+            let mut sim = simulator(app);
+            // Inside the box, below "commit: <sha>".
+            let found = sim.find("commit:").unwrap();
+            let header = iced_test::selector::Bounded::bounds(&found);
+            let at = iced::Point::new(header.x, header.y + header.height + 30.0);
+            sim.point_at(at);
+            let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: at,
+            })]);
+            let snap = sim.snapshot(&app.theme()).unwrap();
+            assert!(snap.matches_image(&path).unwrap());
+        };
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            app.settings.appearance.theme = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            hovered(&app, &format!("message-pencil-enabled-{theme}"));
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(git_core::reword::EditBlock::NotOnBranch.reason())),
+            });
+            hovered(&app, &format!("message-pencil-blocked-{theme}"));
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(None),
+            });
+        }
+        app.settings.appearance.theme = crate::settings::ThemeChoice::Dark;
         let _ = app.update(Message::CommitEditStart);
         let _ = app.update(Message::CommitEditFactsLoaded {
             tab,
@@ -1466,6 +1544,7 @@ mod tests {
     fn ui_check_commit_prompt() {
         let mut app = ready_app(&["c"]);
         let input = git_core::prompt::PromptInput {
+            source: git_core::prompt::PromptSource::Staged,
             branch: "feature/login".into(),
             recent: vec!["Add login form".into(), "Set up the project".into()],
             files: vec![

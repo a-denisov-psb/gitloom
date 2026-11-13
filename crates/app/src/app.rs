@@ -791,6 +791,9 @@ pub enum Message {
     /// "Copy commit message prompt…" (M10-07).
     CopyPromptRequested,
     PromptReady(Result<git_core::prompt::Prompt, String>),
+    /// "Copy commit message prompt…" for a commit, from its message editor
+    /// (M15-06).
+    CommitPromptRequested(String),
     PromptCopy,
     PromptClosed,
     /// Ctrl+C that no widget handled (copies the open prompt).
@@ -5966,6 +5969,32 @@ impl App {
 
     /// Writes the repository's editor (`None`: use the global setting) and
     /// reloads the tab (M10-11).
+    /// Builds the commit message prompt for `source` in the background
+    /// (M10-07, M15-06).
+    fn prompt_task(&self, source: git_core::prompt::PromptSource) -> Task<Message> {
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let writer = Arc::clone(&view.writer);
+        let instruction = self.settings.templates.commit_prompt.clone();
+        let options = &view.snapshot.template_options;
+        let template = view.snapshot.commit_template.as_ref().map(|t| {
+            if options.remove_comments {
+                git_core::commit_template::strip_comment_lines(t, &options.comment_char)
+            } else {
+                t.clone()
+            }
+        });
+        Task::perform(
+            blocking(move || {
+                git_core::prompt::gather_from(writer.as_ref(), &source)
+                    .map(|input| git_core::prompt::build(&instruction, template.as_deref(), &input))
+                    .map_err(|e| e.to_string())
+            }),
+            Message::PromptReady,
+        )
+    }
+
     /// Start values of Preferences → Gitflow: the repository's
     /// configuration, or the defaults when it is not initialized (the
     /// production branch falls back to `init.defaultBranch`, M15-03).
@@ -10252,29 +10281,10 @@ impl App {
                     self.status = reason;
                     return Task::none();
                 }
-                let Some(view) = self.active_tab().and_then(Tab::view) else {
-                    return Task::none();
-                };
-                let writer = Arc::clone(&view.writer);
-                let instruction = self.settings.templates.commit_prompt.clone();
-                let options = &view.snapshot.template_options;
-                let template = view.snapshot.commit_template.as_ref().map(|t| {
-                    if options.remove_comments {
-                        git_core::commit_template::strip_comment_lines(t, &options.comment_char)
-                    } else {
-                        t.clone()
-                    }
-                });
-                return Task::perform(
-                    blocking(move || {
-                        git_core::prompt::gather(writer.as_ref())
-                            .map(|input| {
-                                git_core::prompt::build(&instruction, template.as_deref(), &input)
-                            })
-                            .map_err(|e| e.to_string())
-                    }),
-                    Message::PromptReady,
-                );
+                return self.prompt_task(git_core::prompt::PromptSource::Staged);
+            }
+            Message::CommitPromptRequested(id) => {
+                return self.prompt_task(git_core::prompt::PromptSource::Commit(id));
             }
             Message::PromptReady(Ok(prompt)) => self.prompt_dialog = Some(prompt),
             Message::PromptReady(Err(error)) => {
@@ -16447,6 +16457,7 @@ pub(crate) mod tests {
 
     fn prompt() -> git_core::prompt::Prompt {
         git_core::prompt::Prompt {
+            source: git_core::prompt::PromptSource::Staged,
             text: "Write a commit message.\n\nBranch: main\n".into(),
             notes: vec!["1 diff omitted (binary)".into()],
         }
@@ -16521,6 +16532,64 @@ pub(crate) mod tests {
         let _ = app.update(Message::FlowFieldChanged(0, "prod".into()));
         let _ = app.update(Message::DefaultBranchLoaded(Ok(Some("trunk2".into()))));
         assert_eq!(production(&app), "prod");
+    }
+
+    /// M15-06: the pencil's state carries each reason of M14-05; stashes
+    /// have no pencil; the commit prompt names its commit.
+    #[test]
+    fn message_pencil_states_and_commit_prompt() {
+        use crate::ui::panel::edit_icon_state;
+        let mut app = ready_app(&["c2", "c1"]);
+        let _ = app.update(git_available());
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let tab = app.tabs[0].id;
+        let state = |app: &App| edit_icon_state(app.tabs[0].view().unwrap(), "c2");
+        assert_eq!(state(&app), None, "still checking");
+        for block in [
+            git_core::reword::EditBlock::Pushed("origin/main".into()),
+            git_core::reword::EditBlock::NotOnBranch,
+        ] {
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(block.reason())),
+            });
+            assert_eq!(state(&app), Some(Err(block.reason())));
+        }
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        assert_eq!(state(&app), Some(Ok(())));
+        // An operation that started later wins.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        snapshot.state = git_core::RepoState::Merging {
+            merge_head: "x".into(),
+        };
+        view.snapshot = Arc::new(snapshot.clone());
+        assert_eq!(
+            state(&app),
+            Some(Err(git_core::reword::EditBlock::OperationRunning.reason()))
+        );
+        // Busy.
+        let view = app.tabs[0].view_mut().unwrap();
+        snapshot.state = git_core::RepoState::Clean;
+        view.snapshot = Arc::new(snapshot);
+        view.busy = Some("Fetching".into());
+        assert_eq!(state(&app), Some(Err("Busy: Fetching".into())));
+        // Stashes have no pencil.
+        let app = graph_app();
+        assert_eq!(edit_icon_state(app.tabs[0].view().unwrap(), "s"), None);
+        // The commit prompt dialog names the commit.
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::PromptReady(Ok(git_core::prompt::Prompt {
+            source: git_core::prompt::PromptSource::Commit("0123456789abcdef".into()),
+            text: "Diff of commit 0123456:\n".into(),
+            notes: Vec::new(),
+        })));
+        assert!(app.prompt_dialog.is_some());
     }
 
     #[test]
