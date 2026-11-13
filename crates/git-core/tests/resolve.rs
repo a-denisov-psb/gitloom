@@ -221,3 +221,172 @@ fn large_conflicts_take_a_whole_side() {
     resolve_with_side(&cli, "big.txt", Side::Ours).unwrap();
     assert_eq!(unmerged(&repo), "");
 }
+
+// M15-01: conflicts in UTF-16, UTF-8 with a byte order mark and 8-bit text.
+
+fn utf16(text: &str, little: bool) -> Vec<u8> {
+    let mut out = if little {
+        vec![0xFF, 0xFE]
+    } else {
+        vec![0xFE, 0xFF]
+    };
+    for unit in text.encode_utf16() {
+        out.extend(if little {
+            unit.to_le_bytes()
+        } else {
+            unit.to_be_bytes()
+        });
+    }
+    out
+}
+
+/// Like [`conflict`] with raw bytes per version.
+fn byte_conflict(path: &str, base: &[u8], ours: &[u8], theirs: &[u8]) -> TestRepo {
+    let repo = TestRepo::new();
+    let commit = |data: &[u8], message: &str| {
+        std::fs::write(repo.path().join(path), data).unwrap();
+        repo.git(&["add", "--", path]);
+        repo.git(&["commit", "--quiet", "-m", message]);
+    };
+    commit(base, "base");
+    repo.branch("topic");
+    commit(ours, "ours");
+    repo.checkout("topic");
+    commit(theirs, "theirs");
+    repo.checkout("main");
+    assert!(!repo.try_git(&["merge", "topic"]));
+    repo
+}
+
+/// Loads the text conflict, takes theirs and resolves; returns the
+/// encoding, the working tree file and stage 0.
+fn take_theirs(repo: &TestRepo) -> (git_core::ConflictEncoding, Vec<u8>, Vec<u8>) {
+    let cli = CliBackend::new(repo.path());
+    let loaded = load_conflict(&cli, "a.txt").unwrap();
+    let ConflictContent::Text(text) = loaded.content else {
+        panic!("not a text conflict: {:?}", loaded.content);
+    };
+    let mut picks = Picks::new(&text);
+    picks.take_all(Side::Theirs);
+    let output = text.output(&picks, ("HEAD", "topic"));
+    resolve_conflict(&cli, "a.txt", output.as_bytes()).unwrap();
+    assert_eq!(unmerged(repo), "");
+    (
+        loaded.encoding,
+        std::fs::read(repo.path().join("a.txt")).unwrap(),
+        repo.git_bytes(&["cat-file", "blob", ":a.txt"]),
+    )
+}
+
+#[test]
+fn utf16_le_with_bom_and_crlf_is_a_text_conflict() {
+    // The maintainer's PowerShell-written readme.md starts like this.
+    let base = utf16("\r\nasdf\r\n", true);
+    assert_eq!(
+        base,
+        [
+            0xFF, 0xFE, 0x0D, 0x00, 0x0A, 0x00, 0x61, 0x00, 0x73, 0x00, 0x64, 0x00, 0x66, 0x00,
+            0x0D, 0x00, 0x0A, 0x00
+        ]
+    );
+    let repo = byte_conflict(
+        "a.txt",
+        &base,
+        &utf16("\r\nasdf ours\r\nä\r\n", true),
+        &utf16("\r\nasdf theirs\r\nä\r\n", true),
+    );
+    let (encoding, file, stage) = take_theirs(&repo);
+    assert_eq!(encoding, git_core::ConflictEncoding::Utf16Le);
+    let expected = utf16("\r\nasdf theirs\r\nä\r\n", true);
+    assert_eq!(file, expected);
+    assert_eq!(stage, expected);
+}
+
+#[test]
+fn utf16_be_is_a_text_conflict() {
+    let repo = byte_conflict(
+        "a.txt",
+        &utf16("1\n2\n3\n", false),
+        &utf16("1\nours\n3\n", false),
+        &utf16("1\ntheirs ü\n3\n", false),
+    );
+    let (encoding, file, stage) = take_theirs(&repo);
+    assert_eq!(encoding, git_core::ConflictEncoding::Utf16Be);
+    let expected = utf16("1\ntheirs ü\n3\n", false);
+    assert_eq!(file, expected);
+    assert_eq!(stage, expected);
+}
+
+#[test]
+fn utf8_with_bom_keeps_the_mark_of_ours() {
+    let bom = |text: &str| [&[0xEF, 0xBB, 0xBF][..], text.as_bytes()].concat();
+    let repo = byte_conflict(
+        "a.txt",
+        &bom("1\n2\n3\n"),
+        &bom("1\nours\n3\n"),
+        // Theirs dropped the mark: still UTF-8, the output follows ours.
+        b"1\ntheirs\n3\n",
+    );
+    let (encoding, file, stage) = take_theirs(&repo);
+    assert_eq!(encoding, git_core::ConflictEncoding::Utf8Bom);
+    assert_eq!(file, bom("1\ntheirs\n3\n"));
+    assert_eq!(stage, bom("1\ntheirs\n3\n"));
+}
+
+#[test]
+fn eight_bit_text_round_trips_byte_for_byte() {
+    let repo = byte_conflict(
+        "a.txt",
+        b"caf\xe9\n2\n3\n",
+        b"caf\xe9\nours \xfc\n3\n",
+        b"caf\xe9\ntheirs \xe4\xff\x80\n3\n",
+    );
+    let (encoding, file, stage) = take_theirs(&repo);
+    assert_eq!(encoding, git_core::ConflictEncoding::EightBit);
+    assert_eq!(file, b"caf\xe9\ntheirs \xe4\xff\x80\n3\n");
+    assert_eq!(stage, b"caf\xe9\ntheirs \xe4\xff\x80\n3\n");
+}
+
+#[test]
+fn eight_bit_output_rejects_characters_it_cannot_store() {
+    let repo = byte_conflict("a.txt", b"\xe9\n", b"\xe9 ours\n", b"\xe9 theirs\n");
+    let error = resolve_conflict(&CliBackend::new(repo.path()), "a.txt", "€\n".as_bytes())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("8-bit"), "{error}");
+    assert_eq!(unmerged(&repo), "a.txt");
+}
+
+#[test]
+fn mixed_encodings_take_a_whole_side() {
+    let repo = byte_conflict(
+        "a.txt",
+        &utf16("1\n", true),
+        &utf16("ours\n", true),
+        "theirs ä\n".as_bytes(),
+    );
+    let cli = CliBackend::new(repo.path());
+    assert_eq!(
+        load_conflict(&cli, "a.txt").unwrap().content,
+        ConflictContent::WholeFile(WholeFileReason::MixedEncodings {
+            first: git_core::ConflictEncoding::Utf16Le,
+            second: git_core::ConflictEncoding::Utf8,
+        })
+    );
+    // ASCII on one side does not fit UTF-16 either.
+    let repo = byte_conflict("a.txt", &utf16("1\n", true), &utf16("2\n", true), b"3\n");
+    assert!(matches!(
+        load_conflict(&CliBackend::new(repo.path()), "a.txt")
+            .unwrap()
+            .content,
+        ConflictContent::WholeFile(WholeFileReason::MixedEncodings { .. })
+    ));
+}
+
+#[test]
+fn ascii_fits_eight_bit_text() {
+    let repo = byte_conflict("a.txt", b"1\n2\n", b"1\nours\n", b"1\ntheirs \xe9\n");
+    let (encoding, file, _) = take_theirs(&repo);
+    assert_eq!(encoding, git_core::ConflictEncoding::EightBit);
+    assert_eq!(file, b"1\ntheirs \xe9\n");
+}

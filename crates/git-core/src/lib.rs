@@ -106,7 +106,8 @@ pub use reset::{
 };
 pub use resolve::{
     conflict_stages, load_conflict, resolve_conflict, resolve_with_side, ConflictContent,
-    ConflictStages, LoadedConflict, StageEntry, WholeFileReason, MAX_CONFLICT_SIZE,
+    ConflictEncoding, ConflictStages, LoadedConflict, StageEntry, WholeFileReason,
+    MAX_CONFLICT_SIZE,
 };
 pub use rewrite::{reword_commit, squash_commits};
 pub use ssh::{SshConfig, SshSetting};

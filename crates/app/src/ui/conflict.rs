@@ -2,7 +2,9 @@
 //! left, "theirs" top right with checkboxes per hunk and line, the editable
 //! output below.
 
-use git_core::{Chunk, ConflictContent, ConflictText, PickState, Side, WholeFileReason};
+use git_core::{
+    Chunk, ConflictContent, ConflictEncoding, ConflictText, PickState, Side, WholeFileReason,
+};
 use iced::widget::{
     button, checkbox, column, container, row, scrollable, space, text, text_editor, Column,
 };
@@ -40,9 +42,16 @@ pub fn view<'a>(
             .on_press(Message::DiffClosed)
     ]
     .spacing(6);
-    let title = row![text(&conflict.path).size(14), space::horizontal()]
+    let mut title = row![text(&conflict.path).size(14)]
         .spacing(8)
         .align_y(iced::Center);
+    // Encoding next to the path like the diff header (M7-17, M15-01).
+    if let Loadable::Ready(loaded) = &conflict.loaded {
+        if loaded.encoding != ConflictEncoding::Utf8 {
+            title = title.push(muted(loaded.encoding.label()).size(12));
+        }
+    }
+    let title = title.push(space::horizontal());
 
     let body: Element<'a, Message> = match &conflict.loaded {
         Loadable::Loading => muted("Loading conflict…").into(),
@@ -337,28 +346,43 @@ fn side_panel<'a>(
     .into()
 }
 
+/// Explanation for versions in different encodings (M15-01).
+pub fn mixed_encodings_text(first: ConflictEncoding, second: ConflictEncoding) -> String {
+    format!(
+        "The sides use different encodings ({}, {}). Take one side's file:",
+        first.label(),
+        second.label()
+    )
+}
+
 fn whole_file<'a>(repo: &RepoView, reason: WholeFileReason, idle: bool) -> Element<'a, Message> {
     let (explanation, ours_label, theirs_label) = match reason {
         WholeFileReason::TooLarge => (
             "This file is larger than 2 MB, so the conflict view is not shown. Take one \
-             side's file:",
+             side's file:"
+                .to_owned(),
             "Take ours",
             "Take theirs",
         ),
         WholeFileReason::Binary => (
-            "This file is binary (or not UTF-8), so lines cannot be picked. Take one side's file:",
+            "This file is binary, so lines cannot be picked. Take one side's file:".to_owned(),
+            "Take ours",
+            "Take theirs",
+        ),
+        WholeFileReason::MixedEncodings { first, second } => (
+            mixed_encodings_text(first, second),
             "Take ours",
             "Take theirs",
         ),
         WholeFileReason::DeletedOnOneSide { ours_deleted: true } => (
-            "Ours deleted this file, theirs changed it.",
+            "Ours deleted this file, theirs changed it.".to_owned(),
             "Delete the file",
             "Keep theirs",
         ),
         WholeFileReason::DeletedOnOneSide {
             ours_deleted: false,
         } => (
-            "Ours changed this file, theirs deleted it.",
+            "Ours changed this file, theirs deleted it.".to_owned(),
             "Keep ours",
             "Delete the file",
         ),
