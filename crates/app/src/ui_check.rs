@@ -1514,16 +1514,32 @@ mod tests {
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_repository_editor() {
-        let mut app = ready_app(&["c"]);
-        app.settings.tools.editor_command = "code {path}".into();
-        let view = app.tabs[0].view_mut().unwrap();
-        let mut repo = (*view.snapshot).clone();
-        repo.repo_editor = Some("idea {path}".into());
-        view.apply_snapshot(std::sync::Arc::new(repo));
-        let _ = app.update(Message::SettingsOpenedAt(
-            crate::settings::Category::RepoEditor,
-        ));
-        snapshot(&app, "repository-editor");
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = ready_app(&["c"]);
+            app.settings.appearance.theme = choice;
+            app.settings.tools.editor_command = "code {path}".into();
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut repo = (*view.snapshot).clone();
+            repo.repo_editor = Some("idea {path}".into());
+            view.apply_snapshot(std::sync::Arc::new(repo));
+            let _ = app.update(Message::SettingsOpenedAt(
+                crate::settings::Category::RepoEditor,
+            ));
+            snapshot(&app, &format!("repository-editor-{theme}"));
+            // M15-02: a long global command; back to the global setting.
+            app.settings.tools.editor_command =
+                r#""C:\Users\maintainer\AppData\Local\Programs\Zed\Zed.exe" --new-window {path}"#
+                    .into();
+            let label = crate::app::use_global_editor_label(&app.settings.tools.editor_command);
+            let _ = app.update(Message::RepoEditorChosen("Custom".into()));
+            let _ = app.update(Message::RepoEditorChosen(label));
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut repo = (*view.snapshot).clone();
+            repo.repo_editor = None;
+            view.apply_snapshot(std::sync::Arc::new(repo));
+            snapshot(&app, &format!("repository-editor-global-{theme}"));
+        }
     }
 
     /// Stash node and label (M11-05): dashed square with the archive icon,

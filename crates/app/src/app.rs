@@ -6627,6 +6627,11 @@ impl App {
             Message::RepoEditorChosen(choice) => {
                 let global = self.settings.tools.editor_command.clone();
                 if choice == use_global_editor_label(&global) {
+                    // Leaves Custom too (M15-02); the input is cleared by
+                    // `write_repo_editor`.
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.repo_editor_custom = false;
+                    }
                     return self.write_repo_editor(None);
                 }
                 let preset = settings::EditorPreset::ALL
@@ -12040,13 +12045,9 @@ pub fn resolve_editor(repository: Option<&str>, global: &str) -> String {
 
 /// First entry of the repository editor list (M10-11).
 pub fn use_global_editor_label(global: &str) -> String {
-    let preset = settings::EditorPreset::of(global);
-    let name = match preset {
-        settings::EditorPreset::None => "none".to_owned(),
-        settings::EditorPreset::Custom => global.trim().to_owned(),
-        preset => preset.label().to_owned(),
-    };
-    format!("Use global setting ({name})")
+    // The editor's name, not the command: a long path does not fit the
+    // picker (M15-02); the full command is shown below it.
+    format!("Use global setting ({})", settings::editor_name(global))
 }
 
 /// Dropdown entry for a custom stash message template (M10-10).
@@ -16438,8 +16439,72 @@ pub(crate) mod tests {
         assert_eq!(use_global_editor_label(""), "Use global setting (none)");
         assert_eq!(
             use_global_editor_label("vim {path}"),
-            "Use global setting (vim {path})"
+            "Use global setting (vim)"
         );
+    }
+
+    #[test]
+    fn editor_names_for_labels() {
+        use settings::editor_name;
+        // Every preset by its template.
+        for preset in settings::EditorPreset::ALL {
+            if let Some(template) = preset.template().filter(|t| !t.is_empty()) {
+                assert_eq!(editor_name(template), preset.label());
+            }
+        }
+        assert_eq!(editor_name(""), "none");
+        assert_eq!(editor_name("code --wait {path}"), "VS Code");
+        assert_eq!(editor_name("/usr/bin/codium -n {path}"), "VSCodium");
+        assert_eq!(
+            editor_name(r#""C:\Program Files\Sublime Text\sublime_text.exe" {path}"#),
+            "Sublime Text"
+        );
+        assert_eq!(editor_name("idea64.exe {path}"), "IntelliJ IDEA");
+        assert_eq!(
+            editor_name(r#""C:\Users\me\AppData\Local\Programs\Zed\Zed.exe" {path}"#),
+            "Zed"
+        );
+        assert_eq!(editor_name("subl {path}:1"), "Sublime Text");
+        assert_eq!(editor_name("/opt/nvim/bin/nvim {path}"), "nvim");
+        assert_eq!(
+            editor_name(r#""C:\Tools\Notepad++.exe" {path}"#),
+            "Notepad++.exe"
+        );
+    }
+
+    /// "Use global setting" leaves every state of the repository picker
+    /// (M15-02).
+    #[test]
+    fn repository_editor_returns_to_the_global_setting() {
+        let global = |app: &App| use_global_editor_label(&app.settings.tools.editor_command);
+        let back = |app: &mut App| {
+            let label = global(app);
+            let _ = app.update(Message::RepoEditorChosen(label));
+            let page = app.settings_page.as_ref().unwrap();
+            assert!(!page.repo_editor_custom);
+            assert_eq!(page.repo_editor_input, "");
+        };
+        let mut app = staging_app(&[], &[]);
+        app.settings.tools.editor_command = "/very/long/path/to/editors/code {path}".into();
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::RepoEditor));
+        // Custom → global.
+        let _ = app.update(Message::RepoEditorChosen("Custom".into()));
+        back(&mut app);
+        // Custom with an unsaved input → global.
+        let _ = app.update(Message::RepoEditorChosen("Custom".into()));
+        let _ = app.update(Message::RepoEditorInput("vim {path}".into()));
+        back(&mut app);
+        // Preset → global.
+        let _ = app.update(Message::RepoEditorChosen("Zed".into()));
+        back(&mut app);
+        // A command stored in the repository → global (the key is removed
+        // by `set_repository_editor(None)`, also when it is not set).
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut repo = (*view.snapshot).clone();
+        repo.repo_editor = Some("idea {path}".into());
+        view.apply_snapshot(Arc::new(repo));
+        back(&mut app);
+        assert_eq!(global(&app), "Use global setting (VS Code)");
     }
 
     #[test]
