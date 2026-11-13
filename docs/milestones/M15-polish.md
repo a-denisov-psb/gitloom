@@ -158,6 +158,8 @@ Acceptance: unit tests for the mark mapping (with and without word wrap, Split h
 
 ### [ ] M15-10 Documentation
 
+Progress (2026-11-13): the docs of M15-01 … M15-09 are merged (user guide incl. `merge-rebase-conflicts.md`, UX-PARITY, checklist 7i, M15 verification items in section 8, CHANGELOG); the M15-11 parts and the tick follow after M15-11 (planning update 6).
+
 - User guide (`daily-workflow.md`, `coming-from-gitkraken.md`, Git flow page), UX-PARITY: rows for the overflow slot (#30), the pencil-only editing (#34, replaces the M14-05 row "Editable messages are plain text until clicked"), the diff header Blame and the minimap, the GITFLOW hover flag (Gitloom extension until verified); update the UTF-16 row (conflict view now handles UTF-16).
 - `docs/RELEASE-CHECKLIST.md` section "7i. New in M15" (UTF-16 conflict from a PowerShell-written file, editor picker, production fallback, hover finish, experimental label, narrow graph, pencil and commit prompt, start buttons, diff icons and Blame, minimap).
 - CHANGELOG `[Unreleased]`.

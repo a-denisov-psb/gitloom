@@ -73,4 +73,4 @@ Conflicted files have their own section above the unstaged files. Click one to o
 
 ![Conflict view](../screenshots/m5-conflict-dark.png)
 
-Binary files, files larger than 2 MB and delete/modify conflicts take one side's whole file. Line endings are kept. **Open in merge tool** resolves the file in your configured merge tool instead.
+Text files in UTF-8 (with or without a byte order mark), UTF-16 with a byte order mark (as PowerShell writes them) and 8-bit encodings such as Latin-1 are resolved line by line; the encoding is shown next to the path when it is not plain UTF-8, and the resolved file keeps the encoding, byte order mark and line endings of your side. Binary files, versions in different encodings (e.g. UTF-16 on one side, UTF-8 on the other), files larger than 2 MB and delete/modify conflicts take one side's whole file; the view says why. Line endings are kept. **Open in merge tool** resolves the file in your configured merge tool instead.

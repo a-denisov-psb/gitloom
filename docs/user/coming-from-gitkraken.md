@@ -53,12 +53,15 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - Stage, unstage, mark resolved, stash, delete/rename stash, pull, remote and upstream changes and submodule updates can be undone as well ([Undo](undo.md)).
 - Several branches and tags can be selected (Ctrl/Shift+click) and deleted in one step.
 - The command palette also toggles settings and opens any Preferences setting; Ctrl+Shift+P opens it too.
-- **Gitflow layout** (gear menu above the graph): with Git flow initialized the graph groups lanes like the classic Git flow diagram, also for deleted branches (Gitloom extension).
+- **Gitflow layout (experimental)** (gear menu above the graph): with Git flow initialized the graph groups lanes like the classic Git flow diagram, also for deleted branches (Gitloom extension).
+- Feature, release and hotfix rows of the GITFLOW section show a flag on hover that finishes the branch.
 - A sparkle button next to "Committing as …" copies a commit message prompt for a tool of your choice (no AI inside Gitloom).
 - Preferences → Editor has no "End of Line Character" (there is no in-app file editor).
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
-- Commit messages can be edited by a click only for commits that were not pushed; pushed ones say why and point to interactive rebase.
+- Commit messages are edited through the pencil at the top right of the message box (shown on hover), only for commits that were not pushed; a click on the text only selects it. A muted pencil says why editing is not possible (pushed ones point to interactive rebase). The editor's sparkle builds the commit message prompt for that commit.
+- The diff minimap (Inline and Split) marks the changes right of the scrollbar like GitKraken's; it is not shown in the Hunk view.
+- A Graph column narrower than its lanes shows the nodes of the hidden lanes in its last lane instead of cutting them off.
 - In the commit details' file list the sort toggle reads "A→Z" / "Z→A", and a click on an unchanged file ("View all files") shows its content in the blame view.
 - **Identities instead of profiles:** Preferences → Identities keeps names and emails; each repository uses one through its own Git config ("Committing as …" in the commit panel) instead of switching a global profile. The default can keep the global Git config up to date.
 - **SSH key per repository** (Preferences → Repository → SSH key) instead of one global key; it is Git's own `core.sshCommand`.

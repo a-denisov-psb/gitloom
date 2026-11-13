@@ -11,7 +11,7 @@ Every commit is a row: branch and tag pills, the lane graph, the message, author
 - Clicking a branch in the left panel jumps to its commit. Branch and tag names with `/` are grouped into folders (click a folder or remote to collapse it; remembered per repository); every level lists branches (or tags) first, then folders. The checked-out branch is highlighted and has a check next to its branch icon.
 - The small panel icons at the left and right end of the status bar hide and show the left panel and the commit panel (also Ctrl+J and Ctrl+K); a filled side means the panel is shown.
 
-**Columns:** drag the border at the right of any column header to change that column's width (only that one changes); a double click sets the width that fits the visible rows, on the Commit message border it goes back to filling the free space. A table wider than the window scrolls sideways: the scrollbar below the rows, Shift+wheel or a horizontal wheel; the header moves along. The gear at the right end of the header shows or hides Author, Date and SHA and has **Reset column widths**. Widths are kept across restarts.
+**Columns:** drag the border at the right of any column header to change that column's width (only that one changes); a double click sets the width that fits the visible rows, on the Commit message border it goes back to filling the free space. A table wider than the window scrolls sideways: the scrollbar below the rows, Shift+wheel or a horizontal wheel; the header moves along. The gear at the right end of the header shows or hides Author, Date and SHA and has **Reset column widths**. Widths are kept across restarts. A Graph column narrower than its lanes keeps every commit visible: the lanes that do not fit put their nodes into the column's last lane (in their own colors, without lines); at the narrowest width all nodes sit on one line.
 
 **Search** (Ctrl+F or the magnifier above the graph): type part of a message, author, email or SHA. Other commits are dimmed, "n of m" counts the matches, Enter / Shift+Enter jump to the next / previous one, Esc closes the search.
 
@@ -28,25 +28,25 @@ Every commit is a row: branch and tag pills, the lane graph, the message, author
 
 ### Edit a commit message
 
-Click the message of a commit that you have not pushed yet: it becomes an editor with the summary (and its counter) and the description. **Save** (Ctrl+Enter) or **Cancel** (Esc). This works for the newest commit and for older ones on the checked-out branch, also when merges follow: Gitloom rebuilds the commits after it with the same files, authors and dates, and moves the branch. Your working tree and staged changes are not touched. Other branches and tags that contain the commit keep the old one; the editor lists them before you save. With commit signing on, the rebuilt commits are signed again; with it off, the editor says that their signatures are removed.
+Hover the message box of a commit that you have not pushed yet and click the pencil at its top right: the box becomes an editor with the summary (and its counter) and the description. **Save** (Ctrl+Enter) or **Cancel** (Esc). The sparkle right of the summary opens **Copy commit message prompt…** for this commit (its diff against the first parent, the commits before it). A click on the text itself only selects it. This works for the newest commit and for older ones on the checked-out branch, also when merges follow: Gitloom rebuilds the commits after it with the same files, authors and dates, and moves the branch. Your working tree and staged changes are not touched. Other branches and tags that contain the commit keep the old one; the editor lists them before you save. With commit signing on, the rebuilt commits are signed again; with it off, the editor says that their signatures are removed.
 
-The message cannot be edited when the commit is already on a remote ("Already pushed to origin/main. Use interactive rebase to change pushed history."), when it is not on the checked-out branch, or while a merge, rebase, cherry-pick or revert runs; hovering the message says why. Ctrl+Z undoes the edit.
+The message cannot be edited when the commit is already on a remote ("Already pushed to origin/main. Use interactive rebase to change pushed history."), when it is not on the checked-out branch, or while a merge, rebase, cherry-pick or revert runs; the pencil is muted then and its tooltip says why. Stashes have no pencil. Ctrl+Z undoes the edit.
 
 ## Diffs
 
 Code is syntax highlighted (shown plain for a moment first); font, size, tabs, line numbers and word wrap are set in Preferences → Editor.
 
-Clicking a file shows its diff in the center. Three views, switched in the diff header (or the palette, "Diff: … view"); the choice is remembered:
+Clicking a file shows its diff in the center. The header has icons like GitKraken: **Blame**, **History**, the change arrows, the view toggle (**Hunk** / **Inline** / **Split**), **External** and **Close**; their tooltips name them and their shortcuts. Three views, switched in the header (or the palette, "Diff: … view"); the choice is remembered:
 
 - **Hunk**: only the changed parts with 3 lines around them, each hunk with a header.
 - **Inline**: the whole file; a bar above every change block offers **Stage block** / **Unstage block** / **Discard block**.
 - **Split**: old (left) and new (right) side by side with the same bars; changed lines are paired, added or deleted files show "File added" / "File deleted" on the empty side.
 
-In Inline and Split the arrows in the header jump to the previous / next change, and opening a file shows its first change. Old and new line numbers, + and − markers and colors are the same in all views. Binary and very large files get a short explanation instead. In partial (blobless) clones, missing file contents are fetched through Git when a diff needs them.
+In Inline and Split the arrows in the header jump to the previous / next change, and opening a file shows its first change. A minimap right of the scrollbar marks removed (red) and added (green) lines, in Split on the left and right half, and shows the visible part; click or drag in it to jump there, the mouse wheel scrolls. Old and new line numbers, + and − markers and colors are the same in all views. Binary and very large files get a short explanation instead. In partial (blobless) clones, missing file contents are fetched through Git when a diff needs them.
 
 ![Diff view](../screenshots/m5-diff-light.png)
 
-**External** (or Ctrl+D) opens the diff in your diff tool, **History** opens the file history.
+**External** (or Ctrl+D) opens the diff in your diff tool, **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
 
 ## Staging
 
