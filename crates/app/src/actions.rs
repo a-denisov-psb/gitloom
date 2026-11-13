@@ -745,7 +745,7 @@ fn table() -> Vec<Action> {
     );
     add(
         A::ToggleFlowLayout,
-        "Toggle Gitflow layout",
+        "Toggle Gitflow layout (experimental)",
         Interface,
         Global,
         &[],

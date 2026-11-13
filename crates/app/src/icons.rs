@@ -71,10 +71,12 @@ pub enum Icon {
     /// part filled, like VS Code.
     PanelLeftFilled,
     PanelRightFilled,
+    /// Finish a Git flow branch from the GITFLOW section (M15-04).
+    Flag,
 }
 
 impl Icon {
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -121,6 +123,7 @@ impl Icon {
         Self::Sparkles,
         Self::PanelLeftFilled,
         Self::PanelRightFilled,
+        Self::Flag,
     ];
 
     /// SVG source of the icon.
@@ -177,6 +180,7 @@ impl Icon {
             Self::Sparkles => lucide!("sparkles"),
             Self::PanelLeftFilled => lucide!("panel-left-filled"),
             Self::PanelRightFilled => lucide!("panel-right-filled"),
+            Self::Flag => lucide!("flag"),
         }
     }
 

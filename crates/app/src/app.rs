@@ -6215,12 +6215,12 @@ impl App {
                     entries.push(MenuEntry::Separator);
                     entries.push(match self.action_block(Shortcut::ToggleFlowLayout) {
                         None => MenuEntry::check(
-                            "Gitflow layout",
+                            "Gitflow layout (experimental)",
                             view.snapshot.flow_layout,
                             Message::FlowLayoutSet(!view.snapshot.flow_layout),
                         ),
                         Some(reason) => MenuEntry::Item {
-                            label: "Gitflow layout".into(),
+                            label: "Gitflow layout (experimental)".into(),
                             shortcut: None,
                             enabled: false,
                             message: Box::new(Message::FlowLayoutSet(true)),
@@ -8134,12 +8134,14 @@ impl App {
                         &[]
                     };
                     if let Some(branch) = config.classify(&name) {
+                        // Same reason as the hover flag of GITFLOW (M15-04).
+                        let block = self.write_block().or_else(|| view.finish_block());
                         entries.push(MenuEntry::Separator);
                         entries.push(MenuEntry::Item {
-                            hint: None,
                             label: format!("Finish {} {}", branch.kind.noun(), branch.name),
                             shortcut: None,
-                            enabled: writable,
+                            enabled: block.is_none(),
+                            hint: block,
                             message: Box::new(Message::FlowFinishRequested(name.clone())),
                         });
                     }
@@ -16834,7 +16836,7 @@ pub(crate) mod tests {
         let menu = app.context_menu.take().unwrap();
         assert!(menu.entries.iter().any(|e| matches!(e,
             MenuEntry::Item { label, enabled: false, hint: Some(h), .. }
-                if label == "Gitflow layout" && h == "Initialize Gitflow first")));
+                if label == "Gitflow layout (experimental)" && h == "Initialize Gitflow first")));
         // With Git flow: the column menu offers the switch; the applied
         // layout replaces the snapshot without reloading.
         let (_repo, snapshot) = crate::snapshot::flow_tests::classic_snapshot();
@@ -16845,7 +16847,7 @@ pub(crate) mod tests {
         let menu = app.context_menu.take().unwrap();
         assert!(menu.entries.iter().any(|e| matches!(e,
             MenuEntry::Check { label, checked: false, message }
-                if label == "Gitflow layout"
+                if label == "Gitflow layout (experimental)"
                     && matches!(**message, Message::FlowLayoutSet(true)))));
         let _ = app.update(Message::FlowLayoutApplied {
             tab,
@@ -16854,7 +16856,7 @@ pub(crate) mod tests {
         assert!(app.tabs[0].view().unwrap().snapshot.flow_layout);
         // The palette entry is listed and enabled.
         let _ = app.update(checked(Shortcut::CommandPalette, false));
-        assert!(palette_labels(&app).contains(&"Toggle Gitflow layout".to_owned()));
+        assert!(palette_labels(&app).contains(&"Toggle Gitflow layout (experimental)".to_owned()));
     }
 
     #[test]
