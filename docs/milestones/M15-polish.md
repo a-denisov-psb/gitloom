@@ -140,7 +140,9 @@ Note: height 45 (was 60); the contrast test composites the fill over the start s
 
 Acceptance: contrast test for all states in Dark and Light; start screen snapshots in both themes.
 
-### [ ] M15-08 Diff header icons and Blame
+### [x] M15-08 Diff header icons and Blame
+
+Note: Blame uses Lucide `file-user` (a file with a person: who wrote each line; `user-search` reads as people search, `scan-search` as text search). Icons stay right-aligned as before, in the planned order. Added files are disabled like in the file menus ("Added in this commit", "Not committed yet"); a file deleted in the working copy is disabled ("Deleted in the working copy"), unlike the menu, which blames HEAD (decision table: disabled for deleted files). The file history's embedded diff shows the view toggle and External only.
 
 - Icons, order, tooltips; Blame button; icon licenses.
 
