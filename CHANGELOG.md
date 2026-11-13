@@ -96,6 +96,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- Conflicts in UTF-16 files with a byte order mark (as written by PowerShell) and in 8-bit text files (e.g. Latin-1) open in the conflict view like UTF-8 files; the resolved file keeps its encoding, byte order mark and line endings. The encoding is shown next to the path; versions in different encodings and binary files explain why only a whole side can be taken.
 - The node in the rightmost lane of the graph was cut off by 2 px and lost its initials.
 
 - Commit and stash details say "1 changed file" instead of "1 changed files".

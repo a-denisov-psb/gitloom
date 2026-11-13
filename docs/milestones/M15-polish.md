@@ -82,7 +82,9 @@ Out of scope:
 
 ## Tasks
 
-### [ ] M15-01 Conflict view for UTF-16 and 8-bit text
+### [x] M15-01 Conflict view for UTF-16 and 8-bit text
+
+Note: ASCII-only versions fit UTF-8 and 8-bit text but not UTF-16 (mixed); UTF-8 with and without BOM count as one encoding (the mark follows ours); an 8-bit output with characters above U+00FF is refused with a message. The finish regression asserts the release branch in both conflict tests.
 
 - Encoding classification, decoding, merge and re-encoding per the decisions table (`git-core::resolve`); `resolve_conflict` writes the output in the encoding of ours.
 - Messages for binary files and mixed encodings; encoding label in the conflict view header.
