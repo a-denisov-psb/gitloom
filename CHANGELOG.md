@@ -62,6 +62,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- A Graph column narrower than its lanes no longer fades out: the nodes of every lane that does not fit are drawn in the column's last lane in their own colors and node styles (without lines), so every commit stays visible; at the minimum width all nodes sit on one line like GitKraken's collapsed graph. The minimum width now holds one whole lane.
 - The Gitflow layout is marked experimental: "Experimental" pill and note in Preferences → Repository → Gitflow, "Gitflow layout (experimental)" in the graph column menu, "Toggle Gitflow layout (experimental)" in the command palette.
 - Gitflow initialization proposes the Default branch name (`init.defaultBranch`) as production branch when the repository has neither `main` nor `master` (else `main`); the notes of both settings explain the difference.
 - Commit details like GitKraken: "commit: <sha>" centered at the top (a click copies the full sha) and the message in a framed, scrollable box whose text can be selected and copied. The author block shows a larger avatar, "authored <date>", "committed by <name> <date>" when someone else committed, co-authors from `Co-authored-by:` trailers as small avatars, and the parents as links that jump to the parent. The file list shows a summary per kind ("1 added · 2 modified"), sorts A→Z or Z→A, switches between Path and Tree (Expand all / Collapse all) and can show all files of the commit (unchanged ones muted; a click shows the file's content); these options are remembered.

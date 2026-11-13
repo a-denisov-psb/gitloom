@@ -93,6 +93,11 @@ Synthetic unit timings (no repository): commit search over 100 000 commits with 
 Time markers (M14-06, `perf_time_markers`): 60 visible rows 10.7 µs per frame (only visible
 rows are built); all 100 000 rows at once 16 ms. The 100k layout benchmark is unchanged
 (markers are drawn per visible row, the layout does not know them).
+Narrow Graph column (M15-05): the overflow slot is decided once per frame from the column
+width and the lane count; per visible row it only moves the node and skips or shortens
+segments, `git-graph` is untouched. `cargo bench -p git-graph` on the M15 cloud container
+(slower than the reference machine above): topo 8.9 ms, layout 10.7 ms, both 19.3 ms; the
+100k layout benchmark is unchanged by construction.
 
 ### Idle memory with avatars
 
