@@ -61,8 +61,49 @@ pub struct CommitFacts {
     pub resettable: bool,
 }
 
-/// `head`: checked-out branch name, or "HEAD" when detached.
+/// "Change author…" of the commit menu (M15-11): the commits it changes
+/// (the multi-selection or the clicked commit) and why it is disabled.
+#[derive(Debug, Clone, Default)]
+pub struct AuthorChange {
+    pub ids: Vec<String>,
+    pub block: Option<String>,
+}
+
+/// `head`: checked-out branch name, or "HEAD" when detached; `author`:
+/// "Change author…" (`None` for a stash).
 pub fn commit(
+    id: &str,
+    message: &str,
+    writable: bool,
+    facts: CommitFacts,
+    head: &str,
+    author: Option<AuthorChange>,
+) -> Vec<MenuEntry> {
+    let mut entries = commit_menu_entries(id, message, writable, facts, head);
+    if let Some(author) = author {
+        // After the message entry (M15-11).
+        let at = entries
+            .iter()
+            .position(
+                |e| matches!(e, MenuEntry::Item { label, .. } if label == "Edit commit message"),
+            )
+            .map_or(entries.len(), |i| i + 1);
+        let enabled = writable && author.block.is_none();
+        entries.insert(
+            at,
+            MenuEntry::Item {
+                label: "Change author…".into(),
+                shortcut: None,
+                enabled,
+                hint: author.block.filter(|_| writable),
+                message: Box::new(Message::ChangeAuthorStart(author.ids)),
+            },
+        );
+    }
+    entries
+}
+
+fn commit_menu_entries(
     id: &str,
     message: &str,
     writable: bool,
@@ -1246,7 +1287,7 @@ mod tests {
 
     #[test]
     fn commit_menu_history_actions_follow_the_facts() {
-        let none = commit("c1", "msg", true, CommitFacts::default(), "main");
+        let none = commit("c1", "msg", true, CommitFacts::default(), "main", None);
         let (enabled, _) = summary(&none);
         assert_eq!(
             enabled,
@@ -1265,13 +1306,62 @@ mod tests {
             revertable: true,
             resettable: true,
         };
-        let menu = commit("c1", "msg", true, all, "topic");
+        let menu = commit("c1", "msg", true, all, "topic", None);
         let (_, disabled) = summary(&menu);
         assert!(disabled.is_empty(), "{disabled:?}");
         assert!(matches!(
-            message_of(&commit("c1", "msg", true, all, "topic"), "Reset topic to this commit…"),
+            message_of(&commit("c1", "msg", true, all, "topic", None), "Reset topic to this commit…"),
             Some(Message::ResetStart(id)) if id == "c1"
         ));
+    }
+
+    /// M15-11: "Change author…" follows the message entry, for all
+    /// selected commits; disabled with the reason of the first blocked one.
+    #[test]
+    fn commit_menu_change_author() {
+        let ids = vec!["c1".to_owned(), "c3".to_owned()];
+        let menu = commit(
+            "c1",
+            "msg",
+            true,
+            CommitFacts::default(),
+            "main",
+            Some(AuthorChange {
+                ids: ids.clone(),
+                block: None,
+            }),
+        );
+        let labels: Vec<&str> = menu
+            .iter()
+            .filter_map(|e| match e {
+                MenuEntry::Item { label, .. } => Some(label.as_str()),
+                _ => None,
+            })
+            .collect();
+        let at = labels.iter().position(|l| *l == "Change author…").unwrap();
+        assert_eq!(labels[at - 1], "Edit commit message");
+        assert!(matches!(
+            message_of(&menu, "Change author…"),
+            Some(Message::ChangeAuthorStart(i)) if i == ids
+        ));
+        let blocked = commit(
+            "c1",
+            "msg",
+            true,
+            CommitFacts::default(),
+            "main",
+            Some(AuthorChange {
+                ids,
+                block: Some("c3c3c3c: Check out a branch that contains this commit".into()),
+            }),
+        );
+        assert_eq!(
+            hint_of(&blocked, "Change author…"),
+            Some("c3c3c3c: Check out a branch that contains this commit")
+        );
+        // Stashes: no entry.
+        let stash = commit("s", "msg", true, CommitFacts::default(), "main", None);
+        assert!(message_of(&stash, "Change author…").is_none());
     }
 
     fn drop_facts<'a>(head: Option<&'a str>, can_fast_forward: bool) -> DropFacts<'a> {
@@ -1386,7 +1476,8 @@ mod tests {
                     revertable: true,
                     resettable: true,
                 },
-                "main"
+                "main",
+                None
             ))
             .0,
             ["Copy SHA", "Copy message"]

@@ -62,6 +62,8 @@ pub struct MessageEdit {
     /// Moved branch and refs that keep the old commit, for the note.
     pub facts: Loadable<git_core::reword::EditFacts>,
     pub error: Option<String>,
+    /// New author (M15-11); `None` keeps the original one.
+    pub author: Option<git_core::Identity>,
 }
 
 impl std::fmt::Debug for MessageEdit {
@@ -1454,6 +1456,54 @@ impl RepoView {
             _ => None,
         }
     }
+}
+
+/// Why the author of `ids` cannot be changed (M15-11), from the loaded
+/// history without Git: "<short sha>: <reason>" for the first commit that
+/// is a stash, not on the checked-out branch, already on a remote, or any
+/// while an operation runs (the texts of M14-05). `rewrite_unpushed`
+/// checks again with Git.
+pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<String> {
+    use git_core::reword::EditBlock;
+    let blocked = |id: &str, reason: String| Some(format!("{}: {reason}", &id[..id.len().min(7)]));
+    for id in ids {
+        if snapshot.is_stash(id) {
+            return blocked(id, "Stashes cannot be edited".to_owned());
+        }
+        if !snapshot.state.is_clean() {
+            return blocked(id, EditBlock::OperationRunning.reason());
+        }
+        let git_core::Head::Branch {
+            name: branch,
+            target: head,
+        } = &snapshot.head
+        else {
+            return blocked(id, EditBlock::NotOnBranch.reason());
+        };
+        if head != id && snapshot.is_ancestor(id, head) != Some(true) {
+            return blocked(id, EditBlock::NotOnBranch.reason());
+        }
+        let containing: Vec<&git_core::Reference> = snapshot
+            .refs
+            .iter()
+            .filter(|r| r.kind == git_core::RefKind::RemoteBranch && !r.name.ends_with("/HEAD"))
+            .filter(|r| r.target == *id || snapshot.is_ancestor(id, &r.target) == Some(true))
+            .collect();
+        if let Some(first) = containing.first() {
+            // Name the branch's own upstream when it contains the commit.
+            let upstream = snapshot
+                .refs
+                .iter()
+                .find(|r| r.kind == git_core::RefKind::LocalBranch && r.name == *branch)
+                .and_then(|r| r.upstream.as_deref());
+            let remote = containing
+                .iter()
+                .find(|r| Some(r.name.as_str()) == upstream)
+                .unwrap_or(first);
+            return blocked(id, EditBlock::Pushed(remote.name.clone()).reason());
+        }
+    }
+    None
 }
 
 /// The commits `ids` form an unbroken first-parent chain ending at HEAD's

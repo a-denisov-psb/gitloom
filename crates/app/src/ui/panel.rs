@@ -262,22 +262,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
     if writable {
         summary = summary.on_input(Message::SummaryChanged);
     }
-    let counter = text(remaining.to_string())
-        .size(11)
-        .style(match counter_level(remaining) {
-            CounterLevel::Normal => theme::text_muted,
-            CounterLevel::Warning => theme::text_warning,
-            CounterLevel::Over => theme::text_danger,
-        });
-    let summary = iced::widget::stack![
-        summary,
-        container(counter)
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Right)
-            .align_y(iced::Center)
-            .padding(iced::Padding::ZERO.right(8)),
-    ];
+    let summary = with_counter(summary, remaining);
 
     let mut description = text_editor(&view.description)
         .placeholder("Description")
@@ -485,6 +470,16 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
             "Commits need a name and email: click to choose an identity".to_owned(),
         ),
     };
+    picker_line(label, tip, Message::IdentityMenu)
+}
+
+/// A muted line with a chevron that opens a menu at the pointer: "Committing
+/// as …" (M8-04) and the editor's "Authored by …" (M15-11).
+fn picker_line<'a>(
+    label: Element<'a, Message>,
+    tip: String,
+    menu: fn(iced::Point) -> Message,
+) -> Element<'a, Message> {
     let line = container(
         row![
             label,
@@ -494,10 +489,51 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
         .align_y(iced::Center),
     )
     .clip(true);
-    let area = crate::ui::context_area::click_area(line, Message::IdentityMenu);
+    let area = crate::ui::context_area::click_area(line, menu);
     with_tooltip_text(
         iced::widget::mouse_area(area)
             .interaction(iced::mouse::Interaction::Pointer)
+            .into(),
+        tip,
+    )
+}
+
+/// Summary field with the counter inside at its right edge like GitKraken
+/// (M9-07); the commit panel and the message editor share it.
+fn with_counter<'a>(
+    summary: iced::widget::TextInput<'a, Message>,
+    remaining: i64,
+) -> Element<'a, Message> {
+    let counter = text(remaining.to_string())
+        .size(11)
+        .style(match counter_level(remaining) {
+            CounterLevel::Normal => theme::text_muted,
+            CounterLevel::Warning => theme::text_warning,
+            CounterLevel::Over => theme::text_danger,
+        });
+    iced::widget::stack![
+        summary,
+        container(counter)
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::Right)
+            .align_y(iced::Center)
+            .padding(iced::Padding::ZERO.right(8)),
+    ]
+    .into()
+}
+
+/// Sparkle button of the commit message prompt (M12-13): 22 × 22, a muted
+/// 13 px icon.
+fn sparkle_button<'a>(message: Option<Message>, tip: String) -> Element<'a, Message> {
+    let icon = crate::icons::tinted(crate::icons::Icon::Sparkles, 13.0, |p| p.text_muted);
+    with_tooltip_text(
+        button(container(icon).center(Fill))
+            .on_press_maybe(message)
+            .padding(0)
+            .width(22)
+            .height(22)
+            .style(theme::flat)
             .into(),
         tip,
     )
@@ -511,15 +547,8 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
 /// 2026-11-12).
 fn prompt_button(view: &RepoView) -> Element<'_, Message> {
     let (enabled, tip) = prompt_button_state(view);
-    let icon = crate::icons::tinted(crate::icons::Icon::Sparkles, 13.0, |p| p.text_muted);
-    with_tooltip_text(
-        button(container(icon).center(Fill))
-            .on_press_maybe(enabled.then_some(Message::CopyPromptRequested))
-            .padding(0)
-            .width(22)
-            .height(22)
-            .style(theme::flat)
-            .into(),
+    sparkle_button(
+        enabled.then_some(Message::CopyPromptRequested),
         tip.to_owned(),
     )
 }
@@ -595,7 +624,7 @@ fn message_box<'a>(
     max_height: f32,
 ) -> Element<'a, Message> {
     if let Some(edit) = view.message_edit.as_ref().filter(|e| e.id == commit.id) {
-        return message_editor(edit);
+        return message_editor(edit, commit);
     }
     let plain = || -> Element<'a, Message> {
         column![text(&commit.summary).size(16)]
@@ -682,9 +711,14 @@ fn edit_icon<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>> {
     Some(with_tooltip_text(button.into(), tip))
 }
 
-/// Inline message editor (M14-05): summary with the commit panel's
-/// counter, description, the note about other refs, Save and Cancel.
-fn message_editor(edit: &crate::repo_view::MessageEdit) -> Element<'_, Message> {
+/// Inline message editor (M14-05), built from the commit panel's parts
+/// so it looks the same (M15-11): "Authored by …" with the author menu and
+/// the sparkle of the commit prompt, the summary with its counter, the
+/// description, the note about other refs, Save and Cancel.
+fn message_editor<'a>(
+    edit: &'a crate::repo_view::MessageEdit,
+    commit: &'a Commit,
+) -> Element<'a, Message> {
     let remaining = SUMMARY_LIMIT as i64 - edit.summary.chars().count() as i64;
     let summary = text_input("Summary", &edit.summary)
         .id(MESSAGE_EDIT_SUMMARY)
@@ -692,47 +726,31 @@ fn message_editor(edit: &crate::repo_view::MessageEdit) -> Element<'_, Message> 
         .style(theme::input)
         .on_input(Message::CommitEditSummary)
         .on_submit(Message::CommitEditSave);
-    let counter = text(remaining.to_string())
-        .size(11)
-        .style(match counter_level(remaining) {
-            CounterLevel::Normal => theme::text_muted,
-            CounterLevel::Warning => theme::text_warning,
-            CounterLevel::Over => theme::text_danger,
-        });
-    let summary = iced::widget::stack![
-        summary,
-        container(counter)
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Right)
-            .align_y(iced::Center)
-            .padding(iced::Padding::ZERO.right(8)),
-    ];
-    // Prompt for this commit at the right of the summary row (M15-06), like
-    // the sparkle of "Committing as …".
-    let sparkle = with_tooltip_text(
-        button(
-            container(crate::icons::tinted(
-                crate::icons::Icon::Sparkles,
-                13.0,
-                |p| p.text_muted,
-            ))
-            .center(Fill),
-        )
-        .on_press(Message::CommitPromptRequested(edit.id.clone()))
-        .padding(0)
-        .width(22)
-        .height(22)
-        .style(theme::flat)
-        .into(),
+    let summary = with_counter(summary, remaining);
+    let (author, tip) = match &edit.author {
+        Some(author) => (
+            format!("Authored by {}", author.label()),
+            "New author after saving (the author date is kept); click to choose another".to_owned(),
+        ),
+        None => (
+            format!("Authored by {} <{}>", commit.author, commit.email),
+            "Click to change the author".to_owned(),
+        ),
+    };
+    let author = picker_line(
+        muted(author).size(11).wrapping(text::Wrapping::None).into(),
+        tip,
+        Message::EditAuthorMenu,
+    );
+    let sparkle = sparkle_button(
+        Some(Message::CommitPromptRequested(edit.id.clone())),
         "Copy commit message prompt…".to_owned(),
     );
-    let summary = row![summary, sparkle].spacing(4).align_y(iced::Center);
     let body = text_editor(&edit.body)
         .placeholder("Description")
         .padding(6)
         .style(theme::editor)
-        .height(120)
+        .height(90)
         .on_action(Message::CommitEditBody)
         // Ctrl+Enter saves instead of inserting a line break.
         .key_binding(|press| {
@@ -748,18 +766,18 @@ fn message_editor(edit: &crate::repo_view::MessageEdit) -> Element<'_, Message> 
     let mut notes = column![].spacing(2);
     if let Loadable::Ready(facts) = &edit.facts {
         for name in &facts.keep_old {
-            notes = notes.push(muted(format!("{name} keeps the old commit")).size(12));
+            notes = notes.push(muted(format!("{name} keeps the old commit")).size(11));
         }
         if facts.drops_signature {
             notes = notes.push(
-                muted("Signatures of the rewritten commits are removed (signing is off)").size(12),
+                muted("Signatures of the rewritten commits are removed (signing is off)").size(11),
             );
         }
     }
     let error = edit
         .error
         .as_ref()
-        .map(|e| text(e.clone()).size(12).style(theme::text_danger));
+        .map(|e| text(e.clone()).size(11).style(theme::text_danger));
     let buttons = row![
         space::horizontal(),
         button(text("Cancel").size(12))
@@ -773,13 +791,19 @@ fn message_editor(edit: &crate::repo_view::MessageEdit) -> Element<'_, Message> 
     ]
     .spacing(8);
     container(
-        column![summary, body]
-            .push(error)
-            .push(notes)
-            .push(buttons)
-            .spacing(8),
+        column![
+            row![container(author).width(Fill).clip(true), sparkle]
+                .spacing(6)
+                .align_y(iced::Center),
+            summary,
+            body,
+        ]
+        .push(error)
+        .push(notes)
+        .push(buttons)
+        .spacing(8),
     )
-    .padding(10)
+    .padding(12)
     .width(Fill)
     .style(theme::message_box)
     .into()
