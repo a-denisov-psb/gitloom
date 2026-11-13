@@ -60,6 +60,7 @@ No accounts, no cloud workspaces, no pull request or issue tracker integrations,
 - "About Gitloom" is in the command palette and at the bottom of the Preferences.
 - The repository and branch pickers in the toolbar open the centered command palette lists instead of a dropdown below the picker.
 - Commit messages are edited through the pencil at the top right of the message box (shown on hover), only for commits that were not pushed; a click on the text only selects it. A muted pencil says why editing is not possible (pushed ones point to interactive rebase). The editor's sparkle builds the commit message prompt for that commit.
+- The author of unpushed commits can be changed: "Change author…" in the commit menu (also for several selected commits) and the "Authored by" row of the message editor (Gitloom extension).
 - The diff minimap (Inline and Split) marks the changes right of the scrollbar like GitKraken's; it is not shown in the Hunk view.
 - A Graph column narrower than its lanes shows the nodes of the hidden lanes in its last lane instead of cutting them off.
 - In the commit details' file list the sort toggle reads "A→Z" / "Z→A", and a click on an unchanged file ("View all files") shows its content in the blame view.

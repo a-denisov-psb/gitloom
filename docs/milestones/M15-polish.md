@@ -169,9 +169,9 @@ Note: eligibility for the menu is computed from the loaded history (stash, opera
 
 Acceptance: integration tests: author of HEAD; of two non-adjacent commits three and five back with a merge between them (merge rebuilt, second parent unchanged); message and author of one commit in one step; author date kept, committer updated; working tree and index untouched; one blocked commit in a selection refuses the whole change; undo and redo restore the exact branch oid. App tests: menu entry for a multi-selection, disabled with "<short sha>: <reason>"; dialog with saved identities and "Other…"; editor row "Authored by …" preselects "Keep original author"; saving with a changed author selects the rewritten commit; snapshots of the dialog and of the editor next to the commit panel in Dark and Light (same paddings, fields and button positions).
 
-### [ ] M15-10 Documentation
+### [x] M15-10 Documentation
 
-Progress (2026-11-13): the docs of M15-01 … M15-09 are merged (user guide incl. `merge-rebase-conflicts.md`, UX-PARITY, checklist 7i, M15 verification items in section 8, CHANGELOG); the M15-11 parts and the tick follow after M15-11 (planning update 6).
+Note: docs of M15-01 … M15-09 merged first (planning update 6 arrived during the task), the M15-11 parts afterwards; also `merge-rebase-conflicts.md` (encodings) and the M15 verification items in section 8 of the release checklist.
 
 - User guide (`daily-workflow.md`, `coming-from-gitkraken.md`, Git flow page), UX-PARITY: rows for the overflow slot (#30), the pencil-only editing (#34, replaces the M14-05 row "Editable messages are plain text until clicked"), the diff header Blame and the minimap, the GITFLOW hover flag (Gitloom extension until verified); update the UTF-16 row (conflict view now handles UTF-16); a row "Change author of unpushed commits (menu, multi-selection, details editor)" as Gitloom extension until the GitKraken item is answered; `docs/user/undo.md` entries "Change author" and "Edit commit".
 - `docs/RELEASE-CHECKLIST.md` section "7i. New in M15" (UTF-16 conflict from a PowerShell-written file, editor picker, production fallback, hover finish, experimental label, narrow graph, pencil and commit prompt, change author (menu with multi-selection, editor row), start buttons, diff icons and Blame, minimap).
