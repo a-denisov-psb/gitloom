@@ -100,7 +100,9 @@ Note: an empty global command reads "Global: none"; unsetting a key that is not 
 
 Acceptance: app tests: Custom → Use global; Custom with an unsaved input → Use global; preset → Use global; repository command set → Use global (key removed); label tests for every preset name, a quoted Windows path (`"C:\…\Zed\Zed.exe" {path}`), an unknown program; snapshot with a long global path in both themes.
 
-### [ ] M15-03 Production branch fallback and hints
+### [x] M15-03 Production branch fallback and hints
+
+Note: `init.defaultBranch` is read from the global config when the Preferences open; a form opened before it arrived is updated unless the production field was edited (`FlowConfig::defaults_with`). The General note says "Empty: main is suggested." instead of "Gitloom suggests main" (product name only from `git_core::identity`, identity guard).
 
 - `FlowConfig::defaults` with the `init.defaultBranch` fallback; both notes.
 

@@ -74,10 +74,10 @@ fn init_creates_a_missing_production_branch_from_head() {
     repo.git(&["branch", "-m", "work"]);
     let writer = CliBackend::new(repo.path());
     let config = FlowConfig::defaults(&["work"]);
-    assert_eq!(config.production, "master");
+    assert_eq!(config.production, "main");
     flow::init(&writer, &config).unwrap();
     let head = repo.head();
-    assert_eq!(repo.git(&["rev-parse", "master"]), head);
+    assert_eq!(repo.git(&["rev-parse", "main"]), head);
     assert_eq!(repo.git(&["rev-parse", "develop"]), head);
 }
 

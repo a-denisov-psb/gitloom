@@ -61,6 +61,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Gitflow initialization proposes the Default branch name (`init.defaultBranch`) as production branch when the repository has neither `main` nor `master` (else `main`); the notes of both settings explain the difference.
 - Commit details like GitKraken: "commit: <sha>" centered at the top (a click copies the full sha) and the message in a framed, scrollable box whose text can be selected and copied. The author block shows a larger avatar, "authored <date>", "committed by <name> <date>" when someone else committed, co-authors from `Co-authored-by:` trailers as small avatars, and the parents as links that jump to the parent. The file list shows a summary per kind ("1 added · 2 modified"), sorts A→Z or Z→A, switches between Path and Tree (Expand all / Collapse all) and can show all files of the commit (unchanged ones muted; a click shows the file's content); these options are remembered.
 
 - File menus are ordered like GitKraken's and add File blame, Open in external diff tool (also for files of a commit), Open file location for commit files and Discard changes for staged files.

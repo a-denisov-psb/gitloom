@@ -59,12 +59,22 @@ pub struct FlowConfig {
 
 impl FlowConfig {
     /// Defaults of the initialization: production `main` if it exists,
-    /// otherwise `master`; `develop`; git-flow's prefixes; no tag prefix.
+    /// else `master` if it exists, else `init.defaultBranch` if set
+    /// (`default_branch`, M15-03), else `main`; `develop`; git-flow's
+    /// prefixes; no tag prefix.
     pub fn defaults(local_branches: &[&str]) -> Self {
+        Self::defaults_with(local_branches, None)
+    }
+
+    /// [`Self::defaults`] with the value of `init.defaultBranch`.
+    pub fn defaults_with(local_branches: &[&str], default_branch: Option<&str>) -> Self {
+        let default_branch = default_branch.map(str::trim).filter(|b| !b.is_empty());
         let production = if local_branches.contains(&"main") {
             "main"
-        } else {
+        } else if local_branches.contains(&"master") {
             "master"
+        } else {
+            default_branch.unwrap_or("main")
         };
         Self {
             production: production.into(),
@@ -272,9 +282,23 @@ mod tests {
     fn defaults_prefer_main() {
         assert_eq!(config().production, "main");
         assert_eq!(FlowConfig::defaults(&["master"]).production, "master");
-        assert_eq!(FlowConfig::defaults(&[]).production, "master");
+        assert_eq!(FlowConfig::defaults(&[]).production, "main");
         assert_eq!(config().development, "develop");
         assert_eq!(config().version_tag, "");
+    }
+
+    /// The production branch order (M15-03): main, master,
+    /// `init.defaultBranch`, main.
+    #[test]
+    fn production_fallback_order() {
+        let production = |branches: &[&str], default: Option<&str>| {
+            FlowConfig::defaults_with(branches, default).production
+        };
+        assert_eq!(production(&["master", "main"], Some("trunk")), "main");
+        assert_eq!(production(&["master", "trunk"], Some("trunk")), "master");
+        assert_eq!(production(&["trunk"], Some("trunk2")), "trunk2");
+        assert_eq!(production(&["trunk"], None), "main");
+        assert_eq!(production(&["trunk"], Some("  ")), "main");
     }
 
     #[test]
