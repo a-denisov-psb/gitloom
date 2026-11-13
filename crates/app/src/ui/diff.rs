@@ -61,7 +61,11 @@ fn view_with<'a>(
             .push(change_navigation(diff))
             .push(space::horizontal().width(8));
     }
-    let modes = modes.extend(DiffMode::ALL.map(|m| mode_button(m, m == mode)));
+    // Hunk / Inline / Split as an icon segmented toggle (M15-08).
+    let modes = modes.push(
+        container(row(DiffMode::ALL.map(|m| mode_button(m, m == mode))).spacing(0))
+            .style(theme::segmented),
+    );
 
     // Staging actions for the selected lines (working tree diffs only).
     let selection_action = match diff.staged() {
@@ -111,22 +115,25 @@ fn view_with<'a>(
         .push(space::horizontal())
         .push(selection_action)
         .push(if standalone {
+            // Like GitKraken (M15-08): Blame, History, change arrows, the
+            // view toggle, External, Close.
             row![
-                external_button(request),
+                blame_button(request, diff),
                 history_button(request),
                 modes,
-                crate::ui::panel::with_tooltip_text(
-                    button(crate::icons::icon(crate::icons::Icon::Close, 15.0))
-                        .on_press(Message::DiffClosed)
-                        .padding([2, 6])
-                        .style(theme::flat)
-                        .into(),
+                external_button(request),
+                icon_button(
+                    crate::icons::Icon::Close,
+                    Some(Message::DiffClosed),
                     "Close diff (Esc)".to_owned(),
                 ),
             ]
-            .spacing(12)
+            .spacing(6)
+            .align_y(iced::Center)
         } else {
-            row![external_button(request), modes].spacing(12)
+            row![modes, external_button(request)]
+                .spacing(6)
+                .align_y(iced::Center)
         })
         .spacing(12)
         .padding([6, 12])
@@ -159,23 +166,48 @@ fn encoding_label<'a>(diff: &DiffView) -> Option<Element<'a, Message>> {
         .map(|encoding| muted(encoding.label()).size(12).into())
 }
 
+/// Icon of the diff header (M15-08): 15 px in a 22×22 hit area; disabled
+/// without a message.
+fn icon_button<'a>(
+    icon: crate::icons::Icon,
+    message: Option<Message>,
+    tip: String,
+) -> Element<'a, Message> {
+    let enabled = message.is_some();
+    crate::ui::panel::with_tooltip_text(
+        button(container(crate::icons::button_icon(icon, 15.0, enabled)).center(Fill))
+            .on_press_maybe(message)
+            .padding(0)
+            .width(22)
+            .height(22)
+            .style(theme::flat)
+            .into(),
+        tip,
+    )
+}
+
+/// `name` with the shortcut of `action`, if it has one.
+fn with_shortcut(name: &str, action: crate::actions::ActionId) -> String {
+    match action.shortcut_text() {
+        Some(keys) => format!("{name} ({keys})"),
+        None => name.to_owned(),
+    }
+}
+
 /// "Open in external diff tool" (M5-12; Ctrl+D).
 fn external_button<'a>(request: &DiffRequest) -> Element<'a, Message> {
     let enabled = !matches!(request.kind, DiffKind::Untracked | DiffKind::Stash { .. });
-    let tip = match (
-        enabled,
-        crate::actions::ActionId::ExternalDiff.shortcut_text(),
-    ) {
-        (false, _) => "Not available for untracked files and stashes".to_owned(),
-        (true, Some(keys)) => format!("Open in external diff tool ({keys})"),
-        (true, None) => "Open in external diff tool".to_owned(),
+    let tip = if enabled {
+        with_shortcut(
+            "Open in external diff tool",
+            crate::actions::ActionId::ExternalDiff,
+        )
+    } else {
+        "Not available for untracked files and stashes".to_owned()
     };
-    crate::ui::panel::with_tooltip_text(
-        button(text("External").size(12))
-            .on_press_maybe(enabled.then_some(Message::ExternalDiff))
-            .padding([2, 8])
-            .style(button::secondary)
-            .into(),
+    icon_button(
+        crate::icons::Icon::ExternalTool,
+        enabled.then_some(Message::ExternalDiff),
         tip,
     )
 }
@@ -189,21 +221,65 @@ fn history_button<'a>(request: &DiffRequest) -> Element<'a, Message> {
         DiffKind::Unstaged | DiffKind::Staged => (None, true),
     };
     let tip = if enabled {
-        "History of this file"
+        with_shortcut("File history", crate::actions::ActionId::FileHistory)
     } else {
-        "No history for this file here"
+        "No history for this file here".to_owned()
     };
-    crate::ui::panel::with_tooltip_text(
-        button(text("History").size(12))
-            .on_press_maybe(enabled.then(|| Message::FileHistoryOpened {
-                path: request.path.clone(),
-                start,
-            }))
-            .padding([2, 8])
-            .style(button::secondary)
-            .into(),
-        tip.to_owned(),
+    icon_button(
+        crate::icons::Icon::History,
+        enabled.then(|| Message::FileHistoryOpened {
+            path: request.path.clone(),
+            start,
+        }),
+        tip,
     )
+}
+
+/// What "Blame" in the diff header opens (M15-08), like "File blame" of
+/// the file menus (M13-07): the file at the commit of a commit diff,
+/// otherwise the working file; or why it is disabled. `file` is the
+/// loaded diff (added and deleted files).
+pub(crate) fn blame_target(
+    request: &DiffRequest,
+    file: Option<&FileDiff>,
+) -> Result<Message, &'static str> {
+    let added = file.is_some_and(|f| f.old_path.is_none() && f.new_path.is_some());
+    let deleted = file.is_some_and(|f| f.new_path.is_none() && f.old_path.is_some());
+    let path = request.path.clone();
+    match &request.kind {
+        DiffKind::Untracked => Err("Untracked files have no history"),
+        DiffKind::Stash { .. } => Err("Not available for stashes"),
+        DiffKind::Commit(_) if deleted => Err("Deleted in this commit"),
+        DiffKind::Commit(_) if added => Err("Added in this commit"),
+        DiffKind::Commit(id) => Ok(Message::FileBlameOpened {
+            path,
+            start: Some(id.clone()),
+            rev: Some(id.clone()),
+        }),
+        DiffKind::Unstaged | DiffKind::Staged if deleted => Err("Deleted in the working copy"),
+        DiffKind::Staged if added => Err("Not committed yet"),
+        DiffKind::Unstaged | DiffKind::Staged => Ok(Message::FileBlameOpened {
+            path,
+            start: None,
+            rev: None,
+        }),
+    }
+}
+
+/// "Blame" in the diff header (M15-08).
+fn blame_button<'a>(request: &DiffRequest, diff: &DiffView) -> Element<'a, Message> {
+    let file = match &diff.diff {
+        Loadable::Ready(file) => Some(file),
+        _ => None,
+    };
+    match blame_target(request, file) {
+        Ok(message) => icon_button(
+            crate::icons::Icon::Blame,
+            Some(message),
+            "File blame".to_owned(),
+        ),
+        Err(reason) => icon_button(crate::icons::Icon::Blame, None, reason.to_owned()),
+    }
 }
 
 fn content<'a>(repo: &'a RepoView, diff: &'a DiffView, file: &'a FileDiff) -> Element<'a, Message> {
@@ -530,12 +606,9 @@ fn change_navigation<'a>(diff: &DiffView) -> Element<'a, Message> {
         } else {
             (crate::icons::Icon::ChevronUp, "Previous change")
         };
-        crate::ui::panel::with_tooltip_text(
-            button(crate::icons::button_icon(icon, 14.0, enabled))
-                .on_press_maybe(enabled.then_some(Message::DiffJumpChange { next }))
-                .padding([2, 6])
-                .style(theme::flat)
-                .into(),
+        icon_button(
+            icon,
+            enabled.then_some(Message::DiffJumpChange { next }),
             tip.to_owned(),
         )
     };
@@ -834,17 +907,100 @@ fn line_action<'a>(
 
 /// Hunk / Inline / Split; the active one is highlighted.
 fn mode_button<'a>(mode: DiffMode, active: bool) -> Element<'a, Message> {
-    let button = button(text(mode.label()).size(12))
-        .padding([2, 8])
+    let icon = match mode {
+        DiffMode::Hunk => crate::icons::Icon::ListCollapse,
+        DiffMode::Inline => crate::icons::Icon::AlignJustify,
+        DiffMode::Split => crate::icons::Icon::Columns2,
+    };
+    let button = button(container(crate::icons::icon(icon, 15.0)).center(Fill))
+        .padding(0)
+        .width(22)
+        .height(22)
         .on_press(Message::DiffModeChanged(mode));
     let button = if active {
         button.style(theme::mode_active)
     } else {
         button.style(theme::flat)
     };
-    crate::ui::panel::with_tooltip_text(button.into(), format!("{} view", mode.label()))
+    crate::ui::panel::with_tooltip_text(
+        button.into(),
+        with_shortcut(
+            &format!("{} view", mode.label()),
+            crate::actions::ActionId::DiffView(mode),
+        ),
+    )
 }
 
 fn centered<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content).center(Fill).into()
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    fn request(kind: DiffKind) -> DiffRequest {
+        DiffRequest {
+            kind,
+            path: "src/a.rs".into(),
+            old_path: None,
+        }
+    }
+
+    fn file(old: Option<&str>, new: Option<&str>) -> FileDiff {
+        FileDiff {
+            old_path: old.map(str::to_owned),
+            new_path: new.map(str::to_owned),
+            binary: false,
+            too_large: false,
+            encoding: None,
+            hunks: Vec::new(),
+        }
+    }
+
+    /// M15-08: Blame like "File blame" of the file menus; disabled with
+    /// the reason for untracked, stash and deleted files.
+    #[test]
+    fn blame_targets_and_reasons() {
+        let modified = file(Some("src/a.rs"), Some("src/a.rs"));
+        let added = file(None, Some("src/a.rs"));
+        let deleted = file(Some("src/a.rs"), None);
+        let reason = |kind: DiffKind, f: &FileDiff| blame_target(&request(kind), Some(f)).err();
+        assert_eq!(
+            reason(DiffKind::Untracked, &added),
+            Some("Untracked files have no history")
+        );
+        let stash = DiffKind::Stash {
+            id: "s".into(),
+            part: git_core::StashPart::Unstaged,
+        };
+        assert_eq!(reason(stash, &modified), Some("Not available for stashes"));
+        assert_eq!(
+            reason(DiffKind::Commit("c".into()), &deleted),
+            Some("Deleted in this commit")
+        );
+        assert_eq!(
+            reason(DiffKind::Unstaged, &deleted),
+            Some("Deleted in the working copy")
+        );
+        assert_eq!(
+            reason(DiffKind::Commit("c".into()), &added),
+            Some("Added in this commit")
+        );
+        assert_eq!(reason(DiffKind::Staged, &added), Some("Not committed yet"));
+        assert!(matches!(
+            blame_target(&request(DiffKind::Commit("c".into())), Some(&modified)),
+            Ok(Message::FileBlameOpened { start: Some(s), rev: Some(r), .. }) if s == "c" && r == "c"
+        ));
+        for kind in [DiffKind::Unstaged, DiffKind::Staged] {
+            assert!(matches!(
+                blame_target(&request(kind), Some(&modified)),
+                Ok(Message::FileBlameOpened {
+                    start: None,
+                    rev: None,
+                    ..
+                })
+            ));
+        }
+    }
 }

@@ -334,12 +334,60 @@ mod tests {
         }
     }
 
+    /// Diff header icons (M15-08): each sends its message. Layout only, so
+    /// part of every test run.
+    #[test]
+    fn diff_header_icons_send_their_messages() {
+        let app = crate::app::tests::app_with_open_diff(git_core::DiffKind::Commit("c".into()));
+        let title = {
+            let mut sim = simulator(&app);
+            let found = sim.find("a").unwrap_or_else(|e| panic!("no path: {e}"));
+            iced_test::selector::Bounded::bounds(&found)
+        };
+        let messages = clicks_along(&app, title.x, title.center_y(), SIZE.0 - title.x);
+        let has = |pred: &dyn Fn(&Message) -> bool| messages.iter().any(pred);
+        assert!(has(&|m| matches!(m,
+            Message::FileBlameOpened { path, start: Some(s), rev: Some(r) }
+                if path == "a" && s == "c" && r == "c")));
+        assert!(has(&|m| matches!(m,
+            Message::FileHistoryOpened { path, start: Some(s) } if path == "a" && s == "c")));
+        for mode in crate::settings::DiffMode::ALL {
+            assert!(
+                has(&|m| matches!(m, Message::DiffModeChanged(x) if *x == mode)),
+                "{mode:?}"
+            );
+        }
+        assert!(has(&|m| matches!(m, Message::ExternalDiff)));
+        assert!(has(&|m| matches!(m, Message::DiffClosed)));
+    }
+
+    /// Diff header in Hunk, Inline and Split (M15-08), both themes.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_diff_header_icons() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            for mode in DiffMode::ALL {
+                let mut app =
+                    crate::app::tests::app_with_open_diff(git_core::DiffKind::Commit("c".into()));
+                app.settings.appearance.theme = choice;
+                app.settings.diff.view_mode = mode;
+                let name = mode.label().to_lowercase();
+                snapshot_sized(
+                    &app,
+                    &format!("diff-header-{name}-{theme}"),
+                    (1200.0, 300.0),
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_diff_mode_toggle() {
         let mut app = crate::app::tests::app_with_open_diff(git_core::DiffKind::Unstaged);
         snapshot(&app, "diff-mode-0-hunk");
-        click(&mut app, "Split");
+        let _ = app.update(Message::DiffModeChanged(crate::settings::DiffMode::Split));
         assert_eq!(
             app.settings.diff.view_mode,
             crate::settings::DiffMode::Split

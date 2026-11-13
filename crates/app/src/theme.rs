@@ -625,6 +625,19 @@ pub fn drop_target(theme: &Theme) -> container::Style {
 }
 
 /// Selected segment of a segmented control (diff modes).
+/// Frame of an icon segmented toggle (diff view modes, M15-08).
+pub fn segmented(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        border: Border {
+            color: p.border,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 pub fn mode_active(theme: &Theme, _: button::Status) -> button::Style {
     let p = palette(theme);
     button_style(Some(p.bg_selected), p.text)
