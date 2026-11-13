@@ -124,7 +124,9 @@ Note: `MIN_GRAPH_WIDTH` grew by the cell padding (4 px) so the slot's nodes are 
 
 Acceptance: unit tests for capacity and the slot mapping (fits, one lane short, minimum width); snapshots of the fixture graph at full width, half width and minimum width (Dark and Light, also with the Gitflow layout); 100k-commit benchmark unchanged (`docs/PERFORMANCE.md`).
 
-### [ ] M15-06 Commit details: edit icon and commit prompt
+### [x] M15-06 Commit details: edit icon and commit prompt
+
+Note: `prompt::gather_from` with `PromptSource::{Staged, Commit}`; the diff section reads "Diff of commit <short sha>:" (the instruction stays the user's text); a busy repository mutes the pencil with "Busy: …". Checked in the real app under Xvfb (hover, tooltip on the icon only, editor, prompt dialog). The headless snapshots show the read-only `text_editor` boxes empty (also on `develop` before M15, a simulator artifact; the real app shows the text).
 
 - Pencil icon, tooltip only on the icon, text always selectable; prompt source `Commit(<oid>)` in the builder; sparkle button in the editor.
 
