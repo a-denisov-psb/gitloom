@@ -156,6 +156,9 @@ pub struct DiffView {
     /// Syntax highlighting of both sides (M11-09), when it arrived for the
     /// current content (`generation`).
     pub highlight: Option<Arc<crate::highlight::DiffSides>>,
+    /// The running highlighting job (fix after M15); replacing it (another
+    /// load, file or theme) stops the old one.
+    pub highlight_job: Option<crate::highlight::Job>,
     /// Counts loads, so a late highlighting result of an older load is
     /// ignored.
     pub generation: u64,
@@ -331,6 +334,7 @@ impl DiffView {
             char_width: 0.0,
             width: 0.0,
             highlight: None,
+            highlight_job: None,
             generation: 0,
             minimap: std::cell::RefCell::new(None),
         }
@@ -618,6 +622,7 @@ impl DiffView {
     pub fn set_diff(&mut self, diff: Result<FileDiff, String>) {
         self.generation += 1;
         self.highlight = None;
+        self.highlight_job = None;
         self.rows.clear();
         self.blocks.clear();
         self.block_rows.clear();

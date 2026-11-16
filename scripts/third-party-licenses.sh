@@ -42,12 +42,18 @@ cargo about generate --locked scripts/third-party/list.tsv.hbs -o "$out_dir/list
     printf '```text\n'
     cat crates/git-core/assets/gitignore/LICENSE
     printf '```\n'
+    printf '\n### Oniguruma (BSD-2-Clause)\n\n'
+    printf 'The regular expression C library bundled and built by the onig_sys crate for syntax highlighting (ADR-047), https://github.com/kkos/oniguruma\n\n'
+    printf '```text\n'
+    cat scripts/third-party/oniguruma-COPYING
+    printf '```\n'
     printf '\n### Syntax definitions and color themes\n\n'
     printf 'Bundled by the two-face crate (from bat) for syntax highlighting; generated into `crates/app/assets/syntax-acknowledgements.md` by a unit test.\n\n'
     cat crates/app/assets/syntax-acknowledgements.md
 } >> "$out_dir/notices.md"
 printf 'Lucide icons\t-\tISC\n' >> "$out_dir/list.tsv"
 printf 'gitignore templates\t-\tCC0-1.0\n' >> "$out_dir/list.tsv"
+printf 'Oniguruma (bundled by onig_sys)\t-\tBSD-2-Clause\n' >> "$out_dir/list.tsv"
 printf 'Syntax definitions and themes (bat)\t-\tvarious, see notices\n' >> "$out_dir/list.tsv"
 # Drop blank lines of the template.
 grep -v '^$' "$out_dir/list.tsv" > "$out_dir/list.clean.tsv"

@@ -5695,27 +5695,27 @@ impl App {
     }
 
     /// Requests highlighting for the open diffs of all tabs that lack a
-    /// result for the current theme.
-    fn highlight_code_views(&self) -> Task<Message> {
-        Task::batch(self.tabs.iter().flat_map(|tab| {
+    /// result (or a running job) for the current theme.
+    fn highlight_code_views(&mut self) -> Task<Message> {
+        let tabs: Vec<TabId> = self.tabs.iter().map(|t| t.id).collect();
+        Task::batch(tabs.into_iter().flat_map(|tab| {
             [
-                self.highlight_diff(tab.id),
-                self.highlight_blame(tab.id),
-                self.highlight_conflict(tab.id),
+                self.highlight_diff(tab),
+                self.highlight_blame(tab),
+                self.highlight_conflict(tab),
             ]
         }))
     }
 
     /// Highlights the ours and theirs files of the conflict open in `tab`
     /// (M11-09).
-    fn highlight_conflict(&self, tab: TabId) -> Task<Message> {
+    fn highlight_conflict(&mut self, tab: TabId) -> Task<Message> {
         let style = self.editor_style();
+        let cache = Arc::clone(&self.highlight_cache);
         let Some(CenterView::Conflict(conflict)) = self
-            .tabs
-            .iter()
-            .find(|t| t.id == tab)
-            .and_then(Tab::view)
-            .map(|v| &v.center)
+            .tab_mut(tab)
+            .and_then(Tab::view_mut)
+            .map(|v| &mut v.center)
         else {
             return Task::none();
         };
@@ -5727,45 +5727,54 @@ impl App {
             || conflict
                 .highlight
                 .as_ref()
-                .is_some_and(|h| h.theme == theme)
+                .is_some_and(|h| h.theme == theme && h.ours.is_complete() && h.theirs.is_complete())
+            || conflict
+                .highlight_job
+                .as_ref()
+                .is_some_and(|j| j.theme == theme)
         {
             return Task::none();
         }
         let (ours, theirs) = crate::highlight::conflict_texts(text);
         let path = conflict.path.clone();
-        let cache = Arc::clone(&self.highlight_cache);
-        Task::perform(
-            blocking(move || {
-                let highlight = crate::conflict::ConflictHighlight {
-                    theme,
-                    ours: crate::highlight::cached(&cache, &path, &ours, theme),
-                    theirs: crate::highlight::cached(&cache, &path, &theirs, theme),
+        let job = crate::highlight::Job::new(theme);
+        let watch = job.watch();
+        conflict.highlight_job = Some(job);
+        let files = vec![(path.clone(), ours), (path.clone(), theirs)];
+        highlight_task(
+            cache,
+            theme,
+            watch,
+            move || Ok(files),
+            move |outcomes| {
+                let mut outcomes = outcomes.into_iter();
+                let (Some(ours), Some(theirs)) = (outcomes.next(), outcomes.next()) else {
+                    return Message::Noop;
                 };
-                Ok::<_, String>((path, highlight))
-            }),
-            move |result| match result {
-                Ok((path, highlight)) => Message::ConflictHighlighted {
+                Message::ConflictHighlighted {
                     tab,
-                    path,
-                    highlight,
-                },
-                Err(_) => Message::Noop,
+                    path: path.clone(),
+                    highlight: crate::conflict::ConflictHighlight {
+                        theme,
+                        ours,
+                        theirs,
+                    },
+                }
             },
         )
     }
 
     /// Highlights the blamed file of `tab` in the background (M11-09).
-    fn highlight_blame(&self, tab: TabId) -> Task<Message> {
+    fn highlight_blame(&mut self, tab: TabId) -> Task<Message> {
         let style = self.editor_style();
-        let Some(blame) = self
-            .tabs
-            .iter()
-            .find(|t| t.id == tab)
-            .and_then(Tab::view)
-            .and_then(|view| match &view.center {
-                CenterView::FileHistory(history) => history.blame.as_ref(),
-                _ => None,
-            })
+        let cache = Arc::clone(&self.highlight_cache);
+        let Some(blame) =
+            self.tab_mut(tab)
+                .and_then(Tab::view_mut)
+                .and_then(|view| match &mut view.center {
+                    CenterView::FileHistory(history) => history.blame.as_mut(),
+                    _ => None,
+                })
         else {
             return Task::none();
         };
@@ -5775,7 +5784,14 @@ impl App {
         };
         if !style.highlight
             || lines.binary
-            || blame.highlight.as_ref().is_some_and(|(t, _)| *t == theme)
+            || blame
+                .highlight
+                .as_ref()
+                .is_some_and(|(t, o)| *t == theme && o.is_complete())
+            || blame
+                .highlight_job
+                .as_ref()
+                .is_some_and(|j| j.theme == theme)
         {
             return Task::none();
         }
@@ -5787,40 +5803,41 @@ impl App {
             .join("\n");
         text.push('\n');
         let (path, rev) = (blame.path.clone(), blame.rev.clone());
-        let cache = Arc::clone(&self.highlight_cache);
-        Task::perform(
-            blocking(move || {
-                let outcome = crate::highlight::cached(&cache, &path, &text, theme);
-                Ok::<_, String>((path, rev, outcome))
-            }),
-            move |result| match result {
-                Ok((path, rev, outcome)) => Message::BlameHighlighted {
+        let job = crate::highlight::Job::new(theme);
+        let watch = job.watch();
+        blame.highlight_job = Some(job);
+        let files = vec![(path.clone(), text)];
+        highlight_task(
+            cache,
+            theme,
+            watch,
+            move || Ok(files),
+            move |outcomes| match outcomes.into_iter().next() {
+                Some(outcome) => Message::BlameHighlighted {
                     tab,
-                    path,
-                    rev,
+                    path: path.clone(),
+                    rev: rev.clone(),
                     theme,
                     outcome,
                 },
-                Err(_) => Message::Noop,
+                None => Message::Noop,
             },
         )
     }
 
     /// Highlights both sides of the diff open in `tab` in the background
-    /// (M11-09). Inline and Split diffs carry the whole file; for the Hunk
-    /// view the whole-file diff is loaded first, so multi-line comments and
-    /// strings are right on every line.
-    fn highlight_diff(&self, tab: TabId) -> Task<Message> {
-        let Some(view) = self.tabs.iter().find(|t| t.id == tab).and_then(Tab::view) else {
+    /// (M11-09), block by block (fix after M15). Inline and Split diffs
+    /// carry the whole file; for the Hunk view the whole-file diff is
+    /// loaded first, so multi-line comments and strings are right on every
+    /// line.
+    fn highlight_diff(&mut self, tab: TabId) -> Task<Message> {
+        let cache = Arc::clone(&self.highlight_cache);
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
             return Task::none();
         };
-        let diff = match &view.center {
-            CenterView::Diff(diff) => diff.as_ref(),
-            CenterView::FileHistory(history) => match history.diff.as_ref() {
-                Some(diff) => diff,
-                None => return Task::none(),
-            },
-            _ => return Task::none(),
+        let backend = Arc::clone(&view.backend);
+        let Some(diff) = view.center.diff_mut() else {
+            return Task::none();
         };
         let theme = diff.style.code_theme;
         let Loadable::Ready(file) = &diff.diff else {
@@ -5829,19 +5846,28 @@ impl App {
         if !diff.style.highlight
             || file.binary
             || file.too_large
-            || diff.highlight.as_ref().is_some_and(|h| h.theme == theme)
+            || diff
+                .highlight
+                .as_ref()
+                .is_some_and(|h| h.theme == theme && h.old.is_complete() && h.new.is_complete())
+            || diff
+                .highlight_job
+                .as_ref()
+                .is_some_and(|j| j.theme == theme)
         {
             return Task::none();
         }
         let request = diff.request.clone();
         let generation = diff.generation;
-        let cache = Arc::clone(&self.highlight_cache);
-        let backend = Arc::clone(&view.backend);
         let loaded = diff.layout.has_blocks().then(|| file.clone());
         let path = request.path.clone();
         let old_path = file.old_path.clone().unwrap_or_else(|| path.clone());
-        Task::perform(
-            blocking(move || {
+        let job = crate::highlight::Job::new(theme);
+        let watch = job.watch();
+        diff.highlight_job = Some(job);
+        let load = {
+            let request = request.clone();
+            move || {
                 let full = match loaded {
                     Some(file) => file,
                     None => backend
@@ -5849,24 +5875,21 @@ impl App {
                         .map_err(|e| e.to_string())?,
                 };
                 let (old, new) = crate::highlight::diff_texts(&full);
-                let sides = crate::highlight::DiffSides {
-                    theme,
-                    old: crate::highlight::cached(&cache, &old_path, &old, theme),
-                    new: crate::highlight::cached(&cache, &path, &new, theme),
-                };
-                Ok::<_, String>((request, sides))
-            }),
-            move |result| match result {
-                Ok((request, sides)) => Message::DiffHighlighted {
-                    tab,
-                    request,
-                    generation,
-                    sides: Arc::new(sides),
-                },
-                // Highlighting is optional: without it the diff stays plain.
-                Err(_) => Message::Noop,
-            },
-        )
+                Ok(vec![(old_path, old), (path, new)])
+            }
+        };
+        highlight_task(cache, theme, watch, load, move |outcomes| {
+            let mut outcomes = outcomes.into_iter();
+            let (Some(old), Some(new)) = (outcomes.next(), outcomes.next()) else {
+                return Message::Noop;
+            };
+            Message::DiffHighlighted {
+                tab,
+                request: request.clone(),
+                generation,
+                sides: Arc::new(crate::highlight::DiffSides { theme, old, new }),
+            }
+        })
     }
 
     /// Applies changed editor settings to the open diffs (their text width
@@ -6484,12 +6507,14 @@ impl App {
                 path,
                 highlight,
             } => {
+                let current = self.editor_style().code_theme == highlight.theme;
                 if let Some(CenterView::Conflict(conflict)) = self
                     .tab_mut(tab)
                     .and_then(Tab::view_mut)
                     .map(|v| &mut v.center)
                 {
-                    if conflict.path == path {
+                    // Stale: another file, or a result for an older theme.
+                    if conflict.path == path && current {
                         conflict.highlight = Some(highlight);
                     }
                 }
@@ -6501,6 +6526,8 @@ impl App {
                 theme,
                 outcome,
             } => {
+                // A result for an older theme is stale.
+                let current = self.editor_style().code_theme == theme;
                 if let Some(blame) = self
                     .tab_mut(tab)
                     .and_then(Tab::view_mut)
@@ -6509,6 +6536,7 @@ impl App {
                         _ => None,
                     })
                     .filter(|b| b.path == path && b.rev == rev)
+                    .filter(|_| current)
                 {
                     blame.highlight = Some((theme, outcome));
                 }
@@ -6531,8 +6559,10 @@ impl App {
                 else {
                     return Task::none();
                 };
-                // A result for another file or an older load is stale.
-                if diff.request == request && diff.generation == generation {
+                // A result for another file, an older load or another
+                // theme is stale.
+                let current = diff.style.code_theme == sides.theme;
+                if diff.request == request && diff.generation == generation && current {
                     diff.highlight = Some(sides);
                 }
             }
@@ -12641,6 +12671,41 @@ fn same_repo(root: &std::path::Path, path: &std::path::Path) -> bool {
 }
 
 /// Runs blocking work (Git, file I/O) on tokio's blocking pool.
+/// Runs [`crate::highlight::run`] off the UI thread on the files `load`
+/// returns and emits a message (from `message`) after every block, so the
+/// lines done so far show at once (fix after M15). A failed `load` leaves
+/// the view plain: highlighting is optional.
+fn highlight_task(
+    cache: Arc<std::sync::Mutex<crate::highlight::Cache>>,
+    theme: crate::highlight::CodeTheme,
+    watch: crate::highlight::Watch,
+    load: impl FnOnce() -> Result<Vec<(String, String)>, String> + Send + 'static,
+    message: impl Fn(Vec<crate::highlight::Outcome>) -> Message + Send + 'static,
+) -> Task<Message> {
+    let stream = iced::stream::channel(
+        16,
+        async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            use iced::futures::{SinkExt as _, StreamExt as _};
+
+            let (sender, mut results) = iced::futures::channel::mpsc::unbounded();
+            let work = tokio::task::spawn_blocking(move || {
+                let Ok(files) = load() else {
+                    return;
+                };
+                crate::highlight::run(&cache, files, theme, &watch, |outcomes| {
+                    let _ = sender.unbounded_send(outcomes);
+                });
+            });
+            // The sender is dropped when the job ends, which ends this loop.
+            while let Some(outcomes) = results.next().await {
+                let _ = output.send(message(outcomes)).await;
+            }
+            let _ = work.await;
+        },
+    );
+    Task::run(stream, |message| message)
+}
+
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -14567,6 +14632,77 @@ pub(crate) mod tests {
         let current = highlighted(&app, CodeTheme::Dark);
         let _ = app.update(current);
         assert!(open_diff(&app).highlight.is_some());
+    }
+
+    /// Fix after M15: a file switch stops the running job, and late
+    /// (partial) results of the previous file never color the new one.
+    #[test]
+    fn switching_files_while_highlighting_never_shows_old_colors() {
+        use crate::highlight::CodeTheme;
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let watch = open_diff(&app)
+            .highlight_job
+            .as_ref()
+            .expect("highlighting runs after the load")
+            .watch();
+        let late = highlighted(&app, CodeTheme::Dark);
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "b.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        assert!(watch.cancelled(), "the old job stops");
+        let _ = app.update(late.clone());
+        assert!(open_diff(&app).highlight.is_none(), "while b.rs loads");
+        let new: String = (0..1_500).map(|i| format!("fn f{i}() {{}}\n")).collect();
+        let text = git_core::text_diff_with(b"", new.as_bytes(), git_core::DiffContext::Full);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            context: settings::DiffMode::Inline.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: None,
+                new_path: Some("b.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let _ = app.update(late);
+        assert!(open_diff(&app).highlight.is_none(), "after b.rs loaded");
+        // The first block of b.rs arrives: its lines are colored, the
+        // rest stays plain until the next block.
+        let mut job =
+            crate::highlight::Progressive::new("b.rs", Arc::from(new.as_str()), CodeTheme::Dark);
+        assert!(!job.step());
+        let generation = open_diff(&app).generation;
+        let partial = |new| Message::DiffHighlighted {
+            tab,
+            request: request.clone(),
+            generation,
+            sides: Arc::new(crate::highlight::DiffSides {
+                theme: CodeTheme::Dark,
+                old: crate::highlight::Outcome::Plain(crate::highlight::Plain::UnknownType),
+                new,
+            }),
+        };
+        let message = partial(job.outcome());
+        let _ = app.update(message);
+        let line = |app: &App, index: usize| {
+            let Loadable::Ready(file) = &open_diff(app).diff else {
+                panic!("diff not loaded");
+            };
+            file.hunks[0].lines[index].clone()
+        };
+        assert!(open_diff(&app).spans_for(&line(&app, 0)).is_some());
+        assert!(open_diff(&app).spans_for(&line(&app, 1_200)).is_none());
+        assert!(job.step());
+        let message = partial(job.outcome());
+        let _ = app.update(message);
+        assert!(open_diff(&app).spans_for(&line(&app, 1_200)).is_some());
     }
 
     #[test]
