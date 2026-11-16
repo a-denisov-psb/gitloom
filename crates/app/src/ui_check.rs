@@ -1930,6 +1930,28 @@ mod tests {
         snapshot(&app, "highlight-conflict-dark");
     }
 
+    /// Word diff (fix after M15): changed characters of paired lines in
+    /// Hunk, Inline and Split, Dark and Light, with syntax colors kept.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_word_diff() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            for (mode, name) in [
+                (DiffMode::Hunk, "hunk"),
+                (DiffMode::Inline, "inline"),
+                (DiffMode::Split, "split"),
+            ] {
+                let mut app = crate::app::tests::word_diff_app(mode, choice);
+                snapshot(&app, &format!("word-diff-{name}-{theme}"));
+                if mode == DiffMode::Inline {
+                    let _ = app.update(Message::EditorWordWrapToggled(true));
+                    snapshot(&app, &format!("word-diff-{name}-wrapped-{theme}"));
+                }
+            }
+        }
+    }
+
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
@@ -2358,6 +2380,22 @@ mod tests {
             crate::app::tests::open_diff(&app).rows.len(),
             start.elapsed()
         );
+        // Word diff (fix after M15): every line is a changed pair; the
+        // background task clones the diff and pairs its lines.
+        let start = Instant::now();
+        let crate::repo_view::Loadable::Ready(file) = &crate::app::tests::open_diff(&app).diff
+        else {
+            panic!("diff not loaded");
+        };
+        let file = file.clone();
+        let cloned = start.elapsed();
+        let emphasis = crate::word_diff::of_diff(&file);
+        eprintln!(
+            "PERF word diff of the 2 MB diff (every line changed): {:?} (clone {cloned:?}, {} paired lines)",
+            start.elapsed(),
+            file.hunks.iter().flat_map(|h| &h.lines).filter(|l| !emphasis.ranges(l).is_empty()).count()
+        );
+        let _ = app.update(crate::app::tests::word_diff_result(&app));
         let rows = crate::app::tests::open_diff(&app).rows.len() as f32;
         let mut worst = std::time::Duration::ZERO;
         for step in 0..20 {

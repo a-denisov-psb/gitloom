@@ -527,6 +527,53 @@ pub fn content_id(path: &str, text: &str) -> String {
 /// `content` cut into styled pieces by `spans` (unstyled between them),
 /// with tabs expanded to `tab` columns as the views show them.
 pub fn segments(content: &str, spans: &[Span], tab: usize) -> Vec<(String, Option<SpanStyle>)> {
+    pieces(content, spans, &[], tab)
+        .into_iter()
+        .map(|piece| (piece.text, piece.style))
+        .collect()
+}
+
+/// A piece of a line as shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    pub text: String,
+    pub style: Option<SpanStyle>,
+    /// Inside a changed range of the word diff (fix after M15).
+    pub emphasis: bool,
+}
+
+/// `content` cut into pieces at the borders of `spans` and of the changed
+/// byte ranges `emphasis` (word diff), with tabs expanded to `tab` columns.
+/// Ranges outside the line or not on character borders are skipped.
+pub fn pieces(content: &str, spans: &[Span], emphasis: &[Range<usize>], tab: usize) -> Vec<Piece> {
+    let valid = |range: &Range<usize>| {
+        range.start < range.end
+            && range.end <= content.len()
+            && content.is_char_boundary(range.start)
+            && content.is_char_boundary(range.end)
+    };
+    // Styled ranges in order, without overlaps.
+    let mut styled: Vec<(Range<usize>, SpanStyle)> = Vec::new();
+    for span in spans {
+        let start = span
+            .range
+            .start
+            .max(styled.last().map_or(0, |(r, _)| r.end));
+        let range = start..span.range.end.min(content.len());
+        if valid(&range) {
+            styled.push((range, span.style));
+        }
+    }
+    let emphasis: Vec<&Range<usize>> = emphasis.iter().filter(|r| valid(r)).collect();
+    let mut borders: Vec<usize> = vec![0, content.len()];
+    for (range, _) in &styled {
+        borders.extend([range.start, range.end]);
+    }
+    for range in &emphasis {
+        borders.extend([range.start, range.end]);
+    }
+    borders.sort_unstable();
+    borders.dedup();
     let tab = tab.max(1);
     let mut column = 0;
     let mut expand = |piece: &str| {
@@ -543,23 +590,24 @@ pub fn segments(content: &str, spans: &[Span], tab: usize) -> Vec<(String, Optio
         }
         out
     };
-    let mut pieces = Vec::new();
-    let mut at = 0;
-    for span in spans {
-        let (start, end) = (span.range.start.max(at), span.range.end.min(content.len()));
-        if start >= end || !content.is_char_boundary(start) || !content.is_char_boundary(end) {
-            continue;
+    let mut out = Vec::new();
+    let mut next_style = 0;
+    for pair in borders.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        while styled.get(next_style).is_some_and(|(r, _)| r.end <= start) {
+            next_style += 1;
         }
-        if start > at {
-            pieces.push((expand(&content[at..start]), None));
-        }
-        pieces.push((expand(&content[start..end]), Some(span.style)));
-        at = end;
+        let style = styled
+            .get(next_style)
+            .filter(|(r, _)| r.start <= start)
+            .map(|(_, style)| *style);
+        out.push(Piece {
+            text: expand(&content[start..end]),
+            style,
+            emphasis: emphasis.iter().any(|r| r.start <= start && end <= r.end),
+        });
     }
-    if at < content.len() {
-        pieces.push((expand(&content[at..]), None));
-    }
-    pieces
+    out
 }
 
 /// The licenses of the bundled syntaxes and themes, as listed in the
@@ -750,6 +798,41 @@ mod tests {
             .iter()
             .any(|s| s.style != open));
         assert!(!sides.too_large());
+    }
+
+    #[test]
+    fn pieces_split_at_emphasis_and_keep_syntax_colors() {
+        let style = SpanStyle {
+            color: [1, 2, 3, 255],
+            bold: false,
+            italic: false,
+        };
+        // "pub(crate) fn x" with ") fn" styled and "pub(crate) " emphasized.
+        let content = "pub(crate) fn x";
+        let spans = [Span {
+            range: 9..13,
+            style,
+        }];
+        let emphasized = [Range { start: 0, end: 11 }];
+        let pieces = pieces(content, &spans, &emphasized, 4);
+        let shown: Vec<(&str, bool, bool)> = pieces
+            .iter()
+            .map(|p| (p.text.as_str(), p.style.is_some(), p.emphasis))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("pub(crate", false, true),
+                (") ", true, true),
+                ("fn", true, false),
+                (" x", false, false),
+            ]
+        );
+        // Tabs expand across pieces; ranges off char borders are skipped.
+        let pieces = super::pieces("\tä\tb", &[], &[1..2, 3..5], 4);
+        let texts: Vec<&str> = pieces.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, ["    ä", "   b"]);
+        assert!(pieces[1].emphasis && !pieces[0].emphasis);
     }
 
     #[test]

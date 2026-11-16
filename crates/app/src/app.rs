@@ -322,6 +322,13 @@ pub enum Message {
         generation: u64,
         sides: Arc<crate::highlight::DiffSides>,
     },
+    /// The word diff of a loaded diff arrived (fix after M15).
+    WordDiffComputed {
+        tab: TabId,
+        request: DiffRequest,
+        generation: u64,
+        emphasis: Arc<crate::word_diff::Emphasis>,
+    },
     /// Nothing to do (an optional background result that did not come).
     Noop,
     /// Toasts (M12-02): close, timer ran out, pointer entered/left,
@@ -5892,6 +5899,44 @@ impl App {
         })
     }
 
+    /// Computes the changed characters of the diff open in `tab` in the
+    /// background (word diff, fix after M15).
+    fn word_diff(&self, tab: TabId) -> Task<Message> {
+        let Some(diff) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .and_then(Tab::view)
+            .and_then(|v| match &v.center {
+                CenterView::Diff(diff) => Some(diff.as_ref()),
+                CenterView::FileHistory(history) => history.diff.as_ref(),
+                _ => None,
+            })
+        else {
+            return Task::none();
+        };
+        let Loadable::Ready(file) = &diff.diff else {
+            return Task::none();
+        };
+        if file.binary || file.too_large || file.hunks.is_empty() {
+            return Task::none();
+        }
+        let file = file.clone();
+        let (request, generation) = (diff.request.clone(), diff.generation);
+        Task::perform(
+            blocking(move || Ok(Arc::new(crate::word_diff::of_diff(&file)))),
+            move |result| match result {
+                Ok(emphasis) => Message::WordDiffComputed {
+                    tab,
+                    request: request.clone(),
+                    generation,
+                    emphasis,
+                },
+                Err(_) => Message::Noop,
+            },
+        )
+    }
+
     /// Applies changed editor settings to the open diffs (their text width
     /// and row height depend on them).
     fn restyle_code_views(&mut self) {
@@ -6564,6 +6609,21 @@ impl App {
                 let current = diff.style.code_theme == sides.theme;
                 if diff.request == request && diff.generation == generation && current {
                     diff.highlight = Some(sides);
+                }
+            }
+            Message::WordDiffComputed {
+                tab,
+                request,
+                generation,
+                emphasis,
+            } => {
+                if let Some(diff) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.center.diff_mut())
+                    .filter(|d| d.request == request && d.generation == generation)
+                {
+                    diff.emphasis = Some(emphasis);
                 }
             }
             Message::EditorWordWrapToggled(on) => {
@@ -9888,8 +9948,13 @@ impl App {
                                 scroll = scroll_by_id(diff.scroll_id.clone(), offset);
                             }
                         }
-                        // Plain first; colors when the background result arrives.
-                        return Task::batch([scroll, self.highlight_diff(tab)]);
+                        // Plain first; colors and the changed characters
+                        // when the background results arrive.
+                        return Task::batch([
+                            scroll,
+                            self.word_diff(tab),
+                            self.highlight_diff(tab),
+                        ]);
                     }
                 }
             }
@@ -14535,6 +14600,131 @@ pub(crate) mod tests {
         let result = highlight_result(&app, old, new);
         let _ = app.update(result);
         app
+    }
+
+    /// A Rust diff with paired changed lines (word diff, fix after M15):
+    /// an added `pub(crate) `, a renamed identifier and a rewritten line,
+    /// highlighted and with its word diff applied.
+    pub(crate) fn word_diff_app(mode: settings::DiffMode, theme: settings::ThemeChoice) -> App {
+        let mut app = staging_app(&["src/view.rs"], &[]);
+        app.settings.appearance.theme = theme;
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "src/view.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old = "impl App {\n    fn view_mut(&mut self) -> Option<&mut RepoView> {\n        let count = self.tabs.len();\n        self.tabs.get_mut(count - 1)\n    }\n\n    // Closes every tab and keeps the history of the closed tabs, so that a closed tab can be opened again later from the menu of the tab bar.\n    fn close(&mut self) {\n        self.tabs.clear();\n    }\n}\n";
+        let new = "impl App {\n    pub(crate) fn view_mut(&mut self) -> Option<&mut RepoView> {\n        let total = self.tabs.len();\n        self.tabs.get_mut(total - 1)\n    }\n\n    // Closes every tab and drops the history of the closed tabs, so that a closed tab cannot be opened again later from the menu of the tab bar.\n    fn close(&mut self) {\n        drop(std::mem::take(&mut self.history));\n    }\n}\n";
+        let text = git_core::text_diff_with(old.as_bytes(), new.as_bytes(), mode.context());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("src/view.rs".into()),
+                new_path: Some("src/view.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let result = highlight_result(&app, old, new);
+        let _ = app.update(result);
+        let result = word_diff_result(&app);
+        let _ = app.update(result);
+        app
+    }
+
+    /// The result of the background word diff of the open diff.
+    pub(crate) fn word_diff_result(app: &App) -> Message {
+        let diff = open_diff(app);
+        let Loadable::Ready(file) = &diff.diff else {
+            panic!("diff not loaded");
+        };
+        Message::WordDiffComputed {
+            tab: app.tabs[0].id,
+            request: diff.request.clone(),
+            generation: diff.generation,
+            emphasis: Arc::new(crate::word_diff::of_diff(file)),
+        }
+    }
+
+    #[test]
+    fn word_diff_arrives_for_the_current_load_only() {
+        use git_core::DiffLineKind;
+        use settings::{DiffMode, ThemeChoice};
+        for mode in [DiffMode::Hunk, DiffMode::Inline, DiffMode::Split] {
+            let mut app = word_diff_app(mode, ThemeChoice::Dark);
+            let diff = open_diff(&app);
+            let Loadable::Ready(file) = &diff.diff else {
+                panic!("diff not loaded");
+            };
+            let shown: Vec<(DiffLineKind, Vec<&str>)> = file
+                .hunks
+                .iter()
+                .flat_map(|h| &h.lines)
+                .filter(|l| l.kind != DiffLineKind::Context)
+                .map(|l| {
+                    let ranges = diff.emphasis_for(l);
+                    (
+                        l.kind,
+                        ranges.iter().map(|r| &l.content[r.clone()]).collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                shown,
+                [
+                    (DiffLineKind::Removed, vec![]),
+                    (DiffLineKind::Removed, vec!["count"]),
+                    (DiffLineKind::Removed, vec!["count"]),
+                    (DiffLineKind::Added, vec!["pub(crate) "]),
+                    (DiffLineKind::Added, vec!["total"]),
+                    (DiffLineKind::Added, vec!["total"]),
+                    (DiffLineKind::Removed, vec!["keeps", "can"]),
+                    (DiffLineKind::Added, vec!["drops", "cannot"]),
+                    (DiffLineKind::Removed, vec![]),
+                    (DiffLineKind::Added, vec![]),
+                ],
+                "{mode:?}"
+            );
+            // A reload drops it until the new result arrives; a result of
+            // the older load or of another file does not apply.
+            let stale = word_diff_result(&app);
+            let mut other = word_diff_result(&app);
+            let diff = open_diff(&app);
+            let reload = Message::DiffLoaded {
+                tab: app.tabs[0].id,
+                request: diff.request.clone(),
+                context: mode.context(),
+                result: match &diff.diff {
+                    Loadable::Ready(file) => Ok(file.clone()),
+                    _ => panic!("diff not loaded"),
+                },
+            };
+            let _ = app.update(reload);
+            assert!(open_diff(&app).emphasis.is_none());
+            let _ = app.update(stale);
+            assert!(open_diff(&app).emphasis.is_none(), "older load");
+            if let Message::WordDiffComputed {
+                request,
+                generation,
+                ..
+            } = &mut other
+            {
+                request.path = "b.rs".into();
+                *generation = open_diff(&app).generation;
+            }
+            let _ = app.update(other);
+            assert!(open_diff(&app).emphasis.is_none(), "other file");
+            let current = word_diff_result(&app);
+            let _ = app.update(current);
+            assert!(open_diff(&app).emphasis.is_some());
+        }
     }
 
     /// The result of the background highlighting of the open diff with the
