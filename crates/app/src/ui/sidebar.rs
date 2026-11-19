@@ -181,6 +181,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
     ));
     let mut submodules_section = Some(submodules(repo, &needle));
     let mut sections = column![].spacing(6);
+    let mut first = true;
     for kind in section_order(gitflow_section.is_some()) {
         let element = match kind {
             Section::Gitflow => gitflow_section.take(),
@@ -191,7 +192,19 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             Section::Submodules => submodules_section.take(),
         };
         if let Some(element) = element {
-            sections = sections.push(element);
+            // Every section after the first visible one: extra space and a
+            // hairline above it (fix/sidebar-section-headers).
+            sections = sections.push(if first {
+                element
+            } else {
+                column![
+                    space::vertical().height(SECTION_GAP),
+                    crate::icons::Hairline,
+                    element
+                ]
+                .into()
+            });
+            first = false;
         }
     }
 
@@ -217,6 +230,9 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .style(theme::panel)
         .into()
 }
+
+/// Extra space above every section but the first, over its hairline.
+const SECTION_GAP: f32 = 8.0;
 
 /// Order of the sections like GitKraken: GITFLOW (when initialized),
 /// LOCAL, REMOTE, STASHES, TAGS, SUBMODULES (M9-06). Keyboard focus
@@ -273,7 +289,10 @@ fn section_with_action<'a>(
     let mut line = row![
         container(icons::tinted(arrow, 12.0, |p| p.text_muted)).width(INDENT),
         icons::tinted(kind, 13.0, |p| p.text_muted),
-        text(title).size(11),
+        text(title).size(11).font(iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::DEFAULT
+        }),
         space::horizontal(),
     ]
     .spacing(6)
@@ -307,7 +326,7 @@ fn section_with_action<'a>(
         };
         line = line.push(crate::ui::panel::with_tooltip_text(control, tip.to_owned()));
     }
-    line = line.push(text(count).size(11));
+    line = line.push(text(count).size(11).style(theme::text_muted));
     let header = button(line)
         .on_press(Message::SectionToggled(section))
         .padding([4, 6])

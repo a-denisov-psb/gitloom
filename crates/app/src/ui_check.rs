@@ -288,6 +288,39 @@ mod tests {
         snapshot(&app, "left-panel-after-clicks");
     }
 
+    /// Section headers (fix/sidebar-section-headers): full text color,
+    /// semibold, a hairline and extra space above every section but the
+    /// first; with and without GITFLOW, LOCAL collapsed, both themes at
+    /// 100 and 125 %.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_section_headers() {
+        for (light, theme) in [(false, "dark"), (true, "light")] {
+            let choice = if light {
+                crate::settings::ThemeChoice::Light
+            } else {
+                crate::settings::ThemeChoice::Dark
+            };
+            let mut flow = crate::app::tests::flow_app();
+            flow.settings.appearance.theme = choice;
+            let mut plain = crate::app::tests::sidebar_app();
+            plain.settings.appearance.theme = choice;
+            for percent in [100_u32, 125] {
+                let scale = percent as f32 / 100.0;
+                for (app, name) in [(&mut flow, "gitflow"), (&mut plain, "local-first")] {
+                    let _ = app.update(Message::SystemScaleChanged(scale));
+                    snapshot_scaled(
+                        app,
+                        &format!("section-headers-{name}-{theme}-{percent}"),
+                        scale,
+                    );
+                }
+            }
+            let _ = flow.update(Message::SectionToggled(crate::repo_view::Section::Local));
+            snapshot(&flow, &format!("section-headers-collapsed-{theme}"));
+        }
+    }
+
     /// Tree order, tag folders and the checked-out marker (M11-11): main
     /// checked out at depth 0, then a branch inside a folder; branches
     /// before folders; TAGS with a folder; both themes.

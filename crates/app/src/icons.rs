@@ -224,7 +224,7 @@ pub fn set_scale(scale: f32) {
     }
 }
 
-fn scale() -> f32 {
+pub(crate) fn scale() -> f32 {
     f32::from_bits(SCALE.load(Ordering::Relaxed))
 }
 
@@ -322,6 +322,68 @@ where
 {
     fn from(icon: Sharp<'a>) -> Self {
         Element::new(icon)
+    }
+}
+
+/// A one-physical-pixel horizontal line in the `divider` color, snapped
+/// to the pixel grid so it stays sharp at fractional scales (M9-05).
+pub struct Hairline;
+
+impl<Message, Renderer> Widget<Message, Theme, Renderer> for Hairline
+where
+    Renderer: iced::advanced::Renderer,
+{
+    fn size(&self) -> Size<iced::Length> {
+        Size::new(iced::Length::Fill, iced::Length::Fixed(1.0))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.resolve(iced::Length::Fill, 1.0, Size::ZERO))
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let scale = scale();
+        let bounds = layout.bounds();
+        let x = bounds.x + snap_offset(bounds.x, scale);
+        let y = bounds.y + snap_offset(bounds.y, scale);
+        let right = bounds.x + bounds.width;
+        let right = right + snap_offset(right, scale);
+        renderer.fill_quad(
+            iced::advanced::renderer::Quad {
+                bounds: Rectangle {
+                    x,
+                    y,
+                    width: (right - x).max(0.0),
+                    height: 1.0 / scale,
+                },
+                ..iced::advanced::renderer::Quad::default()
+            },
+            palette(theme).border,
+        );
+    }
+}
+
+impl<'a, Message, Renderer> From<Hairline> for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Renderer: iced::advanced::Renderer + 'a,
+{
+    fn from(line: Hairline) -> Self {
+        Element::new(line)
     }
 }
 
