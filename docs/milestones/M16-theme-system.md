@@ -79,12 +79,14 @@ Open: none. Themes beyond Dark and Light are a Gitloom extension (UX-PARITY).
 
 ## Tasks
 
-### [ ] M16-01 Palette as runtime data and theme registry
+### [x] M16-01 Palette as runtime data and theme registry
 
 - `ThemeDef` (id, name, base, palette, syntax theme name) and a registry holding Dark and Light; lookup by id, list by base.
 - Every place that reads the palette (`theme.rs`, `app.rs`, `icons.rs`, `ui/graph.rs`, `highlight.rs`, `askpass.rs`, `ui/toasts.rs`, `ui/start.rs`, `ui/split_handle.rs`, `ui/sidebar.rs`, `ui/diff.rs`) gets it from the registry through one mechanism; `ThemeKind` stays as the base. No leak per theme change. Record the mechanism in ADR-058.
 
 Acceptance: all existing snapshots of Dark and Light are pixel-identical to before; unit tests for lookup, list by base and unknown id → Dark; `./scripts/check.sh` green.
+
+Note: mechanism in ADR-058 (registry keyed by the iced theme name, `palette()` returns `Arc<ThemePalette>`); all 359 `ui_check` snapshots compared pixel by pixel with `develop` before the change: identical.
 
 ### [ ] M16-02 Feature color list, syntax theme per theme, derive
 

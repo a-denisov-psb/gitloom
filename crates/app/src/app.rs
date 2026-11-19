@@ -14399,7 +14399,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
         assert!(app.light_theme());
         assert_eq!(app.settings.appearance.theme, settings::ThemeChoice::Light);
-        assert_eq!(crate::theme::palette(&app.theme()), &crate::theme::LIGHT);
+        assert_eq!(*crate::theme::palette(&app.theme()), crate::theme::LIGHT);
 
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::System));
         assert!(!app.light_theme(), "unknown system mode falls back to dark");

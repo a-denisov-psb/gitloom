@@ -681,7 +681,8 @@ Consequences: small discipline costs now; no behavior change for local repositor
   - Names and values: hex values come from published palettes only where the license allows, with the sources in the third-party notices; the theme names go through the ADR-033 brand check.
 - Why: one rendering path for every theme (ADR-048); nothing in a view depends on a specific theme.
 - Consequences: views take colors only from the palette (a test checks it); every built-in is covered by contrast tests and a snapshot; a theme must bring its syntax pairing; adding a visual detail means adding a palette field with a value for every theme.
-- Implementation notes: filled in by M16 (access mechanism, syntax pairings, sources).
+- Implementation notes (M16):
+  - Access mechanism (M16-01): `crate::themes` keeps the registry, a process-wide `RwLock` list of `Arc<ThemeDef>`. The iced theme of a theme is `Theme::custom_with_fn` named by the theme id, with `is_dark` set from the base (not guessed from the background). `theme::palette(&Theme)` looks the name up in the registry and returns `Arc<ThemePalette>`; iced themes that are not in the registry (tests use `Theme::Dark` and `Theme::Light`) get the default palette of their brightness. Entries are replaced, not leaked: an old palette is freed when the last frame holding its `Arc` is gone. Style functions keep `fn(&Theme)`; helpers that take `&ThemePalette` get `&palette(theme)`.
 
 ## ADR-059 Theme files and the theme editor
 
