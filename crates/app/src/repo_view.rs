@@ -54,27 +54,6 @@ pub struct CommitDetails {
     pub edit_block: Loadable<Option<String>>,
 }
 
-/// Inline editor of a commit message in the details (M14-05, ADR-051).
-pub struct MessageEdit {
-    pub id: String,
-    pub summary: String,
-    pub body: iced::widget::text_editor::Content,
-    /// Moved branch and refs that keep the old commit, for the note.
-    pub facts: Loadable<git_core::reword::EditFacts>,
-    pub error: Option<String>,
-    /// New author (M15-11); `None` keeps the original one.
-    pub author: Option<git_core::Identity>,
-}
-
-impl std::fmt::Debug for MessageEdit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MessageEdit")
-            .field("id", &self.id)
-            .field("summary", &self.summary)
-            .finish()
-    }
-}
-
 /// Message of the selected commit in the details' framed box (M14-01):
 /// read-only editors so the text can be selected and copied.
 pub struct MessageBox {
@@ -864,8 +843,6 @@ pub struct RepoView {
     pub message_box: Option<MessageBox>,
     /// Collapsed folders of the details' file tree (M14-03), per session.
     pub file_tree_collapsed: HashSet<String>,
-    /// Open message editor of the details (M14-05).
-    pub message_edit: Option<MessageEdit>,
     /// Signature status per commit, requested once when a commit is
     /// selected (M10-05).
     pub signatures:
@@ -1255,7 +1232,6 @@ impl RepoView {
             details: None,
             message_box: None,
             file_tree_collapsed: HashSet::new(),
-            message_edit: None,
             signatures: std::collections::HashMap::new(),
             center: CenterView::Graph,
             filter: String::new(),

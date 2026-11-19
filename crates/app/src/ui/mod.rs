@@ -19,7 +19,9 @@ pub(crate) mod diff;
 mod file_history;
 pub(crate) mod graph;
 mod inert;
+mod message_modal;
 mod shift;
+pub(crate) mod split_handle;
 #[cfg(test)]
 pub use graph::lanes_width;
 pub use graph::{optimal_column_width, MIN_GRAPH_WIDTH};
@@ -108,6 +110,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut layers = vec![base];
     if let Some(page) = &app.settings_page {
         layers.push(preferences(app, page));
+    }
+    // The message modal (finding #43) lies below the toasts (a failed save
+    // shows one), its author menu, the "Other…" form and the prompt.
+    if let Some(modal) = &app.message_modal {
+        let busy = app
+            .tabs
+            .iter()
+            .find(|t| t.id == modal.tab)
+            .and_then(|t| t.view())
+            .is_some_and(|v| v.busy.is_some());
+        layers.push(message_modal::view(modal, app.window_size(), busy));
     }
     // Toasts sit above the app and the Preferences, below menus and dialogs.
     if let Some(toasts) = toasts::view(&app.toasts) {
@@ -244,12 +257,22 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                     &app.editor_style(),
                 )),
             },
-            PaneKind::Panel => panel::view(view, &app.avatars, app.settings.file_list),
+            PaneKind::Panel => panel::view(
+                view,
+                &app.avatars,
+                app.settings.file_list,
+                panel::PanelLayout {
+                    position: app.panes.position,
+                    staging: app.panes.ratios.staging,
+                },
+            ),
         };
         pane_grid::Content::new(content)
     })
-    .spacing(1)
-    .min_size(160)
+    .spacing(crate::layout::PANE_SPACING)
+    // The pane minimums of `layout` apply (`Panes::clamped`); the grid's
+    // own bound only stops a drag at the smallest of them (finding #45).
+    .min_size(crate::layout::BOTTOM_GRAPH_MIN_HEIGHT)
     .on_resize(6, Message::PaneResized)
     .style(theme::panes)
     .into()

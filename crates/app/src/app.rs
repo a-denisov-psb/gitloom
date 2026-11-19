@@ -952,6 +952,15 @@ pub enum Message {
     UnstageAll,
     CopyToClipboard(String),
     WindowResized(iced::Size),
+    /// Splitter between the file lists and the commit message of the
+    /// staging area at the bottom (finding #44): pressed, moved by `dy`
+    /// in a `room` high area, released.
+    StagingSplitStart,
+    StagingSplitDragged {
+        dy: f32,
+        room: f32,
+    },
+    StagingSplitEnd,
     /// The main window opened: ask for its scale factor (M9-05).
     WindowOpened(window::Id),
     /// The operating system's scale factor of the window (M9-05).
@@ -1175,12 +1184,18 @@ pub enum Message {
         id: String,
         result: Result<Option<String>, String>,
     },
-    /// Click on an editable message box: open the editor.
-    CommitEditStart,
-    CommitEditSummary(String),
-    CommitEditBody(iced::widget::text_editor::Action),
+    /// Button in the details header or "Edit commit message…": opens the
+    /// "Commit message" modal of the selected commit (finding #43).
+    CommitModalOpen,
+    CommitModalSummary(String),
+    CommitModalBody(iced::widget::text_editor::Action),
+    /// Selection in the read-only summary or description.
+    CommitModalText {
+        body: bool,
+        action: iced::widget::text_editor::Action,
+    },
     /// Refs that keep the old commit, for the note before saving.
-    CommitEditFactsLoaded {
+    CommitModalFactsLoaded {
         tab: TabId,
         id: String,
         result: Result<git_core::reword::EditFacts, String>,
@@ -1193,15 +1208,22 @@ pub enum Message {
         ids: Vec<String>,
         result: Result<git_core::reword::EditFacts, String>,
     },
-    /// Chevron of the message editor's "Authored by" row (M15-11).
+    /// Chevron of the modal's "Authored by" row (M15-11).
     EditAuthorMenu(iced::Point),
-    /// Author of the message editor: `None` keeps the original one.
+    /// Author in the modal: `None` keeps the original one.
     EditAuthorChosen(Option<git_core::Identity>),
-    /// "Other…" in the editor's author menu: name and e-mail dialog.
+    /// "Other…" in the modal's author menu: name and e-mail dialog.
     EditAuthorOther,
-    /// Save (Ctrl+Enter) / Cancel (Esc) of the message editor.
-    CommitEditSave,
-    CommitEditCancel,
+    /// Save (Ctrl+Enter) of the modal.
+    CommitModalSave,
+    /// Esc, Cancel, × or a click beside the modal: closes it, or asks
+    /// "Discard changes?" when something changed.
+    CommitModalClose,
+    /// Answers to "Discard changes?".
+    CommitModalKeepEditing,
+    CommitModalDiscard,
+    /// "Copy message" of the read-only modal.
+    CommitModalCopy,
     /// A minute passed: the graph's time markers update (M14-06).
     MinuteTick,
     /// Sort toggle of the details' file list (M14-03).
@@ -1272,6 +1294,8 @@ pub struct App {
     pub panes: Panes,
     /// Graph column border being dragged (M11-02).
     pub column_drag: Option<ColumnDrag>,
+    /// Staging splitter being dragged: the ratio at the press (#44).
+    staging_drag: Option<f32>,
     /// Notifications at the bottom left (M12-02).
     pub toasts: crate::toast::Toasts,
     /// Counts palette deep links; an older highlight timer is ignored.
@@ -1310,6 +1334,8 @@ pub struct App {
     pub form: Option<Form>,
     /// Open commit message dialog (reword, squash).
     pub message_dialog: Option<crate::overlay::MessageDialog>,
+    /// "Commit message" modal of the details (finding #43).
+    pub message_modal: Option<crate::message_modal::MessageModal>,
     /// "Clone a repository" (M10-02).
     pub clone_dialog: Option<crate::clone_dialog::CloneDialog>,
     /// "Start a local repository" (M10-03).
@@ -1381,6 +1407,7 @@ impl App {
             active: 0,
             panes: Panes::new(Default::default()),
             column_drag: None,
+            staging_drag: None,
             toasts: crate::toast::Toasts::default(),
             highlight_seq: 0,
             highlight_cache: Arc::default(),
@@ -1407,6 +1434,7 @@ impl App {
             notice: None,
             modal: None,
             message_dialog: None,
+            message_modal: None,
             clone_dialog: None,
             init_dialog: None,
             template_description: iced::widget::text_editor::Content::new(),
@@ -2337,12 +2365,8 @@ impl App {
                     return Task::none();
                 }
                 self.form = None;
-                if let Some(edit) = self
-                    .tab_mut(tab)
-                    .and_then(Tab::view_mut)
-                    .and_then(|v| v.message_edit.as_mut())
-                {
-                    edit.author = Some(git_core::Identity { name, email });
+                if let Some(modal) = self.message_modal.as_mut().filter(|m| m.tab == tab) {
+                    modal.author = Some(git_core::Identity { name, email });
                 }
                 Task::none()
             }
@@ -3016,8 +3040,20 @@ impl App {
                 _ => {}
             }
         }
+        // Ctrl+Enter saves the message modal (finding #43), also without
+        // focus in a field.
+        if self.message_modal.is_some()
+            && self.modal.is_none()
+            && self.form.is_none()
+            && self.prompt_dialog.is_none()
+            && self.context_menu.is_none()
+            && shortcut == Shortcut::Commit
+        {
+            return self.update(Message::CommitModalSave);
+        }
         // An open dialog or menu only reacts to Esc and Enter.
         let overlay_open = self.modal.is_some()
+            || self.message_modal.is_some()
             || self.context_menu.is_some()
             || self.message_dialog.is_some()
             || self.clone_dialog.is_some()
@@ -3048,6 +3084,11 @@ impl App {
         let count = self.tabs.len();
         match shortcut {
             Shortcut::CopyCommitPrompt => return self.update(Message::CopyPromptRequested),
+            Shortcut::EditCommitMessage => {
+                if self.action_block(shortcut).is_none() {
+                    return self.update(Message::CommitModalOpen);
+                }
+            }
             Shortcut::NewTab => {
                 self.add_tab(TabState::Start);
             }
@@ -3067,6 +3108,14 @@ impl App {
             Shortcut::Refresh => return self.update(Message::Refresh),
             Shortcut::ToggleSidebar => self.panes.toggle_sidebar(),
             Shortcut::TogglePanel => self.panes.toggle_panel(),
+            // A setting, not an undo entry (ADR-043); the same button moves
+            // it back (finding #44).
+            Shortcut::MoveDetailsPanel => {
+                let position = self.panes.position.other();
+                self.panes.set_position(position);
+                self.settings.appearance.details_panel = position;
+                return self.save_settings();
+            }
             Shortcut::Navigate(step) => {
                 // ↑/↓ move in the file history list while it is shown.
                 if let Some(view) = self.active_view_mut() {
@@ -3304,6 +3353,23 @@ impl App {
     /// Closes the topmost dialog, menu, overlay or inline input; false if
     /// none was open (M6-07: Esc closes every overlay, also when a text
     /// field inside it had focus).
+    /// Esc and the other close requests of the message modal (finding
+    /// #43): closes it without changes, asks "Discard changes?" with
+    /// changes, keeps editing while the question is open; false if no
+    /// modal is open.
+    fn close_message_modal(&mut self) -> bool {
+        use crate::message_modal::{close_request, CloseRequest};
+        let Some(modal) = self.message_modal.as_mut() else {
+            return false;
+        };
+        match close_request(modal) {
+            CloseRequest::Close => self.message_modal = None,
+            CloseRequest::Ask => modal.confirm_discard = true,
+            CloseRequest::KeepEditing => modal.confirm_discard = false,
+        }
+        true
+    }
+
     /// Esc on the clone dialog: cancels a running clone, else closes it.
     fn close_clone_dialog(&mut self) -> bool {
         match &self.clone_dialog {
@@ -3327,16 +3393,15 @@ impl App {
             || self.message_dialog.take().is_some()
             || self.close_clone_dialog()
             || self.prompt_dialog.take().is_some()
+            || self.close_message_modal()
             || self.init_dialog.take_if(|d| !d.running).is_some()
             || self.settings_page.take().is_some()
             || self
                 .active_view_mut()
                 .is_some_and(|v| v.drag.take().is_some())
-            || self.active_view_mut().is_some_and(|v| {
-                v.new_branch.take().is_some()
-                    || v.rename.take().is_some()
-                    || v.message_edit.take().is_some()
-            })
+            || self
+                .active_view_mut()
+                .is_some_and(|v| v.new_branch.take().is_some() || v.rename.take().is_some())
     }
 
     /// Opens the repository containing `path` in tab `id`.
@@ -4437,7 +4502,6 @@ impl App {
                 None => Loadable::Loading,
             },
         });
-        view.message_edit = None;
         let block_task = if quick_block.is_some() {
             Task::none()
         } else {
@@ -4508,34 +4572,35 @@ impl App {
         Task::batch([changes, signature, all_files, block_task])
     }
 
-    /// Opens the message editor of the selected commit when its message
-    /// can be edited (M14-05) and asks which refs keep the old commit.
-    fn start_message_edit(&mut self) -> Task<Message> {
+    /// Opens the "Commit message" modal of the selected commit (finding
+    /// #43): editable when ADR-051 allows it, otherwise read-only with the
+    /// reason; asks which refs keep the old commit.
+    fn open_message_modal(&mut self) -> Task<Message> {
         let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
         };
-        let Some(view) = self.active_view_mut() else {
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
             return Task::none();
         };
+        if view.is_multi() {
+            return Task::none();
+        }
         let Some(details) = view.details.as_ref() else {
             return Task::none();
         };
-        if view.message_edit_block(&details.id) != Some(None) || view.busy.is_some() {
-            return Task::none();
-        }
         let Some(commit) = view.snapshot.commit(&details.id) else {
             return Task::none();
         };
+        let read_only = message_modal_block(view, &commit.id);
+        let modal = crate::message_modal::MessageModal::new(tab, commit, read_only);
+        let editable = modal.editable();
         let id = commit.id.clone();
-        view.message_edit = Some(crate::repo_view::MessageEdit {
-            id: id.clone(),
-            summary: commit.summary.clone(),
-            body: iced::widget::text_editor::Content::with_text(&commit.body),
-            facts: Loadable::Loading,
-            error: None,
-            author: None,
-        });
         let writer = Arc::clone(&view.writer);
+        self.context_menu = None;
+        self.message_modal = Some(modal);
+        if !editable {
+            return Task::none();
+        }
         let facts = Task::perform(
             blocking({
                 let id = id.clone();
@@ -4543,7 +4608,7 @@ impl App {
                     git_core::reword::edit_facts(writer.as_ref(), &id).map_err(|e| e.to_string())
                 }
             }),
-            move |result| Message::CommitEditFactsLoaded {
+            move |result| Message::CommitModalFactsLoaded {
                 tab,
                 id: id.clone(),
                 result,
@@ -4551,7 +4616,7 @@ impl App {
         );
         Task::batch([
             facts,
-            iced::widget::operation::focus(crate::ui::panel::MESSAGE_EDIT_SUMMARY),
+            iced::widget::operation::focus(crate::message_modal::SUMMARY_INPUT),
         ])
     }
 
@@ -4618,38 +4683,36 @@ impl App {
         )
     }
 
-    /// Saves the edited message (ADR-051); one undo entry.
-    fn save_message_edit(&mut self) -> Task<Message> {
-        let Some(tab) = self.active_tab().map(|t| t.id) else {
+    /// Saves the modal (ADR-051); one undo entry. The modal closes when
+    /// the rewrite succeeded and stays open with its content otherwise.
+    fn save_message_modal(&mut self) -> Task<Message> {
+        let Some(modal) = self.message_modal.as_mut() else {
             return Task::none();
         };
-        let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) else {
-            return Task::none();
-        };
-        let summary = edit.summary.trim().to_owned();
-        if summary.is_empty() {
-            edit.error = Some("Enter a summary".to_owned());
+        if !modal.editable() {
             return Task::none();
         }
-        let body = edit.body.text().trim_end().to_owned();
-        let message = if body.trim().is_empty() {
-            summary
-        } else {
-            format!("{summary}\n\n{body}")
-        };
-        let id = edit.id.clone();
-        let author = edit.author.clone();
+        let tab = modal.tab;
+        if modal.summary.trim().is_empty() {
+            modal.error = Some("Enter a summary".to_owned());
+            return Task::none();
+        }
+        let message = modal.message();
+        let id = modal.id.clone();
+        let author = modal.author.clone();
         // Message only, author only, or both in one step (M15-11).
-        let unchanged = self
-            .active_tab()
-            .and_then(Tab::view)
-            .and_then(|v| v.snapshot.commit(&id))
-            .is_some_and(|commit| full_message(commit).trim_end() == message.trim_end());
-        let (label, message) = match (&author, unchanged) {
+        let (label, message) = match (&author, modal.message_unchanged()) {
             (Some(_), true) => ("Change author", None),
             (Some(_), false) => ("Edit commit", Some(message)),
             (None, _) => ("Edit commit message", Some(message)),
         };
+        if self
+            .tab_mut(tab)
+            .and_then(|t| t.view())
+            .is_none_or(|v| v.busy.is_some())
+        {
+            return Task::none();
+        }
         self.run_undoable(tab, label, move |git| {
             let done = git_core::reword::rewrite_unpushed(
                 git,
@@ -4872,6 +4935,13 @@ impl App {
                 return Some("Stage changes first".to_owned());
             }
         }
+        if id == Shortcut::EditCommitMessage {
+            let view = self.active_tab().and_then(Tab::view)?;
+            let one = !view.is_multi() && view.selected_commit().is_some();
+            if !one {
+                return Some("Select one commit".to_owned());
+            }
+        }
         if id == Shortcut::OpenRemoteWebsite && self.remote_websites().is_empty() {
             return Some("No remote with a website".to_owned());
         }
@@ -4937,8 +5007,14 @@ impl App {
                             Shortcut::FileHistory => Target::Mode(Mode::Files),
                             id => Target::Action(id),
                         };
-                        let mut entry = Entry::new(action.label.clone(), target)
-                            .disabled(self.action_block(action.id));
+                        // The pin action names where the panel goes (finding #44).
+                        let label = if action.id == Shortcut::MoveDetailsPanel {
+                            self.panes.position.move_label().to_owned()
+                        } else {
+                            action.label.clone()
+                        };
+                        let mut entry =
+                            Entry::new(label, target).disabled(self.action_block(action.id));
                         // GitKraken calls identities "profiles" (M12-12).
                         if action.id == Shortcut::ChooseIdentity {
                             entry = entry.keywords("profile");
@@ -6031,7 +6107,11 @@ impl App {
             return flash;
         }
         self.settings.appearance.zoom_percent = percent;
-        Task::batch([flash, self.save_settings()])
+        // The pane room in logical pixels changes with the zoom; the
+        // window minimum is set again (finding #45).
+        self.panes
+            .set_area(crate::layout::pane_area(self.window_size()));
+        Task::batch([flash, self.save_settings(), window_min_task()])
     }
 
     /// Shows `text` in the status bar for a moment.
@@ -7128,7 +7208,18 @@ impl App {
                 if let Some(notice) = notice {
                     self.status = notice;
                 }
+                let zoom = self.settings.appearance.zoom_percent;
                 self.settings = settings;
+                self.panes
+                    .set_position(self.settings.appearance.details_panel);
+                // The loaded zoom may differ: minimum and pane room follow.
+                let min = if zoom == self.settings.appearance.zoom_percent {
+                    Task::none()
+                } else {
+                    self.panes
+                        .set_area(crate::layout::pane_area(self.window_size()));
+                    window_min_task()
+                };
                 if let Some(page) = &mut self.settings_page {
                     *page = settings::Page::new(&self.settings).with_category(page.category);
                 }
@@ -7137,7 +7228,7 @@ impl App {
                 } else {
                     Task::none()
                 };
-                return Task::batch([save, self.restart_auto_fetch()]);
+                return Task::batch([save, self.restart_auto_fetch(), min]);
             }
             Message::SettingsOpened => return self.open_settings(),
             Message::SystemTheme(mode) => {
@@ -7891,12 +7982,27 @@ impl App {
                 self.status = "Copied to the clipboard".into();
                 return iced::clipboard::write(text);
             }
+            Message::StagingSplitStart => self.staging_drag = Some(self.panes.ratios.staging),
+            Message::StagingSplitDragged { dy, room } => {
+                if let Some(start) = self.staging_drag {
+                    self.panes.ratios.staging = staging_split(start, dy, room);
+                }
+            }
+            Message::StagingSplitEnd => self.staging_drag = None,
             Message::WindowResized(size) => {
                 self.window_size = size;
                 self.window_scale = self.scale_factor();
+                self.panes
+                    .set_area(crate::layout::pane_area(self.window_size()));
             }
             Message::WindowOpened(id) => {
-                return window::scale_factor(id).map(Message::SystemScaleChanged);
+                return Task::batch([
+                    window::scale_factor(id).map(Message::SystemScaleChanged),
+                    // Not every platform reports a resize at start; the
+                    // pane minimums need the size (finding #45).
+                    window::size(id).map(Message::WindowResized),
+                    window_min_task(),
+                ]);
             }
             Message::SystemScaleChanged(scale) => {
                 if scale.is_finite() && scale > 0.0 {
@@ -7971,6 +8077,7 @@ impl App {
                 let mut not_merged = None;
                 let mut then_network = None;
                 let mut success_status = None;
+                let mut reworded = false;
                 if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
                     view.busy = None;
                     if let Some(op) = view.network.take() {
@@ -8078,7 +8185,7 @@ impl App {
                             // The rewritten commit stays selected (M14-05).
                             if let UndoAction::Reword { done, .. } = action {
                                 view.selection = Some(Selection::Commit(done.new_commit.clone()));
-                                view.message_edit = None;
+                                reworded = true;
                             }
                             view.undo.push(action.clone());
                             view.redo.clear();
@@ -8110,6 +8217,11 @@ impl App {
                         view.description = iced::widget::text_editor::Content::new();
                         view.amend = false;
                     }
+                }
+                // Saved: the modal closes (finding #43); a failed save keeps
+                // it open with its content and shows a toast.
+                if reworded && self.message_modal.as_ref().is_some_and(|m| m.tab == tab) {
+                    self.message_modal = None;
                 }
                 match result {
                     // Cancelled by the user or by a queued operation: no dialog.
@@ -9362,37 +9474,59 @@ impl App {
                     };
                 }
             }
-            Message::CommitEditStart => return self.start_message_edit(),
-            Message::CommitEditSummary(summary) => {
-                if let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) {
-                    edit.summary = summary;
-                    edit.error = None;
+            Message::CommitModalOpen => return self.open_message_modal(),
+            Message::CommitModalSummary(summary) => {
+                if let Some(modal) = self.message_modal.as_mut().filter(|m| m.editable()) {
+                    modal.summary = summary;
+                    modal.error = None;
                 }
             }
-            Message::CommitEditBody(action) => {
-                if let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) {
-                    edit.body.perform(action);
+            Message::CommitModalBody(action) => {
+                if let Some(modal) = self.message_modal.as_mut().filter(|m| m.editable()) {
+                    modal.body.perform(action);
                 }
             }
-            Message::CommitEditFactsLoaded { tab, id, result } => {
-                if let Some(edit) = self
-                    .tab_mut(tab)
-                    .and_then(Tab::view_mut)
-                    .and_then(|v| v.message_edit.as_mut())
-                    .filter(|e| e.id == id)
+            Message::CommitModalText { body, action } => {
+                if let Some(modal) = self
+                    .message_modal
+                    .as_mut()
+                    .filter(|m| !m.editable() && !action.is_edit())
                 {
-                    edit.facts = match result {
+                    if body {
+                        modal.body.perform(action);
+                    } else {
+                        modal.summary_view.perform(action);
+                    }
+                }
+            }
+            Message::CommitModalFactsLoaded { tab, id, result } => {
+                if let Some(modal) = self
+                    .message_modal
+                    .as_mut()
+                    .filter(|m| m.tab == tab && m.id == id)
+                {
+                    modal.facts = match result {
                         Ok(facts) => Loadable::Ready(facts),
                         Err(error) => Loadable::Failed(error),
                     };
                 }
             }
-            Message::CommitEditCancel => {
-                if let Some(view) = self.active_view_mut() {
-                    view.message_edit = None;
+            Message::CommitModalSave => return self.save_message_modal(),
+            Message::CommitModalClose => {
+                self.close_message_modal();
+            }
+            Message::CommitModalKeepEditing => {
+                if let Some(modal) = self.message_modal.as_mut() {
+                    modal.confirm_discard = false;
                 }
             }
-            Message::CommitEditSave => return self.save_message_edit(),
+            Message::CommitModalDiscard => self.message_modal = None,
+            Message::CommitModalCopy => {
+                if let Some(modal) = &self.message_modal {
+                    self.status = "Commit message copied".into();
+                    return iced::clipboard::write(modal.original_message());
+                }
+            }
             Message::ChangeAuthorStart(ids) => return self.change_author_dialog(ids),
             Message::ChangeAuthorFactsLoaded { tab, ids, result } => {
                 if let Some(form) = self.form.as_mut().filter(|f| {
@@ -9418,7 +9552,7 @@ impl App {
                 let Some(view) = self.active_tab().and_then(Tab::view) else {
                     return Task::none();
                 };
-                let Some(edit) = view.message_edit.as_ref() else {
+                let Some(edit) = self.message_modal.as_ref().filter(|m| m.editable()) else {
                     return Task::none();
                 };
                 let mut entries = vec![MenuEntry::Item {
@@ -9444,19 +9578,15 @@ impl App {
                 self.context_menu = Some(ContextMenu::new(position, entries));
             }
             Message::EditAuthorChosen(author) => {
-                if let Some(edit) = self.active_view_mut().and_then(|v| v.message_edit.as_mut()) {
-                    edit.author = author;
+                if let Some(modal) = self.message_modal.as_mut().filter(|m| m.editable()) {
+                    modal.author = author;
                 }
             }
             Message::EditAuthorOther => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
                     return Task::none();
                 };
-                let current = self
-                    .active_tab()
-                    .and_then(Tab::view)
-                    .and_then(|v| v.message_edit.as_ref())
-                    .and_then(|e| e.author.clone());
+                let current = self.message_modal.as_ref().and_then(|m| m.author.clone());
                 let (name, email) = current.map_or_else(Default::default, |a| (a.name, a.email));
                 self.form = Some(Form {
                     title: "Author".into(),
@@ -11865,6 +11995,48 @@ fn full_message(commit: &git_core::Commit) -> String {
     }
 }
 
+/// Sets the window minimum (finding #45): derived from the pane minimums
+/// in logical pixels, which iced scales with the zoom, and limited to the
+/// monitor the window is on.
+fn window_min_task() -> Task<Message> {
+    window::latest().and_then(|id| {
+        window::monitor_size(id).then(move |monitor| {
+            window::set_min_size(id, Some(crate::layout::window_min_on(monitor)))
+        })
+    })
+}
+
+/// Ratio of the staging splitter after a drag by `dy` from `start` in a
+/// `room` high area (finding #44): clamped against the minimum heights of
+/// the lists and the commit message.
+pub(crate) fn staging_split(start: f32, dy: f32, room: f32) -> f32 {
+    use crate::ui::panel::{STAGING_LISTS_MIN, STAGING_MESSAGE_MIN};
+    if room <= 0.0 || !dy.is_finite() {
+        return start;
+    }
+    crate::panes::clamp_split(
+        start + dy / room,
+        room,
+        STAGING_LISTS_MIN,
+        STAGING_MESSAGE_MIN,
+    )
+    .clamp(0.05, 0.95)
+}
+
+/// Why the message modal of commit `id` opens read-only (finding #43):
+/// the pencil's reason (ADR-051), "Stashes cannot be edited", or an empty
+/// reason while the check still runs; `None` when it can be edited.
+pub(crate) fn message_modal_block(view: &RepoView, id: &str) -> Option<String> {
+    if view.snapshot.is_stash(id) {
+        return Some(crate::message_modal::STASH_REASON.to_owned());
+    }
+    match crate::ui::panel::edit_icon_state(view, id) {
+        Some(Ok(())) => None,
+        Some(Err(reason)) => Some(reason),
+        None => Some(String::new()),
+    }
+}
+
 /// Keys of the interactive rebase panel; true if `shortcut` was handled.
 fn rebase_panel_shortcut(panel: &mut crate::rebase_panel::RebasePanel, shortcut: Shortcut) -> bool {
     use crate::nav::Move;
@@ -12857,6 +13029,11 @@ async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::panes::DetailsPanelPosition;
+
+    pub(crate) fn tab_id(n: u64) -> TabId {
+        TabId(n)
+    }
 
     fn app_with_tabs(count: usize) -> App {
         let (mut app, _) = App::new(Vec::new(), None);
@@ -12988,6 +13165,8 @@ pub(crate) mod tests {
             panes: crate::panes::PaneRatios {
                 sidebar: 0.3,
                 center: 0.6,
+                bottom: 0.4,
+                staging: 0.3,
             },
             ..Session::default()
         };
@@ -15241,9 +15420,129 @@ pub(crate) mod tests {
         let _ = app.update(checked(Shortcut::TogglePanel, false));
         assert!(!app.panes.panel_visible);
         assert_eq!(
-            panel_icon(PanelToggle::Right, app.panes.panel_visible),
+            panel_icon(
+                PanelToggle::Details(app.panes.position),
+                app.panes.panel_visible
+            ),
             Icon::PanelRight
         );
+        // Finding #44: the pin moves the panel, the toggle icon follows;
+        // Ctrl+K hides and shows it at the bottom as well.
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert_eq!(app.panes.position, DetailsPanelPosition::Bottom);
+        assert_eq!(
+            app.settings.appearance.details_panel,
+            DetailsPanelPosition::Bottom
+        );
+        assert_eq!(
+            panel_icon(
+                PanelToggle::Details(app.panes.position),
+                app.panes.panel_visible
+            ),
+            Icon::PanelBottomFilled
+        );
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        assert!(!app.panes.panel_visible);
+        assert_eq!(
+            panel_icon(PanelToggle::Details(app.panes.position), false),
+            Icon::PanelBottom
+        );
+        // Hidden: the pin still works and only remembers the place.
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert_eq!(app.panes.position, DetailsPanelPosition::Right);
+        assert!(!app.panes.panel_visible);
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        assert!(app.panes.panel_visible);
+        use crate::ui::statusbar::pin_icon;
+        assert_eq!(
+            pin_icon(DetailsPanelPosition::Right),
+            (Icon::MoveToBottom, "Move details panel to the bottom")
+        );
+        assert_eq!(
+            pin_icon(DetailsPanelPosition::Bottom),
+            (Icon::MoveToRight, "Move details panel to the right")
+        );
+    }
+
+    /// Finding #44: the staging splitter moves with the drag, keeps the
+    /// minimum heights of the lists and the message and lands in the
+    /// session.
+    #[test]
+    fn staging_splitter_clamps_and_is_saved() {
+        use crate::ui::panel::{STAGING_LISTS_MIN, STAGING_MESSAGE_MIN};
+        assert_eq!(staging_split(0.5, 40.0, 400.0), 0.6);
+        assert_eq!(
+            staging_split(0.5, -1000.0, 400.0),
+            STAGING_LISTS_MIN / 400.0
+        );
+        assert_eq!(
+            staging_split(0.5, 1000.0, 400.0),
+            1.0 - STAGING_MESSAGE_MIN / 400.0
+        );
+        assert_eq!(staging_split(0.5, 10.0, 0.0), 0.5, "no room yet");
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::StagingSplitStart);
+        let _ = app.update(Message::StagingSplitDragged {
+            dy: -40.0,
+            room: 400.0,
+        });
+        let _ = app.update(Message::StagingSplitDragged {
+            dy: -80.0,
+            room: 400.0,
+        });
+        let _ = app.update(Message::StagingSplitEnd);
+        assert!((app.panes.ratios.staging - 0.3).abs() < 1e-6);
+        // Moves after the release do nothing.
+        let _ = app.update(Message::StagingSplitDragged {
+            dy: 100.0,
+            room: 400.0,
+        });
+        assert!((app.current_session().panes.staging - 0.3).abs() < 1e-6);
+        // The panel position does not touch the staging split.
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert!((app.panes.ratios.staging - 0.3).abs() < 1e-6);
+    }
+
+    /// Finding #44: the palette names where the panel goes; the position
+    /// comes back with the settings after a restart.
+    #[test]
+    fn details_panel_position_via_palette_and_restart() {
+        let mut app = ready_app(&["c"]);
+        let label = |app: &App| {
+            app.palette_entries(palette::Mode::Actions)
+                .into_iter()
+                .find(|e| {
+                    matches!(
+                        e.target,
+                        palette::Target::Action(Shortcut::MoveDetailsPanel)
+                    )
+                })
+                .map(|e| e.label)
+        };
+        assert_eq!(
+            label(&app).as_deref(),
+            Some("Move details panel to the bottom")
+        );
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert_eq!(
+            label(&app).as_deref(),
+            Some("Move details panel to the right")
+        );
+        // The stored settings carry the position into a new app.
+        let stored = serde_json::to_string(&app.settings).unwrap();
+        assert!(stored.contains("\"details_panel\":\"bottom\""), "{stored}");
+        let mut restarted = ready_app(&["c"]);
+        assert_eq!(restarted.panes.position, DetailsPanelPosition::Right);
+        let _ = restarted.update(Message::SettingsLoaded(settings::Loaded {
+            settings: serde_json::from_str(&stored).unwrap(),
+            notice: None,
+            write: false,
+        }));
+        assert_eq!(restarted.panes.position, DetailsPanelPosition::Bottom);
+        // Older settings without the field: right.
+        let old: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert_eq!(old.appearance.details_panel, DetailsPanelPosition::Right);
     }
 
     #[test]
@@ -20278,17 +20577,8 @@ pub(crate) mod tests {
             id: "c2".into(),
             result: Ok(None),
         });
-        let _ = app.update(Message::CommitEditStart);
-        assert_eq!(
-            app.tabs[0]
-                .view()
-                .unwrap()
-                .message_edit
-                .as_ref()
-                .unwrap()
-                .author,
-            None
-        );
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(app.message_modal.as_ref().unwrap().author, None);
         let _ = app.update(Message::EditAuthorMenu(iced::Point::ORIGIN));
         let menu = app.context_menu.take().unwrap();
         assert!(matches!(&menu.entries[0],
@@ -20302,7 +20592,7 @@ pub(crate) mod tests {
         };
         let _ = app.update(Message::EditAuthorChosen(Some(bo.clone())));
         // Only the author changed.
-        let _ = app.update(Message::CommitEditSave);
+        let _ = app.update(Message::CommitModalSave);
         assert_eq!(running_args(&app), ["Change author"]);
         let done = git_core::reword::Reworded {
             branch: "main".into(),
@@ -20318,9 +20608,9 @@ pub(crate) mod tests {
                 label: "Change author".into(),
             }))),
         });
+        assert!(app.message_modal.is_none(), "saved: the modal closes");
         let view = app.tabs[0].view().unwrap();
         assert_eq!(view.selection, Some(Selection::Commit("n2".into())));
-        assert!(view.message_edit.is_none());
         assert_eq!(
             view.undo.last().map(UndoAction::label).as_deref(),
             Some("Change author")
@@ -20333,7 +20623,7 @@ pub(crate) mod tests {
             id: "c2".into(),
             result: Ok(None),
         });
-        let _ = app.update(Message::CommitEditStart);
+        let _ = app.update(Message::CommitModalOpen);
         let _ = app.update(Message::EditAuthorOther);
         assert_eq!(app.form.as_ref().unwrap().fields.len(), 2);
         let _ = app.update(Message::FormInput {
@@ -20346,45 +20636,84 @@ pub(crate) mod tests {
         });
         let _ = app.update(Message::FormSubmit);
         assert_eq!(
-            app.tabs[0]
-                .view()
-                .unwrap()
-                .message_edit
-                .as_ref()
-                .unwrap()
-                .author,
+            app.message_modal.as_ref().unwrap().author,
             Some(git_core::Identity {
                 name: "Cy Dee".into(),
                 email: "cy@example.com".into()
             })
         );
-        let _ = app.update(Message::CommitEditSummary("New summary".into()));
-        let _ = app.update(Message::CommitEditSave);
+        let _ = app.update(Message::CommitModalSummary("New summary".into()));
+        let _ = app.update(Message::CommitModalSave);
         assert_eq!(running_args(&app), ["Edit commit"]);
     }
 
+    /// Finding #43: the button opens the modal editable when ADR-051
+    /// allows it, otherwise read-only with the reason.
     #[test]
-    fn message_edit_opens_only_when_allowed() {
+    fn message_modal_opens_editable_or_read_only() {
         let mut app = editable_app();
         let tab = app.tabs[0].id;
-        let _ = app.update(Message::CommitEditStart);
-        assert!(app.tabs[0].view().unwrap().message_edit.is_some());
+        let read_only = |app: &App| app.message_modal.as_ref().map(|m| m.read_only.clone());
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(read_only(&app), Some(None), "editable");
         let _ = app.update(Message::EscapeCaptured);
-        assert!(
-            app.tabs[0].view().unwrap().message_edit.is_none(),
-            "Esc cancels"
-        );
+        assert!(app.message_modal.is_none(), "Esc without changes closes");
 
-        // Pushed: no editor, the reason is kept for the tooltip.
+        // Not on the checked-out branch, an operation, busy.
+        for reason in [
+            git_core::reword::EditBlock::NotOnBranch.reason(),
+            git_core::reword::EditBlock::OperationRunning.reason(),
+        ] {
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(reason.clone())),
+            });
+            let _ = app.update(Message::CommitModalOpen);
+            assert_eq!(read_only(&app), Some(Some(reason)));
+            let _ = app.update(Message::CommitModalClose);
+            assert!(app.message_modal.is_none());
+        }
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        app.tabs[0].view_mut().unwrap().busy = Some("Fetch".into());
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(read_only(&app), Some(Some("Busy: Fetch".into())));
+        app.message_modal = None;
+        app.tabs[0].view_mut().unwrap().busy = None;
+
+        // Pushed: read-only, the reason is kept.
         let reason = git_core::reword::EditBlock::Pushed("origin/main".into()).reason();
         let _ = app.update(Message::EditBlockLoaded {
             tab,
             id: "c2".into(),
             result: Ok(Some(reason.clone())),
         });
-        let _ = app.update(Message::CommitEditStart);
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(read_only(&app), Some(Some(reason.clone())));
+        // Read-only: "Copy message" copies summary and description; the
+        // fields only select.
+        let _ = app.update(Message::CommitModalCopy);
+        assert_eq!(app.status, "Commit message copied");
+        let commit = app.tabs[0].view().unwrap().snapshot.commit("c2").cloned();
+        assert_eq!(
+            app.message_modal.as_ref().unwrap().original_message(),
+            full_message(&commit.unwrap())
+        );
+        let _ = app.update(Message::CommitModalText {
+            body: true,
+            action: iced::widget::text_editor::Action::Edit(
+                iced::widget::text_editor::Edit::Insert('x'),
+            ),
+        });
+        let modal = app.message_modal.as_ref().unwrap();
+        assert!(!modal.body.text().contains('x') && !modal.dirty());
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.message_modal.is_none());
         let view = app.tabs[0].view().unwrap();
-        assert!(view.message_edit.is_none());
         assert_eq!(
             view.details.as_ref().unwrap().edit_block,
             Loadable::Ready(Some(reason))
@@ -20408,7 +20737,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn message_edit_is_blocked_without_git_and_during_operations() {
+    fn message_modal_is_read_only_without_git_and_during_operations() {
         // Without Git: the write block is the reason, no background check.
         let mut app = ready_app(&["c2", "c1"]);
         app.tabs[0].view_mut().unwrap().write_block = Some("Git was not found".into());
@@ -20429,21 +20758,24 @@ pub(crate) mod tests {
             app.tabs[0].view().unwrap().message_edit_block("c"),
             Some(Some("Finish the running operation first".into()))
         );
-        let _ = app.update(Message::CommitEditStart);
-        assert!(app.tabs[0].view().unwrap().message_edit.is_none());
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(
+            app.message_modal.as_ref().unwrap().read_only.as_deref(),
+            Some("Finish the running operation first")
+        );
     }
 
     #[test]
-    fn message_edit_saves_selects_and_undoes() {
+    fn message_modal_saves_selects_and_undoes() {
         let mut app = editable_app();
         let tab = app.tabs[0].id;
-        let _ = app.update(Message::CommitEditStart);
-        let _ = app.update(Message::CommitEditSummary("   ".into()));
-        let _ = app.update(Message::CommitEditSave);
-        let edit = app.tabs[0].view().unwrap().message_edit.as_ref().unwrap();
-        assert_eq!(edit.error.as_deref(), Some("Enter a summary"));
-        let _ = app.update(Message::CommitEditSummary("Better summary".into()));
-        let _ = app.update(Message::CommitEditFactsLoaded {
+        let _ = app.update(Message::CommitModalOpen);
+        let _ = app.update(Message::CommitModalSummary("   ".into()));
+        let _ = app.update(Message::CommitModalSave);
+        let modal = app.message_modal.as_ref().unwrap();
+        assert_eq!(modal.error.as_deref(), Some("Enter a summary"));
+        let _ = app.update(Message::CommitModalSummary("Better summary".into()));
+        let _ = app.update(Message::CommitModalFactsLoaded {
             tab,
             id: "c2".into(),
             result: Ok(git_core::reword::EditFacts {
@@ -20453,13 +20785,28 @@ pub(crate) mod tests {
             }),
         });
         assert!(matches!(
-            &app.tabs[0].view().unwrap().message_edit.as_ref().unwrap().facts,
+            &app.message_modal.as_ref().unwrap().facts,
             Loadable::Ready(f) if f.keep_old == ["copy"]
         ));
-        let _ = app.update(Message::CommitEditSave);
+        // Ctrl+Enter saves.
+        let _ = app.update(checked(Shortcut::Commit, false));
+        assert_eq!(running_args(&app), ["Edit commit message"]);
+        // A failed save (the branch moved) shows a toast and keeps the
+        // modal with its content.
+        let _ = app.update(Message::WriteFinished {
+            tab,
+            label: "Edit commit message".into(),
+            result: Err("The branch moved since the check".into()),
+        });
+        assert_eq!(
+            app.message_modal.as_ref().map(|m| m.summary.as_str()),
+            Some("Better summary")
+        );
+        assert!(!app.toasts.list.is_empty(), "a toast explains the failure");
+        let _ = app.update(Message::CommitModalSave);
         assert_eq!(running_args(&app), ["Edit commit message"]);
 
-        // Success: the rewritten commit is selected, the editor closes and
+        // Success: the rewritten commit is selected, the modal closes and
         // Ctrl+Z restores the branch.
         let done = git_core::reword::Reworded {
             branch: "main".into(),
@@ -20475,12 +20822,54 @@ pub(crate) mod tests {
                 label: "Edit commit message".into(),
             }))),
         });
+        assert!(app.message_modal.is_none());
         let view = app.tabs[0].view().unwrap();
-        assert!(view.message_edit.is_none());
         assert_eq!(view.selection, Some(Selection::Commit("n2".into())));
         assert_eq!(view.undo.last().unwrap().label(), "Edit commit message");
         let _ = app.update(checked(Shortcut::Undo, false));
         assert_eq!(running_args(&app), ["Undo Edit commit message"]);
+    }
+
+    /// Finding #43: Esc, Cancel, × and a click beside the modal ask
+    /// "Discard changes?" when something changed; "Keep editing" stays,
+    /// "Discard" closes. The palette action needs exactly one commit.
+    #[test]
+    fn message_modal_asks_before_discarding_changes() {
+        let mut app = editable_app();
+        let _ = app.update(Message::CommitModalOpen);
+        let _ = app.update(Message::CommitModalSummary("Changed".into()));
+        for close in [Message::EscapeCaptured, Message::CommitModalClose] {
+            let _ = app.update(close);
+            assert!(app.message_modal.as_ref().unwrap().confirm_discard);
+            // Esc on the question keeps editing, like the button.
+            let _ = app.update(Message::EscapeCaptured);
+            assert!(!app.message_modal.as_ref().unwrap().confirm_discard);
+            let _ = app.update(Message::CommitModalClose);
+            let _ = app.update(Message::CommitModalKeepEditing);
+            let modal = app.message_modal.as_ref().unwrap();
+            assert!(!modal.confirm_discard);
+            assert_eq!(modal.summary, "Changed");
+        }
+        let _ = app.update(Message::CommitModalClose);
+        let _ = app.update(Message::CommitModalDiscard);
+        assert!(app.message_modal.is_none());
+        // A changed author alone counts as a change.
+        let _ = app.update(Message::CommitModalOpen);
+        let _ = app.update(Message::EditAuthorChosen(Some(git_core::Identity {
+            name: "Bo".into(),
+            email: "bo@example.com".into(),
+        })));
+        let _ = app.update(Message::CommitModalClose);
+        assert!(app.message_modal.as_ref().unwrap().confirm_discard);
+        app.message_modal = None;
+
+        // Palette: one commit selected.
+        assert_eq!(app.action_block(Shortcut::EditCommitMessage), None);
+        let _ = app.update(checked(Shortcut::EditCommitMessage, false));
+        assert!(app.message_modal.is_some());
+        app.message_modal = None;
+        let _ = app.update(Message::WipSelected);
+        assert!(app.action_block(Shortcut::EditCommitMessage).is_some());
     }
 
     #[test]

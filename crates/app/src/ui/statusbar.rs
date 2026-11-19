@@ -1,9 +1,10 @@
 //! Bottom status bar.
 
-use iced::widget::{button, container, row, space, text};
+use iced::widget::{button, container, row, space, text, tooltip};
 use iced::{Element, Fill};
 
 use crate::app::{App, Message};
+use crate::panes::DetailsPanelPosition;
 use crate::theme;
 use crate::ui::muted;
 
@@ -63,31 +64,75 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
     content = content.push(muted(concat!("v", env!("CARGO_PKG_VERSION"))).size(12));
     if repository {
-        content = content.push(panel_toggle(PanelToggle::Right, app.panes.panel_visible));
+        // The pin button left of the details panel toggle (finding #44).
+        let position = app.panes.position;
+        content = content.push(
+            row![
+                pin_button(position),
+                panel_toggle(PanelToggle::Details(position), app.panes.panel_visible),
+            ]
+            .spacing(PIN_GAP),
+        );
     }
 
     container(content).width(Fill).style(theme::chrome).into()
 }
 
+/// Gap between the pin button and the details panel toggle.
+pub const PIN_GAP: f32 = 4.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelToggle {
     Left,
-    Right,
+    /// The details panel at its position (finding #44).
+    Details(DetailsPanelPosition),
 }
 
 /// Icon of a panel toggle: filled side part while the panel is shown,
-/// outline while hidden (like VS Code).
+/// outline while hidden (like VS Code); the details panel's icon shows
+/// where it sits.
 pub fn panel_icon(toggle: PanelToggle, shown: bool) -> crate::icons::Icon {
     use crate::icons::Icon;
     match (toggle, shown) {
         (PanelToggle::Left, true) => Icon::PanelLeftFilled,
         (PanelToggle::Left, false) => Icon::PanelLeft,
-        (PanelToggle::Right, true) => Icon::PanelRightFilled,
-        (PanelToggle::Right, false) => Icon::PanelRight,
+        (PanelToggle::Details(DetailsPanelPosition::Right), true) => Icon::PanelRightFilled,
+        (PanelToggle::Details(DetailsPanelPosition::Right), false) => Icon::PanelRight,
+        (PanelToggle::Details(DetailsPanelPosition::Bottom), true) => Icon::PanelBottomFilled,
+        (PanelToggle::Details(DetailsPanelPosition::Bottom), false) => Icon::PanelBottom,
     }
 }
 
-/// Toggle of the left or the commit panel in the status bar (fix
+/// Icon and tooltip of the pin button: the arrow shows where the details
+/// panel goes (finding #44).
+pub fn pin_icon(position: DetailsPanelPosition) -> (crate::icons::Icon, &'static str) {
+    use crate::icons::Icon;
+    let icon = match position {
+        DetailsPanelPosition::Right => Icon::MoveToBottom,
+        DetailsPanelPosition::Bottom => Icon::MoveToRight,
+    };
+    (icon, position.move_label())
+}
+
+/// Pin button of the details panel (finding #44): looks like the panel
+/// toggles; its tooltip names the action. Enabled also while the panel is
+/// hidden (it then only remembers the place).
+fn pin_button<'a>(position: DetailsPanelPosition) -> Element<'a, Message> {
+    let (icon, tip) = pin_icon(position);
+    let icon = crate::icons::hover_tinted(icon, 14.0, |p| p.text_muted, |p| p.text, 4.0);
+    let button = button(container(icon).center(Fill))
+        .on_press(Message::ShortcutChecked {
+            shortcut: crate::shortcuts::Shortcut::MoveDetailsPanel,
+            text_input_focused: false,
+        })
+        .padding(0)
+        .width(22)
+        .height(20)
+        .style(theme::bare);
+    crate::ui::panel::with_tooltip_text_at(button.into(), tip.to_owned(), tooltip::Position::Top)
+}
+
+/// Toggle of the left or the details panel in the status bar (fix
 /// 2026-11-12, replaces the toolbar toggles of M11-14): a 14 px icon in a
 /// 22 × 20 px click area, no background in any state; muted, the text
 /// color on hover; no tooltip (it covered the button, fix 2026-11-12).
@@ -95,7 +140,7 @@ fn panel_toggle<'a>(toggle: PanelToggle, shown: bool) -> Element<'a, Message> {
     use crate::shortcuts::Shortcut;
     let shortcut = match toggle {
         PanelToggle::Left => Shortcut::ToggleSidebar,
-        PanelToggle::Right => Shortcut::TogglePanel,
+        PanelToggle::Details(_) => Shortcut::TogglePanel,
     };
     let icon = crate::icons::hover_tinted(
         panel_icon(toggle, shown),

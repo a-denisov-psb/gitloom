@@ -1356,6 +1356,110 @@ mod tests {
         app
     }
 
+    /// Finding #42: one Expand/Collapse button in the first row of the
+    /// frame whose label follows the folders; hidden in Path mode and
+    /// without folders. Layout only.
+    #[test]
+    fn expand_collapse_toggle_follows_the_folders() {
+        let mut app = file_list_app();
+        let has = |app: &App, label: &str| simulator(app).find(label).is_ok();
+        assert!(
+            !has(&app, "Collapse all") && !has(&app, "Expand all"),
+            "path mode"
+        );
+        let _ = app.update(Message::FileListTreeChosen(true));
+        assert!(has(&app, "Collapse all") && !has(&app, "Expand all"));
+        click(&mut app, "Collapse all");
+        assert_eq!(app.tabs[0].view().unwrap().file_tree_collapsed.len(), 3);
+        assert!(has(&app, "Expand all") && !has(&app, "Collapse all"));
+        click(&mut app, "Expand all");
+        assert!(app.tabs[0].view().unwrap().file_tree_collapsed.is_empty());
+        assert!(has(&app, "Collapse all"));
+        // Collapsing one folder by hand flips the label back.
+        let _ = app.update(Message::FileListFolderToggled("src/ui".into()));
+        assert!(has(&app, "Expand all") && !has(&app, "Collapse all"));
+        // A commit without folders hides the button.
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitChangesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(crate::repo_view::DetailChanges::Commit(vec![
+                git_core::FileChange {
+                    path: "Cargo.toml".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                },
+            ])),
+        });
+        assert!(
+            !has(&app, "Collapse all") && !has(&app, "Expand all"),
+            "no folders"
+        );
+    }
+
+    /// Finding #42: the commit details do not scroll; the file list has its
+    /// own frame with a scrollbar, the message box at most a fifth of the
+    /// panel. Long and short message, Path and Tree, a stash; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_details_layout() {
+        use crate::settings::ThemeChoice;
+        let long_body = (1..=40)
+            .map(|i| format!("Line {i} of a long description that wraps in the panel."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let files: Vec<git_core::FileChange> = (0..60)
+            .map(|i| git_core::FileChange {
+                path: format!("src/module{}/file{i:02}.rs", i % 4),
+                kind: if i % 5 == 0 {
+                    git_core::ChangeKind::Added
+                } else {
+                    git_core::ChangeKind::Modified
+                },
+                old_path: None,
+            })
+            .collect();
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = details_app(&[
+                ("c3", "Fix the graph header", ""),
+                ("c2", "Add the message box", &long_body),
+                ("c1", "Initial commit", ""),
+            ]);
+            app.settings.appearance.theme = choice;
+            let tab = app.tabs[0].id;
+            for (id, name) in [("c2", "long"), ("c3", "short")] {
+                let _ = app.update(Message::CommitSelected(id.into()));
+                let _ = app.update(Message::CommitChangesLoaded {
+                    tab,
+                    id: id.into(),
+                    result: Ok(crate::repo_view::DetailChanges::Commit(files.clone())),
+                });
+                let _ = app.update(Message::FileListTreeChosen(false));
+                snapshot(&app, &format!("details-layout-{name}-path-{theme}"));
+                let _ = app.update(Message::FileListTreeChosen(true));
+                snapshot(&app, &format!("details-layout-{name}-tree-{theme}"));
+            }
+            let _ = app.update(Message::FileListTreeChosen(false));
+            // A stash: its sections inside the frame.
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice;
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("s".into()));
+            let _ = app.update(Message::CommitChangesLoaded {
+                tab,
+                id: "s".into(),
+                result: Ok(crate::repo_view::DetailChanges::Stash(
+                    git_core::StashChanges {
+                        staged: files[..3].to_vec(),
+                        unstaged: files[3..30].to_vec(),
+                        untracked: files[30..33].to_vec(),
+                    },
+                )),
+            });
+            snapshot(&app, &format!("details-layout-stash-{theme}"));
+        }
+    }
+
     /// Unchanged files of "View all files" are muted and open the file's
     /// content at the commit (M14-03). Layout only.
     #[test]
@@ -1441,10 +1545,11 @@ mod tests {
     }
 
     /// The message box (M15-06): a click on the text does not open the
-    /// editor, the pencil at its top right does; a blocked pencil does
-    /// nothing. Layout only, so part of every test run.
+    /// modal; the button at the right of the header row does (finding
+    /// #42, #43), also when editing is blocked (then read-only). Layout
+    /// only, so part of every test run.
     #[test]
-    fn message_box_pencil_opens_the_editor() {
+    fn header_button_opens_the_message_modal() {
         let mut app = details_app(&[("c2", "Fix the typo", "Body text"), ("c1", "Initial", "")]);
         let _ = app.update(Message::CommitSelected("c2".into()));
         let tab = app.tabs[0].id;
@@ -1453,64 +1558,70 @@ mod tests {
             id: "c2".into(),
             result: Ok(None),
         });
-        let starts = |messages: &[Message]| {
+        let opens = |messages: &[Message]| {
             messages
                 .iter()
-                .any(|m| matches!(m, Message::CommitEditStart))
+                .any(|m| matches!(m, Message::CommitModalOpen))
         };
-        // The box lies below "commit: <sha>"; the pencil at its top right.
         let header = {
             let mut sim = simulator(&app);
             let found = sim.find("commit:").unwrap();
             iced_test::selector::Bounded::bounds(&found)
         };
         let top = header.y + header.height;
-        // A click on the text (left part of the box) does not edit.
+        // A click on the text (left part of the box) does not open it.
         let text_clicks = clicks_along(&app, header.x - 60.0, top + 30.0, 120.0);
-        assert!(!starts(&text_clicks), "{text_clicks:?}");
-        let pencil = |app: &App| {
+        assert!(!opens(&text_clicks), "{text_clicks:?}");
+        let button = |app: &App| {
             let mut messages = Vec::new();
-            let mut y = top + 4.0;
-            while y < top + 50.0 {
+            let mut y = header.y;
+            while y < top {
                 messages.extend(clicks_along(app, SIZE.0 - 90.0, y, 90.0));
                 y += 4.0;
             }
             messages
         };
-        assert!(starts(&pencil(&app)));
-        // Blocked: the pencil is shown muted and does nothing.
+        assert!(opens(&button(&app)));
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(app.message_modal.as_ref().unwrap().read_only, None);
+        // A click on the modal itself does not close it; one beside it does.
+        let messages = clicks_along(&app, SIZE.0 / 2.0 - 300.0, SIZE.1 / 2.0, 20.0);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, Message::CommitModalClose)),
+            "{messages:?}"
+        );
+        let messages = clicks_along(&app, 20.0, 20.0, 10.0);
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::CommitModalClose)));
+        app.message_modal = None;
+        // Blocked: the open icon opens the modal read-only.
+        let reason = "Check out a branch that contains this commit";
         let _ = app.update(Message::EditBlockLoaded {
             tab,
             id: "c2".into(),
-            result: Ok(Some("Check out a branch that contains this commit".into())),
+            result: Ok(Some(reason.into())),
         });
-        assert!(!starts(&pencil(&app)));
+        assert!(opens(&button(&app)));
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(
+            app.message_modal.as_ref().unwrap().read_only.as_deref(),
+            Some(reason)
+        );
     }
 
+    /// Finding #43: the hovered header with its button (pencil, open
+    /// icon), the modal in edit mode with the note about other refs and
+    /// read-only (pushed, stash); Dark and Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
-    fn ui_check_message_editor() {
-        let mut app = details_app(&[
-            (
-                "c2",
-                "Fix the typo in the header",
-                "Explain why.\n\nRefs #12",
-            ),
-            ("c1", "Initial", ""),
-        ]);
-        let tab = app.tabs[0].id;
-        let _ = app.update(Message::CommitSelected("c2".into()));
-        let _ = app.update(Message::EditBlockLoaded {
-            tab,
-            id: "c2".into(),
-            result: Ok(None),
-        });
-        snapshot(&app, "message-edit-idle");
-        // M15-06: the hovered box with its pencil, enabled and blocked.
+    fn ui_check_message_modal() {
+        use crate::settings::ThemeChoice;
         let hovered = |app: &App, name: &str| {
             let path = fresh_path(name);
             let mut sim = simulator(app);
-            // Inside the box, below "commit: <sha>".
             let found = sim.find("commit:").unwrap();
             let header = iced_test::selector::Bounded::bounds(&found);
             let at = iced::Point::new(header.x, header.y + header.height + 30.0);
@@ -1521,47 +1632,60 @@ mod tests {
             let snap = sim.snapshot(&app.theme()).unwrap();
             assert!(snap.matches_image(&path).unwrap());
         };
-        for (light, theme) in [(false, "dark"), (true, "light")] {
-            app.settings.appearance.theme = if light {
-                crate::settings::ThemeChoice::Light
-            } else {
-                crate::settings::ThemeChoice::Dark
-            };
-            hovered(&app, &format!("message-pencil-enabled-{theme}"));
-            let _ = app.update(Message::EditBlockLoaded {
-                tab,
-                id: "c2".into(),
-                result: Ok(Some(git_core::reword::EditBlock::NotOnBranch.reason())),
-            });
-            hovered(&app, &format!("message-pencil-blocked-{theme}"));
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = details_app(&[
+                (
+                    "c2",
+                    "Fix the typo in the header",
+                    "Explain why.\n\nRefs #12",
+                ),
+                ("c1", "Initial", ""),
+            ]);
+            app.settings.appearance.theme = choice;
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("c2".into()));
             let _ = app.update(Message::EditBlockLoaded {
                 tab,
                 id: "c2".into(),
                 result: Ok(None),
             });
-        }
-        app.settings.appearance.theme = crate::settings::ThemeChoice::Dark;
-        let _ = app.update(Message::CommitEditStart);
-        let _ = app.update(Message::CommitEditFactsLoaded {
-            tab,
-            id: "c2".into(),
-            result: Ok(git_core::reword::EditFacts {
-                branch: "main".into(),
-                keep_old: vec!["backup".into(), "v1.2".into()],
-                drops_signature: true,
-            }),
-        });
-        for (light, theme) in [(false, "dark"), (true, "light")] {
-            app.settings.appearance.theme = if light {
-                crate::settings::ThemeChoice::Light
-            } else {
-                crate::settings::ThemeChoice::Dark
-            };
-            snapshot(&app, &format!("message-edit-{theme}"));
+            hovered(&app, &format!("message-button-edit-{theme}"));
+            let _ = app.update(Message::CommitModalOpen);
+            let _ = app.update(Message::CommitModalFactsLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(git_core::reword::EditFacts {
+                    branch: "main".into(),
+                    keep_old: vec!["backup".into(), "v1.2".into()],
+                    drops_signature: true,
+                }),
+            });
+            snapshot(&app, &format!("message-modal-edit-{theme}"));
+            let _ = app.update(Message::CommitModalSummary("Fix the typo".into()));
+            let _ = app.update(Message::CommitModalClose);
+            snapshot(&app, &format!("message-modal-discard-{theme}"));
+            app.message_modal = None;
+            // Pushed: read-only with the reason.
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(
+                    git_core::reword::EditBlock::Pushed("origin/main".into()).reason(),
+                )),
+            });
+            hovered(&app, &format!("message-button-open-{theme}"));
+            let _ = app.update(Message::CommitModalOpen);
+            snapshot(&app, &format!("message-modal-pushed-{theme}"));
+            // A stash.
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice;
+            let _ = app.update(Message::CommitSelected("s".into()));
+            let _ = app.update(Message::CommitModalOpen);
+            snapshot(&app, &format!("message-modal-stash-{theme}"));
         }
     }
 
-    /// M15-11: the message editor next to the commit panel (same parts,
+    /// M15-11: the message modal next to the commit panel (same parts,
     /// paddings and button positions) and the "Change author" dialog,
     /// Dark and Light.
     #[test]
@@ -1585,7 +1709,7 @@ mod tests {
                 id: "c2".into(),
                 result: Ok(None),
             });
-            let _ = app.update(Message::CommitEditStart);
+            let _ = app.update(Message::CommitModalOpen);
             snapshot(&app, &format!("change-author-editor-{theme}"));
             let _ = app.update(Message::EditAuthorChosen(Some(git_core::Identity {
                 name: "Bo Kim".into(),
@@ -1593,7 +1717,7 @@ mod tests {
             })));
             snapshot(&app, &format!("change-author-editor-chosen-{theme}"));
             // The commit panel for comparison.
-            let _ = app.update(Message::CommitEditCancel);
+            app.message_modal = None;
             let _ = app.update(Message::WipSelected);
             snapshot(&app, &format!("change-author-commit-panel-{theme}"));
             // The dialog.
@@ -2136,6 +2260,11 @@ mod tests {
     /// Messages of a click at every few pixels of the row showing `label`
     /// while the pointer hovers it (the hover buttons appear then).
     fn row_clicks(app: &App, label: &str) -> Vec<Message> {
+        row_clicks_over(app, label, 360.0)
+    }
+
+    /// [`row_clicks`] over `width` pixels from the label.
+    fn row_clicks_over(app: &App, label: &str, width: f32) -> Vec<Message> {
         use iced::mouse::{Button, Event as Mouse};
         use iced::{Event, Point};
         let bounds = {
@@ -2147,7 +2276,7 @@ mod tests {
         };
         let mut messages = Vec::new();
         let mut x = bounds.x;
-        while x < bounds.x + 360.0 {
+        while x < bounds.x + width {
             let at = Point::new(x, bounds.center_y());
             let mut sim = simulator(app);
             sim.point_at(at);
@@ -2160,6 +2289,359 @@ mod tests {
             x += 4.0;
         }
         messages
+    }
+
+    /// Finding #44: the staging area at the bottom keeps every function:
+    /// Stage all, Unstage all, Discard all (with its confirmation), the
+    /// row hover buttons, context menus, Amend, the commit button; a click
+    /// on a file opens its diff in the center above the panel. Layout
+    /// only, part of every run.
+    #[test]
+    fn bottom_staging_keeps_its_functions() {
+        use crate::panes::DetailsPanelPosition;
+        let mut app = crate::app::tests::staging_app(&["a.txt", "b.txt"], &["src/main.rs"]);
+        app.panes.set_position(DetailsPanelPosition::Bottom);
+        // Enough room for every part at the test window's height.
+        app.panes.set_ratios(crate::panes::PaneRatios {
+            bottom: 0.3,
+            ..app.panes.ratios
+        });
+        let _ = app.update(Message::WipSelected);
+        let _ = app.update(Message::SummaryChanged("Summary".into()));
+        let has = |messages: &[Message], test: &dyn Fn(&Message) -> bool| messages.iter().any(test);
+        let m = clicked(&app, "Stage all changes");
+        assert!(has(&m, &|m| matches!(m, Message::StageAll)), "{m:?}");
+        let m = clicked(&app, "Unstage all changes");
+        assert!(has(&m, &|m| matches!(m, Message::UnstageAll)), "{m:?}");
+        let m = clicked(&app, "Amend previous commit");
+        assert!(
+            has(&m, &|m| matches!(m, Message::AmendToggled(true))),
+            "{m:?}"
+        );
+        let m = clicked(&app, "Commit changes to 1 file");
+        assert!(has(&m, &|m| matches!(m, Message::CommitRequested)), "{m:?}");
+        let m = row_clicks_over(&app, "a.txt", 600.0);
+        assert!(
+            has(&m, &|m| matches!(m, Message::Stage(f) if f.path == "a.txt")),
+            "{m:?}"
+        );
+        let m = row_clicks_over(&app, "src/main.rs", 600.0);
+        assert!(
+            has(
+                &m,
+                &|m| matches!(m, Message::Unstage(f) if f.path == "src/main.rs")
+            ),
+            "{m:?}"
+        );
+        // Discard all: the trash icon at the left of the header.
+        let title = {
+            let mut sim = simulator(&app);
+            let found = sim.find("3 file changes on HEAD (c)").unwrap();
+            iced_test::selector::Bounded::bounds(&found)
+        };
+        let m = clicks_along(&app, 0.0, title.center_y(), SIZE.0 / 2.0);
+        assert!(
+            has(&m, &|m| matches!(
+                m,
+                Message::Discard(crate::app::DiscardTarget::All)
+            )),
+            "{m:?}"
+        );
+        // Right click on a row and on the staged header open their menus.
+        let right_click = |label: &str| {
+            let mut sim = simulator(&app);
+            let found = sim.find(label).unwrap();
+            let at = iced_test::selector::Bounded::bounds(&found).center();
+            sim.point_at(at);
+            let _ = sim.simulate(vec![
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at }),
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                    iced::mouse::Button::Right,
+                )),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Right,
+                )),
+            ]);
+            sim.into_messages().collect::<Vec<_>>()
+        };
+        let m = right_click("b.txt");
+        assert!(
+            has(&m, &|m| matches!(m, Message::FileContextMenu { .. })),
+            "{m:?}"
+        );
+        let m = right_click("Staged Files (1)");
+        assert!(
+            has(&m, &|m| matches!(m, Message::StagedHeaderMenu(_))),
+            "{m:?}"
+        );
+        // The diff opens in the center; the panel stays below.
+        let m = clicked(&app, "b.txt");
+        let open = m
+            .into_iter()
+            .find(|m| matches!(m, Message::DiffOpened(_)))
+            .expect("diff");
+        let _ = app.update(open);
+        let view = app.tabs[0].view().unwrap();
+        assert!(matches!(view.center, crate::repo_view::CenterView::Diff(_)));
+        assert!(simulator(&app).find("Unstaged Files (2)").is_ok());
+    }
+
+    /// Bounds of the widget showing `label` in a window of `size`.
+    fn bounds_in(app: &App, size: (f32, f32), label: &str) -> iced::Rectangle {
+        let mut sim = Simulator::with_size(settings(), size, app.view());
+        let found = sim
+            .find(label)
+            .unwrap_or_else(|e| panic!("no {label:?}: {e}"));
+        iced_test::selector::Bounded::bounds(&found)
+    }
+
+    /// Finding #45: `layout::CHROME_HEIGHT` is the measured height of the
+    /// tab bar, toolbar, status bar and their gaps. Layout only.
+    #[test]
+    fn chrome_height_is_measured() {
+        let mut app = crate::app::tests::staging_app(&["a.txt"], &["b.txt"]);
+        let _ = app.update(Message::WipSelected);
+        // Right: the staging header text sits 10 px below the pane top.
+        let title = bounds_in(&app, SIZE, "2 file changes on HEAD (c)");
+        let version = bounds_in(&app, SIZE, concat!("v", env!("CARGO_PKG_VERSION")));
+        let pane_top = title.y - 10.0;
+        // Status bar: 26 px (padding 3, the 20 px toggles), the text in
+        // its middle; 1 px gap above the bar.
+        let pane_bottom = version.center_y() - 13.0 - 1.0;
+        let chrome = SIZE.1 - (pane_bottom - pane_top);
+        assert!(
+            (chrome - crate::layout::CHROME_HEIGHT).abs() <= 1.5,
+            "measured {chrome}"
+        );
+    }
+
+    /// Finding #45: at the window minimum (100 % zoom) nothing of the
+    /// staging area is cut off in either position: both lists show their
+    /// header and two rows, the commit message its fields, the Commit
+    /// button and a hint stay inside the panel. Layout only.
+    #[test]
+    fn staging_fits_at_the_window_minimum() {
+        use crate::panes::DetailsPanelPosition;
+        let min = crate::layout::window_min();
+        let size = (min.width, min.height);
+        for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+            let mut app = crate::app::tests::staging_app(
+                &["a1.txt", "a2.txt", "a3.txt", "a4.txt"],
+                &["s1.txt", "s2.txt", "s3.txt"],
+            );
+            app.panes.set_position(position);
+            let _ = app.update(Message::WindowResized(min));
+            let _ = app.update(Message::WipSelected);
+            let status = bounds_in(&app, size, concat!("v", env!("CARGO_PKG_VERSION")));
+            let commit = bounds_in(&app, size, "Commit changes to 3 files");
+            assert!(
+                commit.y + commit.height <= status.y - 3.0,
+                "{position:?}: commit button {commit:?} below the panel"
+            );
+            let hint = bounds_in(&app, size, "Enter a commit summary");
+            assert!(
+                hint.y + hint.height <= status.y,
+                "{position:?}: hint {hint:?}"
+            );
+            let summary_label = match position {
+                DetailsPanelPosition::Right => "Commit",
+                DetailsPanelPosition::Bottom => "Commit Message",
+            };
+            let label = bounds_in(&app, size, summary_label);
+            for (header, second) in [
+                ("Unstaged Files (4)", "a2.txt"),
+                ("Staged Files (3)", "s2.txt"),
+            ] {
+                let header = bounds_in(&app, size, header);
+                let row = bounds_in(&app, size, second);
+                assert!(row.y > header.y, "{position:?}");
+                let limit = match position {
+                    // At the bottom the lists end above the message.
+                    DetailsPanelPosition::Bottom => label.y,
+                    // At the right the staged list ends above the box.
+                    DetailsPanelPosition::Right => label.y,
+                };
+                assert!(
+                    row.y + row.height <= limit,
+                    "{position:?}: {second} {row:?} cut off above {limit}"
+                );
+            }
+            // The graph keeps its minimum height above the panel.
+            if position == DetailsPanelPosition::Bottom {
+                let graph = bounds_in(&app, size, "BRANCH / TAG");
+                let header = bounds_in(&app, size, "Unstaged Files (4)");
+                assert!(
+                    header.y - graph.y >= crate::layout::BOTTOM_GRAPH_MIN_HEIGHT,
+                    "graph {graph:?}, panel {header:?}"
+                );
+            }
+        }
+    }
+
+    /// The apps of the minimum size checks: (name, app) for the graph with
+    /// details right and at the bottom, staging right and at the bottom,
+    /// a diff, the conflict view and the large modals.
+    fn minimum_size_apps() -> Vec<(String, App, Vec<&'static str>)> {
+        use crate::panes::DetailsPanelPosition;
+        let min = crate::layout::window_min();
+        let sized = |mut app: App| {
+            let _ = app.update(Message::WindowResized(min));
+            app
+        };
+        let mut out = Vec::new();
+        for (position, name) in [
+            (DetailsPanelPosition::Right, "right"),
+            (DetailsPanelPosition::Bottom, "bottom"),
+        ] {
+            let mut app = file_list_app();
+            app.panes.set_position(position);
+            out.push((format!("details-{name}"), sized(app), vec!["commit:"]));
+            let mut app = crate::app::tests::staging_app(
+                &["src/main.rs", "src/ui/panel.rs", "README.md"],
+                &["Cargo.toml", "src/lib.rs"],
+            );
+            app.panes.set_position(position);
+            let _ = app.update(Message::WipSelected);
+            out.push((
+                format!("staging-{name}"),
+                sized(app),
+                vec!["Commit changes to 2 files", "Stage all changes"],
+            ));
+        }
+        let app = crate::app::tests::minimap_app(crate::settings::DiffMode::Hunk);
+        out.push(("diff".into(), sized(app), vec![]));
+        let app = crate::app::tests::rust_conflict_app();
+        out.push(("conflict".into(), sized(app), vec![]));
+        // Modals.
+        let mut app = crate::app::tests::ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpened);
+        out.push(("preferences".into(), sized(app), vec![]));
+        let mut app = start_app();
+        let _ = app.update(Message::CloneStart);
+        out.push(("clone".into(), sized(app), vec!["Clone", "Cancel"]));
+        let mut app = details_app(&[
+            ("c2", "Fix the typo", "Why.\n\nMore."),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::ChangeAuthorStart(vec!["c2".into()]));
+        if app.form.is_none() {
+            // The fixture is detached: on a branch the dialog opens.
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            snapshot.head = git_core::Head::Branch {
+                name: "main".into(),
+                target: "c2".into(),
+            };
+            view.snapshot = std::sync::Arc::new(snapshot);
+            let _ = app.update(Message::ChangeAuthorStart(vec!["c2".into()]));
+        }
+        out.push((
+            "change-author".into(),
+            sized(app),
+            vec!["Change author", "Cancel"],
+        ));
+        let mut app = details_app(&[
+            (
+                "c2",
+                "Fix the typo",
+                &"A long line of the description.\n".repeat(30),
+            ),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::CommitModalOpen);
+        let _ = app.update(Message::CommitModalFactsLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(git_core::reword::EditFacts {
+                branch: "main".into(),
+                keep_old: vec!["backup".into(), "v1.2".into()],
+                drops_signature: true,
+            }),
+        });
+        out.push(("message-edit".into(), sized(app), vec!["Save", "Cancel"]));
+        let mut app = details_app(&[
+            (
+                "c2",
+                "Fix the typo",
+                &"A long line of the description.\n".repeat(30),
+            ),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(Some(
+                git_core::reword::EditBlock::Pushed("origin/main".into()).reason(),
+            )),
+        });
+        let _ = app.update(Message::CommitModalOpen);
+        out.push((
+            "message-read-only".into(),
+            sized(app),
+            vec!["Copy message", "Close"],
+        ));
+        let mut app = crate::app::tests::ready_app(&["c"]);
+        let input = git_core::prompt::PromptInput {
+            source: git_core::prompt::PromptSource::Staged,
+            branch: "main".into(),
+            recent: vec!["Add login form".into()],
+            files: vec![git_core::prompt::PromptFile::new(
+                "M",
+                "src/login.rs",
+                Some((3, 1)),
+                Ok("diff --git a/src/login.rs b/src/login.rs\n@@ -1 +1 @@\n-old\n+new\n".into()),
+            )],
+        };
+        let prompt = git_core::prompt::build(git_core::prompt::DEFAULT_INSTRUCTION, None, &input);
+        let _ = app.update(Message::PromptReady(Ok(prompt)));
+        out.push(("commit-prompt".into(), sized(app), vec!["Copy", "Close"]));
+        out
+    }
+
+    /// Finding #45: at the window minimum (100 % zoom) the buttons of the
+    /// staging area and of the large modals lie inside the window. Layout
+    /// only, part of every run.
+    #[test]
+    fn buttons_fit_at_the_window_minimum() {
+        let min = crate::layout::window_min();
+        for (name, app, labels) in minimum_size_apps() {
+            for label in labels {
+                let found = bounds_in(&app, (min.width, min.height), label);
+                assert!(
+                    found.x >= 0.0
+                        && found.y >= 0.0
+                        && found.x + found.width <= min.width
+                        && found.y + found.height <= min.height - 26.0,
+                    "{name}: {label:?} at {found:?} outside {min:?}"
+                );
+            }
+        }
+    }
+
+    /// Finding #45: snapshots at the window minimum, 100 % zoom, Dark.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_minimum_size() {
+        let min = crate::layout::window_min();
+        for (name, app, _) in minimum_size_apps() {
+            snapshot_sized(&app, &format!("minimum-{name}"), (min.width, min.height));
+        }
     }
 
     fn finish_requests(messages: &[Message]) -> Vec<String> {
@@ -2878,17 +3360,19 @@ mod tests {
     #[test]
     fn status_bar_panel_toggles() {
         let version = concat!("v", env!("CARGO_PKG_VERSION"));
-        let click = |app: &mut App, left: bool| {
+        // 0: left toggle, 1: pin button, 2: details panel toggle.
+        let press = |app: &mut App, which: u8| {
             let messages: Vec<Message> = {
                 let mut sim = simulator(app);
                 let label = sim.find(version).unwrap_or_else(|e| panic!("{e}"));
                 let bounds = iced_test::selector::Bounded::bounds(&label);
                 // Left: 12 px padding + half the 22 px area; right: after the
-                // version with the 16 px spacing.
-                let x = if left {
-                    12.0 + 11.0
-                } else {
-                    bounds.x + bounds.width + 16.0 + 11.0
+                // version with the 16 px spacing, the pin first (finding #44).
+                let pin = bounds.x + bounds.width + 16.0 + 11.0;
+                let x = match which {
+                    0 => 12.0 + 11.0,
+                    1 => pin,
+                    _ => pin + 22.0 + crate::ui::statusbar::PIN_GAP,
                 };
                 sim.point_at(iced::Point::new(x, bounds.center_y()));
                 let _ = sim.simulate(iced_test::simulator::click());
@@ -2898,6 +3382,7 @@ mod tests {
                 let _ = app.update(message);
             }
         };
+        let click = |app: &mut App, left: bool| press(app, if left { 0 } else { 2 });
         let mut app = crate::app::tests::staging_app(&[], &[]);
         assert!(app.panes.sidebar_visible && app.panes.panel_visible);
         click(&mut app, true);
@@ -2912,6 +3397,20 @@ mod tests {
         assert!(app.panes.sidebar_visible);
         click(&mut app, false);
         assert!(app.panes.panel_visible);
+        // The pin moves the panel to the bottom and back.
+        press(&mut app, 1);
+        assert_eq!(
+            app.panes.position,
+            crate::panes::DetailsPanelPosition::Bottom
+        );
+        click(&mut app, false);
+        assert!(!app.panes.panel_visible, "the toggle stays in place");
+        click(&mut app, false);
+        press(&mut app, 1);
+        assert_eq!(
+            app.panes.position,
+            crate::panes::DetailsPanelPosition::Right
+        );
         // Start screen: the left end of the status bar is not a toggle.
         let (mut start, _) = App::new(Vec::new(), None);
         let before = start.panes.sidebar_visible;
@@ -2921,7 +3420,13 @@ mod tests {
         use crate::icons::Icon;
         use crate::ui::statusbar::{panel_icon, PanelToggle};
         assert_eq!(panel_icon(PanelToggle::Left, true), Icon::PanelLeftFilled);
-        assert_eq!(panel_icon(PanelToggle::Right, false), Icon::PanelRight);
+        assert_eq!(
+            panel_icon(
+                PanelToggle::Details(crate::panes::DetailsPanelPosition::Right),
+                false
+            ),
+            Icon::PanelRight
+        );
     }
 
     /// Status bar with both panels shown, both hidden and mixed; three
@@ -2952,6 +3457,119 @@ mod tests {
             app.settings.appearance.theme = choice;
             let _ = app.update(Message::SystemScaleChanged(1.25));
             snapshot_scaled(&app, &format!("statusbar-125-{theme}"), 1.25);
+        }
+    }
+
+    /// Finding #44: the status bar with the pin button in both positions
+    /// and the layout with the details panel at the bottom (graph above,
+    /// panel below), Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_details_panel_position() {
+        use crate::panes::DetailsPanelPosition;
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+                let mut app = crate::app::tests::graph_app();
+                app.settings.appearance.theme = choice;
+                app.panes.set_position(position);
+                let _ = app.update(Message::CommitSelected("f".into()));
+                let name = match position {
+                    DetailsPanelPosition::Right => "right",
+                    DetailsPanelPosition::Bottom => "bottom",
+                };
+                snapshot(&app, &format!("panel-position-{name}-{theme}"));
+                app.panes.toggle_panel();
+                snapshot(&app, &format!("panel-position-{name}-hidden-{theme}"));
+            }
+        }
+    }
+
+    /// Finding #44: the details panel at the bottom: staging empty and
+    /// with files in both lists (Path and Tree), commit details, a merge
+    /// in progress, a stash and several commits; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_bottom_layouts() {
+        use crate::panes::DetailsPanelPosition;
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let bottom = |app: &mut App| {
+                app.settings.appearance.theme = choice;
+                app.panes.set_position(DetailsPanelPosition::Bottom);
+            };
+            let mut app = crate::app::tests::staging_app(&[], &[]);
+            bottom(&mut app);
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("bottom-staging-empty-{theme}"));
+            let mut app = crate::app::tests::staging_app(
+                &["src/main.rs", "src/ui/panel.rs", "README.md", "new.txt"],
+                &["Cargo.toml", "src/lib.rs"],
+            );
+            bottom(&mut app);
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("bottom-staging-files-{theme}"));
+            let _ = app.update(Message::FileListTreeChosen(true));
+            snapshot(&app, &format!("bottom-staging-tree-{theme}"));
+            let _ = app.update(Message::FileListTreeChosen(false));
+
+            let mut app = file_list_app();
+            bottom(&mut app);
+            snapshot(&app, &format!("bottom-details-{theme}"));
+
+            let mut app = crate::app::tests::app_in_state(git_core::RepoState::Merging {
+                merge_head: "x".into(),
+            });
+            bottom(&mut app);
+            let view = app.tabs[0].view_mut().unwrap();
+            let tree = git_core::WorkingTree {
+                unstaged: vec![git_core::FileChange {
+                    path: "src/main.rs".into(),
+                    kind: git_core::ChangeKind::Conflicted,
+                    old_path: None,
+                }],
+                staged: vec![git_core::FileChange {
+                    path: "README.md".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                }],
+            };
+            view.operation_conflicts = Some(["src/main.rs".to_owned()].into());
+            view.snapshot = std::sync::Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("bottom-merge-{theme}"));
+
+            let mut app = crate::app::tests::graph_app();
+            bottom(&mut app);
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("s".into()));
+            let file = |path: &str| git_core::FileChange {
+                path: path.into(),
+                kind: git_core::ChangeKind::Modified,
+                old_path: None,
+            };
+            let _ = app.update(Message::CommitChangesLoaded {
+                tab,
+                id: "s".into(),
+                result: Ok(crate::repo_view::DetailChanges::Stash(
+                    git_core::StashChanges {
+                        staged: vec![file("a.rs")],
+                        unstaged: vec![file("b.rs"), file("c.rs")],
+                        untracked: Vec::new(),
+                    },
+                )),
+            });
+            snapshot(&app, &format!("bottom-stash-{theme}"));
+            let _ = app.update(Message::CommitSelected("a".into()));
+            {
+                let view = app.tabs[0].view_mut().unwrap();
+                let order: Vec<String> =
+                    view.snapshot.commits.iter().map(|c| c.id.clone()).collect();
+                let order: Vec<&str> = order.iter().map(String::as_str).collect();
+                view.multi.toggle("a", &order);
+                view.multi.toggle("e", &order);
+            }
+            snapshot(&app, &format!("bottom-multi-{theme}"));
         }
     }
 

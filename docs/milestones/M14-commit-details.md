@@ -43,7 +43,7 @@ Open:
 | Item | Used in |
 |---|---|
 | Can GitKraken edit the message of older or pushed commits by a click? | M14-05 |
-| What does the icon at the right of GitKraken's details header do? | M14-01 |
+| What does the icon at the right of GitKraken's details header do? Answered 2026-11-19: Pin to bottom (Gitloom: status bar button, finding #44) | M14-01 |
 | Does GitKraken show the committer when it differs? | M14-02 |
 | Exact buckets of GitKraken's time markers | M14-06 |
 | Path/Tree and "View all files" also in GitKraken's staging lists? | M14-03 |

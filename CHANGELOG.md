@@ -6,6 +6,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Pin the details panel to the bottom like GitKraken: a button in the status bar (left of the details panel toggle) and the palette action "Move details panel to the bottom/right" move commit details and staging under the graph; the choice is remembered. At the bottom the staging area shows Unstaged and Staged files side by side with the commit message and the Commit button across the full width, and a grey bar between the lists and the message can be dragged. The panel toggle icon follows the position.
+- Commit message modal: the button in the header of the commit details opens the full message in a window for comfortable reading; for commits that can be edited (not pushed yet) it also edits the message, the author and the commit prompt there ("Discard changes?" before closing with changes). Pushed commits and stashes open read-only with the reason and "Copy message". Palette action "Edit commit message…".
+- Minimum window size (about 1000×640 at 100 % zoom, scaled with the zoom) and minimum widths for the left panel, the graph and the details panel; at the bottom the graph and the panel keep a minimum height.
+
 - Changed characters within changed lines are highlighted like GitKraken (word diff): in a block of removed and added lines, each removed line is compared with the added line at the same position and only the differing parts get a stronger red or green background (e.g. only `pub(crate) ` when `fn x` became `pub(crate) fn x`). Hunk, Inline and Split, with syntax colors and word wrap; lines that have too little in common get no extra highlight.
 - Custom diff and merge tools: Preferences → External tools offers presets (VS Code, VSCodium, IntelliJ IDEA for merging, Zed for diffs, Meld, WinMerge, Beyond Compare) and "Custom" with an editable command using `{local}`, `{remote}` (merge also `{base}`, `{merged}`); stored only in Gitloom's settings, run through `git difftool` / `git mergetool` without writing to the Git config. The lists load without an open repository. Without a tool, Ctrl+D says "No external diff tool is defined." with "Define tool…", which opens the field.
 
@@ -66,6 +70,9 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Windows: repositories inside WSL (`\\wsl$\…`, `\\wsl.localhost\…`) show a notice why they are slow (with "Don't show again"), a "WSL: <distro>" badge in the recent list, and are watched by polling every 2 seconds.
 
 ### Changed
+
+- Commit details: the panel no longer scrolls as a whole. The file list has its own framed, scrolling area, the message box is at most a fifth of the panel height, the hash is left-aligned and the edit button moved from the box into the header row (shown while the pointer is over the header or the message). In Tree mode "Expand all" / "Collapse all" is one toggle in the first row of the list that follows the state of the folders.
+- The right panel is called the details panel in menus, tooltips and the palette ("Toggle details panel", Ctrl+K as before).
 
 - The section headers of the left panel (GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES) stand out from the folders and branches below them: full text color, semibold, a hairline and extra space above each section, a light background on hover.
 - Syntax highlighting works for files of any length (up to 8 MB; it stopped at 20,000 lines): colors appear block by block from the top while the rest stays plain for a moment; lines over 5,000 bytes stay plain. Highlighting is about three times faster (oniguruma regex engine).

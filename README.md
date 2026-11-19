@@ -37,7 +37,7 @@ Download the package for your system from the [releases page](https://github.com
 
 ## Coming from GitKraken
 
-The layout (repository tabs, toolbar, left panel, graph, commit panel) and the shortcuts are the same, so you can start right away. Gitloom has no accounts, no cloud workspaces, no integrations, no AI features and no subscription. Intentional differences are listed in [docs/UX-PARITY.md](docs/UX-PARITY.md).
+The layout (repository tabs, toolbar, left panel, graph, details panel) and the shortcuts are the same, so you can start right away. Gitloom has no accounts, no cloud workspaces, no integrations, no AI features and no subscription. Intentional differences are listed in [docs/UX-PARITY.md](docs/UX-PARITY.md).
 
 ## Privacy
 

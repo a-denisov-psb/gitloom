@@ -24,6 +24,8 @@ pub enum ActionId {
     Refresh,
     ToggleSidebar,
     TogglePanel,
+    /// Details panel right or at the bottom (finding #44); no shortcut.
+    MoveDetailsPanel,
     Navigate(Move),
     FocusFilter,
     /// S / U: stage or unstage the file whose diff is shown.
@@ -93,6 +95,9 @@ pub enum ActionId {
     ManageIdentities,
     /// "Copy commit message prompt…" (M10-07).
     CopyCommitPrompt,
+    /// "Edit commit message…": the message modal of the selected commit
+    /// (finding #43); no shortcut.
+    EditCommitMessage,
     /// Toolbar actions in the palette (M6-07: every action by keyboard).
     Pull,
     Push,
@@ -538,6 +543,13 @@ fn table() -> Vec<Action> {
     );
     add(A::PopStash, "Pop stash", RepoActions, Global, &[]);
     add(
+        A::EditCommitMessage,
+        "Edit commit message…",
+        RepoActions,
+        Global,
+        &[],
+    );
+    add(
         A::Refresh,
         "Reload repository",
         RepoActions,
@@ -801,10 +813,19 @@ fn table() -> Vec<Action> {
     );
     add(
         A::TogglePanel,
-        "Toggle commit detail panel",
+        "Toggle details panel",
         Interface,
         Global,
         &[ch('k').cmd()],
+    );
+    // The palette names the other place ("… to the right" while it is at
+    // the bottom).
+    add(
+        A::MoveDetailsPanel,
+        "Move details panel to the bottom",
+        Interface,
+        Global,
+        &[],
     );
     add(
         A::Close,
@@ -902,6 +923,7 @@ fn table() -> Vec<Action> {
                 | A::Stash
                 | A::PopStash
                 | A::CopyCommitPrompt
+                | A::EditCommitMessage
                 | A::ContextMenu
                 | A::SearchCommits
                 | A::FileHistory

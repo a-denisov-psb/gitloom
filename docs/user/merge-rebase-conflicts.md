@@ -41,7 +41,7 @@ While a merge, rebase, cherry-pick or revert is running, Gitloom shows it like G
 
 - a row in the warning color at the top of the graph: "A file conflict was found when attempting to merge into main" (without conflicts "Merge in progress"); click it to see the working directory;
 - with another commit selected, a bar above its details: "1 file conflict in working directory" with **View conflict**;
-- with WIP selected, the right panel is titled "Merge conflicts detected – Merging topic into main" ("Rebasing topic onto main (step 2 of 5)" and so on) and lists **Conflicted Files** and **Resolved Files** (files that were conflicted and are staged now);
+- with WIP selected, the details panel is titled "Merge conflicts detected – Merging topic into main" ("Rebasing topic onto main (step 2 of 5)" and so on) and lists **Conflicted Files** and **Resolved Files** (files that were conflicted and are staged now);
 - **Mark all resolved** stages every conflicted file; if a file still contains conflict markers, Gitloom names it and asks first;
 - the buttons at the bottom: **Commit and merge** (or **Continue rebase**, **Continue cherry-pick**, **Continue revert**), **Skip** (rebase and cherry-pick) and **Abort merge** (and so on).
 

@@ -43,8 +43,8 @@ Clone and init cannot be undone with Ctrl+Z: delete the folder if you no longer 
 | Toolbar | Repository and branch, Undo/Redo, Pull/Push, Branch, Stash/Pop, Terminal, Preferences (gear) |
 | Left panel | Local branches (in folders), remote branches per remote, tags, stashes, Git flow (when set up), submodules; filter on top (Ctrl+Alt+F); Ctrl+J hides it |
 | Graph | All commits with the lane graph, branch and tag pills, the "WIP" row for your uncommitted changes |
-| Right panel | Details of the selected commit, or the staging area when the WIP row is selected; Ctrl+K hides it |
-| Status bar | Messages, running operations (with Cancel), notices; at both ends the toggles for the left panel and the commit panel (filled = shown) |
+| Details panel | Details of the selected commit, or the staging area when the WIP row is selected; right of the graph or pinned below it (arrow button in the status bar); Ctrl+K hides it |
+| Status bar | Messages, running operations (with Cancel), notices; at both ends the toggles for the left panel and the details panel (filled = shown), left of the latter the button that moves the details panel to the bottom or back |
 | Notifications (bottom left) | Errors, warnings and short confirmations, up to three. Errors explain in plain words what happened and what to do; **Details** shows Git's own output, **Copy** copies it. Errors and warnings stay until you close them (×); info and success notifications close after a few seconds (not while the pointer is on them). Questions that need a decision stay dialogs. |
 
 All dividers can be dragged. The diff of a file replaces the graph; **Esc** returns to the graph at the same position.
