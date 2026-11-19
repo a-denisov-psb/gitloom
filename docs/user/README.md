@@ -12,6 +12,7 @@ Gitloom is a native Git client with the layout, interactions and keyboard shortc
 | [Merge, rebase and conflicts](merge-rebase-conflicts.md) | Merge, rebase, interactive rebase, cherry-pick, revert, reset, conflicts |
 | [Undo and redo](undo.md) | What can be undone and when |
 | [Settings](settings.md) | Preferences, themes, zoom, external tools, files on disk |
+| [Themes](themes.md) | Make, edit, import and export your own themes; the file format |
 | [Privacy](privacy.md) | What contacts the network and when |
 | [Troubleshooting](troubleshooting.md) | Credentials, Git not found, external tools, crash reports |
 | [Known limitations](known-limitations.md) | What Gitloom does not do (yet) |

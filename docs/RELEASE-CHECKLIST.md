@@ -240,6 +240,22 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] An unknown id (`"theme": "no-such-theme"` in `settings.json`, then start Gitloom): Dark is used and Preferences → Appearance says "Theme 'no-such-theme' not found, using Dark."
 - [ ] The askpass window (e.g. an HTTPS push that asks for a password) uses the chosen theme; with System it follows the Windows mode and the mapped themes.
 
+## 7p. Theme editor (M17) (Windows required, Linux checked in CI)
+
+- [ ] Preferences → Themes lists the ten built-in themes with a lock icon and "My themes"; "Edit themes…" in Appearance and in the command palette open it.
+- [ ] Select a built-in and click **New theme**: "<name> copy" appears under My themes and opens in the editor; Rename… and Delete… stay disabled for built-ins with the reason as tooltip.
+- [ ] Edit each color group: a main color (type a hex value, then use the sliders of its swatch), a More color, a lane, a Git flow color, add and remove feature colors (one to four; with one, "All feature branches use this color"), change the syntax theme. An invalid hex value is marked red and not applied.
+- [ ] The preview follows every edit while the editor controls and the rest of the window keep the active theme; contrast warnings appear below it.
+- [ ] **Derive the other colors from the main colors** changes only the More colors; the hint appears after a main color changed.
+- [ ] **Save** writes the file (Open folder shows it), **Save and use** switches to the theme at once, **Revert** restores the saved colors; closing the editor or Preferences with changes asks "Discard changes?".
+- [ ] With the theme in use and a Git flow repository in the Gitflow layout: a one-entry feature list colors every feature branch the same.
+- [ ] **Export…** the theme, delete it (Delete… asks), then **Import…** the exported file (or import it on a second machine): it comes back. Import it twice: Replace and Keep both work.
+- [ ] A hand-written minimal file (see `docs/user/themes.md`) in the themes folder loads after a restart and derives the rest.
+- [ ] A broken file in the folder (e.g. `{"name": 1}`) is listed with its reason and the app starts normally.
+- [ ] Delete the theme in use: the window falls back to Dark and Appearance names the missing theme.
+- [ ] System with a user theme in the dark or light slot follows the Windows mode.
+- [ ] Make a theme whose text equals the background: the preview is unreadable, the warnings list it, Preferences stay readable, and saving still works; choose another theme afterwards.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

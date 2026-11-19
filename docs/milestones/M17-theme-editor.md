@@ -48,12 +48,12 @@ Open: none (GitKraken has no theme editor; Gitloom extension).
 
 ## Milestone acceptance
 
-- [ ] A built-in theme can be duplicated; every color group can be edited; the result is saved as a file and used.
-- [ ] The preview shows the edited theme while the controls keep the active theme; contrast warnings appear and never block saving.
-- [ ] A one-entry feature list colors all feature branches the same in the Gitflow layout.
-- [ ] Import and export round-trip; invalid files are listed with the reason and never crash the app.
-- [ ] Deleting or breaking the active theme falls back with a visible note.
-- [ ] User guide, UX-PARITY, release checklist (section 7p) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] A built-in theme can be duplicated; every color group can be edited; the result is saved as a file and used.
+- [x] The preview shows the edited theme while the controls keep the active theme; contrast warnings appear and never block saving.
+- [x] A one-entry feature list colors all feature branches the same in the Gitflow layout.
+- [x] Import and export round-trip; invalid files are listed with the reason and never crash the app.
+- [x] Deleting or breaking the active theme falls back with a visible note.
+- [x] User guide, UX-PARITY, release checklist (section 7p) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
@@ -102,7 +102,7 @@ Acceptance: app test: an edit changes the preview and not the editor controls; u
 
 Note: the preview sits right of the editor controls (3:2), drawn through `iced::widget::themer` with the registry's preview entry (`themes::PREVIEW_ID`, not listed, replaced after every update that changes the edited theme, cleared when the editor closes). The sample code is highlighted once per syntax theme. Snapshots `theme-preview-*`.
 
-### [ ] M17-05 Documentation
+### [x] M17-05 Documentation
 
 - New `docs/user/themes.md`: duplicate, edit, preview, save, import and export, the file format as a table, a hand-written minimal file. `docs/user/settings.md` (category Themes, "Files on disk" row for `themes/`), UX-PARITY row "Theme editor" (Gitloom extension), `docs/ARCHITECTURE.md`, ADR-059 implementation notes.
 - `docs/RELEASE-CHECKLIST.md` section "7p. Theme editor (M17) (Windows required, Linux checked in CI)": duplicate a built-in and edit each color group; preview and warnings; Save, Save and use, Revert, discard dialog; Derive; a one-entry feature list in a repository with the Gitflow layout; export, then import on a second machine or after deleting; a hand-written minimal file; an invalid file in the folder; delete the active theme; System mapping with a user theme; a theme with text equal to background (Preferences stay readable).
