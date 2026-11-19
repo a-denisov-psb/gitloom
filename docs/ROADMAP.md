@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M17 – Theme editor** → [`milestones/M17-theme-editor.md`](milestones/M17-theme-editor.md) (M16 theme system done). After M17: **Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7p); 1.0.0 is released from `develop` when the maintainer asks.
+**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7p); 1.0.0 is released from `develop` when the maintainer asks.
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M17 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -33,7 +33,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M14 | 1.0.0 | Commit details like GitKraken | Done |
 | M15 | 1.0.0 | Polish before 1.0.0 | Done |
 | M16 | 1.0.0 | Theme system | Done |
-| M17 | 1.0.0 | Theme editor | Planned |
+| M17 | 1.0.0 | Theme editor | Done |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -134,7 +134,7 @@ Findings of the maintainer after M14 (2026-11-13): the conflict view handles UTF
 
 Ten built-in themes instead of Dark and Light (Dark, Light, Dark+, Light+, Monokai, GitHub Dark, GitHub Light, Solarized Light, Warm Dark, Warm Light), chosen in Preferences → Appearance or the command palette; System uses one dark and one light theme of the user's choice. The palette becomes runtime data with ten main colors and derived secondary colors; every theme brings its lane colors, Git flow colors (feature branches as a list of 1–4 colors, one entry = fixed color) and an embedded syntax theme. Themes are colors only; the graph style tokens of Classic Dark stay removed (ADR-054, ADR-058). Details: [`milestones/M16-theme-system.md`](milestones/M16-theme-system.md).
 
-### M17 – Theme editor (planned)
+### M17 – Theme editor (done)
 
 Own themes: duplicate any theme, edit main, secondary, lane and Git flow colors and the syntax theme in Preferences → Themes, check them in a preview that cannot make the settings unreadable, save them as JSON files, import and export. Details: [`milestones/M17-theme-editor.md`](milestones/M17-theme-editor.md).
 
