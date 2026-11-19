@@ -180,8 +180,7 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         tags,
     ));
     let mut submodules_section = Some(submodules(repo, &needle));
-    let mut sections = column![].spacing(6);
-    let mut first = true;
+    let mut sections = column![];
     for kind in section_order(gitflow_section.is_some()) {
         let element = match kind {
             Section::Gitflow => gitflow_section.take(),
@@ -192,19 +191,15 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
             Section::Submodules => submodules_section.take(),
         };
         if let Some(element) = element {
-            // Every section after the first visible one: extra space and a
-            // hairline above it (fix/sidebar-section-headers).
-            sections = sections.push(if first {
-                element
-            } else {
-                column![
-                    space::vertical().height(SECTION_GAP),
-                    crate::icons::Hairline,
-                    element
-                ]
-                .into()
-            });
-            first = false;
+            // Every visible section, also the first: a hairline, the same
+            // space above the header and after the section's end, so a
+            // collapsed header sits centered between two lines (#46).
+            sections = sections.push(column![
+                crate::icons::Hairline,
+                space::vertical().height(SECTION_PAD),
+                element,
+                space::vertical().height(SECTION_PAD),
+            ]);
         }
     }
 
@@ -231,8 +226,10 @@ pub fn view(repo: &RepoView) -> Element<'_, Message> {
         .into()
 }
 
-/// Extra space above every section but the first, over its hairline.
-const SECTION_GAP: f32 = 8.0;
+/// Space between a section's hairline and its header, and between the
+/// section's end (its header when collapsed, its last row when expanded)
+/// and the next hairline (finding #46).
+pub const SECTION_PAD: f32 = 6.0;
 
 /// Order of the sections like GitKraken: GITFLOW (when initialized),
 /// LOCAL, REMOTE, STASHES, TAGS, SUBMODULES (M9-06). Keyboard focus

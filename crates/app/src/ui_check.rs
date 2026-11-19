@@ -288,13 +288,15 @@ mod tests {
         snapshot(&app, "left-panel-after-clicks");
     }
 
-    /// Section headers (fix/sidebar-section-headers): full text color,
-    /// semibold, a hairline and extra space above every section but the
-    /// first; with and without GITFLOW, LOCAL collapsed, both themes at
-    /// 100 and 125 %.
+    /// Section headers (fix/sidebar-section-headers, finding #46): full
+    /// text color, semibold, a hairline above every section (also the
+    /// first) and the same space above and below the header; with and
+    /// without GITFLOW, all collapsed, mixed and all expanded, both themes
+    /// at 100 and 125 %.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_section_headers() {
+        use crate::repo_view::Section;
         for (light, theme) in [(false, "dark"), (true, "light")] {
             let choice = if light {
                 crate::settings::ThemeChoice::Light
@@ -305,20 +307,155 @@ mod tests {
             flow.settings.appearance.theme = choice;
             let mut plain = crate::app::tests::sidebar_app();
             plain.settings.appearance.theme = choice;
-            for percent in [100_u32, 125] {
-                let scale = percent as f32 / 100.0;
+            for (state, collapse) in [
+                ("expanded", &[][..]),
+                (
+                    "mixed",
+                    &[Section::Gitflow, Section::Remote, Section::Tags][..],
+                ),
+                ("collapsed", &ALL_SECTIONS[..]),
+            ] {
                 for (app, name) in [(&mut flow, "gitflow"), (&mut plain, "local-first")] {
-                    let _ = app.update(Message::SystemScaleChanged(scale));
-                    snapshot_scaled(
-                        app,
-                        &format!("section-headers-{name}-{theme}-{percent}"),
-                        scale,
-                    );
+                    set_collapsed(app, collapse);
+                    for percent in [100_u32, 125] {
+                        let scale = percent as f32 / 100.0;
+                        let _ = app.update(Message::SystemScaleChanged(scale));
+                        snapshot_scaled(
+                            app,
+                            &format!("section-headers-{name}-{state}-{theme}-{percent}"),
+                            scale,
+                        );
+                    }
                 }
             }
-            let _ = flow.update(Message::SectionToggled(crate::repo_view::Section::Local));
-            snapshot(&flow, &format!("section-headers-collapsed-{theme}"));
         }
+    }
+
+    const ALL_SECTIONS: [crate::repo_view::Section; 6] = [
+        crate::repo_view::Section::Gitflow,
+        crate::repo_view::Section::Local,
+        crate::repo_view::Section::Remote,
+        crate::repo_view::Section::Stashes,
+        crate::repo_view::Section::Tags,
+        crate::repo_view::Section::Submodules,
+    ];
+
+    /// Collapses exactly the sections `collapsed` of the active tab.
+    fn set_collapsed(app: &mut App, collapsed: &[crate::repo_view::Section]) {
+        for section in ALL_SECTIONS {
+            let is = app.tabs[0].view().unwrap().collapsed.contains(&section);
+            if is != collapsed.contains(&section) {
+                let _ = app.update(Message::SectionToggled(section));
+            }
+        }
+    }
+
+    /// Bounds of every hairline in the simulated view, top to bottom.
+    fn hairlines(sim: &mut Simulator<'_, Message>) -> Vec<iced::Rectangle> {
+        use iced_test::selector::Candidate;
+        let mut out = Vec::new();
+        let _ = sim.find(|candidate: Candidate<'_>| -> Option<()> {
+            if let Candidate::Custom { bounds, state, .. } = candidate {
+                if state.is::<crate::icons::Hairline>() {
+                    out.push(bounds);
+                }
+            }
+            None
+        });
+        out.sort_by(|a, b| a.y.total_cmp(&b.y));
+        out
+    }
+
+    /// Bounds of the section header (its button) showing `title` in a
+    /// left panel `sidebar` large: the lowest of the widest containers
+    /// around the label inside the panel's padding.
+    fn header_bounds(
+        sim: &mut Simulator<'_, Message>,
+        sidebar: iced::Rectangle,
+        title: &str,
+    ) -> Option<iced::Rectangle> {
+        use iced_test::selector::Candidate;
+        let label = iced_test::selector::Bounded::bounds(&sim.find(title).ok()?);
+        let mut around = Vec::new();
+        let _ = sim.find(|candidate: Candidate<'_>| -> Option<()> {
+            if let Candidate::Container { bounds, .. } = candidate {
+                let contains = bounds.x <= label.x
+                    && bounds.y <= label.y
+                    && bounds.x + bounds.width >= label.x + label.width
+                    && bounds.y + bounds.height >= label.y + label.height;
+                if contains && bounds.width < sidebar.width {
+                    around.push(bounds);
+                }
+            }
+            None
+        });
+        let widest = around.iter().map(|b| b.width).fold(0.0, f32::max);
+        around
+            .into_iter()
+            .filter(|b| b.width == widest)
+            .min_by(|a, b| a.height.total_cmp(&b.height))
+    }
+
+    /// Finding #46: every visible section of the left panel starts with a
+    /// hairline, also the first (with and without GITFLOW, with the
+    /// "Viewing x/y" line); a collapsed header has `SECTION_PAD` above and
+    /// below it, so it sits centered between two lines. Layout only.
+    #[test]
+    fn section_headers_sit_between_their_lines() {
+        let titles = [
+            "GITFLOW",
+            "LOCAL",
+            "REMOTE",
+            "STASHES",
+            "TAGS",
+            "SUBMODULES",
+        ];
+        let mut plain = ready_app(&["c"]);
+        let _ = plain.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        for (name, mut app, first, viewing) in [
+            ("gitflow", crate::app::tests::flow_app(), "GITFLOW", false),
+            ("viewing", crate::app::tests::sidebar_app(), "LOCAL", true),
+            ("plain", plain, "LOCAL", false),
+        ] {
+            set_collapsed(&mut app, &ALL_SECTIONS);
+            let mut sim = simulator(&app);
+            let sidebar = pane_bounds(&mut sim, crate::panes::PaneKind::Sidebar);
+            let lines: Vec<_> = hairlines(&mut sim)
+                .into_iter()
+                .filter(|l| l.x < sidebar.x + sidebar.width)
+                .collect();
+            let headers: Vec<(&str, iced::Rectangle)> = titles
+                .iter()
+                .filter_map(|t| header_bounds(&mut sim, sidebar, t).map(|b| (*t, b)))
+                .collect();
+            assert_eq!(headers[0].0, first, "{name}");
+            assert_eq!(viewing_shown(&mut sim), viewing, "{name}");
+            assert_eq!(lines.len(), headers.len(), "{name}: one line per section");
+            // The first line sits right below the filter field.
+            let top = lines[0].y - sidebar.y;
+            assert!((30.0..80.0).contains(&top), "{name}: first line at {top}");
+            let pad = crate::ui::sidebar::SECTION_PAD;
+            for (i, (title, header)) in headers.iter().enumerate() {
+                let above = header.y - (lines[i].y + lines[i].height);
+                assert!((above - pad).abs() < 0.01, "{name} {title}: {above} above");
+                if let Some(next) = lines.get(i + 1) {
+                    let below = next.y - (header.y + header.height);
+                    assert!((below - pad).abs() < 0.01, "{name} {title}: {below} below");
+                }
+            }
+        }
+    }
+
+    /// Whether the "Viewing x/y" line of the left panel is shown.
+    fn viewing_shown(sim: &mut Simulator<'_, Message>) -> bool {
+        use iced_test::selector::Candidate;
+        sim.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Text { content, .. } if content.starts_with("Viewing") => Some(()),
+            _ => None,
+        })
+        .is_ok()
     }
 
     /// Tree order, tag folders and the checked-out marker (M11-11): main

@@ -30,7 +30,7 @@ pub(crate) mod overlays;
 pub(crate) mod panel;
 mod rebase;
 pub(crate) mod settings;
-mod sidebar;
+pub(crate) mod sidebar;
 pub(crate) mod start;
 pub(crate) mod statusbar;
 mod tabs;
