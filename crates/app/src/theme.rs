@@ -3,6 +3,8 @@
 //! they are called with, so a theme switch applies everywhere at once.
 
 use git_core::{ChangeKind, RefKind};
+use std::sync::Arc;
+
 use iced::theme::Palette;
 use iced::widget::{button, container, pane_grid, text};
 use iced::{Background, Border, Color, Theme};
@@ -142,37 +144,33 @@ pub const LIGHT: ThemePalette = ThemePalette {
     diff_removed_emphasis: Color::from_rgba(0.776, 0.157, 0.157, 0.22),
 };
 
-/// Palette of the theme a style function is called with.
-pub fn palette(theme: &Theme) -> &'static ThemePalette {
-    if theme.extended_palette().is_dark {
-        &DARK
-    } else {
-        &LIGHT
-    }
+/// Palette of the theme a style function is called with: the registry
+/// entry named like the iced theme (ADR-058); other iced themes (tests use
+/// `Theme::Dark` and `Theme::Light`) get Dark or Light by their brightness.
+pub fn palette(theme: &Theme) -> Arc<ThemePalette> {
+    crate::themes::palette_of(iced::theme::Base::name(theme)).unwrap_or_else(|| {
+        let base = if theme.extended_palette().is_dark {
+            ThemeKind::Dark
+        } else {
+            ThemeKind::Light
+        };
+        Arc::clone(&crate::themes::default_of(base).palette)
+    })
 }
 
-impl ThemeKind {
-    pub fn palette(self) -> &'static ThemePalette {
-        match self {
-            Self::Dark => &DARK,
-            Self::Light => &LIGHT,
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Dark => "Dark",
-            Self::Light => "Light",
-        }
-    }
-}
-
-/// iced theme for a palette.
+/// iced theme of the base's default theme (`dark` or `light`).
 pub fn app_theme(kind: ThemeKind) -> Theme {
-    let name = format!("{} {}", git_core::identity::DISPLAY_NAME, kind.name());
-    let p = kind.palette();
-    Theme::custom(
-        name,
+    iced_theme(&crate::themes::default_of(kind))
+}
+
+/// iced theme for a registry theme: named by the theme id (so
+/// [`palette`] finds it) and dark or light by the theme's base, whatever
+/// its background looks like.
+pub fn iced_theme(def: &crate::themes::ThemeDef) -> Theme {
+    let p = &def.palette;
+    let dark = def.base == ThemeKind::Dark;
+    Theme::custom_with_fn(
+        def.id.clone(),
         Palette {
             background: p.bg_graph,
             text: p.text,
@@ -180,6 +178,10 @@ pub fn app_theme(kind: ThemeKind) -> Theme {
             success: p.success,
             warning: p.warning,
             danger: p.danger,
+        },
+        move |palette| iced::theme::palette::Extended {
+            is_dark: dark,
+            ..iced::theme::palette::Extended::generate(palette)
         },
     )
 }
@@ -194,7 +196,7 @@ fn filled(color: Color) -> container::Style {
 /// Text in a palette color, for `text(..).style(..)`.
 pub fn text_with(pick: fn(&ThemePalette) -> Color) -> impl Fn(&Theme) -> text::Style {
     move |theme| text::Style {
-        color: Some(pick(palette(theme))),
+        color: Some(pick(&palette(theme))),
     }
 }
 
@@ -357,7 +359,7 @@ fn start_button_on_background(p: &ThemePalette, status: button::Status) -> Color
 pub fn start_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
     button::Style {
-        background: Some(Background::Color(start_button_fill(p, status))),
+        background: Some(Background::Color(start_button_fill(&p, status))),
         text_color: p.text,
         border: Border::default().rounded(6),
         ..button::Style::default()
@@ -537,7 +539,7 @@ pub fn graph_row(selected: bool, lane: u32) -> impl Fn(&Theme, button::Status) -
     move |theme, status| {
         let p = palette(theme);
         let background = match (selected, status) {
-            (true, _) => Some(selected_row(p, lane)),
+            (true, _) => Some(selected_row(&p, lane)),
             (false, button::Status::Hovered | button::Status::Pressed) => Some(p.bg_hover),
             _ => None,
         };
@@ -557,7 +559,7 @@ pub fn graph_row(selected: bool, lane: u32) -> impl Fn(&Theme, button::Status) -
 pub fn toast(kind: crate::toast::ToastKind) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let p = palette(theme);
-        let color = toast_color(p, kind);
+        let color = toast_color(&p, kind);
         container::Style {
             background: Some(Background::Color(p.bg_panel)),
             border: Border::default().rounded(6).width(1).color(color),
@@ -638,10 +640,12 @@ pub fn diff_emphasis(
     code_theme: crate::highlight::CodeTheme,
     kind: git_core::DiffLineKind,
 ) -> Option<Color> {
-    let p = match code_theme {
-        crate::highlight::CodeTheme::Dark => &DARK,
-        crate::highlight::CodeTheme::Light => &LIGHT,
-    };
+    let p = crate::themes::default_of(match code_theme {
+        crate::highlight::CodeTheme::Dark => ThemeKind::Dark,
+        crate::highlight::CodeTheme::Light => ThemeKind::Light,
+    })
+    .palette
+    .clone();
     match kind {
         git_core::DiffLineKind::Added => Some(p.diff_added_emphasis),
         git_core::DiffLineKind::Removed => Some(p.diff_removed_emphasis),
@@ -1051,8 +1055,8 @@ mod tests {
 
     #[test]
     fn palette_follows_the_theme() {
-        assert_eq!(palette(&app_theme(ThemeKind::Dark)), &DARK);
-        assert_eq!(palette(&app_theme(ThemeKind::Light)), &LIGHT);
+        assert_eq!(*palette(&app_theme(ThemeKind::Dark)), DARK);
+        assert_eq!(*palette(&app_theme(ThemeKind::Light)), LIGHT);
     }
 
     #[test]

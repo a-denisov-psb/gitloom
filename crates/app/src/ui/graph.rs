@@ -1131,7 +1131,7 @@ fn graph_with_avatar<'a>(
     if stash {
         let alpha = if dimmed { 0.3 } else { 1.0 };
         let icon = icons::colored(Icon::Stash, STASH_ICON, move |theme| {
-            theme::lane_color(theme::palette(theme), lane).scale_alpha(alpha)
+            theme::lane_color(&theme::palette(theme), lane).scale_alpha(alpha)
         });
         return iced::widget::Stack::with_children([
             cell,
@@ -1224,10 +1224,10 @@ impl canvas::Program<Message> for GraphCell {
                 continue;
             };
             let path = to_path(&ops);
-            frame.stroke(&path, line(theme::lane_color(p, color.0), dashed));
+            frame.stroke(&path, line(theme::lane_color(&p, color.0), dashed));
         }
 
-        let color = theme::lane_color(p, self.row.color.0);
+        let color = theme::lane_color(&p, self.row.color.0);
         let color = if self.dimmed {
             color.scale_alpha(0.3)
         } else {

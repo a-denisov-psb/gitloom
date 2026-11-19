@@ -41,7 +41,7 @@ fn toast(toast: &Toast) -> Element<'_, Message> {
     let mut body = column![
         row![
             icons::colored(icon, 16.0, move |t| theme::toast_color(
-                theme::palette(t),
+                &theme::palette(t),
                 kind
             )),
             text(&toast.title).size(14),

@@ -427,7 +427,7 @@ pub fn icon<'a>(icon: Icon, size: f32) -> Sharp<'a> {
 
 /// Icon in a palette color.
 pub fn tinted<'a>(icon: Icon, size: f32, pick: fn(&ThemePalette) -> Color) -> Sharp<'a> {
-    colored(icon, size, move |theme| pick(palette(theme)))
+    colored(icon, size, move |theme| pick(&palette(theme)))
 }
 
 /// Icon in a color derived from the theme.
@@ -460,8 +460,8 @@ pub fn hover_tinted<'a>(
             .height(size)
             .style(move |theme, status| svg::Style {
                 color: Some(match status {
-                    svg::Status::Hovered => hovered(palette(theme)),
-                    svg::Status::Idle => idle(palette(theme)),
+                    svg::Status::Hovered => hovered(&palette(theme)),
+                    svg::Status::Idle => idle(&palette(theme)),
                 }),
             }),
         hover_margin: margin,
@@ -490,7 +490,7 @@ pub fn change_icon<'a>(kind: git_core::ChangeKind, size: f32) -> Sharp<'a> {
         ChangeKind::Conflicted => Icon::FileConflicted,
     };
     colored(icon, size, move |theme| {
-        crate::theme::change_color(palette(theme), kind)
+        crate::theme::change_color(&palette(theme), kind)
     })
 }
 
