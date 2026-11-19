@@ -3035,7 +3035,7 @@ mod tests {
         let lines = one_mb.lines().count();
         let start = Instant::now();
         let outcome =
-            crate::highlight::highlight("big.rs", &one_mb, crate::highlight::CodeTheme::Dark);
+            crate::highlight::highlight("big.rs", &one_mb, crate::highlight::CodeTheme::DARK);
         eprintln!(
             "PERF highlight 1 MB ({lines} lines): {:?} ({})",
             start.elapsed(),
@@ -3044,7 +3044,7 @@ mod tests {
         let too_large = one_mb.repeat(9);
         let start = Instant::now();
         let outcome =
-            crate::highlight::highlight("big.rs", &too_large, crate::highlight::CodeTheme::Dark);
+            crate::highlight::highlight("big.rs", &too_large, crate::highlight::CodeTheme::DARK);
         eprintln!(
             "PERF highlight 9 MB (plain): {:?} ({outcome:?})",
             start.elapsed()
@@ -3133,7 +3133,7 @@ mod tests {
     fn perf_highlight_progressive() {
         use std::sync::Arc;
         use std::time::Instant;
-        let theme = crate::highlight::CodeTheme::Dark;
+        let theme = crate::highlight::CodeTheme::DARK;
         let app_rs =
             std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs")).unwrap();
         let synthetic: String = (0..100_000)

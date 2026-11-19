@@ -28,6 +28,10 @@ pub struct EditorStyle {
     /// Syntax highlighting (M11-09) and the theme family it uses.
     pub highlight: bool,
     pub code_theme: crate::highlight::CodeTheme,
+    /// Background of changed characters in added and removed lines (word
+    /// diff), from the active theme's palette.
+    pub added_emphasis: iced::Color,
+    pub removed_emphasis: iced::Color,
 }
 
 impl Default for EditorStyle {
@@ -45,7 +49,9 @@ impl EditorStyle {
             numbers: settings.line_numbers,
             wrap: settings.word_wrap,
             highlight: settings.syntax_highlighting,
-            code_theme: crate::highlight::CodeTheme::Dark,
+            code_theme: crate::highlight::CodeTheme::DARK,
+            added_emphasis: crate::theme::DARK.diff_added_emphasis,
+            removed_emphasis: crate::theme::DARK.diff_removed_emphasis,
         }
     }
 

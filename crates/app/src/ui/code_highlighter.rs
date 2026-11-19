@@ -139,7 +139,7 @@ mod tests {
         Settings {
             path: path.into(),
             language: None,
-            theme: CodeTheme::Dark,
+            theme: CodeTheme::DARK,
             enabled: true,
         }
     }

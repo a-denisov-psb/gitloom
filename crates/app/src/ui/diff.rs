@@ -913,7 +913,7 @@ fn line_text<'a>(
             emphasis: false,
         });
     }
-    let background = theme::diff_emphasis(style.code_theme, line.kind);
+    let background = theme::diff_emphasis(style, line.kind);
     rich_code(pieces, background, offset, style, wrapped)
 }
 

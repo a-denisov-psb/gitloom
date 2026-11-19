@@ -27,21 +27,36 @@ pub const MAX_LINE_BYTES: usize = 5_000;
 /// Lines highlighted per block before the partial result is handed out.
 pub const BLOCK_LINES: usize = 1_000;
 
-/// The syntect theme family of a Gitloom theme (ADR-047): Dark uses
-/// "OneHalfDark", Light uses "GitHub". Gitloom keeps its own
-/// backgrounds; only the text color and style come from the theme.
+/// The embedded `two-face` theme a Gitloom theme takes its syntax colors
+/// from (ADR-047, ADR-058): Dark uses "OneHalfDark", Light "GitHub".
+/// Gitloom keeps its own backgrounds; only the text color and style come
+/// from the theme. Part of the cache key and of every job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CodeTheme {
-    Dark,
-    Light,
-}
+pub struct CodeTheme(pub EmbeddedThemeName);
 
 impl CodeTheme {
+    /// The pairing of the built-in Dark theme.
+    pub const DARK: Self = Self(EmbeddedThemeName::OneHalfDark);
+    /// The pairing of the built-in Light theme.
+    pub const LIGHT: Self = Self(EmbeddedThemeName::Github);
+
     fn embedded(self) -> EmbeddedThemeName {
-        match self {
-            Self::Dark => EmbeddedThemeName::OneHalfDark,
-            Self::Light => EmbeddedThemeName::Github,
-        }
+        self.0
+    }
+
+    /// The name of the theme in the set (stored in theme files, M17).
+    #[allow(dead_code)] // Used by theme files (M17).
+    pub fn name(self) -> &'static str {
+        self.0.as_name()
+    }
+
+    /// The embedded theme called `name`.
+    #[allow(dead_code)] // Used by theme files (M17).
+    pub fn named(name: &str) -> Option<Self> {
+        two_face::theme::EmbeddedLazyThemeSet::theme_names()
+            .iter()
+            .find(|t| t.as_name() == name)
+            .map(|t| Self(*t))
     }
 }
 
@@ -133,13 +148,9 @@ pub(crate) fn syntaxes() -> &'static SyntaxSet {
 }
 
 pub(crate) fn theme(theme: CodeTheme) -> &'static Theme {
-    static DARK: OnceLock<Theme> = OnceLock::new();
-    static LIGHT: OnceLock<Theme> = OnceLock::new();
-    let cell = match theme {
-        CodeTheme::Dark => &DARK,
-        CodeTheme::Light => &LIGHT,
-    };
-    cell.get_or_init(|| two_face::theme::extra().get(theme.embedded()).clone())
+    static SET: OnceLock<two_face::theme::EmbeddedLazyThemeSet> = OnceLock::new();
+    SET.get_or_init(two_face::theme::extra)
+        .get(theme.embedded())
 }
 
 /// Name of the syntax without highlighting; as a language override it
@@ -779,7 +790,7 @@ mod tests {
     #[test]
     fn rust_keywords_strings_and_comments_differ() {
         let source = "fn main() {\n    // greet\n    let s = \"hi\";\n}\n";
-        let outcome = highlight("src/main.rs", source, CodeTheme::Dark);
+        let outcome = highlight("src/main.rs", source, CodeTheme::DARK);
         let h = spans(&outcome);
         assert_eq!(h.lines_done(), 4);
         assert!(h.is_complete());
@@ -801,7 +812,7 @@ mod tests {
     #[test]
     fn python_by_extension_and_by_shebang() {
         let source = "def f():\n    return 'x'  # done\n";
-        let h = highlight("tool.py", source, CodeTheme::Light);
+        let h = highlight("tool.py", source, CodeTheme::LIGHT);
         let h = spans(&h);
         assert_ne!(
             style_of(source, h, 0, "def").color,
@@ -809,12 +820,12 @@ mod tests {
         );
         let script = "#!/usr/bin/env python3\nprint('x')\n";
         assert!(matches!(
-            highlight("bin/tool", script, CodeTheme::Dark),
+            highlight("bin/tool", script, CodeTheme::DARK),
             Outcome::Highlighted(_)
         ));
         // A file name without extension.
         assert!(matches!(
-            highlight("Makefile", "all:\n\techo hi\n", CodeTheme::Dark),
+            highlight("Makefile", "all:\n\techo hi\n", CodeTheme::DARK),
             Outcome::Highlighted(_)
         ));
     }
@@ -823,7 +834,7 @@ mod tests {
     fn multi_line_comment_keeps_its_style() {
         // Line 3 alone looks like code; inside the comment it is not.
         let source = "int a = 1;\n/* start\n   int b = 2;\n   end */\nint c = 3;\n";
-        let outcome = highlight("x.c", source, CodeTheme::Dark);
+        let outcome = highlight("x.c", source, CodeTheme::DARK);
         let h = spans(&outcome);
         let comment = style_of(source, h, 1, "start");
         assert_eq!(style_of(source, h, 2, "int b"), comment);
@@ -834,16 +845,16 @@ mod tests {
     #[test]
     fn unknown_types_and_large_files_stay_plain() {
         assert_eq!(
-            highlight("notes.unknownext", "hello\n", CodeTheme::Dark),
+            highlight("notes.unknownext", "hello\n", CodeTheme::DARK),
             Outcome::Plain(Plain::UnknownType)
         );
         assert_eq!(
-            highlight("README", "hello\n", CodeTheme::Dark),
+            highlight("README", "hello\n", CodeTheme::DARK),
             Outcome::Plain(Plain::UnknownType)
         );
         let wide = "a".repeat(MAX_BYTES + 1);
         assert_eq!(
-            highlight("a.rs", &wide, CodeTheme::Dark),
+            highlight("a.rs", &wide, CodeTheme::DARK),
             Outcome::Plain(Plain::TooLarge)
         );
     }
@@ -851,29 +862,34 @@ mod tests {
     #[test]
     fn themes_differ() {
         let source = "fn main() {}\n";
-        let dark = highlight("a.rs", source, CodeTheme::Dark);
-        let light = highlight("a.rs", source, CodeTheme::Light);
+        let dark = highlight("a.rs", source, CodeTheme::DARK);
+        let light = highlight("a.rs", source, CodeTheme::LIGHT);
         assert_ne!(dark, light);
     }
 
     #[test]
     fn cache_hits_by_blob_and_theme() {
         let mut cache = Cache::default();
-        let outcome = highlight("a.rs", "fn x() {}\n", CodeTheme::Dark);
-        cache.insert("blob1", CodeTheme::Dark, outcome.clone());
-        assert_eq!(cache.get("blob1", CodeTheme::Dark), Some(&outcome));
-        assert!(cache.get("blob1", CodeTheme::Light).is_none());
-        assert!(cache.get("blob2", CodeTheme::Dark).is_none());
+        let outcome = highlight("a.rs", "fn x() {}\n", CodeTheme::DARK);
+        cache.insert("blob1", CodeTheme::DARK, outcome.clone());
+        assert_eq!(cache.get("blob1", CodeTheme::DARK), Some(&outcome));
+        assert!(cache.get("blob1", CodeTheme::LIGHT).is_none());
+        // Every syntax theme has its own entries (ADR-058).
+        let monokai = CodeTheme(EmbeddedThemeName::MonokaiExtended);
+        assert!(cache.get("blob1", monokai).is_none());
+        cache.insert("blob1", monokai, outcome.clone());
+        assert_eq!(cache.get("blob1", monokai), Some(&outcome));
+        assert!(cache.get("blob2", CodeTheme::DARK).is_none());
         // The same key again does not grow the cache.
-        cache.insert("blob1", CodeTheme::Dark, outcome.clone());
-        assert_eq!(cache.len(), 1);
+        cache.insert("blob1", CodeTheme::DARK, outcome.clone());
+        assert_eq!(cache.len(), 2);
         // The oldest entries go first.
         for i in 0..Cache::CAPACITY {
-            cache.insert(&format!("b{i}"), CodeTheme::Dark, outcome.clone());
+            cache.insert(&format!("b{i}"), CodeTheme::DARK, outcome.clone());
         }
         assert_eq!(cache.len(), Cache::CAPACITY);
-        assert!(cache.get("blob1", CodeTheme::Dark).is_none());
-        assert!(cache.get("b63", CodeTheme::Dark).is_some());
+        assert!(cache.get("blob1", CodeTheme::DARK).is_none());
+        assert!(cache.get("b63", CodeTheme::DARK).is_some());
     }
 
     #[test]
@@ -911,11 +927,11 @@ mod tests {
         assert_eq!(old, "/* open\nend */ fn old() {}\nfn x() {}\n");
         assert_eq!(new, "/* open\nstill comment */\nfn x() {}\n");
         let sides = DiffSides {
-            theme: CodeTheme::Dark,
+            theme: CodeTheme::DARK,
             language: None,
             detected: "Rust",
-            old: highlight("a.rs", &old, CodeTheme::Dark),
-            new: highlight("a.rs", &new, CodeTheme::Dark),
+            old: highlight("a.rs", &old, CodeTheme::DARK),
+            new: highlight("a.rs", &new, CodeTheme::DARK),
         };
         let lines = &diff.hunks[0].lines;
         let open = sides.spans_for(&lines[0]).unwrap()[0].style;
@@ -994,7 +1010,7 @@ mod tests {
     /// highlighter over the whole file, no line limit.
     fn reference(path: &str, content: &str) -> Vec<Vec<Span>> {
         let syntax = syntax_for(path, content.lines().next().unwrap_or(""), None).unwrap();
-        let mut highlighter = HighlightLines::new(syntax, theme(CodeTheme::Dark));
+        let mut highlighter = HighlightLines::new(syntax, theme(CodeTheme::DARK));
         syntect::util::LinesWithEndings::from(content)
             .map(|line| {
                 let ranges = highlighter.highlight_line(line, syntaxes()).unwrap();
@@ -1028,7 +1044,7 @@ mod tests {
     #[test]
     fn progressive_result_equals_one_shot() {
         let source = crossing_blocks();
-        let mut job = Progressive::new("a.rs", Arc::from(source.as_str()), CodeTheme::Dark, None);
+        let mut job = Progressive::new("a.rs", Arc::from(source.as_str()), CodeTheme::DARK, None);
         let mut partials = Vec::new();
         while !job.step() {
             partials.push(job.outcome());
@@ -1066,7 +1082,7 @@ mod tests {
     fn long_lines_stay_plain_and_the_next_line_is_right() {
         let long = format!("let s = \"{}\";", "x".repeat(MAX_LINE_BYTES));
         let source = format!("/* open\n{long}\nstill */ fn after() {{}}\nfn g() {{}}\n");
-        let outcome = highlight("a.rs", &source, CodeTheme::Dark);
+        let outcome = highlight("a.rs", &source, CodeTheme::DARK);
         let h = spans(&outcome);
         assert_eq!(h.lines_done(), 4);
         assert_eq!(h.line(1), Some(&[][..]));
@@ -1078,7 +1094,7 @@ mod tests {
         assert_ne!(style_of(&source, h, 3, "fn"), comment);
         // Exactly the limit is still highlighted.
         let at_limit = format!("// {}\n", "y".repeat(MAX_LINE_BYTES - 3));
-        let outcome = highlight("a.rs", &at_limit, CodeTheme::Dark);
+        let outcome = highlight("a.rs", &at_limit, CodeTheme::DARK);
         assert!(!spans(&outcome).line(0).unwrap().is_empty());
     }
 
@@ -1087,13 +1103,13 @@ mod tests {
         // More lines than the old limit of 20,000 (the 100,000-line file
         // is measured in release: `perf_highlight_and_wrap`).
         let many = "fn x() {}\n".repeat(30_000);
-        let outcome = highlight("a.rs", &many, CodeTheme::Dark);
+        let outcome = highlight("a.rs", &many, CodeTheme::DARK);
         let h = spans(&outcome);
         assert_eq!(h.lines_done(), 30_000);
         assert!(!h.line(29_999).unwrap().is_empty());
         let huge = "x\n".repeat(MAX_BYTES / 2 + 1);
         assert_eq!(
-            highlight("a.rs", &huge, CodeTheme::Dark),
+            highlight("a.rs", &huge, CodeTheme::DARK),
             Outcome::Plain(Plain::TooLarge)
         );
     }
@@ -1102,13 +1118,13 @@ mod tests {
     fn run_emits_rounds_and_caches_complete_results() {
         let cache = std::sync::Mutex::new(Cache::default());
         let source = crossing_blocks();
-        let job = Job::new(CodeTheme::Dark, None);
+        let job = Job::new(CodeTheme::DARK, None);
         let mut emitted = Vec::new();
         let files = vec![
             Source::new("a.rs", source.clone(), None),
             Source::new("b.rs", "fn b() {}\n", None),
         ];
-        run(&cache, files.clone(), CodeTheme::Dark, &job.watch(), |o| {
+        run(&cache, files.clone(), CodeTheme::DARK, &job.watch(), |o| {
             emitted.push(o)
         });
         // Three blocks of a.rs and one of b.rs, each handed out at once;
@@ -1127,7 +1143,7 @@ mod tests {
         assert_eq!(cache.lock().unwrap().len(), 2);
         // From the cache: one call, the same result.
         let mut again = Vec::new();
-        run(&cache, files, CodeTheme::Dark, &job.watch(), |o| {
+        run(&cache, files, CodeTheme::DARK, &job.watch(), |o| {
             again.push(o)
         });
         assert_eq!(again, std::slice::from_ref(last));
@@ -1137,11 +1153,11 @@ mod tests {
     #[test]
     fn a_cancelled_run_emits_nothing_stale_and_caches_nothing() {
         let cache = std::sync::Mutex::new(Cache::default());
-        let mut job = Some(Job::new(CodeTheme::Dark, None));
+        let mut job = Some(Job::new(CodeTheme::DARK, None));
         let watch = job.as_ref().unwrap().watch();
         let mut emitted = 0;
         let files = vec![Source::new("a.rs", crossing_blocks(), None)];
-        run(&cache, files.clone(), CodeTheme::Dark, &watch, |_| {
+        run(&cache, files.clone(), CodeTheme::DARK, &watch, |_| {
             emitted += 1;
             // The view moves on after the first block.
             job = None;
@@ -1151,14 +1167,14 @@ mod tests {
         assert_eq!(cache.lock().unwrap().len(), 0);
         // A job dropped before it starts emits nothing at all; a clone of
         // the handle keeps it alive.
-        let job = Job::new(CodeTheme::Dark, None);
+        let job = Job::new(CodeTheme::DARK, None);
         let copy = job.clone();
         let watch = job.watch();
         drop(job);
         assert!(!watch.cancelled());
         drop(copy);
         let mut any = false;
-        run(&cache, files, CodeTheme::Dark, &watch, |_| any = true);
+        run(&cache, files, CodeTheme::DARK, &watch, |_| any = true);
         assert!(!any);
     }
 
@@ -1168,30 +1184,30 @@ mod tests {
     fn a_chosen_language_highlights_an_unknown_file_type() {
         // ADR-057: `project.godot` is INI, but its extension is unknown.
         assert_eq!(
-            highlight("project.godot", GODOT, CodeTheme::Dark),
+            highlight("project.godot", GODOT, CodeTheme::DARK),
             Outcome::Plain(Plain::UnknownType)
         );
-        let outcome = highlight_in("project.godot", GODOT, CodeTheme::Dark, Some("INI"));
+        let outcome = highlight_in("project.godot", GODOT, CodeTheme::DARK, Some("INI"));
         let h = spans(&outcome);
         assert_ne!(
             style_of(GODOT, h, 0, "Engine").color,
             style_of(GODOT, h, 2, "application").color
         );
         // The same as the file under an INI name.
-        assert_eq!(outcome, highlight("project.ini", GODOT, CodeTheme::Dark));
+        assert_eq!(outcome, highlight("project.ini", GODOT, CodeTheme::DARK));
     }
 
     #[test]
     fn plain_text_switches_highlighting_off_and_unknown_names_are_ignored() {
         let source = "fn main() {}\n";
         assert_eq!(
-            highlight_in("a.rs", source, CodeTheme::Dark, Some(PLAIN_TEXT)),
+            highlight_in("a.rs", source, CodeTheme::DARK, Some(PLAIN_TEXT)),
             Outcome::Plain(Plain::UnknownType)
         );
         // A name the bundled set does not have works like no choice.
         assert_eq!(
-            highlight_in("a.rs", source, CodeTheme::Dark, Some("No Such Language")),
-            highlight("a.rs", source, CodeTheme::Dark)
+            highlight_in("a.rs", source, CodeTheme::DARK, Some("No Such Language")),
+            highlight("a.rs", source, CodeTheme::DARK)
         );
         assert_eq!(known_language(Some("No Such Language")), None);
         assert_eq!(known_language(Some(PLAIN_TEXT)), Some(PLAIN_TEXT));
@@ -1207,20 +1223,20 @@ mod tests {
         assert_ne!(ids[0], ids[2]);
         // `run` keeps one entry per language.
         let cache = std::sync::Mutex::new(Cache::default());
-        let job = Job::new(CodeTheme::Dark, Some("INI"));
+        let job = Job::new(CodeTheme::DARK, Some("INI"));
         for language in [None, Some("INI")] {
             let files = vec![Source::new("project.godot", GODOT, language)];
             let mut last = None;
-            run(&cache, files, CodeTheme::Dark, &job.watch(), |o| {
+            run(&cache, files, CodeTheme::DARK, &job.watch(), |o| {
                 last = Some(o)
             });
             let plain = matches!(last.unwrap()[0], Outcome::Plain(_));
             assert_eq!(plain, language.is_none());
         }
         assert_eq!(cache.lock().unwrap().len(), 2);
-        assert!(job.is_for(CodeTheme::Dark, Some("INI")));
-        assert!(!job.is_for(CodeTheme::Dark, None));
-        assert!(!job.is_for(CodeTheme::Light, Some("INI")));
+        assert!(job.is_for(CodeTheme::DARK, Some("INI")));
+        assert!(!job.is_for(CodeTheme::DARK, None));
+        assert!(!job.is_for(CodeTheme::LIGHT, Some("INI")));
     }
 
     #[test]
@@ -1284,6 +1300,21 @@ mod tests {
         assert!(
             actual == expected,
             "{path} is out of date: UPDATE_ACKNOWLEDGEMENTS=1 cargo test -p gitloom acknowledgements"
+        );
+    }
+
+    #[test]
+    fn code_themes_by_name() {
+        assert_eq!(CodeTheme::named("OneHalfDark"), Some(CodeTheme::DARK));
+        assert_eq!(CodeTheme::named("GitHub"), Some(CodeTheme::LIGHT));
+        assert_eq!(CodeTheme::DARK.name(), "OneHalfDark");
+        assert_eq!(CodeTheme::named("No Such Theme"), None);
+        // Other syntax themes color the same file differently.
+        let source = "fn main() { let x = 1; }\n";
+        let monokai = CodeTheme(EmbeddedThemeName::MonokaiExtended);
+        assert_ne!(
+            highlight("a.rs", source, CodeTheme::DARK),
+            highlight("a.rs", source, monokai)
         );
     }
 }
