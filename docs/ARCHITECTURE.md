@@ -153,6 +153,8 @@ Each visible row draws its own segments into a canvas cell of the row height: up
 
 `app::themes` is the theme registry: a process-wide list of `Arc<ThemeDef>` (id, name, base Dark or Light, `Arc<ThemePalette>`, syntax theme). The iced theme of the active theme (`theme::iced_theme`) is named by the theme id, with `is_dark` set from the base; style functions keep `fn(&Theme)` and get the palette with `theme::palette(theme)`, a registry lookup by that name. Entries are replaced, not leaked (M17 replaces user themes at runtime). `ThemePalette::derive` computes the secondary colors from the ten main colors; `App::active_theme` resolves the settings (`ThemeChoice`, the System mapping, unknown ids) and feeds `EditorStyle` with the syntax theme (`highlight::CodeTheme`, the cache key) and the word diff colors. Views take colors only from the palette (`theme::tests::views_use_no_hard_coded_colors`).
 
+User themes _(M17, ADR-059)_: `app::theme_file` reads, validates and writes the JSON files of `themes/` next to `settings.json` (`load_dir` in the startup task, file actions as `theme_file::Op` through `apply` in background tasks); `themes::set_user_themes` replaces the `user:` entries. `app::theme_editor` is the pure editor state in `settings::Page`; `ui::theme_preview` draws the preview inside `iced::widget::themer` with the registry's preview entry (`themes::PREVIEW_ID`), which `App::update` keeps in step with the edited theme.
+
 ## Graph list virtualization _(M1)_
 
 - Fixed row height (30 px).
