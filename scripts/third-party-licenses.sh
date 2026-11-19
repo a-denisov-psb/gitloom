@@ -47,6 +47,8 @@ cargo about generate --locked scripts/third-party/list.tsv.hbs -o "$out_dir/list
     printf '```text\n'
     cat scripts/third-party/oniguruma-COPYING
     printf '```\n'
+    printf '\n### Theme palettes\n\n'
+    cat scripts/third-party/theme-palettes.md
     printf '\n### Syntax definitions and color themes\n\n'
     printf 'Bundled by the two-face crate (from bat) for syntax highlighting; generated into `crates/app/assets/syntax-acknowledgements.md` by a unit test.\n\n'
     cat crates/app/assets/syntax-acknowledgements.md
@@ -54,6 +56,7 @@ cargo about generate --locked scripts/third-party/list.tsv.hbs -o "$out_dir/list
 printf 'Lucide icons\t-\tISC\n' >> "$out_dir/list.tsv"
 printf 'gitignore templates\t-\tCC0-1.0\n' >> "$out_dir/list.tsv"
 printf 'Oniguruma (bundled by onig_sys)\t-\tBSD-2-Clause\n' >> "$out_dir/list.tsv"
+printf 'Theme palettes (VS Code)\t-\tMIT\n' >> "$out_dir/list.tsv"
 printf 'Syntax definitions and themes (bat)\t-\tvarious, see notices\n' >> "$out_dir/list.tsv"
 # Drop blank lines of the template.
 grep -v '^$' "$out_dir/list.tsv" > "$out_dir/list.clean.tsv"
