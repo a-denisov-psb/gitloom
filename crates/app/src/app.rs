@@ -580,6 +580,8 @@ pub enum Message {
     /// Click on a toolbar picker: runs its palette action (M6-17).
     PickerClicked(Shortcut),
     SettingsLoaded(settings::Loaded),
+    /// The theme files of the config directory (ADR-059).
+    UserThemesLoaded(Vec<crate::theme_file::Entry>),
     /// The status bar message number `seq` may disappear now.
     StatusExpired(u64),
     /// Zoom buttons in Preferences → Appearance.
@@ -1323,6 +1325,9 @@ pub struct App {
     /// Open settings view; replaces the tab content.
     pub settings_page: Option<settings::Page>,
     settings_path: Option<PathBuf>,
+    /// Theme files found in `themes/` (ADR-059), invalid ones with their
+    /// reason; the valid ones are in the theme registry.
+    pub theme_files: Vec<crate::theme_file::Entry>,
     settings_save_seq: u64,
     /// Light or dark mode of the operating system (`None` if unknown).
     pub system_theme: iced::theme::Mode,
@@ -1431,6 +1436,7 @@ impl App {
                 .and(crate::avatars::DiskCache::default_dir())
                 .map(crate::avatars::DiskCache::new),
             settings_page: None,
+            theme_files: Vec::new(),
             settings_path: session_path
                 .as_deref()
                 .map(|path| path.with_file_name(settings::FILE_NAME)),
@@ -1483,14 +1489,21 @@ impl App {
                 blocking(move || {
                     // Settings first: they may take values over from the
                     // session file (ADR-023).
-                    let settings = settings_path.map(|p| settings::load(&p, Some(&path)));
-                    Ok((settings, session::load(&path)))
+                    let settings = settings_path
+                        .as_ref()
+                        .map(|p| settings::load(p, Some(&path)));
+                    // User themes (ADR-059) before the settings name one.
+                    let themes = settings_path.map(|p| {
+                        crate::theme_file::load_dir(&p.with_file_name(crate::theme_file::DIR))
+                    });
+                    Ok((settings, themes, session::load(&path)))
                 }),
                 |loaded| loaded,
             )
             .then(|loaded| {
-                let (settings, session) = loaded.unwrap_or_else(|error| {
+                let (settings, themes, session) = loaded.unwrap_or_else(|error| {
                     (
+                        None,
                         None,
                         session::Loaded {
                             session: Session::default(),
@@ -1499,8 +1512,12 @@ impl App {
                     )
                 });
                 let session = Task::done(Message::SessionLoaded(session));
-                match settings {
+                let session = match settings {
                     Some(settings) => Task::done(Message::SettingsLoaded(settings)).chain(session),
+                    None => session,
+                };
+                match themes {
+                    Some(themes) => Task::done(Message::UserThemesLoaded(themes)).chain(session),
                     None => session,
                 }
             }),
@@ -2979,6 +2996,19 @@ impl App {
             }
             settings::ThemeChoice::System => (&appearance.system_dark, ThemeKind::Dark),
         }
+    }
+
+    /// Keeps the theme files and puts the valid ones into the registry.
+    pub fn set_theme_files(&mut self, entries: Vec<crate::theme_file::Entry>) {
+        let themes = entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::theme_file::Entry::Theme(def) => Some(def.clone()),
+                crate::theme_file::Entry::Invalid { .. } => None,
+            })
+            .collect();
+        crate::themes::set_user_themes(themes);
+        self.theme_files = entries;
     }
 
     /// The registry entry of the theme in use (ADR-058).
@@ -7423,6 +7453,11 @@ impl App {
                     }),
                     |result| Message::StatusText(result.err().unwrap_or_default()),
                 );
+            }
+            Message::UserThemesLoaded(entries) => {
+                self.set_theme_files(entries);
+                self.restyle_code_views();
+                return self.highlight_code_views();
             }
             Message::SettingsLoaded(loaded) => {
                 let settings::Loaded {
@@ -14512,6 +14547,43 @@ pub(crate) mod tests {
         // Choosing a known theme clears the note.
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("dark")));
         assert_eq!(app.theme_note(), None);
+    }
+
+    /// ADR-059: theme files join the registry when loaded; a chosen user
+    /// theme applies; invalid files are kept with their reason.
+    #[test]
+    fn user_theme_files_join_the_registry() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut app = ready_app(&["c"]);
+        let def = crate::theme_file::ThemeData {
+            name: "Mine".into(),
+            base: crate::theme::ThemeKind::Light,
+            palette: crate::theme::LIGHT,
+            syntax: crate::highlight::CodeTheme::LIGHT,
+        }
+        .into_def("user:Mine".into());
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme(
+            "user:Mine",
+        )));
+        assert_eq!(app.active_theme().id, "dark", "not loaded yet");
+        let _ = app.update(Message::UserThemesLoaded(vec![
+            crate::theme_file::Entry::Theme(def),
+            crate::theme_file::Entry::Invalid {
+                file: "broken.json".into(),
+                reason: "not a theme file".into(),
+            },
+        ]));
+        assert_eq!(app.active_theme().id, "user:Mine");
+        assert_eq!(app.theme_note(), None);
+        assert_eq!(app.theme_files.len(), 2);
+        app.set_theme_files(Vec::new());
+        assert_eq!(app.active_theme().id, "dark");
+        assert_eq!(
+            app.theme_note().as_deref(),
+            Some("Theme 'user:Mine' not found, using Dark")
+        );
     }
 
     #[test]
