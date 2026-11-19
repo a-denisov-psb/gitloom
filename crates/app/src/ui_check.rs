@@ -1545,10 +1545,11 @@ mod tests {
     }
 
     /// The message box (M15-06): a click on the text does not open the
-    /// editor, the pencil at the right of the header row does (finding #42); a blocked pencil does
-    /// nothing. Layout only, so part of every test run.
+    /// modal; the button at the right of the header row does (finding
+    /// #42, #43), also when editing is blocked (then read-only). Layout
+    /// only, so part of every test run.
     #[test]
-    fn message_box_pencil_opens_the_editor() {
+    fn header_button_opens_the_message_modal() {
         let mut app = details_app(&[("c2", "Fix the typo", "Body text"), ("c1", "Initial", "")]);
         let _ = app.update(Message::CommitSelected("c2".into()));
         let tab = app.tabs[0].id;
@@ -1557,24 +1558,21 @@ mod tests {
             id: "c2".into(),
             result: Ok(None),
         });
-        let starts = |messages: &[Message]| {
+        let opens = |messages: &[Message]| {
             messages
                 .iter()
-                .any(|m| matches!(m, Message::CommitEditStart))
+                .any(|m| matches!(m, Message::CommitModalOpen))
         };
-        // The box lies below "commit: <sha>"; the pencil at its top right.
         let header = {
             let mut sim = simulator(&app);
             let found = sim.find("commit:").unwrap();
             iced_test::selector::Bounded::bounds(&found)
         };
         let top = header.y + header.height;
-        // A click on the text (left part of the box) does not edit.
+        // A click on the text (left part of the box) does not open it.
         let text_clicks = clicks_along(&app, header.x - 60.0, top + 30.0, 120.0);
-        assert!(!starts(&text_clicks), "{text_clicks:?}");
-        // Finding #42: the pencil sits in the slot at the right of the
-        // header row.
-        let pencil = |app: &App| {
+        assert!(!opens(&text_clicks), "{text_clicks:?}");
+        let button = |app: &App| {
             let mut messages = Vec::new();
             let mut y = header.y;
             while y < top {
@@ -1583,40 +1581,47 @@ mod tests {
             }
             messages
         };
-        assert!(starts(&pencil(&app)));
-        // Blocked: the pencil is shown muted and does nothing.
+        assert!(opens(&button(&app)));
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(app.message_modal.as_ref().unwrap().read_only, None);
+        // A click on the modal itself does not close it; one beside it does.
+        let messages = clicks_along(&app, SIZE.0 / 2.0 - 300.0, SIZE.1 / 2.0, 20.0);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, Message::CommitModalClose)),
+            "{messages:?}"
+        );
+        let messages = clicks_along(&app, 20.0, 20.0, 10.0);
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::CommitModalClose)));
+        app.message_modal = None;
+        // Blocked: the open icon opens the modal read-only.
+        let reason = "Check out a branch that contains this commit";
         let _ = app.update(Message::EditBlockLoaded {
             tab,
             id: "c2".into(),
-            result: Ok(Some("Check out a branch that contains this commit".into())),
+            result: Ok(Some(reason.into())),
         });
-        assert!(!starts(&pencil(&app)));
+        assert!(opens(&button(&app)));
+        let _ = app.update(Message::CommitModalOpen);
+        assert_eq!(
+            app.message_modal.as_ref().unwrap().read_only.as_deref(),
+            Some(reason)
+        );
     }
 
+    /// Finding #43: the hovered header with its button (pencil, open
+    /// icon), the modal in edit mode with the note about other refs and
+    /// read-only (pushed, stash); Dark and Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
-    fn ui_check_message_editor() {
-        let mut app = details_app(&[
-            (
-                "c2",
-                "Fix the typo in the header",
-                "Explain why.\n\nRefs #12",
-            ),
-            ("c1", "Initial", ""),
-        ]);
-        let tab = app.tabs[0].id;
-        let _ = app.update(Message::CommitSelected("c2".into()));
-        let _ = app.update(Message::EditBlockLoaded {
-            tab,
-            id: "c2".into(),
-            result: Ok(None),
-        });
-        snapshot(&app, "message-edit-idle");
-        // M15-06: the hovered box with its pencil, enabled and blocked.
+    fn ui_check_message_modal() {
+        use crate::settings::ThemeChoice;
         let hovered = |app: &App, name: &str| {
             let path = fresh_path(name);
             let mut sim = simulator(app);
-            // Inside the box, below "commit: <sha>".
             let found = sim.find("commit:").unwrap();
             let header = iced_test::selector::Bounded::bounds(&found);
             let at = iced::Point::new(header.x, header.y + header.height + 30.0);
@@ -1627,47 +1632,60 @@ mod tests {
             let snap = sim.snapshot(&app.theme()).unwrap();
             assert!(snap.matches_image(&path).unwrap());
         };
-        for (light, theme) in [(false, "dark"), (true, "light")] {
-            app.settings.appearance.theme = if light {
-                crate::settings::ThemeChoice::Light
-            } else {
-                crate::settings::ThemeChoice::Dark
-            };
-            hovered(&app, &format!("message-pencil-enabled-{theme}"));
-            let _ = app.update(Message::EditBlockLoaded {
-                tab,
-                id: "c2".into(),
-                result: Ok(Some(git_core::reword::EditBlock::NotOnBranch.reason())),
-            });
-            hovered(&app, &format!("message-pencil-blocked-{theme}"));
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = details_app(&[
+                (
+                    "c2",
+                    "Fix the typo in the header",
+                    "Explain why.\n\nRefs #12",
+                ),
+                ("c1", "Initial", ""),
+            ]);
+            app.settings.appearance.theme = choice;
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("c2".into()));
             let _ = app.update(Message::EditBlockLoaded {
                 tab,
                 id: "c2".into(),
                 result: Ok(None),
             });
-        }
-        app.settings.appearance.theme = crate::settings::ThemeChoice::Dark;
-        let _ = app.update(Message::CommitEditStart);
-        let _ = app.update(Message::CommitEditFactsLoaded {
-            tab,
-            id: "c2".into(),
-            result: Ok(git_core::reword::EditFacts {
-                branch: "main".into(),
-                keep_old: vec!["backup".into(), "v1.2".into()],
-                drops_signature: true,
-            }),
-        });
-        for (light, theme) in [(false, "dark"), (true, "light")] {
-            app.settings.appearance.theme = if light {
-                crate::settings::ThemeChoice::Light
-            } else {
-                crate::settings::ThemeChoice::Dark
-            };
-            snapshot(&app, &format!("message-edit-{theme}"));
+            hovered(&app, &format!("message-button-edit-{theme}"));
+            let _ = app.update(Message::CommitModalOpen);
+            let _ = app.update(Message::CommitModalFactsLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(git_core::reword::EditFacts {
+                    branch: "main".into(),
+                    keep_old: vec!["backup".into(), "v1.2".into()],
+                    drops_signature: true,
+                }),
+            });
+            snapshot(&app, &format!("message-modal-edit-{theme}"));
+            let _ = app.update(Message::CommitModalSummary("Fix the typo".into()));
+            let _ = app.update(Message::CommitModalClose);
+            snapshot(&app, &format!("message-modal-discard-{theme}"));
+            app.message_modal = None;
+            // Pushed: read-only with the reason.
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(
+                    git_core::reword::EditBlock::Pushed("origin/main".into()).reason(),
+                )),
+            });
+            hovered(&app, &format!("message-button-open-{theme}"));
+            let _ = app.update(Message::CommitModalOpen);
+            snapshot(&app, &format!("message-modal-pushed-{theme}"));
+            // A stash.
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice;
+            let _ = app.update(Message::CommitSelected("s".into()));
+            let _ = app.update(Message::CommitModalOpen);
+            snapshot(&app, &format!("message-modal-stash-{theme}"));
         }
     }
 
-    /// M15-11: the message editor next to the commit panel (same parts,
+    /// M15-11: the message modal next to the commit panel (same parts,
     /// paddings and button positions) and the "Change author" dialog,
     /// Dark and Light.
     #[test]
@@ -1691,7 +1709,7 @@ mod tests {
                 id: "c2".into(),
                 result: Ok(None),
             });
-            let _ = app.update(Message::CommitEditStart);
+            let _ = app.update(Message::CommitModalOpen);
             snapshot(&app, &format!("change-author-editor-{theme}"));
             let _ = app.update(Message::EditAuthorChosen(Some(git_core::Identity {
                 name: "Bo Kim".into(),
@@ -1699,7 +1717,7 @@ mod tests {
             })));
             snapshot(&app, &format!("change-author-editor-chosen-{theme}"));
             // The commit panel for comparison.
-            let _ = app.update(Message::CommitEditCancel);
+            app.message_modal = None;
             let _ = app.update(Message::WipSelected);
             snapshot(&app, &format!("change-author-commit-panel-{theme}"));
             // The dialog.

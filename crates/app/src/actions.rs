@@ -95,6 +95,9 @@ pub enum ActionId {
     ManageIdentities,
     /// "Copy commit message prompt…" (M10-07).
     CopyCommitPrompt,
+    /// "Edit commit message…": the message modal of the selected commit
+    /// (finding #43); no shortcut.
+    EditCommitMessage,
     /// Toolbar actions in the palette (M6-07: every action by keyboard).
     Pull,
     Push,
@@ -540,6 +543,13 @@ fn table() -> Vec<Action> {
     );
     add(A::PopStash, "Pop stash", RepoActions, Global, &[]);
     add(
+        A::EditCommitMessage,
+        "Edit commit message…",
+        RepoActions,
+        Global,
+        &[],
+    );
+    add(
         A::Refresh,
         "Reload repository",
         RepoActions,
@@ -913,6 +923,7 @@ fn table() -> Vec<Action> {
                 | A::Stash
                 | A::PopStash
                 | A::CopyCommitPrompt
+                | A::EditCommitMessage
                 | A::ContextMenu
                 | A::SearchCommits
                 | A::FileHistory

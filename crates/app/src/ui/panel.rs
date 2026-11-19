@@ -475,7 +475,7 @@ fn identity_line(view: &RepoView) -> Element<'_, Message> {
 
 /// A muted line with a chevron that opens a menu at the pointer: "Committing
 /// as …" (M8-04) and the editor's "Authored by …" (M15-11).
-fn picker_line<'a>(
+pub(crate) fn picker_line<'a>(
     label: Element<'a, Message>,
     tip: String,
     menu: fn(iced::Point) -> Message,
@@ -500,7 +500,7 @@ fn picker_line<'a>(
 
 /// Summary field with the counter inside at its right edge like GitKraken
 /// (M9-07); the commit panel and the message editor share it.
-fn with_counter<'a>(
+pub(crate) fn with_counter<'a>(
     summary: iced::widget::TextInput<'a, Message>,
     remaining: i64,
 ) -> Element<'a, Message> {
@@ -525,7 +525,7 @@ fn with_counter<'a>(
 
 /// Sparkle button of the commit message prompt (M12-13): 22 × 22, a muted
 /// 13 px icon.
-fn sparkle_button<'a>(message: Option<Message>, tip: String) -> Element<'a, Message> {
+pub(crate) fn sparkle_button<'a>(message: Option<Message>, tip: String) -> Element<'a, Message> {
     let icon = crate::icons::tinted(crate::icons::Icon::Sparkles, 13.0, |p| p.text_muted);
     with_tooltip_text(
         button(container(icon).center(Fill))
@@ -563,10 +563,10 @@ pub(crate) fn prompt_button_state(view: &RepoView) -> (bool, &'static str) {
 }
 
 /// GitKraken counts down from 72 characters for the summary.
-const SUMMARY_LIMIT: usize = 72;
+pub(crate) const SUMMARY_LIMIT: usize = 72;
 
 /// Right padding of the summary field that holds the counter (M9-07).
-const COUNTER_ROOM: f32 = 40.0;
+pub(crate) const COUNTER_ROOM: f32 = 40.0;
 
 /// Color of the summary counter: muted, warning at 10 or fewer characters
 /// left, error below 0 (the commit is not blocked).
@@ -663,9 +663,6 @@ fn details_header(id: &str) -> Element<'_, Message> {
     with_tooltip_text(copy.into(), "Copy the full sha".into())
 }
 
-/// Focus target of the message editor's summary (M14-05).
-pub const MESSAGE_EDIT_SUMMARY: &str = "message-edit-summary";
-
 /// Summary (larger) and description in a framed, scrollable box whose text
 /// can be selected and copied (M14-01), at most `max_height` high.
 fn message_box<'a>(
@@ -673,9 +670,6 @@ fn message_box<'a>(
     commit: &'a Commit,
     max_height: f32,
 ) -> Element<'a, Message> {
-    if let Some(edit) = view.message_edit.as_ref().filter(|e| e.id == commit.id) {
-        return message_editor(edit, commit);
-    }
     let plain = || -> Element<'a, Message> {
         column![text(&commit.summary).size(16)]
             .push((!commit.body.is_empty()).then(|| text(&commit.body)))
@@ -729,125 +723,25 @@ pub(crate) fn edit_icon_state(view: &RepoView, id: &str) -> Option<Result<(), St
     }
 }
 
-/// Pencil in the button slot at the right of the header row, shown while
-/// the header or the message box is hovered (M15-06, finding #42); the
-/// tooltip is on the icon only.
-fn edit_icon<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>> {
-    let state = edit_icon_state(view, id)?;
-    let tint: fn(&theme::ThemePalette) -> iced::Color = if state.is_ok() {
-        |p| p.text
+/// Button in the slot at the right of the header row, shown while the
+/// header or the message box is hovered (finding #42); it always opens the
+/// message modal (finding #43): a pencil "Edit message" when the message
+/// can be edited, otherwise the open icon "Open message" (read-only).
+fn message_button<'a>(view: &RepoView, id: &str) -> Element<'a, Message> {
+    let editable = crate::app::message_modal_block(view, id).is_none();
+    let (icon, tip) = if editable {
+        (crate::icons::Icon::Pencil, "Edit message")
     } else {
-        |p| p.text_muted
+        (crate::icons::Icon::Maximize, "Open message")
     };
-    let icon = crate::icons::tinted(crate::icons::Icon::Pencil, 14.0, tint);
+    let icon = crate::icons::tinted(icon, 14.0, |p| p.text);
     let button = button(container(icon).center(Fill))
-        .on_press_maybe(state.is_ok().then_some(Message::CommitEditStart))
+        .on_press(Message::CommitModalOpen)
         .padding(0)
         .width(HEADER_HEIGHT)
         .height(HEADER_HEIGHT)
         .style(theme::flat);
-    let tip = state
-        .err()
-        .unwrap_or_else(|| "Edit the commit message".to_owned());
-    Some(with_tooltip_text(button.into(), tip))
-}
-
-/// Inline message editor (M14-05), built from the commit panel's parts
-/// so it looks the same (M15-11): "Authored by …" with the author menu and
-/// the sparkle of the commit prompt, the summary with its counter, the
-/// description, the note about other refs, Save and Cancel.
-fn message_editor<'a>(
-    edit: &'a crate::repo_view::MessageEdit,
-    commit: &'a Commit,
-) -> Element<'a, Message> {
-    let remaining = SUMMARY_LIMIT as i64 - edit.summary.chars().count() as i64;
-    let summary = text_input("Summary", &edit.summary)
-        .id(MESSAGE_EDIT_SUMMARY)
-        .padding(iced::Padding::new(6.0).right(COUNTER_ROOM))
-        .style(theme::input)
-        .on_input(Message::CommitEditSummary)
-        .on_submit(Message::CommitEditSave);
-    let summary = with_counter(summary, remaining);
-    let (author, tip) = match &edit.author {
-        Some(author) => (
-            format!("Authored by {}", author.label()),
-            "New author after saving (the author date is kept); click to choose another".to_owned(),
-        ),
-        None => (
-            format!("Authored by {} <{}>", commit.author, commit.email),
-            "Click to change the author".to_owned(),
-        ),
-    };
-    let author = picker_line(
-        muted(author).size(11).wrapping(text::Wrapping::None).into(),
-        tip,
-        Message::EditAuthorMenu,
-    );
-    let sparkle = sparkle_button(
-        Some(Message::CommitPromptRequested(edit.id.clone())),
-        "Copy commit message prompt…".to_owned(),
-    );
-    let body = text_editor(&edit.body)
-        .placeholder("Description")
-        .padding(6)
-        .style(theme::editor)
-        .height(90)
-        .on_action(Message::CommitEditBody)
-        // Ctrl+Enter saves instead of inserting a line break.
-        .key_binding(|press| {
-            let enter = matches!(
-                press.key.as_ref(),
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
-            );
-            if enter && press.modifiers.command() {
-                return Some(text_editor::Binding::Custom(Message::CommitEditSave));
-            }
-            text_editor::Binding::from_key_press(press)
-        });
-    let mut notes = column![].spacing(2);
-    if let Loadable::Ready(facts) = &edit.facts {
-        for name in &facts.keep_old {
-            notes = notes.push(muted(format!("{name} keeps the old commit")).size(11));
-        }
-        if facts.drops_signature {
-            notes = notes.push(
-                muted("Signatures of the rewritten commits are removed (signing is off)").size(11),
-            );
-        }
-    }
-    let error = edit
-        .error
-        .as_ref()
-        .map(|e| text(e.clone()).size(11).style(theme::text_danger));
-    let buttons = row![
-        space::horizontal(),
-        button(text("Cancel").size(12))
-            .padding([4, 10])
-            .style(button::secondary)
-            .on_press(Message::CommitEditCancel),
-        button(text("Save").size(12))
-            .padding([4, 10])
-            .style(button::primary)
-            .on_press(Message::CommitEditSave),
-    ]
-    .spacing(8);
-    container(
-        column![
-            row![container(author).width(Fill).clip(true), sparkle]
-                .spacing(6)
-                .align_y(iced::Center),
-            summary,
-            body,
-        ]
-        .push(error)
-        .push(notes)
-        .push(buttons)
-        .spacing(8),
-    )
-    .padding(12)
-    .width(Fill)
-    .style(theme::message_box)
-    .into()
+    with_tooltip_text(button.into(), tip.to_owned())
 }
 
 fn details_content<'a>(
@@ -909,16 +803,13 @@ fn details_content<'a>(
     let top: Element<'a, Message> = column![header, message_box(view, commit, max_message)]
         .spacing(DETAILS_SPACING)
         .into();
-    let top = match edit_icon(view, &commit.id) {
-        Some(icon) => hover(
-            top,
-            container(icon)
-                .width(Fill)
-                .height(HEADER_HEIGHT)
-                .align_x(iced::Right),
-        ),
-        None => top,
-    };
+    let top = hover(
+        top,
+        container(message_button(view, &commit.id))
+            .width(Fill)
+            .height(HEADER_HEIGHT)
+            .align_x(iced::Right),
+    );
 
     column![top, author]
         .push(head)

@@ -19,6 +19,7 @@ pub(crate) mod diff;
 mod file_history;
 pub(crate) mod graph;
 mod inert;
+mod message_modal;
 mod shift;
 #[cfg(test)]
 pub use graph::lanes_width;
@@ -108,6 +109,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut layers = vec![base];
     if let Some(page) = &app.settings_page {
         layers.push(preferences(app, page));
+    }
+    // The message modal (finding #43) lies below the toasts (a failed save
+    // shows one), its author menu, the "Other…" form and the prompt.
+    if let Some(modal) = &app.message_modal {
+        let busy = app
+            .tabs
+            .iter()
+            .find(|t| t.id == modal.tab)
+            .and_then(|t| t.view())
+            .is_some_and(|v| v.busy.is_some());
+        layers.push(message_modal::view(modal, app.window_size(), busy));
     }
     // Toasts sit above the app and the Preferences, below menus and dialogs.
     if let Some(toasts) = toasts::view(&app.toasts) {

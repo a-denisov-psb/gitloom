@@ -29,6 +29,7 @@ mod highlight;
 mod icons;
 mod launch;
 mod menus;
+mod message_modal;
 mod nav;
 mod operation;
 mod overlay;
