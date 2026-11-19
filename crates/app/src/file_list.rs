@@ -149,6 +149,38 @@ pub fn folder_paths(nodes: &[crate::branch_tree::Node]) -> Vec<String> {
     out
 }
 
+/// The one Expand/Collapse button above a tree (finding #42).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpandToggle {
+    ExpandAll,
+    CollapseAll,
+}
+
+impl ExpandToggle {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ExpandAll => "Expand all",
+            Self::CollapseAll => "Collapse all",
+        }
+    }
+}
+
+/// State of the Expand/Collapse button for a tree with `folders`, given
+/// the folders collapsed in this session: hidden without folders,
+/// "Collapse all" while every folder is open, otherwise "Expand all".
+pub fn expand_toggle(
+    folders: &[String],
+    collapsed: &std::collections::HashSet<String>,
+) -> Option<ExpandToggle> {
+    if folders.is_empty() {
+        None
+    } else if folders.iter().any(|f| collapsed.contains(f)) {
+        Some(ExpandToggle::ExpandAll)
+    } else {
+        Some(ExpandToggle::CollapseAll)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +312,38 @@ mod tests {
             serde_json::from_str::<FileListOptions>("{}").unwrap(),
             FileListOptions::default()
         );
+    }
+
+    #[test]
+    fn expand_toggle_follows_the_folders() {
+        use std::collections::HashSet;
+        let folders = vec!["src".to_owned(), "src/ui".to_owned()];
+        let none: HashSet<String> = HashSet::new();
+        assert_eq!(
+            expand_toggle(&folders, &none),
+            Some(ExpandToggle::CollapseAll),
+            "all open"
+        );
+        let one: HashSet<String> = ["src/ui".to_owned()].into();
+        assert_eq!(
+            expand_toggle(&folders, &one),
+            Some(ExpandToggle::ExpandAll),
+            "one closed"
+        );
+        let all: HashSet<String> = folders.iter().cloned().collect();
+        assert_eq!(
+            expand_toggle(&folders, &all),
+            Some(ExpandToggle::ExpandAll),
+            "none open"
+        );
+        // Folders of other commits collapsed earlier do not count.
+        let other: HashSet<String> = ["docs".to_owned()].into();
+        assert_eq!(
+            expand_toggle(&folders, &other),
+            Some(ExpandToggle::CollapseAll)
+        );
+        assert_eq!(expand_toggle(&[], &one), None, "no folders");
+        assert_eq!(ExpandToggle::ExpandAll.label(), "Expand all");
+        assert_eq!(ExpandToggle::CollapseAll.label(), "Collapse all");
     }
 }

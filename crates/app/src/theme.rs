@@ -20,6 +20,9 @@ const fn hex(value: u32) -> Color {
 pub struct ThemePalette {
     pub bg_graph: Color,
     pub bg_panel: Color,
+    /// Framed areas inside a panel (the details' file list, finding #42):
+    /// a little darker than the panel in both modes.
+    pub bg_inset: Color,
     pub bg_chrome: Color,
     pub bg_hover: Color,
     pub bg_selected: Color,
@@ -57,6 +60,7 @@ pub enum ThemeKind {
 pub const DARK: ThemePalette = ThemePalette {
     bg_graph: hex(0x1f232b),
     bg_panel: hex(0x252a33),
+    bg_inset: hex(0x1f232b),
     bg_chrome: hex(0x181b21),
     bg_hover: hex(0x2d333e),
     bg_selected: hex(0x2e4058),
@@ -98,6 +102,7 @@ pub const DARK: ThemePalette = ThemePalette {
 pub const LIGHT: ThemePalette = ThemePalette {
     bg_graph: hex(0xffffff),
     bg_panel: hex(0xf4f5f7),
+    bg_inset: hex(0xeceef1),
     bg_chrome: hex(0xe8eaee),
     bg_hover: hex(0xe3e7ee),
     bg_selected: hex(0xcfe0f5),
@@ -765,6 +770,18 @@ pub fn message_box(theme: &Theme) -> container::Style {
     let p = palette(theme);
     container::Style {
         background: Some(Background::Color(p.bg_graph)),
+        border: Border::default().rounded(4).width(1).color(p.border),
+        text_color: Some(p.text),
+        ..container::Style::default()
+    }
+}
+
+/// Frame of the details' file list (finding #42): border like the
+/// message box, a background a little darker than the panel.
+pub fn file_frame(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(Background::Color(p.bg_inset)),
         border: Border::default().rounded(4).width(1).color(p.border),
         text_color: Some(p.text),
         ..container::Style::default()

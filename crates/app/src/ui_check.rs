@@ -1356,6 +1356,110 @@ mod tests {
         app
     }
 
+    /// Finding #42: one Expand/Collapse button in the first row of the
+    /// frame whose label follows the folders; hidden in Path mode and
+    /// without folders. Layout only.
+    #[test]
+    fn expand_collapse_toggle_follows_the_folders() {
+        let mut app = file_list_app();
+        let has = |app: &App, label: &str| simulator(app).find(label).is_ok();
+        assert!(
+            !has(&app, "Collapse all") && !has(&app, "Expand all"),
+            "path mode"
+        );
+        let _ = app.update(Message::FileListTreeChosen(true));
+        assert!(has(&app, "Collapse all") && !has(&app, "Expand all"));
+        click(&mut app, "Collapse all");
+        assert_eq!(app.tabs[0].view().unwrap().file_tree_collapsed.len(), 3);
+        assert!(has(&app, "Expand all") && !has(&app, "Collapse all"));
+        click(&mut app, "Expand all");
+        assert!(app.tabs[0].view().unwrap().file_tree_collapsed.is_empty());
+        assert!(has(&app, "Collapse all"));
+        // Collapsing one folder by hand flips the label back.
+        let _ = app.update(Message::FileListFolderToggled("src/ui".into()));
+        assert!(has(&app, "Expand all") && !has(&app, "Collapse all"));
+        // A commit without folders hides the button.
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitChangesLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(crate::repo_view::DetailChanges::Commit(vec![
+                git_core::FileChange {
+                    path: "Cargo.toml".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                },
+            ])),
+        });
+        assert!(
+            !has(&app, "Collapse all") && !has(&app, "Expand all"),
+            "no folders"
+        );
+    }
+
+    /// Finding #42: the commit details do not scroll; the file list has its
+    /// own frame with a scrollbar, the message box at most a fifth of the
+    /// panel. Long and short message, Path and Tree, a stash; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_details_layout() {
+        use crate::settings::ThemeChoice;
+        let long_body = (1..=40)
+            .map(|i| format!("Line {i} of a long description that wraps in the panel."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let files: Vec<git_core::FileChange> = (0..60)
+            .map(|i| git_core::FileChange {
+                path: format!("src/module{}/file{i:02}.rs", i % 4),
+                kind: if i % 5 == 0 {
+                    git_core::ChangeKind::Added
+                } else {
+                    git_core::ChangeKind::Modified
+                },
+                old_path: None,
+            })
+            .collect();
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = details_app(&[
+                ("c3", "Fix the graph header", ""),
+                ("c2", "Add the message box", &long_body),
+                ("c1", "Initial commit", ""),
+            ]);
+            app.settings.appearance.theme = choice;
+            let tab = app.tabs[0].id;
+            for (id, name) in [("c2", "long"), ("c3", "short")] {
+                let _ = app.update(Message::CommitSelected(id.into()));
+                let _ = app.update(Message::CommitChangesLoaded {
+                    tab,
+                    id: id.into(),
+                    result: Ok(crate::repo_view::DetailChanges::Commit(files.clone())),
+                });
+                let _ = app.update(Message::FileListTreeChosen(false));
+                snapshot(&app, &format!("details-layout-{name}-path-{theme}"));
+                let _ = app.update(Message::FileListTreeChosen(true));
+                snapshot(&app, &format!("details-layout-{name}-tree-{theme}"));
+            }
+            let _ = app.update(Message::FileListTreeChosen(false));
+            // A stash: its sections inside the frame.
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice;
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("s".into()));
+            let _ = app.update(Message::CommitChangesLoaded {
+                tab,
+                id: "s".into(),
+                result: Ok(crate::repo_view::DetailChanges::Stash(
+                    git_core::StashChanges {
+                        staged: files[..3].to_vec(),
+                        unstaged: files[3..30].to_vec(),
+                        untracked: files[30..33].to_vec(),
+                    },
+                )),
+            });
+            snapshot(&app, &format!("details-layout-stash-{theme}"));
+        }
+    }
+
     /// Unchanged files of "View all files" are muted and open the file's
     /// content at the commit (M14-03). Layout only.
     #[test]
@@ -1441,7 +1545,7 @@ mod tests {
     }
 
     /// The message box (M15-06): a click on the text does not open the
-    /// editor, the pencil at its top right does; a blocked pencil does
+    /// editor, the pencil at the right of the header row does (finding #42); a blocked pencil does
     /// nothing. Layout only, so part of every test run.
     #[test]
     fn message_box_pencil_opens_the_editor() {
@@ -1468,10 +1572,12 @@ mod tests {
         // A click on the text (left part of the box) does not edit.
         let text_clicks = clicks_along(&app, header.x - 60.0, top + 30.0, 120.0);
         assert!(!starts(&text_clicks), "{text_clicks:?}");
+        // Finding #42: the pencil sits in the slot at the right of the
+        // header row.
         let pencil = |app: &App| {
             let mut messages = Vec::new();
-            let mut y = top + 4.0;
-            while y < top + 50.0 {
+            let mut y = header.y;
+            while y < top {
                 messages.extend(clicks_along(app, SIZE.0 - 90.0, y, 90.0));
                 y += 4.0;
             }

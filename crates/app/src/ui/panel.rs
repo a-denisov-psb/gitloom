@@ -1,4 +1,4 @@
-//! Right panel: staging area (WIP selected) or commit details.
+//! Details panel: staging area (WIP selected) or commit details.
 
 use git_core::{Commit, DiffKind, DiffRequest, FileChange};
 use iced::widget::{
@@ -591,13 +591,65 @@ fn details<'a>(
     avatars: &'a crate::avatars::Avatars,
     files: crate::file_list::FileListOptions,
 ) -> Element<'a, Message> {
-    // The message box takes at most 40 % of the panel (M14-01).
+    // The message box takes at most a fifth of the panel (finding #42).
     iced::widget::responsive(move |size| details_content(view, commit, avatars, files, size.height))
         .into()
 }
 
-/// "commit: <short sha>" centered like GitKraken; a click copies the full
-/// sha (M14-01).
+/// Height of the header row and of the button slot at its right.
+const HEADER_HEIGHT: f32 = 22.0;
+/// Padding inside the message box.
+const MESSAGE_PADDING: f32 = 10.0;
+/// One line of the summary in the message box (16 px text).
+const MESSAGE_LINE: f32 = 16.0 * 1.3;
+/// Smallest message box when the panel is short: one line.
+const MESSAGE_MIN_HEIGHT: f32 = 2.0 * MESSAGE_PADDING + MESSAGE_LINE;
+/// The message box may always grow to three lines.
+const MESSAGE_THREE_LINES: f32 = 2.0 * MESSAGE_PADDING + 3.0 * MESSAGE_LINE;
+/// Height of one row in the file list (13 px text, padding 3).
+pub const FILE_ROW_HEIGHT: f32 = 13.0 * 1.3 + 6.0;
+/// The file list keeps three rows before the message box gives up room.
+const FRAME_MIN_HEIGHT: f32 = 3.0 * FILE_ROW_HEIGHT + 2.0;
+/// Spacing between the parts of the commit details.
+const DETAILS_SPACING: f32 = 8.0;
+/// Padding of the commit details.
+const DETAILS_PADDING: f32 = 12.0;
+
+/// Highest message box in a panel `height` high whose other parts take
+/// `fixed` (finding #42): max(20 % of the panel, three lines), less when
+/// the file list would get fewer than three rows, never below one line.
+pub(crate) fn message_max_height(height: f32, fixed: f32) -> f32 {
+    let wanted = (height * 0.2).max(MESSAGE_THREE_LINES);
+    let room = height - fixed - FRAME_MIN_HEIGHT;
+    wanted.min(room).max(MESSAGE_MIN_HEIGHT)
+}
+
+/// Height of the commit details besides the message box and the file
+/// list: paddings, spacings, the header row, the author block, the
+/// summary line and the toolbar.
+fn details_fixed_height(view: &RepoView, commit: &Commit) -> f32 {
+    let line: f32 = 12.0 * 1.3 + 2.0;
+    let mut author_lines: f32 = 13.0 * 1.3 + 2.0 + line;
+    if !commit.committer.is_empty() {
+        author_lines += line;
+    }
+    if matches!(
+        view.signatures.get(&commit.id),
+        Some(Loadable::Ready(Some(_)))
+    ) {
+        author_lines += line;
+    }
+    let mut author = author_lines.max(40.0);
+    if !crate::trailers::co_authors(&commit.body).is_empty() {
+        author += 8.0 + 22.0;
+    }
+    let summary = 12.0 * 1.3;
+    let toolbar = 22.0;
+    2.0 * DETAILS_PADDING + HEADER_HEIGHT + author + summary + toolbar + 5.0 * DETAILS_SPACING
+}
+
+/// "commit: <short sha>" at the left like GitKraken; a click copies the
+/// full sha (M14-01).
 fn details_header(id: &str) -> Element<'_, Message> {
     let label = row![
         muted("commit:"),
@@ -608,16 +660,14 @@ fn details_header(id: &str) -> Element<'_, Message> {
         .on_press(Message::CopyToClipboard(id.to_owned()))
         .padding([2, 6])
         .style(theme::flat);
-    container(with_tooltip_text(copy.into(), "Copy the full sha".into()))
-        .center_x(Fill)
-        .into()
+    with_tooltip_text(copy.into(), "Copy the full sha".into())
 }
 
-/// Summary (larger) and description in a framed, scrollable box whose text
-/// can be selected and copied (M14-01).
 /// Focus target of the message editor's summary (M14-05).
 pub const MESSAGE_EDIT_SUMMARY: &str = "message-edit-summary";
 
+/// Summary (larger) and description in a framed, scrollable box whose text
+/// can be selected and copied (M14-01), at most `max_height` high.
 fn message_box<'a>(
     view: &'a RepoView,
     commit: &'a Commit,
@@ -632,8 +682,7 @@ fn message_box<'a>(
             .spacing(8)
             .into()
     };
-    // Always the selectable text (M15-06): a click on it no longer opens
-    // the editor, the pencil does.
+    // Always the selectable text (M15-06).
     let inner: Element<'a, Message> = match view.message_box.as_ref().filter(|m| m.id == commit.id)
     {
         Some(message) => {
@@ -655,22 +704,13 @@ fn message_box<'a>(
         }
         None => plain(),
     };
-    let framed: Element<'a, Message> =
-        container(crate::ui::vscroll(container(inner).padding(10).width(Fill)))
-            .max_height(max_height.max(60.0))
-            .width(Fill)
-            .style(theme::message_box)
-            .into();
-    match edit_icon(view, &commit.id) {
-        Some(icon) => iced::widget::hover(
-            framed,
-            container(icon)
-                .width(Fill)
-                .align_x(iced::Right)
-                .padding(iced::Padding::ZERO.top(4).right(6)),
-        ),
-        None => framed,
-    }
+    container(crate::ui::vscroll(
+        container(inner).padding(MESSAGE_PADDING).width(Fill),
+    ))
+    .max_height(max_height)
+    .width(Fill)
+    .style(theme::message_box)
+    .into()
 }
 
 /// The edit state of the details' commit `id` as the pencil shows it
@@ -689,8 +729,9 @@ pub(crate) fn edit_icon_state(view: &RepoView, id: &str) -> Option<Result<(), St
     }
 }
 
-/// Pencil at the top right of the message box, shown while the box is
-/// hovered (M15-06); the tooltip is on the icon only.
+/// Pencil in the button slot at the right of the header row, shown while
+/// the header or the message box is hovered (M15-06, finding #42); the
+/// tooltip is on the icon only.
 fn edit_icon<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>> {
     let state = edit_icon_state(view, id)?;
     let tint: fn(&theme::ThemePalette) -> iced::Color = if state.is_ok() {
@@ -702,8 +743,8 @@ fn edit_icon<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>> {
     let button = button(container(icon).center(Fill))
         .on_press_maybe(state.is_ok().then_some(Message::CommitEditStart))
         .padding(0)
-        .width(22)
-        .height(22)
+        .width(HEADER_HEIGHT)
+        .height(HEADER_HEIGHT)
         .style(theme::flat);
     let tip = state
         .err()
@@ -818,28 +859,74 @@ fn details_content<'a>(
 ) -> Element<'a, Message> {
     let author = author_block(view, commit, avatars);
 
-    let files: Element<'a, Message> = match view.details.as_ref().map(|d| &d.changes) {
-        Some(Loadable::Ready(DetailChanges::Commit(changes))) => {
-            commit_files(view, &commit.id, changes, options)
-        }
-        Some(Loadable::Ready(DetailChanges::Stash(changes))) => {
-            stash_files(view, &commit.id, changes)
-        }
-        Some(Loadable::Failed(error)) => text(error).style(theme::text_danger).into(),
-        Some(Loadable::Loading) | None => muted("Loading changed files…").into(),
+    let (head, body): (Option<Element<'a, Message>>, Element<'a, Message>) =
+        match view.details.as_ref().map(|d| &d.changes) {
+            Some(Loadable::Ready(DetailChanges::Commit(changes))) => {
+                let (head, body) = commit_files(view, &commit.id, changes, options);
+                (Some(head), body)
+            }
+            Some(Loadable::Ready(DetailChanges::Stash(changes))) => {
+                let (head, body) = stash_files(view, &commit.id, changes);
+                (Some(head), body)
+            }
+            Some(Loadable::Failed(error)) => (
+                None,
+                container(text(error).style(theme::text_danger))
+                    .padding([4, 12])
+                    .into(),
+            ),
+            Some(Loadable::Loading) | None => (
+                None,
+                container(muted("Loading changed files…"))
+                    .padding([4, 12])
+                    .into(),
+            ),
+        };
+    // The file list scrolls in its own frame; the panel never scrolls
+    // (finding #42).
+    let frame = container(
+        crate::ui::vscroll(container(body).padding([4, 0]).width(Fill))
+            .width(Fill)
+            .height(Fill),
+    )
+    .width(Fill)
+    .height(Fill)
+    .padding(1)
+    .clip(true)
+    .style(theme::file_frame);
+
+    // Hash at the left, the button slot at the right; the button shows
+    // while the header or the message is hovered, its room is always kept
+    // so nothing jumps.
+    let header = row![
+        details_header(&commit.id),
+        space::horizontal(),
+        space::horizontal().width(HEADER_HEIGHT),
+    ]
+    .height(HEADER_HEIGHT)
+    .align_y(iced::Center);
+    let max_message = message_max_height(height, details_fixed_height(view, commit));
+    let top: Element<'a, Message> = column![header, message_box(view, commit, max_message)]
+        .spacing(DETAILS_SPACING)
+        .into();
+    let top = match edit_icon(view, &commit.id) {
+        Some(icon) => hover(
+            top,
+            container(icon)
+                .width(Fill)
+                .height(HEADER_HEIGHT)
+                .align_x(iced::Right),
+        ),
+        None => top,
     };
 
-    let content = column![
-        details_header(&commit.id),
-        message_box(view, commit, height * 0.4)
-    ]
-    .push(author)
-    .push(space::vertical().height(4))
-    .push(files)
-    .spacing(8)
-    .padding(12);
-
-    crate::ui::vscroll(content).height(Fill).into()
+    column![top, author]
+        .push(head)
+        .push(frame)
+        .spacing(DETAILS_SPACING)
+        .padding(DETAILS_PADDING)
+        .height(Fill)
+        .into()
 }
 
 /// Author block like GitKraken's (M14-02): 40 px avatar, name, "authored
@@ -974,14 +1061,17 @@ pub(crate) fn changed_files(count: usize) -> String {
     }
 }
 
-/// Files of a stash entry in sections like the working copy view.
+/// Files of a stash entry in sections like the working copy view: the
+/// count above the frame, the sections (Staged, Unstaged, Untracked) in
+/// it (finding #42).
 fn stash_files<'a>(
     view: &'a RepoView,
     id: &str,
     changes: &'a git_core::StashChanges,
-) -> Element<'a, Message> {
+) -> (Element<'a, Message>, Element<'a, Message>) {
     use git_core::StashPart;
-    let mut content = column![muted(changed_files(changes.file_count()))].spacing(8);
+    let head = muted(changed_files(changes.file_count())).size(12).into();
+    let mut content = column![].spacing(6);
     for (title, part, files) in [
         ("Staged", StashPart::Staged, &changes.staged),
         ("Unstaged", StashPart::Unstaged, &changes.unstaged),
@@ -996,13 +1086,13 @@ fn stash_files<'a>(
         };
         content = content.push(
             column![
-                text(format!("{title} ({})", files.len())).size(12),
+                container(text(format!("{title} ({})", files.len())).size(12)).padding([2, 12]),
                 Column::with_children(files.iter().map(|file| file_row(view, file, kind.clone()))),
             ]
             .spacing(2),
         );
     }
-    content.into()
+    (head, content.into())
 }
 
 fn short(id: &str) -> &str {
@@ -1151,14 +1241,15 @@ fn small_button(label: &str, message: Message) -> button::Button<'_, Message> {
         .on_press(message)
 }
 
-/// File list of a commit (M14-03): summary per kind, toolbar (sort,
-/// Path/Tree, "View all files", expand/collapse) and the rows.
+/// File list of a commit (M14-03): above the frame the summary per kind
+/// and the toolbar (sort, Path/Tree, "View all files"); in the frame the
+/// Expand/Collapse toggle (tree with folders, finding #42) and the rows.
 fn commit_files<'a>(
     view: &'a RepoView,
     id: &'a str,
     changes: &'a [FileChange],
     options: crate::file_list::FileListOptions,
-) -> Element<'a, Message> {
+) -> (Element<'a, Message>, Element<'a, Message>) {
     use crate::branch_tree::Row;
     use crate::file_list::Entry;
     let summary: Element<'a, Message> = if changes.is_empty() {
@@ -1206,7 +1297,7 @@ fn commit_files<'a>(
         .into(),
         "Sort by path".into(),
     );
-    let mut toolbar = row![
+    let toolbar = row![
         sort,
         row![
             segment("Path", !options.tree, false),
@@ -1220,27 +1311,22 @@ fn commit_files<'a>(
     ]
     .spacing(8)
     .align_y(iced::Center);
-    if let Some(nodes) = &nodes {
+    // One button whose label follows the folders (finding #42).
+    let toggle = nodes.as_ref().and_then(|nodes| {
         let folders = crate::file_list::folder_paths(nodes);
-        toolbar = toolbar.extend([
-            small_button(
-                "Expand all",
+        let state = crate::file_list::expand_toggle(&folders, &view.file_tree_collapsed)?;
+        let expand = state == crate::file_list::ExpandToggle::ExpandAll;
+        Some(
+            container(small_button(
+                state.label(),
                 Message::FileListExpandAll {
-                    expand: true,
-                    folders: Vec::new(),
+                    expand,
+                    folders: if expand { Vec::new() } else { folders },
                 },
-            )
-            .into(),
-            small_button(
-                "Collapse all",
-                Message::FileListExpandAll {
-                    expand: false,
-                    folders,
-                },
-            )
-            .into(),
-        ]);
-    }
+            ))
+            .padding([0, 8]),
+        )
+    });
 
     let entry_row = |entry: Entry<'a>, label: String, depth: usize| -> Element<'a, Message> {
         match entry {
@@ -1344,15 +1430,23 @@ fn commit_files<'a>(
             ),
             _ => None,
         };
-    column![
-        muted(changed_files(changes.len())).size(12),
-        summary,
+    let head = column![
+        row![muted(changed_files(changes.len())).size(12), summary]
+            .spacing(12)
+            .align_y(iced::Center)
+            .wrap()
+            .vertical_spacing(4),
         toolbar.wrap().vertical_spacing(4),
     ]
-    .push(loading)
-    .push(Column::with_children(rows))
     .spacing(8)
-    .into()
+    .into();
+    let body = column![]
+        .push(toggle)
+        .push(loading.map(|l| container(l).padding([2, 12])))
+        .push(Column::with_children(rows))
+        .spacing(2)
+        .into();
+    (head, body)
 }
 
 /// "Stage all" / "Unstage all": active when writing is possible and the list is not empty.
