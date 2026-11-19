@@ -129,11 +129,13 @@ Acceptance: app tests: choosing each theme in Preferences and in the palette; th
 
 Note: the two groups sit side by side under the headings "Dark themes" and "Light themes" (a bare "Dark" heading would read like the theme of that name); System is a full-width entry below them, its two lists use the same layout. Each entry: a framed swatch strip in the theme's border color, the name, a check mark when current. Snapshots `theme-list-*` (`ui_check_theme_list`).
 
-### [ ] M16-07 No hard-coded colors in views
+### [x] M16-07 No hard-coded colors in views
 
 - A test scans the app sources for `Color::from_rgb`, `Color::from_rgba`, `color!`, `Color::WHITE` and `Color::BLACK` outside an allow list (`theme.rs`, the syntect span conversion in `ui/diff.rs` and `ui/code_highlighter.rs`, tests), with a reason per entry. Colors found elsewhere move into the palette with values for every theme. `CLAUDE.md` hard rules get the line "UI colors come only from `ThemePalette`."
 
 Acceptance: the test passes; the allow list is short and commented.
+
+Note: `theme::tests::views_use_no_hard_coded_colors`; the allow list also names `themes.rs` (the built-in palettes moved there in M16-04) and skips test code (`ui_check.rs`, everything after `mod tests`). One color moved: the signature badge icon fell back to black, now to the palette's text color.
 
 ### [ ] M16-08 Documentation
 

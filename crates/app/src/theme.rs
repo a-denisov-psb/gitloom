@@ -1328,4 +1328,75 @@ mod tests {
         assert_eq!(node_text_for(&LIGHT.lanes), Color::WHITE);
         assert_eq!(node_text_for(&[hex(0xf5f5a0), hex(0xa0f5f5)]), Color::BLACK);
     }
+
+    /// M16-07 (ADR-058): views and style functions take their colors only
+    /// from `ThemePalette`. Every hard-coded color in the app's sources
+    /// outside test code must be on this list, with its reason.
+    #[test]
+    fn views_use_no_hard_coded_colors() {
+        // (file, text on the line, reason)
+        const ALLOWED: &[(&str, &str, &str)] = &[
+            ("theme.rs", "", "the palettes and color helpers live here"),
+            ("themes.rs", "", "the built-in palettes"),
+            (
+                "ui/diff.rs",
+                "Color::from_rgba8(r, g, b,",
+                "syntect span color of the syntax theme",
+            ),
+            (
+                "ui/code_highlighter.rs",
+                "Color::from_rgba8(r, g, b,",
+                "syntect span color of the syntax theme",
+            ),
+        ];
+        const PATTERNS: &[&str] = &[
+            "Color::from_rgb",
+            "Color::from_rgba",
+            "color!",
+            "Color::WHITE",
+            "Color::BLACK",
+        ];
+        // Test-only modules.
+        const TEST_FILES: &[&str] = &["ui_check.rs"];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![root.clone()];
+        let mut found = Vec::new();
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                for entry in std::fs::read_dir(&path).unwrap() {
+                    files.push(entry.unwrap().path());
+                }
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let name = path
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if TEST_FILES.contains(&name.as_str()) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            // Code after the test module is test code.
+            let code = text.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
+            for (number, line) in code.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                if !PATTERNS.iter().any(|p| line.contains(p)) {
+                    continue;
+                }
+                let allowed = ALLOWED
+                    .iter()
+                    .any(|(file, part, _)| *file == name && line.contains(part));
+                if !allowed {
+                    found.push(format!("{name}:{}: {}", number + 1, line.trim()));
+                }
+            }
+        }
+        assert!(found.is_empty(), "hard-coded colors:\n{}", found.join("\n"));
+    }
 }
