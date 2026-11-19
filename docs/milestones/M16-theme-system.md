@@ -115,7 +115,7 @@ Acceptance: the contrast test passes for each theme; a snapshot of the fixture w
 
 Note: the fixture is two snapshots per theme (`ui_check_themes`: `theme-<id>-graph` with the Gitflow layout, `theme-<id>-diff` with a Split word diff, staging and the status bar), since a diff replaces the graph. Light themes also keep status colors at 4.5:1 on the panel like Light.
 
-### [ ] M16-05 Built-in themes: GitHub Dark, GitHub Light, Solarized Light, Warm Dark, Warm Light
+### [x] M16-05 Built-in themes: GitHub Dark, GitHub Light, Solarized Light, Warm Dark, Warm Light
 
 - Same as M16-04 for these five; Warm Dark and Warm Light use a warm neutral palette with a terracotta accent and own values.
 
