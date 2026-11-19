@@ -90,10 +90,12 @@ pub enum Icon {
     Maximize,
     /// "Discard all changes" in the staging area at the bottom (#44).
     Trash,
+    /// Built-in theme (read only, M17-02).
+    Lock,
 }
 
 impl Icon {
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -152,6 +154,7 @@ impl Icon {
         Self::MoveToRight,
         Self::Maximize,
         Self::Trash,
+        Self::Lock,
     ];
 
     /// SVG source of the icon.
@@ -221,6 +224,7 @@ impl Icon {
             Self::MoveToRight => lucide!("arrow-right-to-line"),
             Self::Maximize => lucide!("maximize-2"),
             Self::Trash => lucide!("trash-2"),
+            Self::Lock => lucide!("lock"),
         }
     }
 

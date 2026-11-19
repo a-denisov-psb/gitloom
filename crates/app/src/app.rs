@@ -582,6 +582,27 @@ pub enum Message {
     SettingsLoaded(settings::Loaded),
     /// The theme files of the config directory (ADR-059).
     UserThemesLoaded(Vec<crate::theme_file::Entry>),
+    /// Preferences → Themes (M17-02): select, New theme (a copy of the
+    /// selected one), Rename…, Delete…, Import…, Export…, Open folder.
+    ThemeSelected(String),
+    ThemeNew,
+    ThemeRename,
+    ThemeDelete {
+        confirmed: bool,
+    },
+    ThemeImport,
+    ThemeImportPicked(Option<PathBuf>),
+    /// Name collision on import: replace (`true`) or keep both.
+    ThemeImportResolved {
+        path: PathBuf,
+        replace: bool,
+    },
+    ThemeExport,
+    ThemeExportPicked(Option<PathBuf>),
+    ThemeExported(Result<PathBuf, String>),
+    ThemeOpenFolder,
+    /// A theme file action finished.
+    ThemeFilesChanged(Result<crate::theme_file::Change, String>),
     /// The status bar message number `seq` may disappear now.
     StatusExpired(u64),
     /// Zoom buttons in Preferences → Appearance.
@@ -1328,6 +1349,9 @@ pub struct App {
     /// Theme files found in `themes/` (ADR-059), invalid ones with their
     /// reason; the valid ones are in the theme registry.
     pub theme_files: Vec<crate::theme_file::Entry>,
+    /// The last theme file action sent to the background (tests run it).
+    #[cfg(test)]
+    pub last_theme_op: Option<crate::theme_file::Op>,
     settings_save_seq: u64,
     /// Light or dark mode of the operating system (`None` if unknown).
     pub system_theme: iced::theme::Mode,
@@ -1436,6 +1460,8 @@ impl App {
                 .and(crate::avatars::DiskCache::default_dir())
                 .map(crate::avatars::DiskCache::new),
             settings_page: None,
+            #[cfg(test)]
+            last_theme_op: None,
             theme_files: Vec::new(),
             settings_path: session_path
                 .as_deref()
@@ -2318,6 +2344,29 @@ impl App {
         let Some(action) = self.form.as_ref().map(|f| f.action.clone()) else {
             return Task::none();
         };
+        if let FormAction::RenameTheme { id } = action {
+            let name = self
+                .form
+                .as_ref()
+                .map(|f| f.value(0).to_owned())
+                .unwrap_or_default();
+            let Some(def) = crate::themes::get(&id) else {
+                self.form = None;
+                return Task::none();
+            };
+            if name.is_empty() {
+                if let Some(form) = self.form.as_mut() {
+                    form.error = Some("Enter a name".into());
+                }
+                return Task::none();
+            }
+            self.form = None;
+            if name == def.name {
+                return Task::none();
+            }
+            let data = crate::theme_file::ThemeData::of(&def);
+            return self.theme_op(crate::theme_file::Op::Rename { id, name, data });
+        }
         // Git flow start/finish: configuration, existing branches, operation state.
         let flow_tags = match &action {
             FormAction::FinishFlow { tab, .. } => {
@@ -2356,6 +2405,8 @@ impl App {
             return Task::none();
         };
         match form.action.clone() {
+            // Handled at the top of `submit_form`.
+            FormAction::RenameTheme { .. } => Task::none(),
             FormAction::ChangeAuthor { tab, ids } => {
                 let (name, email) = (form.value(1).to_owned(), form.value(2).to_owned());
                 if let Some(problem) = git_core::identity_problem(&name, &email) {
@@ -2998,6 +3049,55 @@ impl App {
         }
     }
 
+    /// Folder of the theme files (`themes/` next to `settings.json`).
+    fn theme_dir(&self) -> Option<PathBuf> {
+        self.settings_path
+            .as_ref()
+            .map(|p| p.with_file_name(crate::theme_file::DIR))
+    }
+
+    /// Runs a theme file action off the UI thread (M17-02).
+    fn theme_op(&mut self, op: crate::theme_file::Op) -> Task<Message> {
+        #[cfg(test)]
+        {
+            self.last_theme_op = Some(op.clone());
+        }
+        let Some(dir) = self.theme_dir() else {
+            return Task::none();
+        };
+        Task::perform(
+            blocking(move || crate::theme_file::apply(&dir, op)),
+            Message::ThemeFilesChanged,
+        )
+    }
+
+    /// The theme selected in Preferences → Themes: the page's choice, else
+    /// the active theme.
+    pub fn selected_theme(&self) -> std::sync::Arc<crate::themes::ThemeDef> {
+        self.settings_page
+            .as_ref()
+            .and_then(|p| p.theme_selected.as_deref())
+            .and_then(crate::themes::get)
+            .unwrap_or_else(|| self.active_theme())
+    }
+
+    /// Settings that name theme `old` name `new` instead (a renamed theme).
+    fn rename_theme_in_settings(&mut self, old: &str, new: &str) -> bool {
+        let appearance = &mut self.settings.appearance;
+        let mut changed = false;
+        if appearance.theme == settings::ThemeChoice::theme(old) {
+            appearance.theme = settings::ThemeChoice::theme(new);
+            changed = true;
+        }
+        for slot in [&mut appearance.system_dark, &mut appearance.system_light] {
+            if slot == old {
+                *slot = new.to_owned();
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// Keeps the theme files and puts the valid ones into the registry.
     pub fn set_theme_files(&mut self, entries: Vec<crate::theme_file::Entry>) {
         let themes = entries
@@ -3369,6 +3469,9 @@ impl App {
             }
             Shortcut::Settings => return self.open_settings(),
             Shortcut::About => return self.update(Message::AboutOpened),
+            Shortcut::EditThemes => {
+                return self.update(Message::SettingsOpenedAt(settings::Category::Themes))
+            }
             Shortcut::ManageIdentities => {
                 return self.update(Message::SettingsOpenedAt(settings::Category::Identities))
             }
@@ -7453,6 +7556,192 @@ impl App {
                     }),
                     |result| Message::StatusText(result.err().unwrap_or_default()),
                 );
+            }
+            Message::ThemeSelected(id) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.theme_selected = Some(id);
+                }
+            }
+            Message::ThemeNew => {
+                let def = self.selected_theme();
+                let name = format!("{} copy", def.name);
+                let data = crate::theme_file::ThemeData {
+                    name: name.clone(),
+                    ..crate::theme_file::ThemeData::of(&def)
+                };
+                return self.theme_op(crate::theme_file::Op::New { wish: name, data });
+            }
+            Message::ThemeRename => {
+                let def = self.selected_theme();
+                if crate::theme_file::stem_of(&def.id).is_none() {
+                    return Task::none();
+                }
+                self.form = Some(Form {
+                    title: "Rename theme".into(),
+                    text: "The theme file is renamed too.".into(),
+                    fields: vec![FormField::text("Name", def.name.clone())],
+                    submit: "Rename".into(),
+                    action: FormAction::RenameTheme { id: def.id.clone() },
+                    error: None,
+                });
+                return iced::widget::operation::focus(crate::ui::overlays::FORM_FIRST_INPUT);
+            }
+            Message::ThemeDelete { confirmed } => {
+                let def = self.selected_theme();
+                if crate::theme_file::stem_of(&def.id).is_none() {
+                    return Task::none();
+                }
+                if !confirmed {
+                    let used = self.active_theme().id == def.id
+                        || self.settings.appearance.system_dark == def.id
+                        || self.settings.appearance.system_light == def.id;
+                    let fallback = if used {
+                        " It is in use: Gitloom falls back to Dark or Light until you choose another theme."
+                    } else {
+                        ""
+                    };
+                    self.modal = Some(Modal::confirm(
+                        "Delete theme",
+                        format!("Delete the theme \"{}\" and its file?{fallback}", def.name),
+                        "Delete",
+                        true,
+                        Message::ThemeDelete { confirmed: true },
+                    ));
+                    return Task::none();
+                }
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.theme_selected = None;
+                }
+                return self.theme_op(crate::theme_file::Op::Delete { id: def.id.clone() });
+            }
+            Message::ThemeImport => {
+                return Task::perform(
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Import a theme")
+                        .add_filter("Theme", &["json"])
+                        .pick_file(),
+                    |file| Message::ThemeImportPicked(file.map(|f| f.path().to_path_buf())),
+                );
+            }
+            Message::ThemeImportPicked(Some(source)) => {
+                return self.theme_op(crate::theme_file::Op::Import {
+                    source,
+                    on_collision: None,
+                });
+            }
+            Message::ThemeImportPicked(None) => {}
+            Message::ThemeImportResolved { path, replace } => {
+                return self.theme_op(crate::theme_file::Op::Import {
+                    source: path,
+                    on_collision: Some(replace),
+                });
+            }
+            Message::ThemeExport => {
+                let def = self.selected_theme();
+                let file = format!("{}.json", crate::theme_file::stem_for_name(&def.name));
+                return Task::perform(
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Export the theme")
+                        .add_filter("Theme", &["json"])
+                        .set_file_name(file)
+                        .save_file(),
+                    |file| Message::ThemeExportPicked(file.map(|f| f.path().to_path_buf())),
+                );
+            }
+            Message::ThemeExportPicked(Some(path)) => {
+                let data = crate::theme_file::ThemeData::of(&self.selected_theme());
+                return Task::perform(
+                    blocking(move || {
+                        std::fs::write(&path, crate::theme_file::to_json(&data))
+                            .map(|()| path.clone())
+                            .map_err(|e| format!("{}: {e}", path.display()))
+                    }),
+                    Message::ThemeExported,
+                );
+            }
+            Message::ThemeExportPicked(None) => {}
+            Message::ThemeExported(Ok(path)) => {
+                return self.notify(crate::toast::Toast::new(
+                    crate::toast::ToastKind::Success,
+                    "Theme exported",
+                    path.display().to_string(),
+                ));
+            }
+            Message::ThemeExported(Err(error)) => {
+                self.modal = Some(Modal::info("Theme not exported", error));
+            }
+            Message::ThemeOpenFolder => {
+                let Some(dir) = self.theme_dir() else {
+                    return Task::none();
+                };
+                return Task::perform(
+                    blocking(move || {
+                        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                        crate::launch::spawn(&crate::launch::file_manager(
+                            crate::launch::Platform::current(),
+                            &dir,
+                        ))
+                    }),
+                    |result| Message::StatusText(result.err().unwrap_or_default()),
+                );
+            }
+            Message::ThemeFilesChanged(Ok(change)) => {
+                self.set_theme_files(change.entries);
+                let mut tasks = Vec::new();
+                if let Some((old, new)) = change.renamed {
+                    if self.rename_theme_in_settings(&old, &new) {
+                        tasks.push(self.save_settings());
+                    }
+                }
+                if let Some(select) = change.select {
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.theme_selected = Some(select);
+                    }
+                }
+                if let Some((path, stem)) = change.collision {
+                    self.modal = Some(Modal {
+                        title: "Import theme".into(),
+                        text: format!(
+                            "A theme file \"{stem}.json\" exists already. Replace it, or keep both \
+                             (the imported one gets a numbered name)?"
+                        ),
+                        details: None,
+                        buttons: vec![
+                            crate::overlay::DialogButton {
+                                label: "Cancel".into(),
+                                kind: crate::overlay::ButtonKind::Secondary,
+                                message: None,
+                                disabled: None,
+                            },
+                            crate::overlay::DialogButton {
+                                label: "Keep both".into(),
+                                kind: crate::overlay::ButtonKind::Primary,
+                                message: Some(Message::ThemeImportResolved {
+                                    path: path.clone(),
+                                    replace: false,
+                                }),
+                                disabled: None,
+                            },
+                            crate::overlay::DialogButton {
+                                label: "Replace".into(),
+                                kind: crate::overlay::ButtonKind::Danger,
+                                message: Some(Message::ThemeImportResolved {
+                                    path,
+                                    replace: true,
+                                }),
+                                disabled: None,
+                            },
+                        ],
+                        default: Some(1),
+                    });
+                }
+                // The active theme may have changed or gone.
+                self.restyle_code_views();
+                tasks.push(self.highlight_code_views());
+                return Task::batch(tasks);
+            }
+            Message::ThemeFilesChanged(Err(error)) => {
+                self.modal = Some(Modal::info("Theme files", error));
             }
             Message::UserThemesLoaded(entries) => {
                 self.set_theme_files(entries);
@@ -14584,6 +14873,132 @@ pub(crate) mod tests {
             app.theme_note().as_deref(),
             Some("Theme 'user:Mine' not found, using Dark")
         );
+    }
+
+    /// Runs the theme file action the app sent (M17-02) and hands the
+    /// result back.
+    fn run_theme_op(app: &mut App) -> Result<crate::theme_file::Change, String> {
+        let op = app.last_theme_op.take().expect("a theme file action");
+        let dir = app.theme_dir().expect("a theme folder");
+        let result = crate::theme_file::apply(&dir, op);
+        let _ = app.update(Message::ThemeFilesChanged(result.clone()));
+        result
+    }
+
+    /// An app with a config folder in `dir` and Preferences → Themes open.
+    fn themes_app(dir: &std::path::Path) -> App {
+        let mut app = ready_app(&["c"]);
+        app.settings_path = Some(dir.join(settings::FILE_NAME));
+        app.set_theme_files(Vec::new());
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::Themes));
+        app
+    }
+
+    /// M17-02: New theme, Rename and Delete.
+    #[test]
+    fn theme_file_actions() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let themes = dir.path().join("themes");
+        let mut app = themes_app(dir.path());
+        // Built-ins: no Rename or Delete.
+        let _ = app.update(Message::ThemeSelected("light".into()));
+        let _ = app.update(Message::ThemeRename);
+        let _ = app.update(Message::ThemeDelete { confirmed: false });
+        assert!(app.form.is_none() && app.modal.is_none());
+        assert!(app.last_theme_op.is_none());
+        // Duplicate a built-in: "<name> copy.json", selected.
+        let _ = app.update(Message::ThemeNew);
+        run_theme_op(&mut app).unwrap();
+        assert!(themes.join("Light copy.json").exists());
+        assert_eq!(app.selected_theme().id, "user:Light copy");
+        assert_eq!(app.selected_theme().name, "Light copy");
+        let copy = app.selected_theme();
+        assert_eq!(
+            copy.palette.main_colors(),
+            crate::theme::LIGHT.main_colors()
+        );
+        assert_eq!(copy.palette.lanes, crate::theme::LIGHT.lanes);
+        assert_eq!(copy.palette.flow, crate::theme::LIGHT.flow);
+        assert_eq!(copy.syntax, crate::highlight::CodeTheme::LIGHT);
+        // Use it, also for System's light slot; then rename it.
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme(
+            "user:Light copy",
+        )));
+        let _ = app.update(Message::SystemThemeMapped(
+            crate::theme::ThemeKind::Light,
+            "user:Light copy".into(),
+        ));
+        let _ = app.update(Message::ThemeRename);
+        let form = app.form.as_mut().expect("rename form");
+        form.fields[0].value = "Paper".into();
+        let _ = app.update(Message::FormSubmit);
+        run_theme_op(&mut app).unwrap();
+        assert!(themes.join("Paper.json").exists());
+        assert!(!themes.join("Light copy.json").exists());
+        assert_eq!(
+            app.settings.appearance.theme,
+            settings::ThemeChoice::theme("user:Paper")
+        );
+        assert_eq!(app.settings.appearance.system_light, "user:Paper");
+        assert_eq!(app.active_theme().name, "Paper");
+        // Delete the active theme: asks, then falls back to Dark with the note.
+        let _ = app.update(Message::ThemeDelete { confirmed: false });
+        let modal = app.modal.take().expect("confirmation");
+        assert!(modal.text.contains("It is in use"), "{}", modal.text);
+        let _ = app.update(Message::ThemeDelete { confirmed: true });
+        run_theme_op(&mut app).unwrap();
+        assert!(!themes.join("Paper.json").exists());
+        assert_eq!(app.active_theme().id, "dark");
+        assert_eq!(
+            app.theme_note().as_deref(),
+            Some("Theme 'user:Paper' not found, using Dark")
+        );
+        app.set_theme_files(Vec::new());
+    }
+
+    /// M17-02: import with a name collision, an invalid file, and an
+    /// exported file imported again.
+    #[test]
+    fn theme_import_and_export() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = themes_app(dir.path());
+        let _ = app.update(Message::ThemeSelected("monokai".into()));
+        // Export writes the complete file of the selected theme.
+        let exported = dir.path().join("Monokai.json");
+        let data = crate::theme_file::ThemeData::of(&app.selected_theme());
+        std::fs::write(&exported, crate::theme_file::to_json(&data)).unwrap();
+        let _ = app.update(Message::ThemeImportPicked(Some(exported.clone())));
+        run_theme_op(&mut app).unwrap();
+        assert_eq!(app.selected_theme().id, "user:Monokai");
+        assert_eq!(
+            app.selected_theme().palette.main_colors(),
+            data.palette.main_colors()
+        );
+        // The same file again: Replace or Keep both.
+        let _ = app.update(Message::ThemeImportPicked(Some(exported.clone())));
+        run_theme_op(&mut app).unwrap();
+        let modal = app.modal.take().expect("collision dialog");
+        let labels: Vec<&str> = modal.buttons.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(labels, ["Cancel", "Keep both", "Replace"]);
+        let _ = app.update(modal.action(1).expect("keep both"));
+        run_theme_op(&mut app).unwrap();
+        assert_eq!(app.selected_theme().id, "user:Monokai 2");
+        // An invalid file: the reason, nothing changes.
+        let bad = dir.path().join("bad.json");
+        std::fs::write(&bad, r#"{"name": "Bad", "base": "dim"}"#).unwrap();
+        let before = app.theme_files.clone();
+        let _ = app.update(Message::ThemeImportPicked(Some(bad)));
+        assert!(run_theme_op(&mut app).is_err());
+        let modal = app.modal.take().expect("error dialog");
+        assert!(modal.text.contains("base: 'dim'"), "{}", modal.text);
+        assert_eq!(app.theme_files, before);
+        app.set_theme_files(Vec::new());
     }
 
     #[test]

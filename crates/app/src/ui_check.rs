@@ -1266,6 +1266,42 @@ mod tests {
         snapshot(&app, "theme-list-unknown");
     }
 
+    /// Preferences → Themes (M17-02): built-ins with lock icons, a user
+    /// theme, an invalid file with its reason; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_theme_files() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        use crate::settings::ThemeChoice;
+        use crate::theme_file::{Entry, ThemeData};
+        let mut app = crate::app::tests::ready_app(&["c", "b", "a"]);
+        let mine = ThemeData::of(&crate::themes::get("warm-dark").unwrap());
+        app.set_theme_files(vec![
+            Entry::Theme(
+                ThemeData {
+                    name: "Night shift".into(),
+                    ..mine
+                }
+                .into_def("user:Night shift".into()),
+            ),
+            Entry::Invalid {
+                file: "draft.json".into(),
+                reason: "colors.accent: '#12' is not a color (#RRGGBB)".into(),
+            },
+        ]);
+        let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Themes));
+        for id in ["dark", "light"] {
+            app.settings.appearance.theme = ThemeChoice::theme(id);
+            let _ = app.update(Message::ThemeSelected("user:Night shift".into()));
+            snapshot(&app, &format!("theme-files-{id}"));
+        }
+        let _ = app.update(Message::ThemeSelected("dark".into()));
+        snapshot(&app, "theme-files-builtin-selected");
+        app.set_theme_files(Vec::new());
+    }
+
     /// Every theme of the registry (ADR-058, M16-04/05): the graph with the
     /// Gitflow layout, and a word diff with syntax colors next to staging
     /// and the status bar.
@@ -1274,7 +1310,10 @@ mod tests {
     fn ui_check_themes() {
         use crate::settings::{DiffMode, ThemeChoice};
         let (_repo, flow) = crate::snapshot::flow_tests::classic_snapshot();
-        for def in crate::themes::all() {
+        for def in crate::themes::all()
+            .into_iter()
+            .filter(|d| crate::theme_file::stem_of(&d.id).is_none())
+        {
             let choice = ThemeChoice::theme(&def.id);
             let mut app = crate::app::tests::graph_app();
             app.settings.appearance.theme = choice.clone();

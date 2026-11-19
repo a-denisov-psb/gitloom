@@ -28,9 +28,6 @@
 //! `ThemePalette::derive`; missing `lanes`, `flow` and `syntax` from the
 //! built-in theme of the same base. Unknown keys are ignored.
 
-// The file actions of Preferences → Themes use the rest (M17-02).
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -423,6 +420,199 @@ pub fn load_file(path: &Path) -> Entry {
     }
 }
 
+/// File stems of the theme files in `dir`.
+pub fn stems(dir: &Path) -> Vec<String> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    read.filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .collect()
+}
+
+fn path_of(dir: &Path, stem: &str) -> std::path::PathBuf {
+    dir.join(format!("{stem}.json"))
+}
+
+/// Writes `theme` to `<stem>.json` in `dir` (created when missing),
+/// replacing a file of that name. Blocking.
+pub fn write(dir: &Path, stem: &str, theme: &ThemeData) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = path_of(dir, stem);
+    std::fs::write(&path, to_json(theme)).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Writes `theme` to a new file named after `wish` (numbered when taken)
+/// and returns its id. Blocking.
+pub fn write_new(dir: &Path, wish: &str, theme: &ThemeData) -> Result<String, String> {
+    let stem = unique_stem(&stem_for_name(wish), &stems(dir));
+    write(dir, &stem, theme)?;
+    Ok(id_for(&stem))
+}
+
+/// Renames the theme in `<old_stem>.json` to `name`: the file is written
+/// under the new name and the old one removed. Returns the new id.
+/// Blocking.
+pub fn rename(dir: &Path, old_stem: &str, name: &str, theme: &ThemeData) -> Result<String, String> {
+    let wish = stem_for_name(name);
+    let others: Vec<String> = stems(dir)
+        .into_iter()
+        .filter(|s| !s.eq_ignore_ascii_case(old_stem))
+        .collect();
+    let stem = unique_stem(&wish, &others);
+    let renamed = ThemeData {
+        name: name.trim().to_owned(),
+        ..theme.clone()
+    };
+    write(dir, &stem, &renamed)?;
+    // Same file name in another letter case: the write replaced it.
+    if !stem.eq_ignore_ascii_case(old_stem) {
+        delete(dir, old_stem)?;
+    } else if stem != old_stem {
+        let _ = std::fs::rename(path_of(dir, old_stem), path_of(dir, &stem));
+    }
+    Ok(id_for(&stem))
+}
+
+/// Removes `<stem>.json`. Blocking.
+pub fn delete(dir: &Path, stem: &str) -> Result<(), String> {
+    let path = path_of(dir, stem);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Result of importing a file.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Import {
+    /// Copied; the id of the new theme.
+    Done(String),
+    /// A theme file of that name exists: ask "Replace" or "Keep both".
+    Collision { stem: String },
+}
+
+/// Imports the theme file `source` into `dir` after validating it; on a
+/// name collision nothing is written unless `on_collision` says what to
+/// do (`true` replaces, `false` keeps both with a numbered name). An
+/// invalid file changes nothing. Blocking.
+pub fn import(dir: &Path, source: &Path, on_collision: Option<bool>) -> Result<Import, String> {
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let text = std::fs::read(source)
+        .map_err(|e| format!("{name} cannot be read: {e}"))
+        .and_then(|bytes| {
+            String::from_utf8(bytes).map_err(|_| format!("{name}: not UTF-8 text"))
+        })?;
+    parse(&text).map_err(|reason| format!("{name}: {reason}"))?;
+    let stem = source
+        .file_stem()
+        .map(|s| stem_for_name(&s.to_string_lossy()))
+        .unwrap_or_else(|| "theme".to_owned());
+    let taken = stems(dir);
+    let collides = taken.iter().any(|t| t.eq_ignore_ascii_case(&stem));
+    let stem = match (collides, on_collision) {
+        (false, _) => stem,
+        (true, None) => return Ok(Import::Collision { stem }),
+        (true, Some(true)) => taken
+            .into_iter()
+            .find(|t| t.eq_ignore_ascii_case(&stem))
+            .unwrap_or(stem),
+        (true, Some(false)) => unique_stem(&stem, &taken),
+    };
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // The file is copied as it is (the user's own formatting stays).
+    let path = path_of(dir, &stem);
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(Import::Done(id_for(&stem)))
+}
+
+/// A change to the theme files, run off the UI thread by [`apply`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Op {
+    /// A new file named after `wish` (numbered when taken).
+    New {
+        wish: String,
+        data: ThemeData,
+    },
+    /// Rename the user theme `id` to `name`.
+    Rename {
+        id: String,
+        name: String,
+        data: ThemeData,
+    },
+    /// Write the user theme `id` (M17-03).
+    #[allow(dead_code)] // Sent by the editor (M17-03).
+    Save {
+        id: String,
+        data: ThemeData,
+    },
+    Delete {
+        id: String,
+    },
+    /// `on_collision`: see [`import`].
+    Import {
+        source: std::path::PathBuf,
+        on_collision: Option<bool>,
+    },
+}
+
+/// What [`apply`] did: the theme files afterwards and what follows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    pub entries: Vec<Entry>,
+    /// The theme to select in the list.
+    pub select: Option<String>,
+    /// A theme got a new id (old, new): settings that name it follow.
+    pub renamed: Option<(String, String)>,
+    /// Import of a file whose name is taken: ask "Replace" or "Keep both".
+    pub collision: Option<(std::path::PathBuf, String)>,
+}
+
+/// Runs `op` on the folder `dir` and reads the folder again. Blocking.
+pub fn apply(dir: &Path, op: Op) -> Result<Change, String> {
+    let user_stem = |id: &str| {
+        stem_of(id)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("'{id}' is a built-in theme"))
+    };
+    let mut change = Change {
+        entries: Vec::new(),
+        select: None,
+        renamed: None,
+        collision: None,
+    };
+    match op {
+        Op::New { wish, data } => change.select = Some(write_new(dir, &wish, &data)?),
+        Op::Rename { id, name, data } => {
+            let new = rename(dir, &user_stem(&id)?, &name, &data)?;
+            change.select = Some(new.clone());
+            if new != id {
+                change.renamed = Some((id, new));
+            }
+        }
+        Op::Save { id, data } => {
+            write(dir, &user_stem(&id)?, &data)?;
+            change.select = Some(id);
+        }
+        Op::Delete { id } => delete(dir, &user_stem(&id)?)?,
+        Op::Import {
+            source,
+            on_collision,
+        } => match import(dir, &source, on_collision)? {
+            Import::Done(id) => change.select = Some(id),
+            Import::Collision { stem } => change.collision = Some((source, stem)),
+        },
+    }
+    change.entries = load_dir(dir);
+    Ok(change)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,5 +797,83 @@ mod tests {
         assert_eq!(unique_stem("Light", &taken), "Light");
         assert_eq!(unique_stem("Dark copy", &taken), "Dark copy 3");
         assert_eq!(unique_stem("DARK COPY", &taken), "DARK COPY 3");
+    }
+
+    #[test]
+    fn file_actions() {
+        let dir = tempfile::tempdir().unwrap();
+        let themes = dir.path().join("themes");
+        let data = parse(MINIMAL).unwrap();
+        // New theme: "<name> copy", numbered when taken.
+        let copy = ThemeData {
+            name: "Light copy".into(),
+            ..data.clone()
+        };
+        assert_eq!(
+            write_new(&themes, "Light copy", &copy).unwrap(),
+            "user:Light copy"
+        );
+        assert_eq!(
+            write_new(&themes, "Light copy", &copy).unwrap(),
+            "user:Light copy 2"
+        );
+        // Rename: file, id and name follow.
+        let id = rename(&themes, "Light copy 2", "Paper", &copy).unwrap();
+        assert_eq!(id, "user:Paper");
+        assert!(!themes.join("Light copy 2.json").exists());
+        let Entry::Theme(def) = load_file(&themes.join("Paper.json")) else {
+            panic!("Paper.json");
+        };
+        assert_eq!(def.name, "Paper");
+        // Only the letter case changes.
+        assert_eq!(
+            rename(&themes, "Paper", "PAPER", &copy).unwrap(),
+            "user:PAPER"
+        );
+        assert_eq!(sorted(stems(&themes)), ["Light copy", "PAPER"]);
+        // Delete.
+        delete(&themes, "PAPER").unwrap();
+        delete(&themes, "PAPER").unwrap();
+        assert_eq!(stems(&themes), ["Light copy"]);
+        // Import: collision asks, then replaces or keeps both.
+        let source = dir.path().join("Light copy.json");
+        std::fs::write(&source, MINIMAL).unwrap();
+        assert_eq!(
+            import(&themes, &source, None).unwrap(),
+            Import::Collision {
+                stem: "Light copy".into()
+            }
+        );
+        assert_eq!(
+            import(&themes, &source, Some(false)).unwrap(),
+            Import::Done("user:Light copy 2".into())
+        );
+        assert_eq!(
+            import(&themes, &source, Some(true)).unwrap(),
+            Import::Done("user:Light copy".into())
+        );
+        assert_eq!(
+            std::fs::read_to_string(themes.join("Light copy.json")).unwrap(),
+            MINIMAL
+        );
+        // An invalid file changes nothing and names the reason.
+        let bad = dir.path().join("bad.json");
+        std::fs::write(&bad, "{\"name\": \"x\"}").unwrap();
+        let before = sorted(stems(&themes));
+        let error = import(&themes, &bad, None).unwrap_err();
+        assert!(error.starts_with("bad.json: "), "{error}");
+        assert_eq!(sorted(stems(&themes)), before);
+        // An exported file imports again.
+        let exported = dir.path().join("export.json");
+        std::fs::write(&exported, to_json(&copy)).unwrap();
+        assert_eq!(
+            import(&themes, &exported, None).unwrap(),
+            Import::Done("user:export".into())
+        );
+    }
+
+    fn sorted(mut list: Vec<String>) -> Vec<String> {
+        list.sort();
+        list
     }
 }

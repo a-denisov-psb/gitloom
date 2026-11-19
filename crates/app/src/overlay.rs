@@ -271,6 +271,8 @@ pub enum FormAction {
     PushTag { tab: crate::app::TabId, tag: String },
     /// Delete tag `tag` on the chosen remote.
     DeleteRemoteTag { tab: crate::app::TabId, tag: String },
+    /// Rename the user theme `id` (M17-02; name field).
+    RenameTheme { id: String },
     /// Revert merge commit `id` against the chosen parent ("1: …").
     RevertMerge { tab: crate::app::TabId, id: String },
 }

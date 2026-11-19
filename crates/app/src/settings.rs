@@ -711,13 +711,16 @@ pub enum Category {
     Editor,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
+    /// The theme list and its files (M17-02, ADR-059).
+    Themes,
 }
 
 impl Category {
     /// Categories that apply everywhere, at the top of the list.
-    pub const GLOBAL: [Self; 7] = [
+    pub const GLOBAL: [Self; 8] = [
         Self::General,
         Self::Appearance,
+        Self::Themes,
         Self::Editor,
         Self::Identities,
         Self::Signing,
@@ -754,6 +757,7 @@ impl Category {
             Self::Editor => "Editor",
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
+            Self::Themes => "Themes",
         }
     }
 }
@@ -762,6 +766,8 @@ impl Category {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Page {
     pub category: Category,
+    /// Theme selected in Preferences → Themes (`None`: the active one).
+    pub theme_selected: Option<String>,
     /// Field opened from the palette, highlighted for a moment (M12-12).
     pub highlight: Option<&'static str>,
     /// Text of the auto-fetch input (may be invalid while typing).
@@ -884,6 +890,7 @@ impl Page {
     pub fn new(settings: &Settings) -> Self {
         Self {
             category: Category::General,
+            theme_selected: None,
             highlight: None,
             auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
             error: None,
