@@ -142,10 +142,45 @@ pub(crate) fn theme(theme: CodeTheme) -> &'static Theme {
     cell.get_or_init(|| two_face::theme::extra().get(theme.embedded()).clone())
 }
 
+/// Name of the syntax without highlighting; as a language override it
+/// switches highlighting off for the file (ADR-057).
+pub const PLAIN_TEXT: &str = "Plain Text";
+
+/// The syntax called `name` in the bundled set (any letter case is not
+/// matched: names are stored as the set spells them).
+pub fn syntax_named(name: &str) -> Option<&'static SyntaxReference> {
+    syntaxes().find_syntax_by_name(name)
+}
+
+/// Names of the languages a file can be set to (ADR-057): every syntax of
+/// the bundled set that is not hidden, sorted without regard to case,
+/// without "Plain Text" (the list offers it on its own). Computed once.
+pub fn language_names() -> &'static [&'static str] {
+    static NAMES: OnceLock<Vec<&'static str>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<&'static str> = syntaxes()
+            .syntaxes()
+            .iter()
+            .filter(|syntax| !syntax.hidden && syntax.name != PLAIN_TEXT)
+            .map(|syntax| syntax.name.as_str())
+            .collect();
+        names.sort_by_cached_key(|name| (name.to_lowercase(), *name));
+        names.dedup();
+        names
+    })
+}
+
+/// A language override that names a syntax: "Plain Text" or a syntax of
+/// the set. Unknown names (for example after a `two-face` update) are
+/// treated like no choice.
+pub fn known_language(language: Option<&str>) -> Option<&str> {
+    language.filter(|name| *name == PLAIN_TEXT || syntax_named(name).is_some())
+}
+
 /// The syntax of `path` (by extension, then by file name such as
 /// `Makefile`), else by the first line (`#!/usr/bin/env python`); `None`
 /// for plain text and unknown types.
-pub(crate) fn syntax_for(path: &str, first_line: &str) -> Option<&'static SyntaxReference> {
+fn detect(path: &str, first_line: &str) -> Option<&'static SyntaxReference> {
     let set = syntaxes();
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let by_extension = name
@@ -154,7 +189,57 @@ pub(crate) fn syntax_for(path: &str, first_line: &str) -> Option<&'static Syntax
     by_extension
         .or_else(|| set.find_syntax_by_extension(name))
         .or_else(|| set.find_syntax_by_first_line(first_line))
-        .filter(|syntax| syntax.name != "Plain Text")
+        .filter(|syntax| syntax.name != PLAIN_TEXT)
+}
+
+/// The syntax a file is highlighted with: the language chosen for it
+/// (ADR-057; "Plain Text" means none, an unknown name counts as no
+/// choice), else what [`detect`] finds.
+pub(crate) fn syntax_for(
+    path: &str,
+    first_line: &str,
+    language: Option<&str>,
+) -> Option<&'static SyntaxReference> {
+    match known_language(language) {
+        Some(PLAIN_TEXT) => None,
+        Some(name) => syntax_named(name),
+        None => detect(path, first_line),
+    }
+}
+
+/// Name of the syntax [`syntax_for`] picks, "Plain Text" without one: what
+/// the status bar shows for the file (ADR-057).
+pub fn syntax_name(path: &str, first_line: &str, language: Option<&str>) -> &'static str {
+    syntax_for(path, first_line, language).map_or(PLAIN_TEXT, |syntax| syntax.name.as_str())
+}
+
+/// A file to highlight: its path, its text and the language chosen for it
+/// (ADR-057; `None`: detected from path and first line).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    pub path: String,
+    pub text: String,
+    pub language: Option<String>,
+}
+
+impl Source {
+    pub fn new(path: impl Into<String>, text: impl Into<String>, language: Option<&str>) -> Self {
+        Self {
+            path: path.into(),
+            text: text.into(),
+            language: language.map(str::to_owned),
+        }
+    }
+
+    /// Name of the syntax detection finds for the file (without the
+    /// chosen language): "Auto Detect" in the language list.
+    pub fn detected(&self) -> &'static str {
+        syntax_name(&self.path, first_line(&self.text), None)
+    }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or("")
 }
 
 /// Highlights a file block by block: [`Progressive::step`] does the next
@@ -170,8 +255,9 @@ pub struct Progressive {
 }
 
 impl Progressive {
-    /// Starts highlighting `text` of the file at `path` with `theme_id`.
-    pub fn new(path: &str, text: Arc<str>, theme_id: CodeTheme) -> Self {
+    /// Starts highlighting `text` of the file at `path` with `theme_id`,
+    /// in `language` when one was chosen for the file (ADR-057).
+    pub fn new(path: &str, text: Arc<str>, theme_id: CodeTheme, language: Option<&str>) -> Self {
         let mut job = Self {
             text,
             at: 0,
@@ -183,8 +269,7 @@ impl Progressive {
             job.plain = Plain::TooLarge;
             return job;
         }
-        let first_line = job.text.lines().next().unwrap_or("");
-        if let Some(syntax) = syntax_for(path, first_line) {
+        if let Some(syntax) = syntax_for(path, first_line(&job.text), language) {
             job.highlighter = Some(HighlightLines::new(syntax, theme(theme_id)));
         }
         job
@@ -276,26 +361,45 @@ fn spans_of(ranges: &[(syntect::highlighting::Style, &str)], text_len: usize) ->
 /// Highlights `content` of the file at `path` with `theme` in one go.
 #[cfg(test)]
 pub fn highlight(path: &str, content: &str, theme_id: CodeTheme) -> Outcome {
-    let mut job = Progressive::new(path, Arc::from(content), theme_id);
+    highlight_in(path, content, theme_id, None)
+}
+
+/// [`highlight`] in a chosen language (ADR-057).
+#[cfg(test)]
+pub fn highlight_in(
+    path: &str,
+    content: &str,
+    theme_id: CodeTheme,
+    language: Option<&str>,
+) -> Outcome {
+    let mut job = Progressive::new(path, Arc::from(content), theme_id, language);
     while !job.step() {}
     job.outcome()
 }
 
 /// A running highlighting job, kept by the view it highlights for. The job
 /// stops when every copy of its handle is gone: the view was replaced or
-/// moved on to other content or another theme.
+/// moved on to other content, another theme or another language.
 #[derive(Debug, Clone)]
 pub struct Job {
     alive: Arc<()>,
     pub theme: CodeTheme,
+    /// The language chosen for the file when the job started (ADR-057).
+    pub language: Option<String>,
 }
 
 impl Job {
-    pub fn new(theme: CodeTheme) -> Self {
+    pub fn new(theme: CodeTheme, language: Option<&str>) -> Self {
         Self {
             alive: Arc::new(()),
             theme,
+            language: language.map(str::to_owned),
         }
+    }
+
+    /// The job highlights with `theme` in `language`.
+    pub fn is_for(&self, theme: CodeTheme, language: Option<&str>) -> bool {
+        self.theme == theme && self.language.as_deref() == language
     }
 
     /// What the background task checks between lines.
@@ -314,14 +418,15 @@ impl Watch {
     }
 }
 
-/// Highlights `files` (path and text) with `theme`: complete results from
+/// Highlights `files` (path, text and chosen language) with `theme`:
+/// complete results from
 /// `cache`, the others block by block, each file on its own thread (top
 /// first in every file). `emit` gets the outcomes of all files after every
 /// block; the last call has every outcome complete. Nothing is emitted
 /// once `watch` is cancelled, and only complete results go into the cache.
 pub fn run(
     cache: &std::sync::Mutex<Cache>,
-    files: Vec<(String, String)>,
+    files: Vec<Source>,
     theme: CodeTheme,
     watch: &Watch,
     mut emit: impl FnMut(Vec<Outcome>),
@@ -329,14 +434,14 @@ pub fn run(
     let mut ids = Vec::new();
     let mut current = Vec::new();
     let mut jobs = Vec::new();
-    for (index, (path, text)) in files.into_iter().enumerate() {
-        let id = content_id(&path, &text);
+    for (index, source) in files.into_iter().enumerate() {
+        let id = content_id(&source.path, &source.text, source.language.as_deref());
         match cache.lock().ok().and_then(|c| c.get(&id, theme).cloned()) {
             Some(outcome) => current.push(outcome),
             None => {
                 // Not done yet: plain until the first block arrives.
                 current.push(Outcome::Highlighted(Arc::default()));
-                jobs.push((index, path, text));
+                jobs.push((index, source));
             }
         }
         ids.push(id);
@@ -351,12 +456,17 @@ pub fn run(
     let mut fresh = vec![false; current.len()];
     let finished = std::thread::scope(|scope| {
         let (sender, blocks) = std::sync::mpsc::channel();
-        for (index, path, text) in jobs {
+        for (index, source) in jobs {
             fresh[index] = true;
             let sender = sender.clone();
             // The parser state stays on its thread (oniguruma's is not Send).
             scope.spawn(move || {
-                let mut job = Progressive::new(&path, Arc::from(text), theme);
+                let mut job = Progressive::new(
+                    &source.path,
+                    Arc::from(source.text),
+                    theme,
+                    source.language.as_deref(),
+                );
                 loop {
                     if watch.cancelled() {
                         return;
@@ -429,11 +539,21 @@ impl Cache {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffSides {
     pub theme: CodeTheme,
+    /// The language chosen for the file (ADR-057), `None`: detected.
+    pub language: Option<String>,
+    /// What detection finds for the file (the new side, or the old side
+    /// when the new one has no syntax, such as a deleted script).
+    pub detected: &'static str,
     pub old: Outcome,
     pub new: Outcome,
 }
 
 impl DiffSides {
+    /// Highlighted with `theme` in `language`.
+    pub fn is_for(&self, theme: CodeTheme, language: Option<&str>) -> bool {
+        self.theme == theme && self.language.as_deref() == language
+    }
+
     /// Spans of a diff line: removed lines from the old side, added and
     /// context lines from the new side (by their line numbers).
     pub fn spans_for(&self, line: &git_core::DiffLine) -> Option<&[Span]> {
@@ -453,6 +573,16 @@ impl DiffSides {
             .iter()
             .any(|side| **side == Outcome::Plain(Plain::TooLarge))
     }
+}
+
+/// What detection finds for a file shown from several texts (the sides of
+/// a diff or a conflict): the first that has a syntax, else "Plain Text".
+pub fn detected_of(names: &[&'static str]) -> &'static str {
+    names
+        .iter()
+        .copied()
+        .find(|name| *name != PLAIN_TEXT)
+        .unwrap_or(PLAIN_TEXT)
 }
 
 /// Old and new file text from a diff with full context: every line at its
@@ -515,12 +645,14 @@ pub fn conflict_texts(text: &git_core::ConflictText) -> (String, String) {
     (ours, theirs)
 }
 
-/// An id for a file's content (stands in for its blob id in the cache).
-pub fn content_id(path: &str, text: &str) -> String {
+/// An id for a file's content and the language chosen for it (stands in
+/// for its blob id in the cache; another language is another entry).
+pub fn content_id(path: &str, text: &str, language: Option<&str>) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
     text.hash(&mut hasher);
+    language.hash(&mut hasher);
     format!("{:016x}-{}", hasher.finish(), text.len())
 }
 
@@ -780,6 +912,8 @@ mod tests {
         assert_eq!(new, "/* open\nstill comment */\nfn x() {}\n");
         let sides = DiffSides {
             theme: CodeTheme::Dark,
+            language: None,
+            detected: "Rust",
             old: highlight("a.rs", &old, CodeTheme::Dark),
             new: highlight("a.rs", &new, CodeTheme::Dark),
         };
@@ -859,7 +993,7 @@ mod tests {
     /// The old one-shot algorithm (before the fix after M15): one
     /// highlighter over the whole file, no line limit.
     fn reference(path: &str, content: &str) -> Vec<Vec<Span>> {
-        let syntax = syntax_for(path, content.lines().next().unwrap_or("")).unwrap();
+        let syntax = syntax_for(path, content.lines().next().unwrap_or(""), None).unwrap();
         let mut highlighter = HighlightLines::new(syntax, theme(CodeTheme::Dark));
         syntect::util::LinesWithEndings::from(content)
             .map(|line| {
@@ -894,7 +1028,7 @@ mod tests {
     #[test]
     fn progressive_result_equals_one_shot() {
         let source = crossing_blocks();
-        let mut job = Progressive::new("a.rs", Arc::from(source.as_str()), CodeTheme::Dark);
+        let mut job = Progressive::new("a.rs", Arc::from(source.as_str()), CodeTheme::Dark, None);
         let mut partials = Vec::new();
         while !job.step() {
             partials.push(job.outcome());
@@ -968,11 +1102,11 @@ mod tests {
     fn run_emits_rounds_and_caches_complete_results() {
         let cache = std::sync::Mutex::new(Cache::default());
         let source = crossing_blocks();
-        let job = Job::new(CodeTheme::Dark);
+        let job = Job::new(CodeTheme::Dark, None);
         let mut emitted = Vec::new();
         let files = vec![
-            ("a.rs".to_owned(), source.clone()),
-            ("b.rs".to_owned(), "fn b() {}\n".to_owned()),
+            Source::new("a.rs", source.clone(), None),
+            Source::new("b.rs", "fn b() {}\n", None),
         ];
         run(&cache, files.clone(), CodeTheme::Dark, &job.watch(), |o| {
             emitted.push(o)
@@ -997,16 +1131,16 @@ mod tests {
             again.push(o)
         });
         assert_eq!(again, std::slice::from_ref(last));
-        assert_ne!(content_id("a.rs", "x"), content_id("b.rs", "x"));
+        assert_ne!(content_id("a.rs", "x", None), content_id("b.rs", "x", None));
     }
 
     #[test]
     fn a_cancelled_run_emits_nothing_stale_and_caches_nothing() {
         let cache = std::sync::Mutex::new(Cache::default());
-        let mut job = Some(Job::new(CodeTheme::Dark));
+        let mut job = Some(Job::new(CodeTheme::Dark, None));
         let watch = job.as_ref().unwrap().watch();
         let mut emitted = 0;
-        let files = vec![("a.rs".to_owned(), crossing_blocks())];
+        let files = vec![Source::new("a.rs", crossing_blocks(), None)];
         run(&cache, files.clone(), CodeTheme::Dark, &watch, |_| {
             emitted += 1;
             // The view moves on after the first block.
@@ -1017,7 +1151,7 @@ mod tests {
         assert_eq!(cache.lock().unwrap().len(), 0);
         // A job dropped before it starts emits nothing at all; a clone of
         // the handle keeps it alive.
-        let job = Job::new(CodeTheme::Dark);
+        let job = Job::new(CodeTheme::Dark, None);
         let copy = job.clone();
         let watch = job.watch();
         drop(job);
@@ -1026,6 +1160,112 @@ mod tests {
         let mut any = false;
         run(&cache, files, CodeTheme::Dark, &watch, |_| any = true);
         assert!(!any);
+    }
+
+    const GODOT: &str = "; Engine configuration file.\n\n[application]\nconfig/name=\"Game\"\n";
+
+    #[test]
+    fn a_chosen_language_highlights_an_unknown_file_type() {
+        // ADR-057: `project.godot` is INI, but its extension is unknown.
+        assert_eq!(
+            highlight("project.godot", GODOT, CodeTheme::Dark),
+            Outcome::Plain(Plain::UnknownType)
+        );
+        let outcome = highlight_in("project.godot", GODOT, CodeTheme::Dark, Some("INI"));
+        let h = spans(&outcome);
+        assert_ne!(
+            style_of(GODOT, h, 0, "Engine").color,
+            style_of(GODOT, h, 2, "application").color
+        );
+        // The same as the file under an INI name.
+        assert_eq!(outcome, highlight("project.ini", GODOT, CodeTheme::Dark));
+    }
+
+    #[test]
+    fn plain_text_switches_highlighting_off_and_unknown_names_are_ignored() {
+        let source = "fn main() {}\n";
+        assert_eq!(
+            highlight_in("a.rs", source, CodeTheme::Dark, Some(PLAIN_TEXT)),
+            Outcome::Plain(Plain::UnknownType)
+        );
+        // A name the bundled set does not have works like no choice.
+        assert_eq!(
+            highlight_in("a.rs", source, CodeTheme::Dark, Some("No Such Language")),
+            highlight("a.rs", source, CodeTheme::Dark)
+        );
+        assert_eq!(known_language(Some("No Such Language")), None);
+        assert_eq!(known_language(Some(PLAIN_TEXT)), Some(PLAIN_TEXT));
+        assert_eq!(known_language(Some("INI")), Some("INI"));
+    }
+
+    #[test]
+    fn the_cache_key_changes_with_the_language() {
+        let ids = [None, Some("INI"), Some(PLAIN_TEXT)]
+            .map(|language| content_id("project.godot", GODOT, language));
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[1], ids[2]);
+        assert_ne!(ids[0], ids[2]);
+        // `run` keeps one entry per language.
+        let cache = std::sync::Mutex::new(Cache::default());
+        let job = Job::new(CodeTheme::Dark, Some("INI"));
+        for language in [None, Some("INI")] {
+            let files = vec![Source::new("project.godot", GODOT, language)];
+            let mut last = None;
+            run(&cache, files, CodeTheme::Dark, &job.watch(), |o| {
+                last = Some(o)
+            });
+            let plain = matches!(last.unwrap()[0], Outcome::Plain(_));
+            assert_eq!(plain, language.is_none());
+        }
+        assert_eq!(cache.lock().unwrap().len(), 2);
+        assert!(job.is_for(CodeTheme::Dark, Some("INI")));
+        assert!(!job.is_for(CodeTheme::Dark, None));
+        assert!(!job.is_for(CodeTheme::Light, Some("INI")));
+    }
+
+    #[test]
+    fn language_names_are_sorted_visible_and_unique() {
+        let names = language_names();
+        assert!(names.contains(&"INI"));
+        assert!(names.contains(&"Rust"));
+        assert!(!names.contains(&PLAIN_TEXT));
+        let hidden: Vec<&str> = syntaxes()
+            .syntaxes()
+            .iter()
+            .filter(|s| s.hidden)
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(names.iter().all(|n| !hidden.contains(n) || {
+            // A hidden syntax may share its name with a visible one.
+            syntaxes()
+                .syntaxes()
+                .iter()
+                .any(|s| s.name == *n && !s.hidden)
+        }));
+        assert!(names
+            .windows(2)
+            .all(|w| w[0].to_lowercase() <= w[1].to_lowercase() && w[0] != w[1]));
+        // Every name can be chosen.
+        assert!(names.iter().all(|n| syntax_named(n).is_some()));
+    }
+
+    #[test]
+    fn the_shown_name_is_the_syntax_in_use() {
+        assert_eq!(syntax_name("src/main.rs", "", None), "Rust");
+        assert_eq!(syntax_name("Makefile", "", None), "Makefile");
+        assert_eq!(
+            syntax_name("bin/tool", "#!/usr/bin/env python3", None),
+            "Python"
+        );
+        assert_eq!(syntax_name("project.godot", "", None), PLAIN_TEXT);
+        assert_eq!(syntax_name("project.godot", "", Some("INI")), "INI");
+        assert_eq!(syntax_name("a.rs", "", Some(PLAIN_TEXT)), PLAIN_TEXT);
+        assert_eq!(syntax_name("a.rs", "", Some("Nope")), "Rust");
+        // Detection ignores the chosen language.
+        let source = Source::new("bin/tool", "#!/bin/sh\necho\n", Some("INI"));
+        assert_eq!(source.detected(), "Bourne Again Shell (bash)");
+        assert_eq!(detected_of(&[PLAIN_TEXT, "Rust"]), "Rust");
+        assert_eq!(detected_of(&[PLAIN_TEXT]), PLAIN_TEXT);
     }
 
     /// The third-party notices include this file; regenerate it with

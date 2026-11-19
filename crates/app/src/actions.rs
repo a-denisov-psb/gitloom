@@ -115,6 +115,9 @@ pub enum ActionId {
     FlowFinish,
     /// The graph in the Git flow layout, on or off (M13-03).
     ToggleFlowLayout,
+    /// Palette list of languages for the file in the center (ADR-057);
+    /// no shortcut.
+    SelectLanguage,
 }
 
 /// Group in the shortcut list; the sections of `docs/UX-PARITY.md`.
@@ -823,6 +826,13 @@ fn table() -> Vec<Action> {
     add(
         A::MoveDetailsPanel,
         "Move details panel to the bottom",
+        Interface,
+        Global,
+        &[],
+    );
+    add(
+        A::SelectLanguage,
+        "Change language mode…",
         Interface,
         Global,
         &[],

@@ -188,6 +188,7 @@ fn text_view<'a>(
         .highlight_with::<crate::ui::code_highlighter::SyntaxHighlighter>(
             crate::ui::code_highlighter::Settings {
                 path: conflict.path.clone(),
+                language: repo.language_for(&conflict.path).map(str::to_owned),
                 theme: style.code_theme,
                 enabled: style.highlight,
             },

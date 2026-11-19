@@ -14,10 +14,12 @@ use crate::highlight::{self, CodeTheme, SpanStyle};
 
 const LINES_PER_SNAPSHOT: usize = 50;
 
-/// What the editor highlights: the file path decides the syntax.
+/// What the editor highlights: the language chosen for the file (ADR-057),
+/// else the file path decides the syntax.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub path: String,
+    pub language: Option<String>,
     pub theme: CodeTheme,
     /// Preferences → Editor → Syntax highlighting.
     pub enabled: bool,
@@ -50,7 +52,7 @@ impl Highlighter for SyntaxHighlighter {
     fn new(settings: &Settings) -> Self {
         let syntax = settings
             .enabled
-            .then(|| highlight::syntax_for(&settings.path, ""))
+            .then(|| highlight::syntax_for(&settings.path, "", settings.language.as_deref()))
             .flatten();
         let mut new = Self {
             syntax,
@@ -136,9 +138,27 @@ mod tests {
     fn settings(path: &str) -> Settings {
         Settings {
             path: path.into(),
+            language: None,
             theme: CodeTheme::Dark,
             enabled: true,
         }
+    }
+
+    #[test]
+    fn the_chosen_language_applies() {
+        // ADR-057: INI for an unknown extension, Plain Text switches off.
+        let mut ini = SyntaxHighlighter::new(&Settings {
+            language: Some("INI".into()),
+            ..settings("project.godot")
+        });
+        assert!(ini.highlight_line("[application]").count() > 0);
+        let mut unknown = SyntaxHighlighter::new(&settings("project.godot"));
+        assert_eq!(unknown.highlight_line("[application]").count(), 0);
+        let mut plain = SyntaxHighlighter::new(&Settings {
+            language: Some(crate::highlight::PLAIN_TEXT.into()),
+            ..settings("a.rs")
+        });
+        assert_eq!(plain.highlight_line("fn x() {}").count(), 0);
     }
 
     #[test]

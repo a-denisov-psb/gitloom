@@ -34,6 +34,10 @@ pub struct ConflictView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictHighlight {
     pub theme: crate::highlight::CodeTheme,
+    /// The language chosen for the file (ADR-057), `None`: detected.
+    pub language: Option<String>,
+    /// What detection finds for the file (ours, else theirs).
+    pub detected: &'static str,
     pub ours: crate::highlight::Outcome,
     pub theirs: crate::highlight::Outcome,
 }
