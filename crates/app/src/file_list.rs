@@ -102,7 +102,7 @@ pub fn entries<'a>(
     entries
 }
 
-fn compare(a: &str, b: &str) -> std::cmp::Ordering {
+pub fn compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase()
         .cmp(&b.to_lowercase())
         .then_with(|| a.cmp(b))
@@ -120,7 +120,7 @@ pub fn tree(entries: &[Entry<'_>], descending: bool) -> Vec<crate::branch_tree::
     nodes
 }
 
-fn reverse(nodes: &mut [crate::branch_tree::Node]) {
+pub fn reverse(nodes: &mut [crate::branch_tree::Node]) {
     use crate::branch_tree::Node;
     // Files stay before folders; each group reverses.
     let files = nodes

@@ -21,6 +21,7 @@ pub(crate) mod graph;
 mod inert;
 mod message_modal;
 mod shift;
+pub(crate) mod split_handle;
 #[cfg(test)]
 pub use graph::lanes_width;
 pub use graph::{optimal_column_width, MIN_GRAPH_WIDTH};
@@ -256,7 +257,15 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                     &app.editor_style(),
                 )),
             },
-            PaneKind::Panel => panel::view(view, &app.avatars, app.settings.file_list),
+            PaneKind::Panel => panel::view(
+                view,
+                &app.avatars,
+                app.settings.file_list,
+                panel::PanelLayout {
+                    position: app.panes.position,
+                    staging: app.panes.ratios.staging,
+                },
+            ),
         };
         pane_grid::Content::new(content)
     })

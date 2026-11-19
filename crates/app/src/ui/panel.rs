@@ -16,14 +16,29 @@ use crate::ui::{change_badge, muted};
 
 const NOT_AVAILABLE: &str = "Not available yet";
 
+/// Where the details panel sits and the split of the staging area at the
+/// bottom (finding #44).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelLayout {
+    pub position: crate::panes::DetailsPanelPosition,
+    /// Height of the file lists as fraction of lists + message (bottom).
+    pub staging: f32,
+}
+
 pub fn view<'a>(
     view: &'a RepoView,
     avatars: &'a crate::avatars::Avatars,
     files: crate::file_list::FileListOptions,
+    layout: PanelLayout,
 ) -> Element<'a, Message> {
     let content = match &view.selection {
         _ if view.is_multi() => multi_selection(view),
-        Some(Selection::Wip) => staging(view),
+        Some(Selection::Wip) => match layout.position {
+            crate::panes::DetailsPanelPosition::Right => staging(view),
+            crate::panes::DetailsPanelPosition::Bottom => {
+                staging_bottom(view, files, layout.staging)
+            }
+        },
         Some(Selection::Commit(id)) => match view.snapshot.commit(id) {
             Some(commit) => details(view, commit, avatars, files),
             None => muted("Nothing selected").into(),
@@ -249,8 +264,389 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
         .into()
 }
 
-/// Commit box, read-only until committing arrives in M2.
+/// Smallest height of the file lists at the bottom: the list header and
+/// two rows (finding #44).
+pub const STAGING_LISTS_MIN: f32 = LIST_HEADER_HEIGHT + 2.0 * FILE_ROW_HEIGHT;
+/// Smallest height of the commit message area at the bottom: the label
+/// row, the identity, the summary and two lines of the description.
+pub const STAGING_MESSAGE_MIN: f32 =
+    LABEL_ROW_HEIGHT + IDENTITY_ROW_HEIGHT + INPUT_HEIGHT + DESCRIPTION_TWO_LINES + 3.0 * 8.0;
+/// Header of a file list ("Unstaged Files (n)" and its button).
+pub const LIST_HEADER_HEIGHT: f32 = 2.0 * 6.0 + 12.0 * 1.3 + 2.0 * 3.0;
+/// "Commit Message" and the Amend checkbox.
+const LABEL_ROW_HEIGHT: f32 = 13.0 * 1.3;
+/// "Committing as …" and the sparkle button.
+const IDENTITY_ROW_HEIGHT: f32 = 22.0;
+/// The summary field (13 px text, padding 6).
+const INPUT_HEIGHT: f32 = 13.0 * 1.3 + 12.0;
+/// The description with two lines (padding 6).
+const DESCRIPTION_TWO_LINES: f32 = 2.0 * 13.0 * 1.3 + 12.0;
+/// Staging at the bottom besides the lists and the message: the header,
+/// the toolbar, the splitter and the commit button with its padding.
+pub const STAGING_BOTTOM_FIXED: f32 = HEADER_ROW_HEIGHT
+    + TOOLBAR_HEIGHT
+    + crate::ui::split_handle::HEIGHT
+    + COMMIT_BUTTON_HEIGHT
+    + 2.0 * 12.0
+    + 8.0;
+/// Header row of the staging area at the bottom (padding 8).
+const HEADER_ROW_HEIGHT: f32 = 2.0 * 8.0 + 22.0;
+/// Sort and Path/Tree.
+const TOOLBAR_HEIGHT: f32 = 22.0 + 4.0;
+/// The commit button (padding 8).
+const COMMIT_BUTTON_HEIGHT: f32 = 13.0 * 1.3 + 16.0;
+
+/// Staging area at the bottom (finding #44): discard-all icon and title,
+/// sort and Path/Tree, Unstaged and Staged files side by side, the grey
+/// splitter, the commit message across the full width and the commit
+/// button at the very bottom.
+fn staging_bottom(
+    view: &RepoView,
+    options: crate::file_list::FileListOptions,
+    ratio: f32,
+) -> Element<'_, Message> {
+    iced::widget::responsive(move |size| staging_bottom_content(view, options, ratio, size.height))
+        .into()
+}
+
+/// A warning or hint line below the commit button (11 px text, spacing).
+const EXTRA_LINE_HEIGHT: f32 = 11.0 * 1.3 + 8.0;
+
+/// Room shared by the lists and the message at a panel `height`, with
+/// `extras` lines below the commit button.
+pub(crate) fn staging_split_room(height: f32, extras: usize) -> f32 {
+    (height - STAGING_BOTTOM_FIXED - extras as f32 * EXTRA_LINE_HEIGHT).max(0.0)
+}
+
+fn staging_bottom_content(
+    view: &RepoView,
+    options: crate::file_list::FileListOptions,
+    ratio: f32,
+    height: f32,
+) -> Element<'_, Message> {
+    let tree = &view.snapshot.working_tree;
+    let operation = view.operation();
+    let title: Element<'_, Message> = match &operation {
+        Some(status) => {
+            let mut lines = Column::new().spacing(2).align_x(iced::Center);
+            if let Some(heading) = status.conflicts_heading() {
+                lines = lines.push(text(heading).size(12).style(theme::text_warning));
+            }
+            lines.push(text(status.title.clone())).into()
+        }
+        None => text(format!(
+            "{} file change{} on {}",
+            tree.len(),
+            if tree.len() == 1 { "" } else { "s" },
+            view.snapshot.branch_label()
+        ))
+        .into(),
+    };
+    let (conflicted, unstaged_files): (Vec<_>, Vec<_>) = tree
+        .unstaged
+        .iter()
+        .partition(|f| f.kind == git_core::ChangeKind::Conflicted);
+    let has_unstaged = !unstaged_files.is_empty();
+    // Discard all at the left, with the confirmation of the right panel.
+    let trash = button(
+        container(crate::icons::tinted(crate::icons::Icon::Trash, 14.0, |p| {
+            p.text_muted
+        }))
+        .center(Fill),
+    )
+    .padding(0)
+    .width(22)
+    .height(22)
+    .style(theme::flat);
+    let trash: Element<'_, Message> = if view.write_block.is_some() {
+        write_tooltip(trash.into(), view)
+    } else {
+        with_tooltip_text(
+            trash
+                .on_press_maybe(
+                    (has_unstaged && view.busy.is_none())
+                        .then_some(Message::Discard(DiscardTarget::All)),
+                )
+                .into(),
+            "Discard all changes".into(),
+        )
+    };
+    let header = container(
+        row![
+            trash,
+            container(title).width(Fill).center_x(Fill),
+            space::horizontal().width(22),
+        ]
+        .align_y(iced::Center),
+    )
+    .padding([8, 12])
+    .width(Fill);
+
+    let toolbar = container(
+        row![sort_button(options), tree_segments(options)]
+            .spacing(8)
+            .align_y(iced::Center),
+    )
+    .padding([0, 12]);
+
+    let unstaged_kind = |file: &FileChange| {
+        if file.kind == git_core::ChangeKind::Untracked {
+            DiffKind::Untracked
+        } else {
+            DiffKind::Unstaged
+        }
+    };
+    let mut left = column![].height(Fill);
+    if !conflicted.is_empty() {
+        left = left.push(file_section(
+            format!("Conflicted Files ({})", conflicted.len()),
+            all_button(
+                view,
+                "Mark all resolved",
+                button::success,
+                true,
+                Message::MarkAllResolved,
+            ),
+            list_rows(view, conflicted, &|_| DiffKind::Unstaged, options).into_iter(),
+        ));
+    }
+    left = left.push(file_section(
+        format!("Unstaged Files ({})", unstaged_files.len()),
+        all_button(
+            view,
+            "Stage all changes",
+            button::success,
+            has_unstaged,
+            Message::StageAll,
+        ),
+        list_rows(view, unstaged_files, &unstaged_kind, options).into_iter(),
+    ));
+    let resolved_files = view.resolved_files();
+    let mut right = column![].height(Fill);
+    if operation.is_some() {
+        right = right.push(file_section(
+            format!("Resolved Files ({})", resolved_files.len()),
+            space::horizontal().into(),
+            list_rows(
+                view,
+                resolved_files.to_vec(),
+                &|_| DiffKind::Staged,
+                options,
+            )
+            .into_iter(),
+        ));
+    }
+    let staged_files: Vec<&FileChange> = tree
+        .staged
+        .iter()
+        .filter(|f| !resolved_files.iter().any(|r| r.path == f.path))
+        .collect();
+    right = right.push(file_section_with_menu(
+        format!("Staged Files ({})", staged_files.len()),
+        all_button(
+            view,
+            "Unstage all changes",
+            button::danger,
+            !tree.staged.is_empty(),
+            Message::UnstageAll,
+        ),
+        list_rows(view, staged_files, &|_| DiffKind::Staged, options).into_iter(),
+        Some(Message::StagedHeaderMenu),
+    ));
+
+    let parts = commit_parts(view, Fill);
+    let extras = parts.extra_count;
+    let room = staging_split_room(height, extras);
+    let ratio = crate::panes::clamp_split(ratio, room, STAGING_LISTS_MIN, STAGING_MESSAGE_MIN);
+    let lists_portion = (ratio * 1000.0).round().clamp(1.0, 999.0) as u16;
+    let lists = row![
+        container(left).width(Fill).height(Fill),
+        container(space::vertical())
+            .width(1)
+            .height(Fill)
+            .style(theme::divider),
+        container(right).width(Fill).height(Fill),
+    ]
+    .height(FillPortion(lists_portion));
+    let splitter = crate::ui::split_handle::split_handle(
+        Message::StagingSplitStart,
+        move |dy| Message::StagingSplitDragged { dy, room },
+        Message::StagingSplitEnd,
+    );
+    let message = column![
+        row![muted("Commit Message"), space::horizontal(), parts.amend].align_y(iced::Center),
+        parts.identity,
+        parts.summary,
+        parts.description,
+    ]
+    .spacing(8)
+    .padding([0, 12])
+    .height(FillPortion(1000 - lists_portion));
+    // The operation's buttons share the row of the commit button.
+    let commit_row = match parts.operation {
+        Some(buttons) => row![
+            container(parts.commit).width(FillPortion(3)),
+            container(buttons).width(FillPortion(2)),
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into(),
+        None => parts.commit,
+    };
+    let bottom = column![commit_row]
+        .push((extras > 0).then_some(parts.extras))
+        .spacing(6)
+        .padding(12);
+
+    column![header, toolbar, lists, splitter, message, bottom]
+        .height(Fill)
+        .into()
+}
+
+/// "A→Z" / "Z→A" of a file list (M14-03).
+fn sort_button<'a>(options: crate::file_list::FileListOptions) -> Element<'a, Message> {
+    with_tooltip_text(
+        small_button(
+            if options.descending { "Z→A" } else { "A→Z" },
+            Message::FileListSortToggled,
+        )
+        .into(),
+        "Sort by path".into(),
+    )
+}
+
+/// "Path" and "Tree" of a file list (M14-03).
+fn tree_segments<'a>(options: crate::file_list::FileListOptions) -> Element<'a, Message> {
+    let segment = |label: &'a str, active: bool, tree: bool| {
+        button(text(label).size(12))
+            .padding([2, 8])
+            .style(if active {
+                theme::mode_active
+            } else {
+                theme::flat
+            })
+            .on_press(Message::FileListTreeChosen(tree))
+    };
+    row![
+        segment("Path", !options.tree, false),
+        segment("Tree", options.tree, true)
+    ]
+    .into()
+}
+
+/// A folder row of a file tree (M14-03): chevron, folder icon, name; a
+/// click collapses or expands it.
+fn folder_row<'a>(depth: usize, name: &str, path: &str, expanded: bool) -> Element<'a, Message> {
+    let (chevron, folder) = if expanded {
+        (
+            crate::icons::Icon::ChevronDown,
+            crate::icons::Icon::FolderOpen,
+        )
+    } else {
+        (crate::icons::Icon::ChevronRight, crate::icons::Icon::Folder)
+    };
+    button(
+        row![
+            space::horizontal().width(tree_indent(depth)),
+            crate::icons::icon(chevron, 12.0),
+            crate::icons::icon(folder, 14.0),
+            text(name.to_owned()).wrapping(text::Wrapping::None),
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
+    )
+    .on_press(Message::FileListFolderToggled(path.to_owned()))
+    .padding([3, 12])
+    .width(Fill)
+    .clip(true)
+    .style(theme::list_item(false))
+    .into()
+}
+
+/// Rows of a working copy list at the bottom (finding #44): sorted A→Z or
+/// Z→A, as paths or as a tree with the details' folder state.
+fn list_rows<'a>(
+    view: &'a RepoView,
+    mut files: Vec<&'a FileChange>,
+    kind: &dyn Fn(&FileChange) -> DiffKind,
+    options: crate::file_list::FileListOptions,
+) -> Vec<Element<'a, Message>> {
+    use crate::branch_tree::Row;
+    files.sort_by(|a, b| crate::file_list::compare(&a.path, &b.path));
+    if options.descending {
+        files.reverse();
+    }
+    if !options.tree {
+        return files
+            .into_iter()
+            .map(|file| file_row(view, file, kind(file)))
+            .collect();
+    }
+    let mut nodes =
+        crate::branch_tree::build(files.iter().enumerate().map(|(i, f)| (i, f.path.as_str())));
+    if options.descending {
+        crate::file_list::reverse(&mut nodes);
+    }
+    crate::branch_tree::rows(
+        &nodes,
+        &|path| view.file_tree_collapsed.contains(path),
+        false,
+    )
+    .into_iter()
+    .map(|item| match item {
+        Row::Folder {
+            depth,
+            name,
+            path,
+            expanded,
+        } => folder_row(depth, name, path, expanded),
+        Row::Branch {
+            depth,
+            index,
+            label,
+        } => match files.get(index) {
+            Some(file) => file_row_labeled(view, file, kind(file), label.to_owned(), depth),
+            None => space::vertical().height(0).into(),
+        },
+    })
+    .collect()
+}
+
+/// Parts of the commit box, arranged differently right and at the bottom
+/// (finding #44).
+struct CommitParts<'a> {
+    amend: Element<'a, Message>,
+    identity: Element<'a, Message>,
+    summary: Element<'a, Message>,
+    description: Element<'a, Message>,
+    commit: Element<'a, Message>,
+    /// Operation buttons, warnings and hints below the commit button.
+    extras: Column<'a, Message>,
+    /// Number of `extras`.
+    extra_count: usize,
+    /// Abort, Skip and the stash buttons while an operation runs.
+    operation: Option<Element<'a, Message>>,
+}
+
+/// Commit box at the right: "Commit" and Amend, the identity, summary,
+/// description, the commit button and the extras.
 fn commit_box(view: &RepoView) -> Element<'_, Message> {
+    let parts = commit_parts(view, iced::Length::Fixed(90.0));
+    column![
+        row![muted("Commit"), space::horizontal(), parts.amend].align_y(iced::Center),
+        parts.identity,
+        parts.summary,
+        parts.description,
+        parts.commit,
+    ]
+    .push(parts.operation)
+    .push(parts.extras)
+    .spacing(8)
+    .padding(12)
+    .into()
+}
+
+fn commit_parts(view: &RepoView, description_height: iced::Length) -> CommitParts<'_> {
     let writable = view.write_block.is_none();
     let remaining = SUMMARY_LIMIT as i64 - view.summary.chars().count() as i64;
     // The counter sits inside the field at the right edge like GitKraken
@@ -268,7 +664,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         .placeholder("Description")
         .padding(6)
         .style(theme::editor)
-        .height(90)
+        .height(description_height)
         // Ctrl+Enter commits instead of inserting a line break.
         .key_binding(|press| {
             let enter = matches!(
@@ -324,27 +720,23 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         write_tooltip(commit.into(), view)
     };
 
-    let mut content = column![
-        row![muted("Commit"), space::horizontal(), amend].align_y(iced::Center),
+    let identity = row![
         // The identity takes the room left of the fixed-size button.
-        row![
-            container(identity_line(view)).width(Fill).clip(true),
-            prompt_button(view)
-        ]
-        .spacing(6)
-        .align_y(iced::Center),
-        summary,
-        description,
-        commit,
+        container(identity_line(view)).width(Fill).clip(true),
+        prompt_button(view)
     ]
-    .spacing(8)
-    .padding(12);
-    if let Some(status) = &operation {
-        content = content.push(operation_buttons(view, status));
-    }
+    .spacing(6)
+    .align_y(iced::Center)
+    .into();
+    let mut content = column![].spacing(8);
+    let mut extra_count = 0;
+    let operation = operation
+        .as_ref()
+        .map(|status| operation_buttons(view, status));
     // A rebase always runs on a detached HEAD; the warning would be noise.
     let rebasing = matches!(view.snapshot.state, git_core::RepoState::Rebasing { .. });
     if matches!(view.snapshot.head, git_core::Head::Detached { .. }) && !rebasing {
+        extra_count += 1;
         content = content.push(
             text("You are in detached HEAD; create a branch to keep your commits.")
                 .size(11)
@@ -352,6 +744,7 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         );
     }
     if view.amend && view.head_pushed() {
+        extra_count += 1;
         content = content.push(
             text("HEAD is already pushed; amending rewrites published history.")
                 .size(11)
@@ -359,9 +752,19 @@ fn commit_box(view: &RepoView) -> Element<'_, Message> {
         );
     }
     if let Some(hint) = blocker.filter(|_| writable) {
+        extra_count += 1;
         content = content.push(muted(hint).size(11));
     }
-    content.into()
+    CommitParts {
+        amend: amend.into(),
+        identity,
+        summary,
+        description: description.into(),
+        commit,
+        extras: content,
+        extra_count,
+        operation,
+    }
 }
 
 /// Buttons below the commit button while an operation runs (M12-05):

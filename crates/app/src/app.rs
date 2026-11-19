@@ -952,6 +952,15 @@ pub enum Message {
     UnstageAll,
     CopyToClipboard(String),
     WindowResized(iced::Size),
+    /// Splitter between the file lists and the commit message of the
+    /// staging area at the bottom (finding #44): pressed, moved by `dy`
+    /// in a `room` high area, released.
+    StagingSplitStart,
+    StagingSplitDragged {
+        dy: f32,
+        room: f32,
+    },
+    StagingSplitEnd,
     /// The main window opened: ask for its scale factor (M9-05).
     WindowOpened(window::Id),
     /// The operating system's scale factor of the window (M9-05).
@@ -1285,6 +1294,8 @@ pub struct App {
     pub panes: Panes,
     /// Graph column border being dragged (M11-02).
     pub column_drag: Option<ColumnDrag>,
+    /// Staging splitter being dragged: the ratio at the press (#44).
+    staging_drag: Option<f32>,
     /// Notifications at the bottom left (M12-02).
     pub toasts: crate::toast::Toasts,
     /// Counts palette deep links; an older highlight timer is ignored.
@@ -1396,6 +1407,7 @@ impl App {
             active: 0,
             panes: Panes::new(Default::default()),
             column_drag: None,
+            staging_drag: None,
             toasts: crate::toast::Toasts::default(),
             highlight_seq: 0,
             highlight_cache: Arc::default(),
@@ -7957,6 +7969,13 @@ impl App {
                 self.status = "Copied to the clipboard".into();
                 return iced::clipboard::write(text);
             }
+            Message::StagingSplitStart => self.staging_drag = Some(self.panes.ratios.staging),
+            Message::StagingSplitDragged { dy, room } => {
+                if let Some(start) = self.staging_drag {
+                    self.panes.ratios.staging = staging_split(start, dy, room);
+                }
+            }
+            Message::StagingSplitEnd => self.staging_drag = None,
             Message::WindowResized(size) => {
                 self.window_size = size;
                 self.window_scale = self.scale_factor();
@@ -11955,6 +11974,23 @@ fn full_message(commit: &git_core::Commit) -> String {
     }
 }
 
+/// Ratio of the staging splitter after a drag by `dy` from `start` in a
+/// `room` high area (finding #44): clamped against the minimum heights of
+/// the lists and the commit message.
+pub(crate) fn staging_split(start: f32, dy: f32, room: f32) -> f32 {
+    use crate::ui::panel::{STAGING_LISTS_MIN, STAGING_MESSAGE_MIN};
+    if room <= 0.0 || !dy.is_finite() {
+        return start;
+    }
+    crate::panes::clamp_split(
+        start + dy / room,
+        room,
+        STAGING_LISTS_MIN,
+        STAGING_MESSAGE_MIN,
+    )
+    .clamp(0.05, 0.95)
+}
+
 /// Why the message modal of commit `id` opens read-only (finding #43):
 /// the pencil's reason (ADR-051), "Stashes cannot be edited", or an empty
 /// reason while the check still runs; `None` when it can be edited.
@@ -15395,6 +15431,45 @@ pub(crate) mod tests {
             pin_icon(DetailsPanelPosition::Bottom),
             (Icon::MoveToRight, "Move details panel to the right")
         );
+    }
+
+    /// Finding #44: the staging splitter moves with the drag, keeps the
+    /// minimum heights of the lists and the message and lands in the
+    /// session.
+    #[test]
+    fn staging_splitter_clamps_and_is_saved() {
+        use crate::ui::panel::{STAGING_LISTS_MIN, STAGING_MESSAGE_MIN};
+        assert_eq!(staging_split(0.5, 40.0, 400.0), 0.6);
+        assert_eq!(
+            staging_split(0.5, -1000.0, 400.0),
+            STAGING_LISTS_MIN / 400.0
+        );
+        assert_eq!(
+            staging_split(0.5, 1000.0, 400.0),
+            1.0 - STAGING_MESSAGE_MIN / 400.0
+        );
+        assert_eq!(staging_split(0.5, 10.0, 0.0), 0.5, "no room yet");
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::StagingSplitStart);
+        let _ = app.update(Message::StagingSplitDragged {
+            dy: -40.0,
+            room: 400.0,
+        });
+        let _ = app.update(Message::StagingSplitDragged {
+            dy: -80.0,
+            room: 400.0,
+        });
+        let _ = app.update(Message::StagingSplitEnd);
+        assert!((app.panes.ratios.staging - 0.3).abs() < 1e-6);
+        // Moves after the release do nothing.
+        let _ = app.update(Message::StagingSplitDragged {
+            dy: 100.0,
+            room: 400.0,
+        });
+        assert!((app.current_session().panes.staging - 0.3).abs() < 1e-6);
+        // The panel position does not touch the staging split.
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert!((app.panes.ratios.staging - 0.3).abs() < 1e-6);
     }
 
     /// Finding #44: the palette names where the panel goes; the position

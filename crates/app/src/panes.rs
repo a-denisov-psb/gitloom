@@ -110,6 +110,19 @@ impl PaneRatios {
     }
 }
 
+/// `ratio` of a split of `total` pixels clamped so that the first part
+/// keeps `min_a` and the second `min_b` pixels; when both do not fit, the
+/// parts share the room in proportion to their minimums.
+pub fn clamp_split(ratio: f32, total: f32, min_a: f32, min_b: f32) -> f32 {
+    if !ratio.is_finite() || total <= 0.0 {
+        return ratio;
+    }
+    if min_a + min_b >= total {
+        return min_a / (min_a + min_b).max(f32::EPSILON);
+    }
+    ratio.clamp(min_a / total, 1.0 - min_b / total)
+}
+
 pub struct Panes {
     pub state: pane_grid::State<PaneKind>,
     pub ratios: PaneRatios,
@@ -360,5 +373,15 @@ mod tests {
         .sanitized();
         assert_eq!(sane.bottom, 0.55);
         assert_eq!(sane.staging, 0.95);
+    }
+
+    #[test]
+    fn splits_keep_their_minimums() {
+        assert_eq!(clamp_split(0.5, 400.0, 100.0, 100.0), 0.5);
+        assert_eq!(clamp_split(0.1, 400.0, 100.0, 100.0), 0.25);
+        assert_eq!(clamp_split(0.9, 400.0, 100.0, 100.0), 0.75);
+        // Too small for both: in proportion to the minimums.
+        assert_eq!(clamp_split(0.9, 150.0, 100.0, 50.0), 100.0 / 150.0);
+        assert_eq!(clamp_split(0.9, 100.0, 100.0, 100.0), 0.5);
     }
 }

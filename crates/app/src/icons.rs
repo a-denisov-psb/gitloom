@@ -88,10 +88,12 @@ pub enum Icon {
     MoveToRight,
     /// Opens the read-only commit message modal (finding #43).
     Maximize,
+    /// "Discard all changes" in the staging area at the bottom (#44).
+    Trash,
 }
 
 impl Icon {
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 58] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -149,6 +151,7 @@ impl Icon {
         Self::MoveToBottom,
         Self::MoveToRight,
         Self::Maximize,
+        Self::Trash,
     ];
 
     /// SVG source of the icon.
@@ -217,6 +220,7 @@ impl Icon {
             Self::MoveToBottom => lucide!("arrow-down-to-line"),
             Self::MoveToRight => lucide!("arrow-right-to-line"),
             Self::Maximize => lucide!("maximize-2"),
+            Self::Trash => lucide!("trash-2"),
         }
     }
 

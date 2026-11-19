@@ -2260,6 +2260,11 @@ mod tests {
     /// Messages of a click at every few pixels of the row showing `label`
     /// while the pointer hovers it (the hover buttons appear then).
     fn row_clicks(app: &App, label: &str) -> Vec<Message> {
+        row_clicks_over(app, label, 360.0)
+    }
+
+    /// [`row_clicks`] over `width` pixels from the label.
+    fn row_clicks_over(app: &App, label: &str, width: f32) -> Vec<Message> {
         use iced::mouse::{Button, Event as Mouse};
         use iced::{Event, Point};
         let bounds = {
@@ -2271,7 +2276,7 @@ mod tests {
         };
         let mut messages = Vec::new();
         let mut x = bounds.x;
-        while x < bounds.x + 360.0 {
+        while x < bounds.x + width {
             let at = Point::new(x, bounds.center_y());
             let mut sim = simulator(app);
             sim.point_at(at);
@@ -2284,6 +2289,101 @@ mod tests {
             x += 4.0;
         }
         messages
+    }
+
+    /// Finding #44: the staging area at the bottom keeps every function:
+    /// Stage all, Unstage all, Discard all (with its confirmation), the
+    /// row hover buttons, context menus, Amend, the commit button; a click
+    /// on a file opens its diff in the center above the panel. Layout
+    /// only, part of every run.
+    #[test]
+    fn bottom_staging_keeps_its_functions() {
+        use crate::panes::DetailsPanelPosition;
+        let mut app = crate::app::tests::staging_app(&["a.txt", "b.txt"], &["src/main.rs"]);
+        app.panes.set_position(DetailsPanelPosition::Bottom);
+        // Enough room for every part at the test window's height.
+        app.panes.set_ratios(crate::panes::PaneRatios {
+            bottom: 0.3,
+            ..app.panes.ratios
+        });
+        let _ = app.update(Message::WipSelected);
+        let _ = app.update(Message::SummaryChanged("Summary".into()));
+        let has = |messages: &[Message], test: &dyn Fn(&Message) -> bool| messages.iter().any(test);
+        let m = clicked(&app, "Stage all changes");
+        assert!(has(&m, &|m| matches!(m, Message::StageAll)), "{m:?}");
+        let m = clicked(&app, "Unstage all changes");
+        assert!(has(&m, &|m| matches!(m, Message::UnstageAll)), "{m:?}");
+        let m = clicked(&app, "Amend previous commit");
+        assert!(
+            has(&m, &|m| matches!(m, Message::AmendToggled(true))),
+            "{m:?}"
+        );
+        let m = clicked(&app, "Commit changes to 1 file");
+        assert!(has(&m, &|m| matches!(m, Message::CommitRequested)), "{m:?}");
+        let m = row_clicks_over(&app, "a.txt", 600.0);
+        assert!(
+            has(&m, &|m| matches!(m, Message::Stage(f) if f.path == "a.txt")),
+            "{m:?}"
+        );
+        let m = row_clicks_over(&app, "src/main.rs", 600.0);
+        assert!(
+            has(
+                &m,
+                &|m| matches!(m, Message::Unstage(f) if f.path == "src/main.rs")
+            ),
+            "{m:?}"
+        );
+        // Discard all: the trash icon at the left of the header.
+        let title = {
+            let mut sim = simulator(&app);
+            let found = sim.find("3 file changes on HEAD (c)").unwrap();
+            iced_test::selector::Bounded::bounds(&found)
+        };
+        let m = clicks_along(&app, 0.0, title.center_y(), SIZE.0 / 2.0);
+        assert!(
+            has(&m, &|m| matches!(
+                m,
+                Message::Discard(crate::app::DiscardTarget::All)
+            )),
+            "{m:?}"
+        );
+        // Right click on a row and on the staged header open their menus.
+        let right_click = |label: &str| {
+            let mut sim = simulator(&app);
+            let found = sim.find(label).unwrap();
+            let at = iced_test::selector::Bounded::bounds(&found).center();
+            sim.point_at(at);
+            let _ = sim.simulate(vec![
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at }),
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                    iced::mouse::Button::Right,
+                )),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Right,
+                )),
+            ]);
+            sim.into_messages().collect::<Vec<_>>()
+        };
+        let m = right_click("b.txt");
+        assert!(
+            has(&m, &|m| matches!(m, Message::FileContextMenu { .. })),
+            "{m:?}"
+        );
+        let m = right_click("Staged Files (1)");
+        assert!(
+            has(&m, &|m| matches!(m, Message::StagedHeaderMenu(_))),
+            "{m:?}"
+        );
+        // The diff opens in the center; the panel stays below.
+        let m = clicked(&app, "b.txt");
+        let open = m
+            .into_iter()
+            .find(|m| matches!(m, Message::DiffOpened(_)))
+            .expect("diff");
+        let _ = app.update(open);
+        let view = app.tabs[0].view().unwrap();
+        assert!(matches!(view.center, crate::repo_view::CenterView::Diff(_)));
+        assert!(simulator(&app).find("Unstaged Files (2)").is_ok());
     }
 
     fn finish_requests(messages: &[Message]) -> Vec<String> {
@@ -3124,6 +3224,94 @@ mod tests {
                 app.panes.toggle_panel();
                 snapshot(&app, &format!("panel-position-{name}-hidden-{theme}"));
             }
+        }
+    }
+
+    /// Finding #44: the details panel at the bottom: staging empty and
+    /// with files in both lists (Path and Tree), commit details, a merge
+    /// in progress, a stash and several commits; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_bottom_layouts() {
+        use crate::panes::DetailsPanelPosition;
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let bottom = |app: &mut App| {
+                app.settings.appearance.theme = choice;
+                app.panes.set_position(DetailsPanelPosition::Bottom);
+            };
+            let mut app = crate::app::tests::staging_app(&[], &[]);
+            bottom(&mut app);
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("bottom-staging-empty-{theme}"));
+            let mut app = crate::app::tests::staging_app(
+                &["src/main.rs", "src/ui/panel.rs", "README.md", "new.txt"],
+                &["Cargo.toml", "src/lib.rs"],
+            );
+            bottom(&mut app);
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("bottom-staging-files-{theme}"));
+            let _ = app.update(Message::FileListTreeChosen(true));
+            snapshot(&app, &format!("bottom-staging-tree-{theme}"));
+            let _ = app.update(Message::FileListTreeChosen(false));
+
+            let mut app = file_list_app();
+            bottom(&mut app);
+            snapshot(&app, &format!("bottom-details-{theme}"));
+
+            let mut app = crate::app::tests::app_in_state(git_core::RepoState::Merging {
+                merge_head: "x".into(),
+            });
+            bottom(&mut app);
+            let view = app.tabs[0].view_mut().unwrap();
+            let tree = git_core::WorkingTree {
+                unstaged: vec![git_core::FileChange {
+                    path: "src/main.rs".into(),
+                    kind: git_core::ChangeKind::Conflicted,
+                    old_path: None,
+                }],
+                staged: vec![git_core::FileChange {
+                    path: "README.md".into(),
+                    kind: git_core::ChangeKind::Modified,
+                    old_path: None,
+                }],
+            };
+            view.operation_conflicts = Some(["src/main.rs".to_owned()].into());
+            view.snapshot = std::sync::Arc::new(view.snapshot.with_working_tree(tree).unwrap());
+            let _ = app.update(Message::WipSelected);
+            snapshot(&app, &format!("bottom-merge-{theme}"));
+
+            let mut app = crate::app::tests::graph_app();
+            bottom(&mut app);
+            let tab = app.tabs[0].id;
+            let _ = app.update(Message::CommitSelected("s".into()));
+            let file = |path: &str| git_core::FileChange {
+                path: path.into(),
+                kind: git_core::ChangeKind::Modified,
+                old_path: None,
+            };
+            let _ = app.update(Message::CommitChangesLoaded {
+                tab,
+                id: "s".into(),
+                result: Ok(crate::repo_view::DetailChanges::Stash(
+                    git_core::StashChanges {
+                        staged: vec![file("a.rs")],
+                        unstaged: vec![file("b.rs"), file("c.rs")],
+                        untracked: Vec::new(),
+                    },
+                )),
+            });
+            snapshot(&app, &format!("bottom-stash-{theme}"));
+            let _ = app.update(Message::CommitSelected("a".into()));
+            {
+                let view = app.tabs[0].view_mut().unwrap();
+                let order: Vec<String> =
+                    view.snapshot.commits.iter().map(|c| c.id.clone()).collect();
+                let order: Vec<&str> = order.iter().map(String::as_str).collect();
+                view.multi.toggle("a", &order);
+                view.multi.toggle("e", &order);
+            }
+            snapshot(&app, &format!("bottom-multi-{theme}"));
         }
     }
 
