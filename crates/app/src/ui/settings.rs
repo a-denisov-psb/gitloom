@@ -69,7 +69,10 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Commit => commit_template(app, page),
         Category::RepoEditor => repository_editor(app, page),
         Category::Gitflow => gitflow(app, page),
-        Category::Themes => themes_page(app),
+        Category::Themes => match &page.theme_editor {
+            Some(editor) => theme_editor(editor),
+            None => themes_page(app),
+        },
     };
     HIGHLIGHT.with(|h| h.set(None));
 
@@ -1345,6 +1348,209 @@ fn theme_choice(app: &App) -> Element<'_, Message> {
     content.into()
 }
 
+/// A swatch filled with `color` over the panel (alpha shows as lighter).
+fn swatch<'a>(color: iced::Color, width: f32, height: f32) -> Element<'a, Message> {
+    container(space::horizontal())
+        .width(width)
+        .height(height)
+        .style(move |t: &iced::Theme| container::Style {
+            background: Some(color.into()),
+            border: iced::Border::default()
+                .rounded(3)
+                .width(1)
+                .color(theme::palette(t).border),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// One color of the theme editor (M17-03): label, swatch (opens the RGB
+/// sliders), hex field (marked while the value is not a color).
+fn color_row<'a>(
+    editor: &crate::theme_editor::Editor,
+    field: crate::theme_editor::Field,
+    extra: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    use crate::theme_editor::Edit;
+    let color = editor.color(field);
+    let invalid = editor.invalid(field);
+    let mut line = row![
+        text(field.label()).width(150),
+        button(swatch(color, 36.0, 20.0))
+            .on_press(Message::ThemeEdit(Edit::Picker(field)))
+            .padding(0)
+            .style(button::text),
+        text_input(
+            if field.has_alpha() {
+                "#RRGGBBAA"
+            } else {
+                "#RRGGBB"
+            },
+            &editor.text(field)
+        )
+        .on_input(move |value| Message::ThemeEdit(Edit::Hex(field, value)))
+        .width(110)
+        .padding([3, 6])
+        .style(theme::inline_input(invalid)),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center);
+    if invalid {
+        line = line.push(
+            text(if field.has_alpha() {
+                "#RRGGBB or #RRGGBBAA"
+            } else {
+                "#RRGGBB"
+            })
+            .size(12)
+            .style(theme::text_danger),
+        );
+    }
+    if let Some(extra) = extra {
+        line = line.push(extra);
+    }
+    if editor.picker != Some(field) {
+        return line.into();
+    }
+    // Picker: RGB (and alpha) sliders (M17-03: no extra dependency).
+    let rgba = color.into_rgba8();
+    let channels: &[(&str, usize)] = if field.has_alpha() {
+        &[("R", 0), ("G", 1), ("B", 2), ("A", 3)]
+    } else {
+        &[("R", 0), ("G", 1), ("B", 2)]
+    };
+    let sliders = Column::with_children(channels.iter().map(|&(name, channel)| {
+        row![
+            muted(name).width(14),
+            iced::widget::slider(0..=255u8, rgba[channel], move |value| {
+                Message::ThemeEdit(Edit::Channel(field, channel, value))
+            })
+            .width(240),
+            text(rgba[channel].to_string()).size(12).width(30),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into()
+    }))
+    .spacing(4)
+    .padding(iced::Padding::default().left(160.0));
+    column![line, sliders].spacing(6).into()
+}
+
+/// The theme editor (M17-03, ADR-059): name and base, the color groups,
+/// Derive, the feature color list and the syntax theme; Save, Save and use,
+/// Revert, Close.
+fn theme_editor(editor: &crate::theme_editor::Editor) -> Element<'_, Message> {
+    use crate::theme::ThemeKind;
+    use crate::theme_editor::{Edit, Field};
+    let section = |title: &'static str| text(title).size(15);
+    let header = row![
+        text_input("Name", &editor.data.name)
+            .on_input(|name| Message::ThemeEdit(Edit::Name(name)))
+            .width(240)
+            .padding([4, 8])
+            .style(theme::input),
+        segmented(
+            &[(ThemeKind::Dark, "Dark"), (ThemeKind::Light, "Light")],
+            editor.data.base,
+            |base| Message::ThemeEdit(Edit::Base(base)),
+        ),
+    ]
+    .spacing(12)
+    .align_y(iced::Alignment::Center);
+    let dirty = editor.dirty();
+    let buttons = row![
+        button(text("Save"))
+            .on_press_maybe(dirty.then_some(Message::ThemeEditorSave { use_it: false }))
+            .padding([5, 12]),
+        button(text("Save and use"))
+            .on_press(Message::ThemeEditorSave { use_it: true })
+            .padding([5, 12])
+            .style(button::secondary),
+        button(text("Revert"))
+            .on_press_maybe(dirty.then_some(Message::ThemeEditorRevert))
+            .padding([5, 12])
+            .style(button::secondary),
+        space::horizontal(),
+        button(text("Close"))
+            .on_press(Message::ThemeEditorClose)
+            .padding([5, 12])
+            .style(button::secondary),
+    ]
+    .spacing(6);
+    let rows = |fields: &[Field]| -> Element<'_, Message> {
+        Column::with_children(fields.iter().map(|f| color_row(editor, *f, None)))
+            .spacing(6)
+            .into()
+    };
+    let derive = button(text("Derive the other colors from the main colors").size(12))
+        .on_press(Message::ThemeEdit(Edit::Derive))
+        .padding([4, 10])
+        .style(button::secondary);
+    let mut main = column![section("Main colors"), rows(&Field::MAIN)].spacing(8);
+    if editor.derive_hint {
+        main = main.push(
+            text("A main color changed: derive the other colors to match?")
+                .size(12)
+                .style(theme::text_accent),
+        );
+    }
+    main = main.push(derive);
+    let lanes: Vec<Field> = (0..8).map(Field::Lane).collect();
+    let features = editor.data.palette.flow.features.as_slice().len();
+    let mut feature_rows = column![].spacing(6);
+    for i in 0..features {
+        let remove = (features > 1).then(|| {
+            Element::from(
+                button(text("Remove").size(12))
+                    .on_press(Message::ThemeEdit(Edit::RemoveFeature(i)))
+                    .padding([2, 8])
+                    .style(button::text),
+            )
+        });
+        feature_rows = feature_rows.push(color_row(editor, Field::Feature(i), remove));
+    }
+    let mut flow = column![section("Git flow"), rows(&Field::FLOW), feature_rows].spacing(8);
+    if features == 1 {
+        flow = flow.push(muted("All feature branches use this color").size(12));
+    }
+    if features < crate::theme::FeatureColors::MAX {
+        flow = flow.push(
+            button(text("Add feature color").size(12))
+                .on_press(Message::ThemeEdit(Edit::AddFeature))
+                .padding([4, 10])
+                .style(button::secondary),
+        );
+    }
+    let syntax = column![
+        section("Syntax"),
+        iced::widget::pick_list(
+            crate::theme_editor::syntax_names(),
+            Some(editor.data.syntax.name().to_owned()),
+            |name| Message::ThemeEdit(Edit::Syntax(name)),
+        ),
+        muted("Colors of code in diffs, blame, file history and the conflict view.").size(12),
+    ]
+    .spacing(8);
+    column![
+        header,
+        buttons,
+        main,
+        column![
+            section("More colors"),
+            muted("Node text on the graph is black or white, whichever reads better on the lanes.")
+                .size(12),
+            rows(&Field::MORE)
+        ]
+        .spacing(8),
+        column![section("Graph"), rows(&lanes)].spacing(8),
+        flow,
+        syntax,
+    ]
+    .spacing(20)
+    .into()
+}
+
 /// Preferences → Themes (M17-02, ADR-059): built-in themes (read only,
 /// lock icon) and "My themes" with the invalid files and their reason;
 /// the file actions below act on the selected theme.
@@ -1437,6 +1643,7 @@ fn themes_page(app: &App) -> Element<'_, Message> {
     const BUILT_IN: &str = "Built-in themes cannot be changed; \"New theme\" makes a copy";
     let actions = row![
         action("New theme", Message::ThemeNew, true, ""),
+        action("Edit…", Message::ThemeEditOpened, user, BUILT_IN),
         action("Rename…", Message::ThemeRename, user, BUILT_IN),
         action(
             "Delete…",

@@ -1302,6 +1302,57 @@ mod tests {
         app.set_theme_files(Vec::new());
     }
 
+    /// The theme editor (M17-03) for a copy of Dark and of Light (with the
+    /// sliders open), and a one-entry feature list in the Gitflow layout.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_theme_editor() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        use crate::settings::ThemeChoice;
+        use crate::theme_editor::{Edit, Field};
+        use crate::theme_file::{Entry, ThemeData};
+        let copy = |id: &str| {
+            let def = crate::themes::get(id).unwrap();
+            ThemeData {
+                name: format!("{} copy", def.name),
+                ..ThemeData::of(&def)
+            }
+            .into_def(format!("user:{} copy", def.name))
+        };
+        for id in ["dark", "light"] {
+            let mut app = crate::app::tests::ready_app(&["c", "b", "a"]);
+            let def = copy(id);
+            app.set_theme_files(vec![Entry::Theme(def.clone())]);
+            app.settings.appearance.theme = ThemeChoice::theme(id);
+            let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Themes));
+            let _ = app.update(Message::ThemeSelected(def.id.clone()));
+            let _ = app.update(Message::ThemeEditOpened);
+            snapshot(&app, &format!("theme-editor-{id}"));
+            let _ = app.update(Message::ThemeEdit(Edit::Hex(
+                Field::Background,
+                "#12".into(),
+            )));
+            let _ = app.update(Message::ThemeEdit(Edit::Picker(Field::Surface)));
+            snapshot(&app, &format!("theme-editor-{id}-picker"));
+        }
+        // One feature color: every feature lane has it.
+        let (_repo, flow) = crate::snapshot::flow_tests::classic_snapshot();
+        let mut def = copy("dark");
+        let mut palette = *def.palette;
+        palette.flow.features =
+            crate::theme::FeatureColors::new(&[iced::Color::from_rgb8(0xff, 0x8c, 0x00)]).unwrap();
+        def.palette = std::sync::Arc::new(palette);
+        let mut app = crate::app::tests::graph_app();
+        app.set_theme_files(vec![Entry::Theme(def.clone())]);
+        app.settings.appearance.theme = ThemeChoice::theme(&def.id);
+        let view = app.tabs[0].view_mut().unwrap();
+        view.snapshot = std::sync::Arc::new(flow.with_flow_layout(true).unwrap());
+        snapshot_sized(&app, "theme-one-feature-color", (1200.0, 520.0));
+        app.set_theme_files(Vec::new());
+    }
+
     /// Every theme of the registry (ADR-058, M16-04/05): the graph with the
     /// Gitflow layout, and a word diff with syntax colors next to staging
     /// and the status bar.

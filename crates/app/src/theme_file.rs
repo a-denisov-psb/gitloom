@@ -547,7 +547,6 @@ pub enum Op {
         data: ThemeData,
     },
     /// Write the user theme `id` (M17-03).
-    #[allow(dead_code)] // Sent by the editor (M17-03).
     Save {
         id: String,
         data: ThemeData,
@@ -572,6 +571,10 @@ pub struct Change {
     pub renamed: Option<(String, String)>,
     /// Import of a file whose name is taken: ask "Replace" or "Keep both".
     pub collision: Option<(std::path::PathBuf, String)>,
+    /// A new theme: open it in the editor.
+    pub created: bool,
+    /// The theme `select` was saved by the editor.
+    pub saved: bool,
 }
 
 /// Runs `op` on the folder `dir` and reads the folder again. Blocking.
@@ -586,9 +589,14 @@ pub fn apply(dir: &Path, op: Op) -> Result<Change, String> {
         select: None,
         renamed: None,
         collision: None,
+        created: false,
+        saved: false,
     };
     match op {
-        Op::New { wish, data } => change.select = Some(write_new(dir, &wish, &data)?),
+        Op::New { wish, data } => {
+            change.select = Some(write_new(dir, &wish, &data)?);
+            change.created = true;
+        }
         Op::Rename { id, name, data } => {
             let new = rename(dir, &user_stem(&id)?, &name, &data)?;
             change.select = Some(new.clone());
@@ -599,6 +607,7 @@ pub fn apply(dir: &Path, op: Op) -> Result<Change, String> {
         Op::Save { id, data } => {
             write(dir, &user_stem(&id)?, &data)?;
             change.select = Some(id);
+            change.saved = true;
         }
         Op::Delete { id } => delete(dir, &user_stem(&id)?)?,
         Op::Import {

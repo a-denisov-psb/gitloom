@@ -601,6 +601,17 @@ pub enum Message {
     ThemeExportPicked(Option<PathBuf>),
     ThemeExported(Result<PathBuf, String>),
     ThemeOpenFolder,
+    /// The theme editor (M17-03): open it for the selected user theme,
+    /// an edit, Save (and use), Revert, Close, and leaving it after
+    /// "Discard changes?" with the message that wanted to leave.
+    ThemeEditOpened,
+    ThemeEdit(crate::theme_editor::Edit),
+    ThemeEditorSave {
+        use_it: bool,
+    },
+    ThemeEditorRevert,
+    ThemeEditorClose,
+    ThemeEditorDiscard(Box<Message>),
     /// A theme file action finished.
     ThemeFilesChanged(Result<crate::theme_file::Change, String>),
     /// The status bar message number `seq` may disappear now.
@@ -3047,6 +3058,30 @@ impl App {
             }
             settings::ThemeChoice::System => (&appearance.system_dark, ThemeKind::Dark),
         }
+    }
+
+    /// The open theme editor.
+    fn theme_editor_mut(&mut self) -> Option<&mut crate::theme_editor::Editor> {
+        self.settings_page.as_mut()?.theme_editor.as_mut()
+    }
+
+    /// The theme editor has unsaved edits.
+    fn theme_editor_dirty(&self) -> bool {
+        self.settings_page
+            .as_ref()
+            .and_then(|p| p.theme_editor.as_ref())
+            .is_some_and(crate::theme_editor::Editor::dirty)
+    }
+
+    /// "Discard changes?" before leaving the theme editor with `then`.
+    fn ask_discard_theme(&mut self, then: Message) {
+        self.modal = Some(Modal::confirm(
+            "Discard changes?",
+            "The theme has changes that are not saved.",
+            "Discard",
+            true,
+            Message::ThemeEditorDiscard(Box::new(then)),
+        ));
     }
 
     /// Folder of the theme files (`themes/` next to `settings.json`).
@@ -7562,6 +7597,59 @@ impl App {
                     page.theme_selected = Some(id);
                 }
             }
+            Message::ThemeEditOpened => {
+                let def = self.selected_theme();
+                if crate::theme_file::stem_of(&def.id).is_some() {
+                    if let Some(page) = self.settings_page.as_mut() {
+                        page.theme_editor = Some(crate::theme_editor::Editor::new(
+                            def.id.clone(),
+                            crate::theme_file::ThemeData::of(&def),
+                        ));
+                    }
+                }
+            }
+            Message::ThemeEdit(edit) => {
+                if let Some(editor) = self.theme_editor_mut() {
+                    editor.update(edit);
+                }
+            }
+            Message::ThemeEditorRevert => {
+                if let Some(editor) = self.theme_editor_mut() {
+                    editor.revert();
+                }
+            }
+            Message::ThemeEditorSave { use_it } => {
+                let Some(editor) = self.theme_editor_mut() else {
+                    return Task::none();
+                };
+                let id = editor.id.clone();
+                let mut data = editor.data.clone();
+                // An empty name keeps the saved one.
+                if data.name.trim().is_empty() {
+                    data.name = editor.saved.name.clone();
+                    editor.data.name = data.name.clone();
+                }
+                let save = self.theme_op(crate::theme_file::Op::Save { id: id.clone(), data });
+                if use_it {
+                    let choose = self.update(Message::ThemeChosen(settings::ThemeChoice::theme(&id)));
+                    return Task::batch([save, choose]);
+                }
+                return save;
+            }
+            Message::ThemeEditorClose if self.theme_editor_dirty() => {
+                self.ask_discard_theme(Message::ThemeEditorClose);
+            }
+            Message::ThemeEditorClose => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.theme_editor = None;
+                }
+            }
+            Message::ThemeEditorDiscard(then) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.theme_editor = None;
+                }
+                return self.update(*then);
+            }
             Message::ThemeNew => {
                 let def = self.selected_theme();
                 let name = format!("{} copy", def.name);
@@ -7688,13 +7776,34 @@ impl App {
             Message::ThemeFilesChanged(Ok(change)) => {
                 self.set_theme_files(change.entries);
                 let mut tasks = Vec::new();
-                if let Some((old, new)) = change.renamed {
+                if let Some((old, new)) = change.renamed.clone() {
                     if self.rename_theme_in_settings(&old, &new) {
                         tasks.push(self.save_settings());
                     }
                 }
                 if let Some(select) = change.select {
                     if let Some(page) = self.settings_page.as_mut() {
+                        if change.saved {
+                            if let Some(editor) =
+                                page.theme_editor.as_mut().filter(|e| e.id == select)
+                            {
+                                editor.saved();
+                            }
+                        }
+                        if change.created {
+                            if let Some(def) = crate::themes::get(&select) {
+                                page.theme_editor = Some(crate::theme_editor::Editor::new(
+                                    select.clone(),
+                                    crate::theme_file::ThemeData::of(&def),
+                                ));
+                            }
+                        }
+                        // A renamed theme stays in the editor under its new id.
+                        if let Some(editor) = page.theme_editor.as_mut() {
+                            if change.renamed.as_ref().is_some_and(|(old, _)| *old == editor.id) {
+                                editor.id = select.clone();
+                            }
+                        }
                         page.theme_selected = Some(select);
                     }
                 }
@@ -7989,6 +8098,14 @@ impl App {
                     self.restyle_code_views();
                     return Task::batch([self.save_settings(), self.highlight_code_views()]);
                 }
+            }
+            Message::SettingsClosed if self.theme_editor_dirty() => {
+                self.ask_discard_theme(Message::SettingsClosed);
+            }
+            Message::SettingsCategory(category)
+                if self.theme_editor_dirty() && category != settings::Category::Themes =>
+            {
+                self.ask_discard_theme(Message::SettingsCategory(category));
             }
             Message::SettingsClosed => self.settings_page = None,
             Message::SettingsCategory(category) => {
@@ -14956,6 +15073,68 @@ pub(crate) mod tests {
             app.theme_note().as_deref(),
             Some("Theme 'user:Paper' not found, using Dark")
         );
+        app.set_theme_files(Vec::new());
+    }
+
+    /// M17-03: New theme opens the editor; an edit saved changes the file
+    /// and the window; Revert; "Discard changes?"; Save and use.
+    #[test]
+    fn theme_editor_saves_and_applies() {
+        use crate::theme_editor::{Edit, Field};
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("themes").join("Dark copy.json");
+        let mut app = themes_app(dir.path());
+        let _ = app.update(Message::ThemeSelected("dark".into()));
+        let _ = app.update(Message::ThemeNew);
+        run_theme_op(&mut app).unwrap();
+        let editor = |app: &App| {
+            app.settings_page
+                .as_ref()
+                .and_then(|p| p.theme_editor.clone())
+                .expect("editor open")
+        };
+        assert_eq!(editor(&app).id, "user:Dark copy");
+        // Save and use: the theme is chosen and saved.
+        let _ = app.update(Message::ThemeEditorSave { use_it: true });
+        run_theme_op(&mut app).unwrap();
+        assert_eq!(app.active_theme().id, "user:Dark copy");
+        // An invalid value is marked and not applied.
+        let _ = app.update(Message::ThemeEdit(Edit::Hex(Field::Accent, "#12".into())));
+        assert!(editor(&app).invalid(Field::Accent));
+        assert!(!editor(&app).dirty());
+        // A valid one, saved: file and window change.
+        let _ = app.update(Message::ThemeEdit(Edit::Hex(
+            Field::Accent,
+            "#ff8800".into(),
+        )));
+        assert!(editor(&app).dirty());
+        let _ = app.update(Message::ThemeEditorSave { use_it: false });
+        run_theme_op(&mut app).unwrap();
+        assert!(!editor(&app).dirty());
+        let saved = std::fs::read_to_string(&file).unwrap();
+        assert!(saved.contains("\"accent\": \"#ff8800\""), "{saved}");
+        let accent = iced::Color::from_rgb8(0xff, 0x88, 0x00);
+        assert_eq!(crate::theme::palette(&app.theme()).accent, accent);
+        // Revert.
+        let _ = app.update(Message::ThemeEdit(Edit::Hex(Field::Text, "#000000".into())));
+        let _ = app.update(Message::ThemeEditorRevert);
+        assert!(!editor(&app).dirty());
+        // Closing with changes asks first.
+        let _ = app.update(Message::ThemeEdit(Edit::Name("Night".into())));
+        let _ = app.update(Message::ThemeEditorClose);
+        let modal = app.modal.take().expect("discard dialog");
+        assert_eq!(modal.title, "Discard changes?");
+        assert!(editor(&app).dirty(), "still open");
+        let _ = app.update(Message::SettingsClosed);
+        assert!(app.modal.take().is_some(), "closing Preferences asks too");
+        let _ = app.update(modal.action(1).expect("discard"));
+        assert!(app
+            .settings_page
+            .as_ref()
+            .is_some_and(|p| p.theme_editor.is_none()));
         app.set_theme_files(Vec::new());
     }
 

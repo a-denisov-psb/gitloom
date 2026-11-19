@@ -768,6 +768,8 @@ pub struct Page {
     pub category: Category,
     /// Theme selected in Preferences → Themes (`None`: the active one).
     pub theme_selected: Option<String>,
+    /// The theme editor, while a user theme is edited (M17-03).
+    pub theme_editor: Option<crate::theme_editor::Editor>,
     /// Field opened from the palette, highlighted for a moment (M12-12).
     pub highlight: Option<&'static str>,
     /// Text of the auto-fetch input (may be invalid while typing).
@@ -891,6 +893,7 @@ impl Page {
         Self {
             category: Category::General,
             theme_selected: None,
+            theme_editor: None,
             highlight: None,
             auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
             error: None,
