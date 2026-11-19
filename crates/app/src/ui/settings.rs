@@ -1063,8 +1063,8 @@ fn identities(app: &App) -> Element<'_, Message> {
         .on_toggle(Message::IdentitySyncToggled);
     column![
         muted(
-            "Name and email for commits. A repository uses the identity chosen in its \
-             commit panel, otherwise Git's global identity."
+            "Name and email for commits. A repository uses the identity chosen under \
+             \"Committing as\" in the details panel, otherwise Git's global identity."
         )
         .size(12),
         list,

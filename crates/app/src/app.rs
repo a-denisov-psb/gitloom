@@ -3067,6 +3067,14 @@ impl App {
             Shortcut::Refresh => return self.update(Message::Refresh),
             Shortcut::ToggleSidebar => self.panes.toggle_sidebar(),
             Shortcut::TogglePanel => self.panes.toggle_panel(),
+            // A setting, not an undo entry (ADR-043); the same button moves
+            // it back (finding #44).
+            Shortcut::MoveDetailsPanel => {
+                let position = self.panes.position.other();
+                self.panes.set_position(position);
+                self.settings.appearance.details_panel = position;
+                return self.save_settings();
+            }
             Shortcut::Navigate(step) => {
                 // ↑/↓ move in the file history list while it is shown.
                 if let Some(view) = self.active_view_mut() {
@@ -4937,8 +4945,14 @@ impl App {
                             Shortcut::FileHistory => Target::Mode(Mode::Files),
                             id => Target::Action(id),
                         };
-                        let mut entry = Entry::new(action.label.clone(), target)
-                            .disabled(self.action_block(action.id));
+                        // The pin action names where the panel goes (finding #44).
+                        let label = if action.id == Shortcut::MoveDetailsPanel {
+                            self.panes.position.move_label().to_owned()
+                        } else {
+                            action.label.clone()
+                        };
+                        let mut entry =
+                            Entry::new(label, target).disabled(self.action_block(action.id));
                         // GitKraken calls identities "profiles" (M12-12).
                         if action.id == Shortcut::ChooseIdentity {
                             entry = entry.keywords("profile");
@@ -7129,6 +7143,8 @@ impl App {
                     self.status = notice;
                 }
                 self.settings = settings;
+                self.panes
+                    .set_position(self.settings.appearance.details_panel);
                 if let Some(page) = &mut self.settings_page {
                     *page = settings::Page::new(&self.settings).with_category(page.category);
                 }
@@ -12857,6 +12873,7 @@ async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::panes::DetailsPanelPosition;
 
     fn app_with_tabs(count: usize) -> App {
         let (mut app, _) = App::new(Vec::new(), None);
@@ -12988,6 +13005,8 @@ pub(crate) mod tests {
             panes: crate::panes::PaneRatios {
                 sidebar: 0.3,
                 center: 0.6,
+                bottom: 0.4,
+                staging: 0.3,
             },
             ..Session::default()
         };
@@ -15241,9 +15260,90 @@ pub(crate) mod tests {
         let _ = app.update(checked(Shortcut::TogglePanel, false));
         assert!(!app.panes.panel_visible);
         assert_eq!(
-            panel_icon(PanelToggle::Right, app.panes.panel_visible),
+            panel_icon(
+                PanelToggle::Details(app.panes.position),
+                app.panes.panel_visible
+            ),
             Icon::PanelRight
         );
+        // Finding #44: the pin moves the panel, the toggle icon follows;
+        // Ctrl+K hides and shows it at the bottom as well.
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert_eq!(app.panes.position, DetailsPanelPosition::Bottom);
+        assert_eq!(
+            app.settings.appearance.details_panel,
+            DetailsPanelPosition::Bottom
+        );
+        assert_eq!(
+            panel_icon(
+                PanelToggle::Details(app.panes.position),
+                app.panes.panel_visible
+            ),
+            Icon::PanelBottomFilled
+        );
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        assert!(!app.panes.panel_visible);
+        assert_eq!(
+            panel_icon(PanelToggle::Details(app.panes.position), false),
+            Icon::PanelBottom
+        );
+        // Hidden: the pin still works and only remembers the place.
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert_eq!(app.panes.position, DetailsPanelPosition::Right);
+        assert!(!app.panes.panel_visible);
+        let _ = app.update(checked(Shortcut::TogglePanel, false));
+        assert!(app.panes.panel_visible);
+        use crate::ui::statusbar::pin_icon;
+        assert_eq!(
+            pin_icon(DetailsPanelPosition::Right),
+            (Icon::MoveToBottom, "Move details panel to the bottom")
+        );
+        assert_eq!(
+            pin_icon(DetailsPanelPosition::Bottom),
+            (Icon::MoveToRight, "Move details panel to the right")
+        );
+    }
+
+    /// Finding #44: the palette names where the panel goes; the position
+    /// comes back with the settings after a restart.
+    #[test]
+    fn details_panel_position_via_palette_and_restart() {
+        let mut app = ready_app(&["c"]);
+        let label = |app: &App| {
+            app.palette_entries(palette::Mode::Actions)
+                .into_iter()
+                .find(|e| {
+                    matches!(
+                        e.target,
+                        palette::Target::Action(Shortcut::MoveDetailsPanel)
+                    )
+                })
+                .map(|e| e.label)
+        };
+        assert_eq!(
+            label(&app).as_deref(),
+            Some("Move details panel to the bottom")
+        );
+        let _ = app.update(checked(Shortcut::MoveDetailsPanel, false));
+        assert_eq!(
+            label(&app).as_deref(),
+            Some("Move details panel to the right")
+        );
+        // The stored settings carry the position into a new app.
+        let stored = serde_json::to_string(&app.settings).unwrap();
+        assert!(stored.contains("\"details_panel\":\"bottom\""), "{stored}");
+        let mut restarted = ready_app(&["c"]);
+        assert_eq!(restarted.panes.position, DetailsPanelPosition::Right);
+        let _ = restarted.update(Message::SettingsLoaded(settings::Loaded {
+            settings: serde_json::from_str(&stored).unwrap(),
+            notice: None,
+            write: false,
+        }));
+        assert_eq!(restarted.panes.position, DetailsPanelPosition::Bottom);
+        // Older settings without the field: right.
+        let old: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert_eq!(old.appearance.details_panel, DetailsPanelPosition::Right);
     }
 
     #[test]

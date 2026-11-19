@@ -2984,17 +2984,19 @@ mod tests {
     #[test]
     fn status_bar_panel_toggles() {
         let version = concat!("v", env!("CARGO_PKG_VERSION"));
-        let click = |app: &mut App, left: bool| {
+        // 0: left toggle, 1: pin button, 2: details panel toggle.
+        let press = |app: &mut App, which: u8| {
             let messages: Vec<Message> = {
                 let mut sim = simulator(app);
                 let label = sim.find(version).unwrap_or_else(|e| panic!("{e}"));
                 let bounds = iced_test::selector::Bounded::bounds(&label);
                 // Left: 12 px padding + half the 22 px area; right: after the
-                // version with the 16 px spacing.
-                let x = if left {
-                    12.0 + 11.0
-                } else {
-                    bounds.x + bounds.width + 16.0 + 11.0
+                // version with the 16 px spacing, the pin first (finding #44).
+                let pin = bounds.x + bounds.width + 16.0 + 11.0;
+                let x = match which {
+                    0 => 12.0 + 11.0,
+                    1 => pin,
+                    _ => pin + 22.0 + crate::ui::statusbar::PIN_GAP,
                 };
                 sim.point_at(iced::Point::new(x, bounds.center_y()));
                 let _ = sim.simulate(iced_test::simulator::click());
@@ -3004,6 +3006,7 @@ mod tests {
                 let _ = app.update(message);
             }
         };
+        let click = |app: &mut App, left: bool| press(app, if left { 0 } else { 2 });
         let mut app = crate::app::tests::staging_app(&[], &[]);
         assert!(app.panes.sidebar_visible && app.panes.panel_visible);
         click(&mut app, true);
@@ -3018,6 +3021,20 @@ mod tests {
         assert!(app.panes.sidebar_visible);
         click(&mut app, false);
         assert!(app.panes.panel_visible);
+        // The pin moves the panel to the bottom and back.
+        press(&mut app, 1);
+        assert_eq!(
+            app.panes.position,
+            crate::panes::DetailsPanelPosition::Bottom
+        );
+        click(&mut app, false);
+        assert!(!app.panes.panel_visible, "the toggle stays in place");
+        click(&mut app, false);
+        press(&mut app, 1);
+        assert_eq!(
+            app.panes.position,
+            crate::panes::DetailsPanelPosition::Right
+        );
         // Start screen: the left end of the status bar is not a toggle.
         let (mut start, _) = App::new(Vec::new(), None);
         let before = start.panes.sidebar_visible;
@@ -3027,7 +3044,13 @@ mod tests {
         use crate::icons::Icon;
         use crate::ui::statusbar::{panel_icon, PanelToggle};
         assert_eq!(panel_icon(PanelToggle::Left, true), Icon::PanelLeftFilled);
-        assert_eq!(panel_icon(PanelToggle::Right, false), Icon::PanelRight);
+        assert_eq!(
+            panel_icon(
+                PanelToggle::Details(crate::panes::DetailsPanelPosition::Right),
+                false
+            ),
+            Icon::PanelRight
+        );
     }
 
     /// Status bar with both panels shown, both hidden and mixed; three
@@ -3058,6 +3081,31 @@ mod tests {
             app.settings.appearance.theme = choice;
             let _ = app.update(Message::SystemScaleChanged(1.25));
             snapshot_scaled(&app, &format!("statusbar-125-{theme}"), 1.25);
+        }
+    }
+
+    /// Finding #44: the status bar with the pin button in both positions
+    /// and the layout with the details panel at the bottom (graph above,
+    /// panel below), Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_details_panel_position() {
+        use crate::panes::DetailsPanelPosition;
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+                let mut app = crate::app::tests::graph_app();
+                app.settings.appearance.theme = choice;
+                app.panes.set_position(position);
+                let _ = app.update(Message::CommitSelected("f".into()));
+                let name = match position {
+                    DetailsPanelPosition::Right => "right",
+                    DetailsPanelPosition::Bottom => "bottom",
+                };
+                snapshot(&app, &format!("panel-position-{name}-{theme}"));
+                app.panes.toggle_panel();
+                snapshot(&app, &format!("panel-position-{name}-hidden-{theme}"));
+            }
         }
     }
 

@@ -1,4 +1,6 @@
-//! Pane layout: sidebar | center | detail panel, with hideable side panels.
+//! Pane layout: sidebar | center | details panel, with hideable side
+//! panels. The details panel sits right of the center or below it
+//! (finding #44, ADR-056).
 
 use iced::widget::pane_grid::{self, Axis, Configuration, Node};
 use serde::{Deserialize, Serialize};
@@ -10,13 +12,55 @@ pub enum PaneKind {
     Panel,
 }
 
+/// Where the details panel sits (`settings.json`, global; finding #44).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DetailsPanelPosition {
+    #[default]
+    Right,
+    Bottom,
+}
+
+impl DetailsPanelPosition {
+    pub fn other(self) -> Self {
+        match self {
+            Self::Right => Self::Bottom,
+            Self::Bottom => Self::Right,
+        }
+    }
+
+    /// Label of the action that moves the panel away from `self`.
+    pub fn move_label(self) -> &'static str {
+        match self {
+            Self::Right => "Move details panel to the bottom",
+            Self::Bottom => "Move details panel to the right",
+        }
+    }
+}
+
+fn default_bottom() -> f32 {
+    0.55
+}
+
+fn default_staging() -> f32 {
+    0.5
+}
+
 /// Split ratios, persisted in the session.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PaneRatios {
     /// Sidebar width as fraction of the window.
     pub sidebar: f32,
-    /// Center width as fraction of center + detail panel.
+    /// Center width as fraction of center + details panel (panel right).
     pub center: f32,
+    /// Graph height as fraction of center + details panel (panel at the
+    /// bottom, finding #44).
+    #[serde(default = "default_bottom")]
+    pub bottom: f32,
+    /// Height of the file lists as fraction of lists + commit message in
+    /// the staging area at the bottom (finding #44).
+    #[serde(default = "default_staging")]
+    pub staging: f32,
 }
 
 impl Default for PaneRatios {
@@ -24,6 +68,8 @@ impl Default for PaneRatios {
         Self {
             sidebar: 0.18,
             center: 0.72,
+            bottom: default_bottom(),
+            staging: default_staging(),
         }
     }
 }
@@ -42,6 +88,24 @@ impl PaneRatios {
         Self {
             sidebar: clamp(self.sidebar, defaults.sidebar),
             center: clamp(self.center, defaults.center),
+            bottom: clamp(self.bottom, defaults.bottom),
+            staging: clamp(self.staging, defaults.staging),
+        }
+    }
+
+    /// Ratio of the split between the center and the details panel at
+    /// `position`.
+    pub fn panel_split(&self, position: DetailsPanelPosition) -> f32 {
+        match position {
+            DetailsPanelPosition::Right => self.center,
+            DetailsPanelPosition::Bottom => self.bottom,
+        }
+    }
+
+    fn set_panel_split(&mut self, position: DetailsPanelPosition, ratio: f32) {
+        match position {
+            DetailsPanelPosition::Right => self.center = ratio,
+            DetailsPanelPosition::Bottom => self.bottom = ratio,
         }
     }
 }
@@ -51,6 +115,7 @@ pub struct Panes {
     pub ratios: PaneRatios,
     pub sidebar_visible: bool,
     pub panel_visible: bool,
+    pub position: DetailsPanelPosition,
 }
 
 impl Panes {
@@ -60,6 +125,7 @@ impl Panes {
             ratios: ratios.sanitized(),
             sidebar_visible: true,
             panel_visible: true,
+            position: DetailsPanelPosition::Right,
         };
         panes.rebuild();
         panes
@@ -80,25 +146,39 @@ impl Panes {
         self.rebuild();
     }
 
+    /// Moves the details panel; a hidden panel only remembers the place.
+    pub fn set_position(&mut self, position: DetailsPanelPosition) {
+        if self.position != position {
+            self.position = position;
+            self.rebuild();
+        }
+    }
+
     /// Applies a drag on a split and remembers the new ratio.
     pub fn resize(&mut self, split: pane_grid::Split, ratio: f32) {
         self.state.resize(split, ratio);
         self.read_ratios();
     }
 
-    fn rebuild(&mut self) {
+    /// The pane configuration for the visible panes and the position.
+    pub fn configuration(&self) -> Configuration<PaneKind> {
         let pane = |kind| Box::new(Configuration::Pane(kind));
-        let config = match (self.sidebar_visible, self.panel_visible) {
+        let panel_axis = match self.position {
+            DetailsPanelPosition::Right => Axis::Vertical,
+            DetailsPanelPosition::Bottom => Axis::Horizontal,
+        };
+        let center_and_panel = || Configuration::Split {
+            axis: panel_axis,
+            ratio: self.ratios.panel_split(self.position),
+            a: pane(PaneKind::Center),
+            b: pane(PaneKind::Panel),
+        };
+        match (self.sidebar_visible, self.panel_visible) {
             (true, true) => Configuration::Split {
                 axis: Axis::Vertical,
                 ratio: self.ratios.sidebar,
                 a: pane(PaneKind::Sidebar),
-                b: Box::new(Configuration::Split {
-                    axis: Axis::Vertical,
-                    ratio: self.ratios.center,
-                    a: pane(PaneKind::Center),
-                    b: pane(PaneKind::Panel),
-                }),
+                b: Box::new(center_and_panel()),
             },
             (true, false) => Configuration::Split {
                 axis: Axis::Vertical,
@@ -106,15 +186,13 @@ impl Panes {
                 a: pane(PaneKind::Sidebar),
                 b: pane(PaneKind::Center),
             },
-            (false, true) => Configuration::Split {
-                axis: Axis::Vertical,
-                ratio: self.ratios.center,
-                a: pane(PaneKind::Center),
-                b: pane(PaneKind::Panel),
-            },
+            (false, true) => center_and_panel(),
             (false, false) => Configuration::Pane(PaneKind::Center),
-        };
-        self.state = pane_grid::State::with_configuration(config);
+        }
+    }
+
+    fn rebuild(&mut self) {
+        self.state = pane_grid::State::with_configuration(self.configuration());
     }
 
     /// Reads the ratios of the visible splits back into `ratios`.
@@ -122,15 +200,16 @@ impl Panes {
         let Node::Split { ratio, b, .. } = self.state.layout() else {
             return;
         };
+        let (ratio, b) = (*ratio, b.clone());
         match (self.sidebar_visible, self.panel_visible) {
             (true, true) => {
-                self.ratios.sidebar = *ratio;
-                if let Node::Split { ratio: center, .. } = b.as_ref() {
-                    self.ratios.center = *center;
+                self.ratios.sidebar = ratio;
+                if let Node::Split { ratio: inner, .. } = b.as_ref() {
+                    self.ratios.set_panel_split(self.position, *inner);
                 }
             }
-            (true, false) => self.ratios.sidebar = *ratio,
-            (false, true) => self.ratios.center = *ratio,
+            (true, false) => self.ratios.sidebar = ratio,
+            (false, true) => self.ratios.set_panel_split(self.position, ratio),
             (false, false) => {}
         }
     }
@@ -151,6 +230,7 @@ mod tests {
         let ratios = PaneRatios {
             sidebar: 0.25,
             center: 0.6,
+            ..PaneRatios::default()
         };
         let mut panes = Panes::new(ratios);
         assert_eq!(
@@ -188,8 +268,97 @@ mod tests {
         let panes = Panes::new(PaneRatios {
             sidebar: f32::NAN,
             center: 7.0,
+            ..PaneRatios::default()
         });
         assert_eq!(panes.ratios.sidebar, PaneRatios::default().sidebar);
         assert_eq!(panes.ratios.center, 0.95);
+    }
+
+    /// The split between the center and the panel of a configuration, as
+    /// (axis, ratio), and the kinds in order.
+    fn shape(config: &Configuration<PaneKind>) -> String {
+        match config {
+            Configuration::Pane(kind) => format!("{kind:?}"),
+            Configuration::Split { axis, ratio, a, b } => {
+                let axis = if *axis == Axis::Vertical { "|" } else { "/" };
+                format!("({} {axis}{ratio:.2} {})", shape(a), shape(b))
+            }
+        }
+    }
+
+    #[test]
+    fn configuration_per_position_and_visibility() {
+        let mut panes = Panes::new(PaneRatios::default());
+        let mut seen = Vec::new();
+        for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+            panes.set_position(position);
+            for (sidebar, panel) in [(true, true), (true, false), (false, true), (false, false)] {
+                panes.sidebar_visible = sidebar;
+                panes.panel_visible = panel;
+                seen.push(shape(&panes.configuration()));
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                "(Sidebar |0.18 (Center |0.72 Panel))",
+                "(Sidebar |0.18 Center)",
+                "(Center |0.72 Panel)",
+                "Center",
+                "(Sidebar |0.18 (Center /0.55 Panel))",
+                "(Sidebar |0.18 Center)",
+                "(Center /0.55 Panel)",
+                "Center",
+            ]
+        );
+    }
+
+    #[test]
+    fn each_position_keeps_its_own_ratio() {
+        let mut panes = Panes::new(PaneRatios::default());
+        panes.set_position(DetailsPanelPosition::Bottom);
+        let Node::Split { b, .. } = panes.state.layout().clone() else {
+            panic!("expected split");
+        };
+        let Node::Split { id: inner, .. } = *b else {
+            panic!("expected inner split");
+        };
+        panes.resize(inner, 0.4);
+        assert!((panes.ratios.bottom - 0.4).abs() < 1e-6);
+        assert_eq!(panes.ratios.center, PaneRatios::default().center);
+        panes.set_position(DetailsPanelPosition::Right);
+        let Node::Split { b, .. } = panes.state.layout().clone() else {
+            panic!("expected split");
+        };
+        let Node::Split { id: inner, .. } = *b else {
+            panic!("expected inner split");
+        };
+        panes.resize(inner, 0.6);
+        assert!((panes.ratios.center - 0.6).abs() < 1e-6);
+        assert!((panes.ratios.bottom - 0.4).abs() < 1e-6);
+        // Hidden panel: the position is remembered, the panel comes back
+        // there.
+        panes.toggle_panel();
+        panes.set_position(DetailsPanelPosition::Bottom);
+        panes.toggle_panel();
+        assert_eq!(
+            shape(&panes.configuration()),
+            "(Sidebar |0.18 (Center /0.40 Panel))"
+        );
+    }
+
+    #[test]
+    fn older_ratios_without_the_new_fields_load() {
+        let ratios: PaneRatios = serde_json::from_str(r#"{"sidebar":0.2,"center":0.7}"#).unwrap();
+        assert_eq!(ratios.bottom, 0.55);
+        assert_eq!(ratios.staging, 0.5);
+        let sane = PaneRatios {
+            bottom: f32::INFINITY,
+            staging: 3.0,
+            ..ratios
+        }
+        .sanitized();
+        assert_eq!(sane.bottom, 0.55);
+        assert_eq!(sane.staging, 0.95);
     }
 }

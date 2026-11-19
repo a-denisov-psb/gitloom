@@ -228,6 +228,7 @@ mod tests {
             panes: PaneRatios {
                 sidebar: 0.2,
                 center: 0.7,
+                ..PaneRatios::default()
             },
             ..Session::default()
         };

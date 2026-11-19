@@ -80,10 +80,18 @@ pub enum Icon {
     Columns2,
     ExternalTool,
     Blame,
+    /// Details panel at the bottom (finding #44): toggle outline and
+    /// filled like the right one; the pin buttons show where it moves.
+    PanelBottom,
+    PanelBottomFilled,
+    MoveToBottom,
+    MoveToRight,
+    /// Opens the read-only commit message modal (finding #43).
+    Maximize,
 }
 
 impl Icon {
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 57] = [
         Self::Undo,
         Self::Redo,
         Self::Pull,
@@ -136,6 +144,11 @@ impl Icon {
         Self::Columns2,
         Self::ExternalTool,
         Self::Blame,
+        Self::PanelBottom,
+        Self::PanelBottomFilled,
+        Self::MoveToBottom,
+        Self::MoveToRight,
+        Self::Maximize,
     ];
 
     /// SVG source of the icon.
@@ -199,6 +212,11 @@ impl Icon {
             Self::ExternalTool => lucide!("square-arrow-out-up-right"),
             // A file with a person: who wrote each line.
             Self::Blame => lucide!("file-user"),
+            Self::PanelBottom => lucide!("panel-bottom"),
+            Self::PanelBottomFilled => lucide!("panel-bottom-filled"),
+            Self::MoveToBottom => lucide!("arrow-down-to-line"),
+            Self::MoveToRight => lucide!("arrow-right-to-line"),
+            Self::Maximize => lucide!("maximize-2"),
         }
     }
 

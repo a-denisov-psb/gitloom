@@ -1485,12 +1485,22 @@ pub(crate) fn with_tooltip_text(
     content: Element<'_, Message>,
     message: String,
 ) -> Element<'_, Message> {
+    with_tooltip_text_at(content, message, tooltip::Position::Bottom)
+}
+
+/// [`with_tooltip_text`] at `position` (above controls at the window's
+/// bottom edge).
+pub(crate) fn with_tooltip_text_at(
+    content: Element<'_, Message>,
+    message: String,
+    position: tooltip::Position,
+) -> Element<'_, Message> {
     tooltip(
         content,
         container(text(message).size(12))
             .padding([4, 8])
             .style(theme::tooltip),
-        tooltip::Position::Bottom,
+        position,
     )
     .into()
 }

@@ -287,6 +287,9 @@ pub struct Appearance {
     pub graph_author: bool,
     pub graph_date: bool,
     pub graph_sha: bool,
+    /// Details panel right of the graph or below it (finding #44); set by
+    /// the status bar and the palette, not in Preferences.
+    pub details_panel: crate::panes::DetailsPanelPosition,
 }
 
 impl Default for Appearance {
@@ -300,6 +303,7 @@ impl Default for Appearance {
             graph_author: true,
             graph_date: true,
             graph_sha: true,
+            details_panel: crate::panes::DetailsPanelPosition::Right,
         }
     }
 }

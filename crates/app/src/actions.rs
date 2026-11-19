@@ -24,6 +24,8 @@ pub enum ActionId {
     Refresh,
     ToggleSidebar,
     TogglePanel,
+    /// Details panel right or at the bottom (finding #44); no shortcut.
+    MoveDetailsPanel,
     Navigate(Move),
     FocusFilter,
     /// S / U: stage or unstage the file whose diff is shown.
@@ -801,10 +803,19 @@ fn table() -> Vec<Action> {
     );
     add(
         A::TogglePanel,
-        "Toggle commit detail panel",
+        "Toggle details panel",
         Interface,
         Global,
         &[ch('k').cmd()],
+    );
+    // The palette names the other place ("… to the right" while it is at
+    // the bottom).
+    add(
+        A::MoveDetailsPanel,
+        "Move details panel to the bottom",
+        Interface,
+        Global,
+        &[],
     );
     add(
         A::Close,
