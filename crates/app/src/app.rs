@@ -13938,6 +13938,8 @@ pub(crate) mod tests {
             git(&["rev-parse", "HEAD"])
         };
         git(&["init", "--quiet", "-b", "main"]);
+        // Git for Windows' default autocrlf would hand the tool CRLF files.
+        git(&["config", "core.autocrlf", "false"]);
         let first = commit("one\n", "first");
         let second = commit("two\n", "second");
         // The fake tool: a script in a folder with a space, appending both

@@ -189,8 +189,10 @@ fn custom_mergetool_resolves_when_saved() {
     let repo = conflicted();
     let cli = CliBackend::new(repo.path());
     // Writes "theirs" + base into the result and exits 1: the exit code is
-    // not trusted, the saved file counts.
-    let tool = custom_merge(r#"cat "$2" "$3" > "$4"; exit 1"#);
+    // not trusted, the saved file counts. Git compares modification times
+    // with `test -nt`, which some shells (macOS) do in whole seconds: the
+    // tool saves a second after Git's backup, as a person would.
+    let tool = custom_merge(r#"sleep 1; cat "$2" "$3" > "$4"; exit 1"#);
     run_mergetool(&cli, &tool, "c.txt", true).unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("c.txt")).unwrap(),
