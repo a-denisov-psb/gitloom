@@ -78,11 +78,13 @@ Acceptance: unit tests: a minimal file (name, base, main colors) loads and deriv
 
 Note: the name collision test covers `unique_stem` ("<stem> 2", "<stem> 3", compared without regard to case) and `stem_for_name`, used by import and New theme (M17-02). User themes load in the startup task with the settings; tests that change the process-wide registry hold `themes::TEST_USER_THEMES`, and the contrast test checks the built-ins only.
 
-### [ ] M17-02 Themes category: list and file actions
+### [x] M17-02 Themes category: list and file actions
 
 - The category, the list with lock icons, New theme (duplicate), Rename (file and id; settings follow when the theme was chosen or mapped), Delete with confirmation and fallback note, Import…, Export… (system file dialogs), Open folder; link and palette action "Edit themes…".
 
 Acceptance: app tests: duplicating a built-in creates `<name> copy.json` and selects it; rename updates file, id and settings; deleting the active theme falls back to Dark with the note; import collision asks Replace or Keep both; importing an invalid file shows the reason and changes nothing; an exported file imports again; built-ins have no Rename or Delete; snapshots of the list in Dark and Light.
+
+Note: for a built-in, Rename… and Delete… are shown disabled with the reason ("Built-in themes cannot be changed; \"New theme\" makes a copy") rather than hidden (ADR-044: the way to a changeable copy stays visible); a lock icon marks built-ins and "In use" the active theme. The file actions run as `theme_file::Op` through `theme_file::apply` off the UI thread; the Lucide icon `lock` was added.
 
 ### [ ] M17-03 Editor sections, color rows, save and derive
 

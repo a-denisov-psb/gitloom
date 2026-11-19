@@ -93,6 +93,8 @@ pub enum ActionId {
     About,
     /// Opens Preferences → Identities (M8-03).
     ManageIdentities,
+    /// Opens Preferences → Themes (M17-02).
+    EditThemes,
     /// "Copy commit message prompt…" (M10-07).
     CopyCommitPrompt,
     /// "Edit commit message…": the message modal of the selected commit
@@ -872,6 +874,7 @@ fn table() -> Vec<Action> {
         Global,
         &[],
     );
+    add(A::EditThemes, "Edit themes…", Interface, Global, &[]);
     add(
         A::ManageIdentities,
         "Manage identities",

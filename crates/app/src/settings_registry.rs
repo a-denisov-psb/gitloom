@@ -297,6 +297,14 @@ pub const SETTINGS: &[Setting] = &[
         T(Toggle::GraphSha),
         &["column", "sha", "hash"],
     ),
+    // The theme list and its files (M17-02): no single field.
+    Setting {
+        label: "Edit themes",
+        category: Some(C::Themes),
+        field: None,
+        kind: F,
+        keywords: &["theme", "colors", "import", "export", "my themes"],
+    },
     setting("Font", C::Editor, "Font", F, &["monospace", "code"]),
     setting("Font size", C::Editor, "Font size", F, &["code"]),
     setting("Tab size", C::Editor, "Tab size", F, &["indent"]),

@@ -69,6 +69,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         Category::Commit => commit_template(app, page),
         Category::RepoEditor => repository_editor(app, page),
         Category::Gitflow => gitflow(app, page),
+        Category::Themes => themes_page(app),
     };
     HIGHLIGHT.with(|h| h.set(None));
 
@@ -1204,14 +1205,9 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(
     .into()
 }
 
-/// One theme of the Appearance lists (ADR-058): a swatch strip
-/// (background, surface, accent, text, three lane colors), the name and a
-/// check mark when it is the current one.
-fn theme_entry<'a>(
-    def: &crate::themes::ThemeDef,
-    current: bool,
-    message: Message,
-) -> Element<'a, Message> {
+/// The swatch strip of a theme: background, surface, accent, text and
+/// three lane colors, framed in the theme's border color.
+fn theme_swatches<'a>(def: &crate::themes::ThemeDef) -> Element<'a, Message> {
     let p = &def.palette;
     let colors = [
         p.bg_graph, p.bg_panel, p.accent, p.text, p.lanes[0], p.lanes[1], p.lanes[2],
@@ -1229,13 +1225,25 @@ fn theme_entry<'a>(
     }));
     // The strip's frame is the theme's own border, so dark swatches stay
     // apart from a dark background and light ones from a light one.
-    let strip = container(strip)
+    container(strip)
         .padding(1)
         .style(move |_: &iced::Theme| container::Style {
             background: Some(border.into()),
             border: iced::Border::default().rounded(2),
             ..container::Style::default()
-        });
+        })
+        .into()
+}
+
+/// One theme of the Appearance lists (ADR-058): a swatch strip
+/// (background, surface, accent, text, three lane colors), the name and a
+/// check mark when it is the current one.
+fn theme_entry<'a>(
+    def: &crate::themes::ThemeDef,
+    current: bool,
+    message: Message,
+) -> Element<'a, Message> {
+    let strip = theme_swatches(def);
     let mark: Element<'a, Message> = if current {
         crate::icons::tinted(crate::icons::Icon::Check, 14.0, |p| p.accent).into()
     } else {
@@ -1337,6 +1345,124 @@ fn theme_choice(app: &App) -> Element<'_, Message> {
     content.into()
 }
 
+/// Preferences → Themes (M17-02, ADR-059): built-in themes (read only,
+/// lock icon) and "My themes" with the invalid files and their reason;
+/// the file actions below act on the selected theme.
+fn themes_page(app: &App) -> Element<'_, Message> {
+    use crate::icons::{self, Icon};
+    use crate::theme_file::Entry;
+    let selected = app.selected_theme();
+    let active = app.active_theme().id.clone();
+    let entry = |def: &crate::themes::ThemeDef| -> Element<'_, Message> {
+        let lock: Element<'_, Message> = if crate::theme_file::stem_of(&def.id).is_none() {
+            crate::ui::panel::with_tooltip_text(
+                icons::tinted(Icon::Lock, 12.0, |p| p.text_muted).into(),
+                "Built-in theme: read only".to_owned(),
+            )
+        } else {
+            space::horizontal().width(12).into()
+        };
+        let in_use: Element<'_, Message> = if def.id == active {
+            muted("In use").size(12).into()
+        } else {
+            space::horizontal().width(0).into()
+        };
+        button(
+            row![
+                lock,
+                theme_swatches(def),
+                text(def.name.clone()),
+                space::horizontal(),
+                in_use
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::ThemeSelected(def.id.clone()))
+        .padding([4, 8])
+        .width(Fill)
+        .style(theme::list_item(def.id == selected.id))
+        .into()
+    };
+    let all = crate::themes::all();
+    let mut list = column![muted("Built-in themes").size(12)].spacing(2);
+    for def in all
+        .iter()
+        .filter(|d| crate::theme_file::stem_of(&d.id).is_none())
+    {
+        list = list.push(entry(def));
+    }
+    list = list.push(space::vertical().height(8));
+    list = list.push(muted("My themes").size(12));
+    let mut mine = 0;
+    for file in &app.theme_files {
+        match file {
+            Entry::Theme(def) => {
+                if let Some(def) = all.iter().find(|d| d.id == def.id) {
+                    list = list.push(entry(def));
+                    mine += 1;
+                }
+            }
+            Entry::Invalid { file, reason } => {
+                list = list.push(
+                    container(
+                        text(format!("{file} (invalid: {reason})"))
+                            .size(12)
+                            .style(theme::text_warning),
+                    )
+                    .padding([4, 8]),
+                );
+                mine += 1;
+            }
+        }
+    }
+    if mine == 0 {
+        list = list.push(
+            container(muted("None yet. \"New theme\" copies the selected theme.").size(12))
+                .padding([4, 8]),
+        );
+    }
+    let user = crate::theme_file::stem_of(&selected.id).is_some();
+    let action = |label: &'static str, message: Message, enabled: bool, reason: &'static str| {
+        let button = button(text(label))
+            .on_press_maybe(enabled.then_some(message))
+            .padding([5, 12])
+            .style(button::secondary);
+        if enabled {
+            Element::from(button)
+        } else {
+            crate::ui::panel::with_tooltip_text(button.into(), reason.to_owned())
+        }
+    };
+    const BUILT_IN: &str = "Built-in themes cannot be changed; \"New theme\" makes a copy";
+    let actions = row![
+        action("New theme", Message::ThemeNew, true, ""),
+        action("Rename…", Message::ThemeRename, user, BUILT_IN),
+        action(
+            "Delete…",
+            Message::ThemeDelete { confirmed: false },
+            user,
+            BUILT_IN
+        ),
+        action("Import…", Message::ThemeImport, true, ""),
+        action("Export…", Message::ThemeExport, true, ""),
+        action("Open folder", Message::ThemeOpenFolder, true, ""),
+    ]
+    .spacing(6)
+    .wrap();
+    column![
+        container(list).max_width(520),
+        actions,
+        muted(format!(
+            "\"New theme\" copies \"{}\" into a file of its own in the themes folder.",
+            selected.name
+        ))
+        .size(12),
+    ]
+    .spacing(14)
+    .into()
+}
+
 fn appearance(app: &App) -> Element<'_, Message> {
     let appearance = &app.settings.appearance;
     let system_note = match app.system_theme {
@@ -1347,6 +1473,16 @@ fn appearance(app: &App) -> Element<'_, Message> {
         }
     };
     let theme_field = field("Theme", theme_choice(app), system_note);
+    // Own themes are made in Preferences → Themes (M17-02).
+    let theme_field: Element<'_, Message> = column![
+        theme_field,
+        button(text("Edit themes…").size(12))
+            .on_press(Message::SettingsCategory(Category::Themes))
+            .padding([2, 0])
+            .style(button::text),
+    ]
+    .spacing(2)
+    .into();
     // An unknown chosen or mapped id is named (ADR-044, ADR-058).
     let theme_field: Element<'_, Message> = match app.theme_note() {
         Some(note) => column![
