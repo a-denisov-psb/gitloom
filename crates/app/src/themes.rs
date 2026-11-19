@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 
+use crate::highlight::CodeTheme;
 use crate::theme::{ThemeKind, ThemePalette, DARK, LIGHT};
 
 /// Id of the default dark theme (also the fallback for unknown ids).
@@ -24,15 +25,24 @@ pub struct ThemeDef {
     /// Dark or Light: iced's `is_dark`, icon tint and the System slot.
     pub base: ThemeKind,
     pub palette: Arc<ThemePalette>,
+    /// The embedded syntax theme (ADR-058).
+    pub syntax: CodeTheme,
 }
 
 impl ThemeDef {
-    fn builtin(id: &str, name: &str, base: ThemeKind, palette: ThemePalette) -> Self {
+    fn builtin(
+        id: &str,
+        name: &str,
+        base: ThemeKind,
+        palette: ThemePalette,
+        syntax: CodeTheme,
+    ) -> Self {
         Self {
             id: id.to_owned(),
             name: name.to_owned(),
             base,
             palette: Arc::new(palette),
+            syntax,
         }
     }
 }
@@ -40,8 +50,8 @@ impl ThemeDef {
 /// The built-in themes in list order.
 fn builtins() -> Vec<Arc<ThemeDef>> {
     [
-        ThemeDef::builtin(DARK_ID, "Dark", ThemeKind::Dark, DARK),
-        ThemeDef::builtin(LIGHT_ID, "Light", ThemeKind::Light, LIGHT),
+        ThemeDef::builtin(DARK_ID, "Dark", ThemeKind::Dark, DARK, CodeTheme::DARK),
+        ThemeDef::builtin(LIGHT_ID, "Light", ThemeKind::Light, LIGHT, CodeTheme::LIGHT),
     ]
     .into_iter()
     .map(Arc::new)
@@ -83,11 +93,11 @@ pub fn default_of(base: ThemeKind) -> Arc<ThemeDef> {
     };
     read(|r| r.themes.iter().find(|t| t.id == id).cloned()).unwrap_or_else(|| {
         // Built-ins are never removed; this only keeps the function total.
-        let palette = match base {
-            ThemeKind::Dark => DARK,
-            ThemeKind::Light => LIGHT,
+        let (palette, syntax) = match base {
+            ThemeKind::Dark => (DARK, CodeTheme::DARK),
+            ThemeKind::Light => (LIGHT, CodeTheme::LIGHT),
         };
-        Arc::new(ThemeDef::builtin(id, id, base, palette))
+        Arc::new(ThemeDef::builtin(id, id, base, palette, syntax))
     })
 }
 

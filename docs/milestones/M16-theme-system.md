@@ -88,7 +88,7 @@ Acceptance: all existing snapshots of Dark and Light are pixel-identical to befo
 
 Note: mechanism in ADR-058 (registry keyed by the iced theme name, `palette()` returns `Arc<ThemePalette>`); all 359 `ui_check` snapshots compared pixel by pixel with `develop` before the change: identical.
 
-### [ ] M16-02 Feature color list, syntax theme per theme, derive
+### [x] M16-02 Feature color list, syntax theme per theme, derive
 
 - Replace `flow_colors: [Color; 9]` by named Git flow colors plus a feature list of 1–4 colors; `lane_color` maps the four feature ids to `features[i % len]`.
 - `highlight::CodeTheme` becomes the name of an embedded `two-face` theme taken from the theme; the cache key, `Progressive` jobs and the stale-result checks use it.

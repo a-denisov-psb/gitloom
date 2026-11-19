@@ -2956,7 +2956,12 @@ impl App {
     /// Theme of the window: the choice in the settings; "System" follows
     /// the operating system and falls back to Dark when it is unknown.
     pub fn theme(&self) -> iced::Theme {
-        crate::theme::app_theme(self.theme_kind())
+        crate::theme::iced_theme(&self.active_theme())
+    }
+
+    /// The registry entry of the theme in use (ADR-058).
+    pub fn active_theme(&self) -> std::sync::Arc<crate::themes::ThemeDef> {
+        crate::themes::default_of(self.theme_kind())
     }
 
     #[cfg(test)]
@@ -5972,11 +5977,11 @@ impl App {
     /// Style of the code views from Preferences → Editor (M11-06) and the
     /// code theme of the active theme (M11-09).
     pub fn editor_style(&self) -> crate::editor_style::EditorStyle {
+        let theme = self.active_theme();
         crate::editor_style::EditorStyle {
-            code_theme: match self.theme_kind() {
-                crate::theme::ThemeKind::Light => crate::highlight::CodeTheme::Light,
-                crate::theme::ThemeKind::Dark => crate::highlight::CodeTheme::Dark,
-            },
+            code_theme: theme.syntax,
+            added_emphasis: theme.palette.diff_added_emphasis,
+            removed_emphasis: theme.palette.diff_removed_emphasis,
             ..crate::editor_style::EditorStyle::from_settings(&self.settings.editor)
         }
     }
@@ -15539,7 +15544,7 @@ pub(crate) mod tests {
         };
         // Plain first.
         assert!(open_diff(&app).spans_for(&line(&app)).is_none());
-        let result = highlighted(&app, CodeTheme::Dark);
+        let result = highlighted(&app, CodeTheme::DARK);
         let _ = app.update(result);
         assert!(open_diff(&app).spans_for(&line(&app)).is_some());
         // Off: no spans; the result stays for switching back.
@@ -15549,7 +15554,7 @@ pub(crate) mod tests {
         assert!(open_diff(&app).spans_for(&line(&app)).is_some());
         // Another theme family: the dark result is not used for Light.
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
-        assert_eq!(open_diff(&app).style.code_theme, CodeTheme::Light);
+        assert_eq!(open_diff(&app).style.code_theme, CodeTheme::LIGHT);
         assert!(open_diff(&app).spans_for(&line(&app)).is_none());
     }
 
@@ -15557,7 +15562,7 @@ pub(crate) mod tests {
     fn stale_highlighting_results_are_ignored() {
         use crate::highlight::CodeTheme;
         let mut app = wide_diff_app(settings::DiffMode::Inline);
-        let old = highlighted(&app, CodeTheme::Dark);
+        let old = highlighted(&app, CodeTheme::DARK);
         // The diff reloads (e.g. after staging): a result of the older load
         // does not apply.
         let diff = open_diff(&app);
@@ -15574,13 +15579,13 @@ pub(crate) mod tests {
         let _ = app.update(old);
         assert!(open_diff(&app).highlight.is_none(), "older load");
         // A result for another file is ignored too.
-        let mut other = highlighted(&app, CodeTheme::Dark);
+        let mut other = highlighted(&app, CodeTheme::DARK);
         if let Message::DiffHighlighted { request, .. } = &mut other {
             request.path = "b".into();
         }
         let _ = app.update(other);
         assert!(open_diff(&app).highlight.is_none(), "other file");
-        let current = highlighted(&app, CodeTheme::Dark);
+        let current = highlighted(&app, CodeTheme::DARK);
         let _ = app.update(current);
         assert!(open_diff(&app).highlight.is_some());
     }
@@ -15596,7 +15601,7 @@ pub(crate) mod tests {
             .as_ref()
             .expect("highlighting runs after the load")
             .watch();
-        let late = highlighted(&app, CodeTheme::Dark);
+        let late = highlighted(&app, CodeTheme::DARK);
         let request = DiffRequest {
             kind: git_core::DiffKind::Unstaged,
             path: "b.rs".into(),
@@ -15629,7 +15634,7 @@ pub(crate) mod tests {
         let mut job = crate::highlight::Progressive::new(
             "b.rs",
             Arc::from(new.as_str()),
-            CodeTheme::Dark,
+            CodeTheme::DARK,
             None,
         );
         assert!(!job.step());
@@ -15639,7 +15644,7 @@ pub(crate) mod tests {
             request: request.clone(),
             generation,
             sides: Arc::new(crate::highlight::DiffSides {
-                theme: CodeTheme::Dark,
+                theme: CodeTheme::DARK,
                 language: None,
                 detected: "Rust",
                 old: crate::highlight::Outcome::Plain(crate::highlight::Plain::UnknownType),
@@ -23882,7 +23887,7 @@ pub(crate) mod tests {
     fn choosing_a_language_restarts_the_diff_and_ignores_late_results() {
         use crate::highlight::CodeTheme;
         let mut app = wide_diff_app(settings::DiffMode::Inline);
-        let late = highlighted(&app, CodeTheme::Dark);
+        let late = highlighted(&app, CodeTheme::DARK);
         assert_eq!(diff_job_language(&app), Some(None));
         let item = crate::ui::statusbar::language_item(&app).unwrap();
         assert_eq!(
@@ -23980,13 +23985,13 @@ pub(crate) mod tests {
             path: "f.txt".into(),
             rev: None,
             highlight: crate::file_history::BlameHighlight {
-                theme: crate::highlight::CodeTheme::Dark,
+                theme: crate::highlight::CodeTheme::DARK,
                 language: language.map(str::to_owned),
                 detected: crate::highlight::PLAIN_TEXT,
                 outcome: crate::highlight::highlight_in(
                     "f.txt",
                     "[a]\n",
-                    crate::highlight::CodeTheme::Dark,
+                    crate::highlight::CodeTheme::DARK,
                     language,
                 ),
             },

@@ -43,16 +43,103 @@ pub struct ThemePalette {
     pub backdrop: Color,
     /// Background of the graph's column header (ADR-048 token).
     pub header_band: Color,
-    /// Git flow layout colors (M13-02, ADR-048 token): production,
-    /// hotfix, release, development, the four feature colors, unknown.
-    pub flow_colors: [Color; 9],
+    /// Git flow layout colors (M13-02, ADR-048 token; ADR-058).
+    pub flow: FlowColors,
     /// Changed characters within an added or removed line (word diff, fix
     /// after M15; ADR-048 tokens), drawn over the line's background.
     pub diff_added_emphasis: Color,
     pub diff_removed_emphasis: Color,
 }
 
-/// The themes (ADR-054: Dark and Light).
+/// Git flow layout colors (ADR-058): one per branch type, and a list of
+/// one to four colors for feature branches.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlowColors {
+    pub production: Color,
+    pub hotfix: Color,
+    pub release: Color,
+    pub development: Color,
+    pub unknown: Color,
+    pub features: FeatureColors,
+}
+
+/// One to four feature branch colors: with one, every feature branch has
+/// it; with several they are cycled (ADR-058).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FeatureColors {
+    colors: [Color; FeatureColors::MAX],
+    len: usize,
+}
+
+impl FeatureColors {
+    pub const MAX: usize = 4;
+
+    /// Four colors (the built-in themes).
+    pub const fn four(colors: [Color; 4]) -> Self {
+        Self { colors, len: 4 }
+    }
+
+    /// `colors` when there are one to four of them.
+    #[allow(dead_code)] // Used by the built-in themes and theme files (M16-04, M17).
+    pub fn new(colors: &[Color]) -> Option<Self> {
+        if colors.is_empty() || colors.len() > Self::MAX {
+            return None;
+        }
+        let mut all = [colors[0]; Self::MAX];
+        all[..colors.len()].copy_from_slice(colors);
+        Some(Self {
+            colors: all,
+            len: colors.len(),
+        })
+    }
+
+    #[allow(dead_code)] // Used by the built-in themes and theme files (M16-04, M17).
+    pub fn as_slice(&self) -> &[Color] {
+        &self.colors[..self.len]
+    }
+
+    /// Color of the feature color id `index` of `git-graph`.
+    pub fn get(&self, index: usize) -> Color {
+        self.colors[index % self.len.max(1)]
+    }
+}
+
+impl FlowColors {
+    /// Color of a Git flow color id (`git_graph::flow`): 0 production,
+    /// 1 hotfix, 2 release, 3 development, 4 … 7 features, 8 unknown.
+    pub fn get(&self, id: u32) -> Color {
+        match id {
+            0 => self.production,
+            1 => self.hotfix,
+            2 => self.release,
+            3 => self.development,
+            4..=7 => self.features.get(id as usize - 4),
+            _ => self.unknown,
+        }
+    }
+}
+
+#[allow(dead_code)] // Used by the built-in themes and theme files (M16-04, M17).
+/// The ten colors that define a theme (ADR-058); [`ThemePalette::derive`]
+/// computes the others.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MainColors {
+    /// Background (`bg_graph`).
+    pub background: Color,
+    /// Surface (`bg_panel`).
+    pub surface: Color,
+    /// Chrome (`bg_chrome`).
+    pub chrome: Color,
+    pub text: Color,
+    pub text_muted: Color,
+    pub accent: Color,
+    pub border: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub danger: Color,
+}
+
+/// The themes' bases (ADR-058): every theme is dark or light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeKind {
     Dark,
@@ -86,17 +173,15 @@ pub const DARK: ThemePalette = ThemePalette {
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
     header_band: hex(0x252a33),
-    flow_colors: [
-        hex(0x5fb878), // production: green
-        hex(0x56b6c2), // hotfix: cyan
-        hex(0x4f9dde), // release: blue
-        hex(0xc678dd), // development: violet
-        hex(0xe86fb0), // features: pink, red, orange, yellow
-        hex(0xe06c75),
-        hex(0xd19a66),
-        hex(0xe5c07b),
-        hex(0x8a93a3), // unknown: gray
-    ],
+    flow: FlowColors {
+        production: hex(0x5fb878),  // green
+        hotfix: hex(0x56b6c2),      // cyan
+        release: hex(0x4f9dde),     // blue
+        development: hex(0xc678dd), // violet
+        unknown: hex(0x8a93a3),     // gray
+        // Pink, red, orange, yellow.
+        features: FeatureColors::four([hex(0xe86fb0), hex(0xe06c75), hex(0xd19a66), hex(0xe5c07b)]),
+    },
     diff_added_emphasis: Color::from_rgba(0.373, 0.722, 0.471, 0.36),
     diff_removed_emphasis: Color::from_rgba(0.878, 0.424, 0.459, 0.36),
 };
@@ -129,20 +214,104 @@ pub const LIGHT: ThemePalette = ThemePalette {
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
     header_band: hex(0xf4f5f7),
-    flow_colors: [
-        hex(0x2e8b3a), // production: green
-        hex(0x0f8b9c), // hotfix: cyan
-        hex(0x1f6fc5), // release: blue
-        hex(0x8e44ad), // development: violet
-        hex(0xc2307f), // features: pink, red, orange, yellow
-        hex(0xd1343f),
-        hex(0xc0601c),
-        hex(0xa86d0c),
-        hex(0x6b7280), // unknown: gray
-    ],
+    flow: FlowColors {
+        production: hex(0x2e8b3a),  // green
+        hotfix: hex(0x0f8b9c),      // cyan
+        release: hex(0x1f6fc5),     // blue
+        development: hex(0x8e44ad), // violet
+        unknown: hex(0x6b7280),     // gray
+        // Pink, red, orange, yellow.
+        features: FeatureColors::four([hex(0xc2307f), hex(0xd1343f), hex(0xc0601c), hex(0xa86d0c)]),
+    },
     diff_added_emphasis: Color::from_rgba(0.180, 0.490, 0.196, 0.26),
     diff_removed_emphasis: Color::from_rgba(0.776, 0.157, 0.157, 0.22),
 };
+
+#[allow(dead_code)] // Used by the built-in themes and theme files (M16-04, M17).
+impl ThemePalette {
+    /// The ten main colors of the palette.
+    pub fn main_colors(&self) -> MainColors {
+        MainColors {
+            background: self.bg_graph,
+            surface: self.bg_panel,
+            chrome: self.bg_chrome,
+            text: self.text,
+            text_muted: self.text_muted,
+            accent: self.accent,
+            border: self.border,
+            success: self.success,
+            warning: self.warning,
+            danger: self.danger,
+        }
+    }
+
+    /// A palette from the ten main colors (ADR-058): inset, hover,
+    /// selected, header band, backdrop and the diff emphasis colors are
+    /// computed; lanes and Git flow colors are those of the base's default
+    /// theme, node text is black or white by contrast. Deterministic.
+    pub fn derive(main: MainColors, base: ThemeKind) -> Self {
+        let defaults = match base {
+            ThemeKind::Dark => &DARK,
+            ThemeKind::Light => &LIGHT,
+        };
+        let (hover, selected, backdrop, emphasis) = match base {
+            ThemeKind::Dark => (0.08, 0.25, 0.55, 0.36),
+            ThemeKind::Light => (0.10, 0.20, 0.35, 0.24),
+        };
+        let palette = Self {
+            bg_graph: main.background,
+            bg_panel: main.surface,
+            // Between the panel and the chrome: a little darker than the
+            // panel (finding #42).
+            bg_inset: mix(main.surface, main.chrome, 0.5),
+            bg_chrome: main.chrome,
+            bg_hover: mix(main.surface, main.text, hover),
+            bg_selected: mix(main.background, main.accent, selected),
+            border: main.border,
+            text: main.text,
+            text_muted: main.text_muted,
+            accent: main.accent,
+            success: main.success,
+            warning: main.warning,
+            danger: main.danger,
+            node_text: Color::WHITE,
+            lanes: defaults.lanes,
+            backdrop: Color::BLACK.scale_alpha(backdrop),
+            header_band: main.surface,
+            flow: defaults.flow,
+            diff_added_emphasis: main.success.scale_alpha(emphasis),
+            diff_removed_emphasis: main.danger.scale_alpha(emphasis),
+        };
+        palette.with_graph(defaults.lanes, defaults.flow)
+    }
+
+    /// The palette with other lane and Git flow colors; the node text is
+    /// chosen again (black or white, whichever reads better on the lanes).
+    pub fn with_graph(self, lanes: [Color; 8], flow: FlowColors) -> Self {
+        Self {
+            lanes,
+            flow,
+            node_text: node_text_for(&lanes),
+            ..self
+        }
+    }
+}
+
+#[allow(dead_code)] // Used by the built-in themes and theme files (M16-04, M17).
+/// Black or white, whichever has the better worst contrast on `fills`.
+pub fn node_text_for(fills: &[Color]) -> Color {
+    let worst = |text: Color| {
+        fills
+            .iter()
+            .map(|fill| contrast(text, *fill))
+            .fold(f32::INFINITY, f32::min)
+    };
+    if worst(Color::BLACK) > worst(Color::WHITE) {
+        Color::BLACK
+    } else {
+        Color::WHITE
+    }
+}
 
 /// Palette of the theme a style function is called with: the registry
 /// entry named like the iced theme (ADR-058); other iced themes (tests use
@@ -302,9 +471,8 @@ pub fn panes(theme: &Theme) -> pane_grid::Style {
     }
 }
 
-/// WCAG relative luminance (contrast tests).
-#[cfg(test)]
-pub(crate) fn luminance(c: Color) -> f32 {
+/// WCAG relative luminance.
+pub fn luminance(c: Color) -> f32 {
     let channel = |v: f32| {
         if v <= 0.039_28 {
             v / 12.92
@@ -315,16 +483,14 @@ pub(crate) fn luminance(c: Color) -> f32 {
     0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
 }
 
-/// WCAG contrast ratio of two colors (contrast tests).
-#[cfg(test)]
-pub(crate) fn contrast(a: Color, b: Color) -> f32 {
+/// WCAG contrast ratio of two colors.
+pub fn contrast(a: Color, b: Color) -> f32 {
     let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
 /// `a` moved towards `b` by `t` (0 … 1).
-#[cfg(test)]
-fn mix(a: Color, b: Color, t: f32) -> Color {
+pub fn mix(a: Color, b: Color, t: f32) -> Color {
     Color::from_rgb(
         a.r + (b.r - a.r) * t,
         a.g + (b.g - a.g) * t,
@@ -518,7 +684,7 @@ pub fn change_color(p: &ThemePalette, kind: ChangeKind) -> Color {
 /// [`git_graph::flow::FLOW_COLOR_BASE`] on are Git flow colors (M13-02).
 pub fn lane_color(p: &ThemePalette, color: u32) -> Color {
     match color.checked_sub(git_graph::flow::FLOW_COLOR_BASE) {
-        Some(flow) => p.flow_colors[flow as usize % p.flow_colors.len()],
+        Some(flow) => p.flow.get(flow),
         None => p.lanes[color as usize % p.lanes.len()],
     }
 }
@@ -635,20 +801,14 @@ pub fn diff_line(
 }
 
 /// Background of the changed characters of a `kind` line (word diff, fix
-/// after M15) in the theme of `code_theme`; none for context lines.
+/// after M15) in the code views' style; none for context lines.
 pub fn diff_emphasis(
-    code_theme: crate::highlight::CodeTheme,
+    style: &crate::editor_style::EditorStyle,
     kind: git_core::DiffLineKind,
 ) -> Option<Color> {
-    let p = crate::themes::default_of(match code_theme {
-        crate::highlight::CodeTheme::Dark => ThemeKind::Dark,
-        crate::highlight::CodeTheme::Light => ThemeKind::Light,
-    })
-    .palette
-    .clone();
     match kind {
-        git_core::DiffLineKind::Added => Some(p.diff_added_emphasis),
-        git_core::DiffLineKind::Removed => Some(p.diff_removed_emphasis),
+        git_core::DiffLineKind::Added => Some(style.added_emphasis),
+        git_core::DiffLineKind::Removed => Some(style.removed_emphasis),
         git_core::DiffLineKind::Context => None,
     }
 }
@@ -1043,12 +1203,20 @@ mod tests {
     #[test]
     fn flow_colors_stay_visible() {
         for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
-            for (i, color) in p.flow_colors.iter().enumerate() {
+            let flow = &p.flow;
+            let all = [
+                flow.production,
+                flow.hotfix,
+                flow.release,
+                flow.development,
+                flow.unknown,
+            ];
+            for (i, color) in all.iter().chain(flow.features.as_slice()).enumerate() {
                 let ratio = contrast(*color, p.bg_graph);
                 assert!(ratio >= 3.0, "{name}: flow color {i} {ratio:.2}");
             }
             let base = git_graph::flow::FLOW_COLOR_BASE;
-            assert_eq!(lane_color(p, base + 3), p.flow_colors[3]);
+            assert_eq!(lane_color(p, base + 3), p.flow.development);
             assert_eq!(lane_color(p, 3), p.lanes[3]);
         }
     }
@@ -1065,5 +1233,98 @@ mod tests {
         for p in [&DARK, &LIGHT] {
             assert_eq!(p.header_band, p.bg_panel);
         }
+    }
+
+    /// ADR-058: feature color ids base+4 … base+7 map to `features[i % len]`.
+    #[test]
+    fn feature_colors_cycle_through_the_list() {
+        let base = git_graph::flow::FLOW_COLOR_BASE;
+        let c = [hex(0x111111), hex(0x222222), hex(0x333333), hex(0x444444)];
+        for len in 1..=4 {
+            let features = FeatureColors::new(&c[..len]).expect("1 … 4");
+            assert_eq!(features.as_slice(), &c[..len]);
+            let p = ThemePalette {
+                flow: FlowColors {
+                    features,
+                    ..DARK.flow
+                },
+                ..DARK
+            };
+            let got: Vec<Color> = (4..8).map(|id| lane_color(&p, base + id)).collect();
+            let want: Vec<Color> = (0..4).map(|i| c[i % len]).collect();
+            assert_eq!(got, want, "{len} colors");
+        }
+        // One entry: every feature branch has the same color.
+        let one = FeatureColors::new(&c[..1]).expect("one");
+        assert!((0..4).all(|i| one.get(i) == c[0]));
+        assert!(FeatureColors::new(&[]).is_none());
+        assert!(FeatureColors::new(&[c[0]; 5]).is_none());
+        // The other types keep their colors.
+        assert_eq!(lane_color(&DARK, base), DARK.flow.production);
+        assert_eq!(lane_color(&DARK, base + 1), DARK.flow.hotfix);
+        assert_eq!(lane_color(&DARK, base + 2), DARK.flow.release);
+        assert_eq!(lane_color(&DARK, base + 8), DARK.flow.unknown);
+    }
+
+    /// ADR-058: derived backgrounds keep text readable (4.5:1) for sample
+    /// main colors of both bases.
+    #[test]
+    fn derived_backgrounds_keep_text_readable() {
+        let samples = [
+            (DARK.main_colors(), ThemeKind::Dark),
+            (LIGHT.main_colors(), ThemeKind::Light),
+            (
+                MainColors {
+                    background: hex(0x262624),
+                    surface: hex(0x30302e),
+                    chrome: hex(0x1f1e1d),
+                    text: hex(0xf0eee6),
+                    text_muted: hex(0xb0aea5),
+                    accent: hex(0xd97757),
+                    border: hex(0x3e3e38),
+                    success: hex(0x7fb069),
+                    warning: hex(0xe0b050),
+                    danger: hex(0xe06c60),
+                },
+                ThemeKind::Dark,
+            ),
+            (
+                MainColors {
+                    background: hex(0xfdf6e3),
+                    surface: hex(0xeee8d5),
+                    chrome: hex(0xe4ddc8),
+                    text: hex(0x073642),
+                    text_muted: hex(0x586e75),
+                    accent: hex(0x268bd2),
+                    border: hex(0xd3cbb7),
+                    success: hex(0x5f7d00),
+                    warning: hex(0x8a6100),
+                    danger: hex(0xc0302c),
+                },
+                ThemeKind::Light,
+            ),
+        ];
+        for (i, (main, base)) in samples.into_iter().enumerate() {
+            let p = ThemePalette::derive(main, base);
+            assert_eq!(p.main_colors(), main);
+            for (name, bg) in [
+                ("inset", p.bg_inset),
+                ("hover", p.bg_hover),
+                ("selected", p.bg_selected),
+                ("header band", p.header_band),
+            ] {
+                let ratio = contrast(p.text, bg);
+                assert!(ratio >= 4.5, "sample {i}: text on {name} {ratio:.2}");
+            }
+            assert_ne!(p.bg_hover, p.bg_panel, "sample {i}");
+            assert_ne!(p.bg_selected, p.bg_graph, "sample {i}");
+            assert_eq!(ThemePalette::derive(main, base), p, "deterministic");
+        }
+    }
+
+    #[test]
+    fn node_text_reads_best_on_the_lanes() {
+        assert_eq!(node_text_for(&LIGHT.lanes), Color::WHITE);
+        assert_eq!(node_text_for(&[hex(0xf5f5a0), hex(0xa0f5f5)]), Color::BLACK);
     }
 }
