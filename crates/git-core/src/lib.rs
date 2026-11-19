@@ -68,7 +68,8 @@ pub use discard::{
 pub use editor::{editor_call, editor_main, EditorInput, EditorKind};
 pub use external_tools::{
     configured_tool, difftool_args, mergetool_args, parse_tool_help, run_difftool, run_mergetool,
-    set_flow_layout, set_repository_editor, tool_info, DiffTarget, ToolInfo, ToolKind,
+    set_flow_layout, set_repository_editor, tool_info, tool_shell_command, DiffTarget, ToolInfo,
+    ToolKind, ToolSelection, CUSTOM_TOOL,
 };
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use flow::{FlowBranch, FlowConfig, FlowKind};

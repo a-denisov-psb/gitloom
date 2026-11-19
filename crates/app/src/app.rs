@@ -609,8 +609,17 @@ pub enum Message {
     },
     /// Tools listed in Preferences → External tools.
     ToolsLoaded(Result<(git_core::ToolInfo, git_core::ToolInfo), String>),
-    DiffToolChosen(crate::settings::ToolChoice),
-    MergeToolChosen(crate::settings::ToolChoice),
+    /// Preferences → External tools: a diff/merge tool list entry, and
+    /// the command typed into its field (fix after M15).
+    DiffToolChosen(crate::settings::ToolPick),
+    MergeToolChosen(crate::settings::ToolPick),
+    DiffToolCommandInput(String),
+    MergeToolCommandInput(String),
+    /// "Define tool…" of the "No diff tool" / "No merge tool" dialog:
+    /// External tools with the command field focused.
+    DefineTool {
+        merge: bool,
+    },
     /// Open the settings view at a category ("Open settings" in dialogs).
     SettingsOpenedAt(settings::Category),
     /// "Load avatars from Gravatar" switched in Appearance.
@@ -5283,14 +5292,60 @@ impl App {
         )
     }
 
-    /// Tool to pass as `--tool` for `choice`: `Err` when the choice is
-    /// "None"; `Ok(None)` for Git's configured tool.
-    fn tool_argument(choice: &settings::ToolChoice) -> Result<Option<String>, ExternalToolError> {
+    /// The tool Git runs for `choice`: `Err` for "None" and an empty
+    /// command; a command template becomes a shell command for Git
+    /// (ADR-055).
+    fn tool_argument(
+        choice: &settings::ToolChoice,
+    ) -> Result<git_core::ToolSelection, ExternalToolError> {
         match choice {
-            settings::ToolChoice::GitConfig => Ok(None),
-            settings::ToolChoice::Tool(name) => Ok(Some(name.clone())),
+            settings::ToolChoice::GitConfig => Ok(git_core::ToolSelection::Configured),
+            settings::ToolChoice::Tool(name) => Ok(git_core::ToolSelection::Named(name.clone())),
             settings::ToolChoice::None => Err(ExternalToolError::NotConfigured),
+            settings::ToolChoice::Command(command) => {
+                let platform = crate::launch::Platform::current();
+                let words = crate::launch::split_words_for(platform, command).map_err(|_| {
+                    ExternalToolError::Failed(
+                        "The tool command in Preferences → External tools has an unclosed quote"
+                            .to_owned(),
+                    )
+                })?;
+                if words.is_empty() {
+                    return Err(ExternalToolError::NotConfigured);
+                }
+                let windows = platform == crate::launch::Platform::Windows;
+                Ok(git_core::ToolSelection::Command(
+                    git_core::tool_shell_command(&words, windows),
+                ))
+            }
         }
+    }
+
+    /// A diff or merge tool list entry was picked (fix after M15): presets
+    /// fill the command field, "Custom" keeps (and focuses) it.
+    fn choose_tool(&mut self, kind: git_core::ToolKind, pick: settings::ToolPick) -> Task<Message> {
+        let custom = pick == settings::ToolPick::Custom;
+        if let Some(page) = &mut self.settings_page {
+            *page.tool_custom_mut(kind) = custom;
+        }
+        let choice = self.settings.tools.choice_mut(kind);
+        let field = crate::ui::settings::tool_input(kind);
+        *choice = match pick {
+            settings::ToolPick::GitConfig => settings::ToolChoice::GitConfig,
+            settings::ToolPick::None => settings::ToolChoice::None,
+            settings::ToolPick::Git(name) => settings::ToolChoice::Tool(name),
+            settings::ToolPick::Preset(preset) => {
+                settings::ToolChoice::Command(preset.template(kind).unwrap_or_default().to_owned())
+            }
+            // The setting changes once something is typed.
+            settings::ToolPick::Custom => return iced::widget::operation::focus(field),
+        };
+        let command = matches!(choice, settings::ToolChoice::Command(_));
+        let save = self.save_settings();
+        if command {
+            return Task::batch([save, iced::widget::operation::focus(field)]);
+        }
+        save
     }
 
     /// Opens the shown diff (diff view or file history) in the external
@@ -5333,6 +5388,7 @@ impl App {
             return Task::none();
         };
         let choice = self.settings.tools.diff_tool.clone();
+        let name = settings::tool_name(&choice, git_core::ToolKind::Diff);
         let tool = match Self::tool_argument(&choice) {
             Ok(tool) => tool,
             Err(error) => {
@@ -5349,23 +5405,15 @@ impl App {
         let writer = Arc::clone(&view.writer);
         self.status = format!(
             "Waiting for {}…",
-            tool.as_deref().unwrap_or("the external diff tool")
+            name.as_deref().unwrap_or("the external diff tool")
         );
         Task::perform(
             blocking(move || {
                 let result = run_tool(
                     writer.as_ref(),
                     git_core::ToolKind::Diff,
-                    tool.is_some(),
-                    |git| {
-                        git_core::run_difftool(
-                            git,
-                            &target,
-                            tool.as_deref(),
-                            &path,
-                            old_path.as_deref(),
-                        )
-                    },
+                    tool.is_explicit(),
+                    |git| git_core::run_difftool(git, &target, &tool, &path, old_path.as_deref()),
                 );
                 Ok(result)
             }),
@@ -5385,14 +5433,19 @@ impl App {
         if self.write_block().is_some() {
             return Task::none();
         }
+        let name = settings::tool_name(&self.settings.tools.merge_tool, git_core::ToolKind::Merge);
         let tool = match Self::tool_argument(&self.settings.tools.merge_tool) {
             Ok(tool) => tool,
-            Err(error) => {
-                return self.update(Message::ExternalToolFinished {
-                    tab,
-                    merge_path: None,
-                    result: Err(error),
-                })
+            // Nothing ran: no refresh, but the merge tool's dialog or toast
+            // (not the diff tool's).
+            Err(ExternalToolError::NotConfigured) => {
+                self.modal = Some(tool_missing_dialog(true));
+                return Task::none();
+            }
+            Err(ExternalToolError::Failed(error)) => {
+                self.toasts
+                    .push(crate::toast::Toast::git_error("Merge tool failed", error));
+                return Task::none();
             }
         };
         let Some(view) = self.active_view_mut() else {
@@ -5403,7 +5456,7 @@ impl App {
         }
         let label = format!(
             "Waiting for {}",
-            tool.as_deref().unwrap_or("the merge tool")
+            name.as_deref().unwrap_or("the merge tool")
         );
         view.busy = Some(label);
         let writer = Arc::clone(&view.writer);
@@ -5414,8 +5467,8 @@ impl App {
                 Ok(run_tool(
                     writer.as_ref(),
                     git_core::ToolKind::Merge,
-                    tool.is_some(),
-                    |git| git_core::run_mergetool(git, tool.as_deref(), &path, delete_orig),
+                    tool.is_explicit(),
+                    |git| git_core::run_mergetool(git, &tool, &path, delete_orig),
                 ))
             }),
             move |result: Result<_, String>| Message::ExternalToolFinished {
@@ -7228,13 +7281,33 @@ impl App {
                     page.tools = Some(result);
                 }
             }
-            Message::DiffToolChosen(choice) => {
-                self.settings.tools.diff_tool = choice;
+            Message::DiffToolChosen(pick) => return self.choose_tool(git_core::ToolKind::Diff, pick),
+            Message::MergeToolChosen(pick) => {
+                return self.choose_tool(git_core::ToolKind::Merge, pick)
+            }
+            Message::DiffToolCommandInput(command) => {
+                self.settings.tools.diff_tool = settings::ToolChoice::Command(command);
                 return self.save_settings();
             }
-            Message::MergeToolChosen(choice) => {
-                self.settings.tools.merge_tool = choice;
+            Message::MergeToolCommandInput(command) => {
+                self.settings.tools.merge_tool = settings::ToolChoice::Command(command);
                 return self.save_settings();
+            }
+            Message::DefineTool { merge } => {
+                self.modal = None;
+                let kind = if merge {
+                    git_core::ToolKind::Merge
+                } else {
+                    git_core::ToolKind::Diff
+                };
+                let open = self.open_preferences(settings::Category::ExternalTools);
+                if let Some(page) = &mut self.settings_page {
+                    *page.tool_custom_mut(kind) = true;
+                }
+                // After the page's own focus (the first field of General).
+                return open.chain(iced::widget::operation::focus(
+                    crate::ui::settings::tool_input(kind),
+                ));
             }
             Message::SettingsOpenedAt(category) => return self.open_preferences(category),
             Message::AvatarsToggled(on) => {
@@ -7326,13 +7399,18 @@ impl App {
                         page.flow = flow.as_ref().map(settings::FlowForm::new);
                     }
                 }
-                // The tool lists come from Git (needs a repository).
+                // The tool lists come from Git: in the open repository (its
+                // config may define tools), else in a neutral folder.
                 if category == settings::Category::ExternalTools {
                     let writer = self
                         .active_tab()
                         .and_then(Tab::view)
-                        .map(|v| Arc::clone(&v.writer));
-                    if let (Some(writer), Some(page)) = (writer, &mut self.settings_page) {
+                        .map(|v| Arc::clone(&v.writer))
+                        .unwrap_or_else(|| {
+                            Arc::new(git_core::CliBackend::new(std::env::temp_dir()))
+                                as Arc<dyn git_core::GitWriter>
+                        });
+                    if let Some(page) = &mut self.settings_page {
                         if page.tools.is_none() {
                             return Task::perform(
                                 blocking(move || {
@@ -12338,22 +12416,19 @@ fn run_tool(
     run(git).map_err(|e| ExternalToolError::Failed(e.to_string()))
 }
 
-/// No diff or merge tool: explain where to choose one.
+/// No diff or merge tool: "Define tool…" opens the command field.
 fn tool_missing_dialog(merge: bool) -> Modal {
-    let (title, kind, key) = if merge {
-        ("No merge tool", "merge", "merge.tool")
+    let (title, kind) = if merge {
+        ("No merge tool", "merge")
     } else {
-        ("No diff tool", "diff", "diff.tool")
+        ("No diff tool", "diff")
     };
     let mut modal = Modal::confirm(
         title,
-        format!(
-            "No external {kind} tool is configured. Choose one in Preferences → External \
-             tools, or set {key} in your Git configuration."
-        ),
-        "Open settings",
+        format!("No external {kind} tool is defined."),
+        "Define tool…",
         false,
-        Message::SettingsOpenedAt(settings::Category::ExternalTools),
+        Message::DefineTool { merge },
     );
     modal.default = Some(1);
     modal
@@ -13633,9 +13708,10 @@ pub(crate) mod tests {
         let _ = app.update(checked(Shortcut::ExternalDiff, false));
         let modal = app.modal.take().unwrap();
         assert_eq!(modal.title, "No diff tool");
+        assert_eq!(modal.text, "No external diff tool is defined.");
         assert!(matches!(
             modal.default_action(),
-            Some(Message::SettingsOpenedAt(settings::Category::ExternalTools))
+            Some(Message::DefineTool { merge: false })
         ));
 
         app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
@@ -13706,15 +13782,222 @@ pub(crate) mod tests {
             app.settings_page.as_ref().and_then(|p| p.tools.as_ref()),
             Some(Ok(_))
         ));
-        let _ = app.update(Message::DiffToolChosen(settings::ToolChoice::Tool(
+        let _ = app.update(Message::DiffToolChosen(settings::ToolPick::Git(
             "vimdiff".into(),
         )));
-        let _ = app.update(Message::MergeToolChosen(settings::ToolChoice::None));
+        let _ = app.update(Message::MergeToolChosen(settings::ToolPick::None));
         assert_eq!(
             app.settings.tools.diff_tool,
             settings::ToolChoice::Tool("vimdiff".into())
         );
         assert_eq!(app.settings.tools.merge_tool, settings::ToolChoice::None);
+    }
+
+    /// Fix after M15: a preset fills the command field; editing it makes
+    /// it "Custom"; "Custom" from another choice opens an empty field and
+    /// changes the setting only once something is typed.
+    #[test]
+    fn tool_presets_fill_the_command_and_editing_makes_it_custom() {
+        use git_core::ToolKind;
+        use settings::{ToolChoice, ToolPick, ToolPreset};
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::ExternalTools));
+        let _ = app.update(Message::DiffToolChosen(ToolPick::Preset(
+            ToolPreset::VsCode,
+        )));
+        assert_eq!(
+            app.settings.tools.diff_tool,
+            ToolChoice::Command("code --wait --diff {local} {remote}".into())
+        );
+        let shown = |app: &App, kind| {
+            let page = app.settings_page.as_ref().unwrap();
+            let (choice, custom) = match kind {
+                ToolKind::Diff => (&app.settings.tools.diff_tool, page.diff_tool_custom),
+                ToolKind::Merge => (&app.settings.tools.merge_tool, page.merge_tool_custom),
+            };
+            ToolPick::of(choice, kind, custom)
+        };
+        assert_eq!(
+            shown(&app, ToolKind::Diff),
+            ToolPick::Preset(ToolPreset::VsCode)
+        );
+        let full =
+            r#""C:\Program Files\Microsoft VS Code\Code.exe" --wait --diff {local} {remote}"#;
+        let _ = app.update(Message::DiffToolCommandInput(full.into()));
+        assert_eq!(
+            app.settings.tools.diff_tool,
+            ToolChoice::Command(full.into())
+        );
+        assert_eq!(shown(&app, ToolKind::Diff), ToolPick::Custom);
+        // Typing a preset's exact text shows the preset again.
+        let meld = ToolPreset::Meld.template(ToolKind::Diff).unwrap();
+        let _ = app.update(Message::DiffToolCommandInput(meld.into()));
+        assert_eq!(
+            shown(&app, ToolKind::Diff),
+            ToolPick::Preset(ToolPreset::Meld)
+        );
+        // Merge: "Custom" from Git's config keeps the setting until typed.
+        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
+        let _ = app.update(Message::MergeToolChosen(ToolPick::Custom));
+        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
+        assert_eq!(shown(&app, ToolKind::Merge), ToolPick::Custom);
+        let _ = app.update(Message::MergeToolCommandInput("kdiff3 {merged}".into()));
+        assert_eq!(
+            app.settings.tools.merge_tool,
+            ToolChoice::Command("kdiff3 {merged}".into())
+        );
+        // The waiting message names the preset or the program.
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        app.settings.tools.diff_tool =
+            ToolChoice::Command(ToolPreset::Zed.template(ToolKind::Diff).unwrap().into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Waiting for Zed…");
+        // An empty command is no tool; an unclosed quote is an error.
+        app.settings.tools.diff_tool = ToolChoice::Command("  ".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(
+            app.modal.take().map(|m| m.title),
+            Some("No diff tool".into())
+        );
+        app.settings.tools.diff_tool = ToolChoice::Command("\"meld {local}".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert!(app.modal.is_none());
+        assert_eq!(
+            app.toasts.list.last().map(|t| t.title.as_str()),
+            Some("Diff tool failed")
+        );
+    }
+
+    /// Fix after M15: "Define tool…" opens Preferences → External tools
+    /// with the command field shown.
+    #[test]
+    fn define_tool_opens_external_tools_with_the_field() {
+        for merge in [false, true] {
+            let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+            let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+                git_core::MIN_GIT_VERSION,
+            )));
+            app.settings.tools.diff_tool = settings::ToolChoice::None;
+            app.settings.tools.merge_tool = settings::ToolChoice::None;
+            let _ = app.update(if merge {
+                Message::OpenMergeTool("c.txt".into())
+            } else {
+                Message::ExternalDiff
+            });
+            let modal = app.modal.take().unwrap();
+            assert_eq!(modal.buttons[1].label, "Define tool…");
+            let title = if merge {
+                "No merge tool"
+            } else {
+                "No diff tool"
+            };
+            assert_eq!(modal.title, title);
+            let _ = app.update(modal.default_action().unwrap());
+            let page = app.settings_page.as_ref().unwrap();
+            assert_eq!(page.category, settings::Category::ExternalTools);
+            assert_eq!(page.merge_tool_custom, merge);
+            assert_eq!(page.diff_tool_custom, !merge);
+            assert!(app.modal.is_none());
+        }
+    }
+
+    /// Fix after M15: a command template runs through `git difftool` /
+    /// `git mergetool` exactly as the background task does, with a fake
+    /// tool in a real repository: commit files get parent and commit,
+    /// staged and unstaged files the right sides; a merge tool that
+    /// closes without saving leaves the file conflicted and never waits.
+    #[test]
+    fn custom_tools_get_the_right_versions_and_never_hang() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        };
+        let commit = |text: &str, message: &str| {
+            std::fs::write(root.join("a.txt"), text).unwrap();
+            git(&["add", "a.txt"]);
+            git(&[
+                "-c",
+                "commit.gpgSign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ]);
+            git(&["rev-parse", "HEAD"])
+        };
+        git(&["init", "--quiet", "-b", "main"]);
+        let first = commit("one\n", "first");
+        let second = commit("two\n", "second");
+        // The fake tool: a script in a folder with a space, appending both
+        // sides to a log.
+        let tools = dir.path().join("my tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let log = dir
+            .path()
+            .join("calls.txt")
+            .to_string_lossy()
+            .replace('\\', "/");
+        std::fs::write(
+            tools.join("fake diff.sh"),
+            format!("cat \"$1\" \"$2\" | tr '\\n' ' ' >> '{log}'; echo >> '{log}'\n"),
+        )
+        .unwrap();
+        let script = tools
+            .join("fake diff.sh")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let template = format!("sh \"{script}\" {{local}} {{remote}}");
+        let tool = App::tool_argument(&settings::ToolChoice::Command(template)).unwrap();
+        let cli = git_core::CliBackend::new(&root);
+        let calls = || std::fs::read_to_string(dir.path().join("calls.txt")).unwrap_or_default();
+        let run = |target: &git_core::DiffTarget| {
+            run_tool(&cli, git_core::ToolKind::Diff, tool.is_explicit(), |git| {
+                git_core::run_difftool(git, target, &tool, "a.txt", None)
+            })
+        };
+        let target = git_core::DiffTarget::Commit {
+            id: second,
+            parent: Some(first),
+        };
+        assert_eq!(run(&target), Ok(()));
+        assert_eq!(calls(), "one two \n");
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
+        assert_eq!(run(&git_core::DiffTarget::Unstaged), Ok(()));
+        assert!(calls().ends_with("two three \n"), "{}", calls());
+        git(&["add", "a.txt"]);
+        std::fs::write(root.join("a.txt"), "four\n").unwrap();
+        assert_eq!(run(&git_core::DiffTarget::Staged), Ok(()));
+        assert!(calls().ends_with("two three \n"), "{}", calls());
+
+        // A conflict and a merge tool that closes without saving.
+        git(&["checkout", "--quiet", "-f", "-b", "side"]);
+        commit("side\n", "side");
+        git(&["checkout", "--quiet", "main"]);
+        commit("main\n", "main");
+        git(&["-c", "commit.gpgSign=false", "merge", "side"]);
+        let tool = App::tool_argument(&settings::ToolChoice::Command(
+            "sh -c \"exit 0\" {local} {remote} {base} {merged}".into(),
+        ))
+        .unwrap();
+        let start = std::time::Instant::now();
+        let result = run_tool(&cli, git_core::ToolKind::Merge, true, |git| {
+            git_core::run_mergetool(git, &tool, "a.txt", false)
+        });
+        assert!(matches!(result, Err(ExternalToolError::Failed(_))));
+        assert!(start.elapsed() < Duration::from_secs(20));
+        assert_eq!(git(&["diff", "--name-only", "--diff-filter=U"]), "a.txt");
     }
 
     #[test]

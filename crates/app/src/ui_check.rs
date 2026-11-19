@@ -1797,6 +1797,40 @@ mod tests {
         snapshot(&app, "preferences-templates");
     }
 
+    /// Preferences → External tools with the command field (fix after
+    /// M15): a preset for diffs, a custom merge command with a full path,
+    /// the tool list Git offers, and the empty field "Define tool…" opens.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_external_tools() {
+        use crate::settings::{ToolPick, ToolPreset};
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::ExternalTools,
+        ));
+        let info = git_core::ToolInfo {
+            configured: None,
+            available: vec!["meld".into(), "kdiff3".into(), "vimdiff".into()],
+        };
+        let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
+        let _ = app.update(Message::DiffToolChosen(ToolPick::Preset(
+            ToolPreset::VsCode,
+        )));
+        let _ = app.update(Message::MergeToolChosen(ToolPick::Custom));
+        let _ = app.update(Message::MergeToolCommandInput(
+            r#""C:\Program Files\WinMerge\WinMergeU.exe" -u -e {local} {remote} {merged}"#.into(),
+        ));
+        snapshot(&app, "preferences-external-tools");
+        // "Define tool…" for diffs with no tool: the empty field, focused.
+        let _ = app.update(Message::DiffToolChosen(ToolPick::None));
+        let _ = app.update(Message::DefineTool { merge: false });
+        snapshot_focused(
+            &app,
+            crate::ui::settings::tool_input(git_core::ToolKind::Diff),
+            "preferences-external-tools-define",
+        );
+    }
+
     /// Toolbar without labels (M10-08).
     #[test]
     #[ignore = "renders the UI; run with --ignored"]

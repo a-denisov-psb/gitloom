@@ -4,7 +4,8 @@
 mod support;
 
 use git_core::{
-    configured_tool, run_difftool, run_mergetool, tool_info, CliBackend, DiffTarget, ToolKind,
+    configured_tool, run_difftool, run_mergetool, tool_info, tool_shell_command, CliBackend,
+    DiffTarget, ToolKind, ToolSelection,
 };
 use support::TestRepo;
 
@@ -32,6 +33,10 @@ fn repo_with_fake_tools() -> TestRepo {
     repo
 }
 
+fn fake() -> ToolSelection {
+    ToolSelection::Named("fake".into())
+}
+
 fn calls(repo: &TestRepo) -> String {
     std::fs::read_to_string(repo.path().join("..").join("calls.txt")).unwrap_or_default()
 }
@@ -48,15 +53,15 @@ fn difftool_for_commit_unstaged_and_staged() {
         id: second,
         parent: Some(parent),
     };
-    run_difftool(&cli, &commit, Some("fake"), "a.txt", None).unwrap();
+    run_difftool(&cli, &commit, &fake(), "a.txt", None).unwrap();
     assert_eq!(calls(&repo), "one two \n");
 
     repo.write("a.txt", "three\n");
-    run_difftool(&cli, &DiffTarget::Unstaged, Some("fake"), "a.txt", None).unwrap();
+    run_difftool(&cli, &DiffTarget::Unstaged, &fake(), "a.txt", None).unwrap();
     assert!(calls(&repo).ends_with("two three \n"), "{}", calls(&repo));
 
     repo.git(&["add", "a.txt"]);
-    run_difftool(&cli, &DiffTarget::Staged, Some("fake"), "a.txt", None).unwrap();
+    run_difftool(&cli, &DiffTarget::Staged, &fake(), "a.txt", None).unwrap();
     assert!(calls(&repo).ends_with("two three \n"));
     assert_eq!(
         calls(&repo).lines().count(),
@@ -74,7 +79,7 @@ fn difftool_for_a_root_commit_compares_with_the_empty_tree() {
         id: root,
         parent: None,
     };
-    run_difftool(&cli, &target, Some("fake"), "a.txt", None).unwrap();
+    run_difftool(&cli, &target, &fake(), "a.txt", None).unwrap();
     assert_eq!(calls(&repo).trim(), "one");
 }
 
@@ -89,7 +94,13 @@ fn mergetool_resolves_the_conflict() {
     repo.commit("c.txt", "ours\n", "main");
     assert!(!repo.try_git(&["merge", "side"]));
     let cli = CliBackend::new(repo.path());
-    run_mergetool(&cli, Some("fakemerge"), "c.txt", false).unwrap();
+    run_mergetool(
+        &cli,
+        &ToolSelection::Named("fakemerge".into()),
+        "c.txt",
+        false,
+    )
+    .unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("c.txt")).unwrap(),
         "theirs\n"
@@ -98,6 +109,118 @@ fn mergetool_resolves_the_conflict() {
     assert!(repo
         .git(&["diff", "--name-only", "--diff-filter=U"])
         .is_empty());
+}
+
+/// A command template (fix after M15, ADR-055): the same fake diff tool,
+/// given per call, with a program path containing a space; nothing is
+/// written to the repository's config.
+fn custom_diff(repo: &TestRepo) -> ToolSelection {
+    let dir = repo.path().join("..").join("my tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake diff.sh");
+    let log = repo.path().join("..").join("calls.txt");
+    let log = log.to_string_lossy().replace('\\', "/");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ncat \"$1\" \"$2\" | tr '\\n' ' ' >> '{log}'; echo >> '{log}'\n"),
+    )
+    .unwrap();
+    let program = script.to_string_lossy().replace('\\', "/");
+    let words: Vec<String> = ["sh", &program, "{local}", "{remote}"]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .collect();
+    ToolSelection::Command(tool_shell_command(&words, false))
+}
+
+#[test]
+fn custom_difftool_for_commit_unstaged_and_staged() {
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "one\n", "first");
+    let second = repo.commit("a.txt", "two\n", "second");
+    let parent = repo.parents(&second)[0].clone();
+    let cli = CliBackend::new(repo.path());
+    let tool = custom_diff(&repo);
+    let commit = DiffTarget::Commit {
+        id: second,
+        parent: Some(parent),
+    };
+    run_difftool(&cli, &commit, &tool, "a.txt", None).unwrap();
+    assert_eq!(calls(&repo), "one two \n");
+    repo.write("a.txt", "three\n");
+    run_difftool(&cli, &DiffTarget::Unstaged, &tool, "a.txt", None).unwrap();
+    assert!(calls(&repo).ends_with("two three \n"), "{}", calls(&repo));
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "four\n");
+    run_difftool(&cli, &DiffTarget::Staged, &tool, "a.txt", None).unwrap();
+    assert!(calls(&repo).ends_with("two three \n"), "{}", calls(&repo));
+    assert_eq!(calls(&repo).lines().count(), 3);
+    assert!(!repo.try_git(&["config", "--get-regexp", "gitloom-custom"]));
+}
+
+fn conflicted() -> TestRepo {
+    let repo = TestRepo::new();
+    repo.commit("c.txt", "base\n", "base");
+    repo.branch("side");
+    repo.checkout("side");
+    repo.commit("c.txt", "theirs\n", "side");
+    repo.checkout("main");
+    repo.commit("c.txt", "ours\n", "main");
+    assert!(!repo.try_git(&["merge", "side"]));
+    repo
+}
+
+fn custom_merge(script: &str) -> ToolSelection {
+    let words: Vec<String> = [
+        "sh", "-c", script, "merge", "{local}", "{remote}", "{base}", "{merged}",
+    ]
+    .iter()
+    .map(|w| (*w).to_owned())
+    .collect();
+    ToolSelection::Command(tool_shell_command(&words, false))
+}
+
+fn unresolved(repo: &TestRepo) -> String {
+    repo.git(&["diff", "--name-only", "--diff-filter=U"])
+}
+
+#[test]
+fn custom_mergetool_resolves_when_saved() {
+    let repo = conflicted();
+    let cli = CliBackend::new(repo.path());
+    // Writes "theirs" + base into the result and exits 1: the exit code is
+    // not trusted, the saved file counts.
+    let tool = custom_merge(r#"cat "$2" "$3" > "$4"; exit 1"#);
+    run_mergetool(&cli, &tool, "c.txt", true).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("c.txt")).unwrap(),
+        "theirs\nbase\n"
+    );
+    assert!(unresolved(&repo).is_empty());
+    assert!(!repo.path().join("c.txt.orig").exists());
+}
+
+#[test]
+fn custom_mergetool_closed_without_saving_never_waits() {
+    let repo = conflicted();
+    let cli = CliBackend::new(repo.path());
+    // Exits at once without touching the result: Git would ask "Was the
+    // merge successful?"; stdin is closed, so it stays conflicted.
+    let tool = custom_merge("exit 0");
+    let start = std::time::Instant::now();
+    assert!(run_mergetool(&cli, &tool, "c.txt", false).is_err());
+    assert!(start.elapsed() < std::time::Duration::from_secs(20));
+    assert_eq!(unresolved(&repo).trim(), "c.txt");
+}
+
+#[test]
+fn tool_help_works_outside_a_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let cli = CliBackend::new(dir.path());
+    // Git lists its tools without a repository (Preferences → External
+    // tools works before any repository is open).
+    assert!(tool_info(&cli, ToolKind::Diff).is_ok());
+    assert!(tool_info(&cli, ToolKind::Merge).is_ok());
 }
 
 #[test]
