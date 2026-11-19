@@ -142,7 +142,32 @@ Release build in the Linux container (2026-11-11), `cargo test -p gitloom --rele
 | Word-wrap layout of 50 000 rows (prefix sums + visible rows) | < 50 ms | < 25 ms in a debug build (unit test `large_files_stay_fast`) |
 | Binary size, `dist` profile, Linux x64 | – | **31.5 MB** (28.3 MB before M11-08: +3.2 MB for syntect, the regex engine and the syntax and theme sets) |
 
-Highlighting uses syntect's pure Rust regex engine (`regex-fancy`, ADR-047), which is slower than oniguruma but needs no C library; whole files are highlighted once per content and theme and cached (64 entries).
+Highlighting used syntect's pure Rust regex engine (`regex-fancy`, ADR-047) in M11; since the fix after M15 it uses oniguruma (see below). Whole files are highlighted once per content and theme and cached (64 entries).
+
+## Highlighting without a line limit (fix after M15)
+
+Release build in the Linux container (4 cores, 2026-11-19), `cargo test -p gitloom --release perf_highlight_progressive -- --ignored --nocapture --test-threads=1` (three runs) and `perf_highlight_and_wrap`; oniguruma regex engine (ADR-047 amendment).
+
+| Metric | Target | Result |
+|---|---|---|
+| First block (1,000 lines) of `crates/app/src/app.rs` visible | < 100 ms | **30–37 ms** |
+| `app.rs` (22,671 lines, 899 KB) complete | < 1 s | **0.87–0.98 s** (pure Rust engine: 2.7 s) |
+| Both sides of the Inline diff of `app.rs` (each on its own thread) | – | first block **27–30 ms**, complete **0.99–1.14 s** |
+| Synthetic Rust file, 100,000 lines (1.6 MB) | measured | first block **18–24 ms**, complete **1.5–1.7 s** |
+| 1 MB Rust file (11,554 long lines) | – | **0.70 s** (M11: 3.4 s) |
+| File over the limit (9 MB) | plain at once | **6 ms** (one size check of a copy) |
+| Partial result applied (update) | – | ≤ 0.4 ms |
+| Frame of the Inline diff of `app.rs` while partial results arrive (view + layout, 7 scroll positions) | < 50 ms | **11–22 ms** |
+
+## Word diff (fix after M15)
+
+Same build, `perf_highlight_and_wrap`: the 2 MB diff with every line changed (46,208 paired lines).
+
+| Metric | Target | Result |
+|---|---|---|
+| Extra time on the UI thread when the diff loads (copy for the background task) | < 50 ms | **1.8 ms** |
+| Word diff of all pairs (background task) | – | **41–48 ms** |
+| Frame of the wrapped 2 MB diff with emphasis, worst of 20 scroll positions | < 50 ms | **25–26 ms** |
 
 ## M13: Git flow layout (task M13-05)
 

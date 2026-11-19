@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Added
 
+- Changed characters within changed lines are highlighted like GitKraken (word diff): in a block of removed and added lines, each removed line is compared with the added line at the same position and only the differing parts get a stronger red or green background (e.g. only `pub(crate) ` when `fn x` became `pub(crate) fn x`). Hunk, Inline and Split, with syntax colors and word wrap; lines that have too little in common get no extra highlight.
+- Custom diff and merge tools: Preferences → External tools offers presets (VS Code, VSCodium, IntelliJ IDEA for merging, Zed for diffs, Meld, WinMerge, Beyond Compare) and "Custom" with an editable command using `{local}`, `{remote}` (merge also `{base}`, `{merged}`); stored only in Gitloom's settings, run through `git difftool` / `git mergetool` without writing to the Git config. The lists load without an open repository. Without a tool, Ctrl+D says "No external diff tool is defined." with "Define tool…", which opens the field.
+
 - Change the author of unpushed commits: "Change author…" in the commit menu (also for several selected commits; disabled with the reason of the first blocked commit) opens a dialog with the repository's identity, the saved identities and "Other…"; the message editor of the commit details looks like the commit panel and has an "Authored by …" row whose menu changes the author ("Keep original author" first). Author dates are kept; one undo step ("Change author", or "Edit commit" with a new message too).
 - Diff minimap in the Inline and Split views like GitKraken: a strip right of the scrollbar marks every removed (red) and added (green) line (Split: removed left, added right) and shows the visible range; click or drag to jump there, the mouse wheel scrolls.
 - GITFLOW section: feature, release and hotfix rows show a flag on hover that opens the finish dialog; while finishing is blocked (e.g. during a merge) the flag is muted and its tooltip says why (also in the branch menu).
@@ -64,6 +67,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Syntax highlighting works for files of any length (up to 8 MB; it stopped at 20,000 lines): colors appear block by block from the top while the rest stays plain for a moment; lines over 5,000 bytes stay plain. Highlighting is about three times faster (oniguruma regex engine).
+
 - Diff header as icons like GitKraken: Blame (new: the file's blame at the commit of a commit diff, otherwise of the working file; disabled with the reason for untracked, stash, added and deleted files), History, change arrows, Hunk / Inline / Split as an icon toggle, External, Close; tooltips name the action and its shortcut.
 - Start screen buttons are calmer: a light accent fill like the initials tile of the commit details (stronger on hover and press), title, shortcut and icon in the normal text color, about a quarter lower.
 - Commit details: the message is always selectable text; a pencil at the top right of the message box (shown on hover) opens the editor of unpushed commits, muted with the reason as its tooltip when the message cannot be edited. A click on the text no longer opens the editor. The editor has a sparkle button that opens "Copy commit message prompt…" for that commit (its diff against the first parent, the commits before it).
@@ -104,6 +109,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Preferences: the settings of the active tab's repository sit in a group "Repository · <name>" below the global categories (Gitflow for now); on the start screen the group is disabled.
 
 ### Fixed
+
+- Opening a conflicted file in the merge tool without a merge tool showed the "No diff tool" dialog.
 
 - Preferences → Repository → External editor: "Use global setting" works from every state (it stayed on Custom before); the entries name the editor ("Use global setting (Zed)") instead of the whole command, which is shown in full below the picker.
 - Conflicts in UTF-16 files with a byte order mark (as written by PowerShell) and in 8-bit text files (e.g. Latin-1) open in the conflict view like UTF-8 files; the resolved file keeps its encoding, byte order mark and line endings. The encoding is shown next to the path; versions in different encodings and binary files explain why only a whole side can be taken.

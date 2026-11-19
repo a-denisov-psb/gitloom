@@ -179,6 +179,15 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Diff header: Blame, History, change arrows, Hunk / Inline / Split icons, External, Close; the tooltips name the action and its shortcut; Blame opens the blame view (at the commit of a commit diff) and is disabled with a reason for an untracked file and a stash.
 - [ ] Minimap in Inline and Split on a long file with changes at the top, middle and end: red and green marks (Split: left and right half), the visible range as a rectangle; click and drag jump there, the mouse wheel over the strip scrolls; no minimap in the Hunk view; scrolling a 20,000-line diff stays smooth.
 
+## 7j. Fixes after M15 (Windows required, Linux checked in CI)
+
+- [ ] Open a diff of `crates/app/src/app.rs` (Hunk, Inline, Split) and its Blame: colors appear within a second, top first; scrolling stays smooth; switching to another file during highlighting shows no stale colors.
+- [ ] Change `fn x` to `pub(crate) fn x` and look at the diff in all three modes: only `pub(crate) ` is highlighted stronger; a completely rewritten line has no extra highlight; Dark and Light readable.
+- [ ] Preferences → External tools without an open repository: the lists load. Diff tool "VS Code" (and Zed): Ctrl+D on an unstaged, a staged and a commit file opens the right two versions; the temporary files are gone after closing.
+- [ ] Diff tool "Custom" with a full path containing spaces (e.g. WinMerge or Beyond Compare under `C:\Program Files\…`) works.
+- [ ] Merge tool "VS Code" (or Meld/WinMerge) on a conflicted file: resolve, save, close: the file counts as resolved; closing without saving leaves it conflicted; Gitloom never hangs.
+- [ ] Without a diff tool: Ctrl+D shows "No diff tool" with "Define tool…", which opens External tools with the field focused.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
@@ -195,3 +204,4 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] M15: does GitKraken show the diff minimap in the Hunk view too? (Gitloom: Inline and Split only.)
 - [ ] M15: which icons (or text) does GitKraken use for Blame and History in the diff header? (Gitloom: `file-user` and `history`.)
 - [ ] M15: can GitKraken change the author of a commit (context menu or details)? (Gitloom: yes, for unpushed commits.)
+- [ ] Fix after M15: which diff and merge tools does GitKraken 7.5.2 offer in Preferences → General, and is there "Custom"? (Gitloom: presets VS Code, VSCodium, Zed, IntelliJ IDEA, Meld, WinMerge, Beyond Compare, plus Custom and Git's tools.)
