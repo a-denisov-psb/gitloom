@@ -1213,20 +1213,27 @@ fn appearance(app: &App) -> Element<'_, Message> {
             "System: the operating system reports no preference here, so Dark is used."
         }
     };
-    column![
-        field(
-            "Theme",
-            segmented(
-                &[
-                    (ThemeChoice::Dark, "Dark"),
-                    (ThemeChoice::Light, "Light"),
-                    (ThemeChoice::System, "System"),
-                ],
-                appearance.theme,
-                Message::ThemeChosen,
-            ),
-            system_note,
+    let theme_field = field(
+        "Theme",
+        segmented(
+            &[("dark", "Dark"), ("light", "Light"), ("system", "System")],
+            appearance.theme.as_str(),
+            |id| Message::ThemeChosen(ThemeChoice::parse(id)),
         ),
+        system_note,
+    );
+    // An unknown chosen or mapped id is named (ADR-044, ADR-058).
+    let theme_field: Element<'_, Message> = match app.theme_note() {
+        Some(note) => column![
+            theme_field,
+            text(format!("{note}.")).size(12).style(theme::text_warning)
+        ]
+        .spacing(4)
+        .into(),
+        None => theme_field,
+    };
+    column![
+        theme_field,
         field("Zoom", zoom(appearance.zoom_percent), zoom_note()),
         field(
             "Load avatars from Gravatar",

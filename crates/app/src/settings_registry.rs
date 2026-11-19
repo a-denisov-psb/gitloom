@@ -118,7 +118,12 @@ impl Choice {
                 .map(|p| p.label().to_owned())
         };
         match self {
-            Self::Theme => ["Dark", "Light", "System"].map(str::to_owned).to_vec(),
+            // The registry's names in list order, then System (ADR-058).
+            Self::Theme => crate::themes::all()
+                .iter()
+                .map(|t| t.name.clone())
+                .chain(std::iter::once("System".to_owned()))
+                .collect(),
             Self::DiffView => DiffMode::ALL.iter().map(|m| m.label().to_owned()).collect(),
             Self::StashTemplate => crate::stash_template::PRESETS
                 .iter()
@@ -135,12 +140,15 @@ impl Choice {
     pub fn messages(self, value: &str) -> Vec<Message> {
         match self {
             Self::Theme => {
-                let theme = match value {
-                    "Light" => ThemeChoice::Light,
-                    "System" => ThemeChoice::System,
-                    _ => ThemeChoice::Dark,
+                let theme = if value == "System" {
+                    Some(ThemeChoice::System)
+                } else {
+                    crate::themes::all()
+                        .iter()
+                        .find(|t| t.name == value)
+                        .map(|t| ThemeChoice::theme(&t.id))
                 };
-                vec![Message::ThemeChosen(theme)]
+                theme.map(Message::ThemeChosen).into_iter().collect()
             }
             Self::DiffView => DiffMode::ALL
                 .iter()

@@ -631,6 +631,9 @@ pub enum Message {
         result: Result<crate::avatars::Cached, String>,
     },
     ThemeChosen(settings::ThemeChoice),
+    /// The theme System uses for a mode of the operating system (ADR-058).
+    #[allow(dead_code)] // Sent by the Appearance lists (M16-06).
+    SystemThemeMapped(crate::theme::ThemeKind, String),
     /// Open the settings view (Ctrl+, , gear button, palette).
     SettingsOpened,
     SettingsClosed,
@@ -2953,33 +2956,61 @@ impl App {
         )
     }
 
-    /// Theme of the window: the choice in the settings; "System" follows
-    /// the operating system and falls back to Dark when it is unknown.
+    /// Theme of the window (ADR-058): the chosen theme; "System" uses
+    /// the theme mapped to the operating system's mode (Dark when it
+    /// reports none); unknown ids fall back to Dark or Light.
     pub fn theme(&self) -> iced::Theme {
         crate::theme::iced_theme(&self.active_theme())
     }
 
-    /// The registry entry of the theme in use (ADR-058).
-    pub fn active_theme(&self) -> std::sync::Arc<crate::themes::ThemeDef> {
-        crate::themes::default_of(self.theme_kind())
-    }
-
     #[cfg(test)]
     pub fn light_theme(&self) -> bool {
-        self.theme_kind() == crate::theme::ThemeKind::Light
+        self.active_theme().base == crate::theme::ThemeKind::Light
     }
 
-    /// The theme in use (System follows the operating system).
-    pub fn theme_kind(&self) -> crate::theme::ThemeKind {
+    /// The theme id the settings ask for now, and the base whose default
+    /// is used when the id is unknown.
+    fn wanted_theme(&self) -> (&str, crate::theme::ThemeKind) {
         use crate::theme::ThemeKind;
-        match self.settings.appearance.theme {
-            settings::ThemeChoice::Dark => ThemeKind::Dark,
-            settings::ThemeChoice::Light => ThemeKind::Light,
+        let appearance = &self.settings.appearance;
+        match &appearance.theme {
+            settings::ThemeChoice::Theme(id) => (id, ThemeKind::Dark),
             settings::ThemeChoice::System if self.system_theme == iced::theme::Mode::Light => {
-                ThemeKind::Light
+                (&appearance.system_light, ThemeKind::Light)
             }
-            settings::ThemeChoice::System => ThemeKind::Dark,
+            settings::ThemeChoice::System => (&appearance.system_dark, ThemeKind::Dark),
         }
+    }
+
+    /// The registry entry of the theme in use (ADR-058).
+    pub fn active_theme(&self) -> std::sync::Arc<crate::themes::ThemeDef> {
+        let (id, fallback) = self.wanted_theme();
+        crate::themes::get(id).unwrap_or_else(|| crate::themes::default_of(fallback))
+    }
+
+    /// Note for Preferences → Appearance when a chosen or mapped theme id
+    /// is unknown (ADR-044): "Theme '<id>' not found, using Dark".
+    pub fn theme_note(&self) -> Option<String> {
+        use crate::theme::ThemeKind;
+        let appearance = &self.settings.appearance;
+        let wanted: Vec<(&str, ThemeKind)> = match &appearance.theme {
+            settings::ThemeChoice::Theme(id) => vec![(id, ThemeKind::Dark)],
+            settings::ThemeChoice::System => vec![
+                (&appearance.system_dark, ThemeKind::Dark),
+                (&appearance.system_light, ThemeKind::Light),
+            ],
+        };
+        let notes: Vec<String> = wanted
+            .into_iter()
+            .filter(|(id, _)| crate::themes::get(id).is_none())
+            .map(|(id, fallback)| {
+                format!(
+                    "Theme '{id}' not found, using {}",
+                    crate::themes::default_of(fallback).name
+                )
+            })
+            .collect();
+        (!notes.is_empty()).then(|| notes.join(". "))
     }
 
     pub fn title(&self) -> String {
@@ -5347,12 +5378,12 @@ impl App {
     fn choice_value(&self, choice: crate::settings_registry::Choice) -> Option<String> {
         use crate::settings_registry::Choice;
         Some(match choice {
-            Choice::Theme => match self.settings.appearance.theme {
-                settings::ThemeChoice::Dark => "Dark",
-                settings::ThemeChoice::Light => "Light",
-                settings::ThemeChoice::System => "System",
-            }
-            .to_owned(),
+            Choice::Theme => match &self.settings.appearance.theme {
+                settings::ThemeChoice::System => "System".to_owned(),
+                settings::ThemeChoice::Theme(id) => crate::themes::get(id)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| id.clone()),
+            },
             Choice::DiffView => self.settings.diff.view_mode.label().to_owned(),
             Choice::StashTemplate => self.settings.templates.stash_template.clone(),
             Choice::ExternalEditor => {
@@ -7617,7 +7648,20 @@ impl App {
             Message::ZoomTo(percent) => return self.set_zoom(percent),
             Message::ThemeChosen(choice) => {
                 if self.settings.appearance.theme != choice {
-                    self.settings.appearance.theme = choice;
+                    self.settings.appearance.theme = choice.clone();
+                    // Code colors follow the theme (M11-09).
+                    self.restyle_code_views();
+                    return Task::batch([self.save_settings(), self.highlight_code_views()]);
+                }
+            }
+            Message::SystemThemeMapped(base, id) => {
+                let appearance = &mut self.settings.appearance;
+                let slot = match base {
+                    crate::theme::ThemeKind::Dark => &mut appearance.system_dark,
+                    crate::theme::ThemeKind::Light => &mut appearance.system_light,
+                };
+                if *slot != id {
+                    *slot = id;
                     // Code colors follow the theme (M11-09).
                     self.restyle_code_views();
                     return Task::batch([self.save_settings(), self.highlight_code_views()]);
@@ -14401,9 +14445,12 @@ pub(crate) mod tests {
     fn theme_choice_and_system_mode() {
         let mut app = ready_app(&["c"]);
         assert!(!app.light_theme(), "dark by default");
-        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("light")));
         assert!(app.light_theme());
-        assert_eq!(app.settings.appearance.theme, settings::ThemeChoice::Light);
+        assert_eq!(
+            app.settings.appearance.theme,
+            settings::ThemeChoice::theme("light")
+        );
         assert_eq!(*crate::theme::palette(&app.theme()), crate::theme::LIGHT);
 
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::System));
@@ -14412,6 +14459,60 @@ pub(crate) mod tests {
         assert!(app.light_theme());
         let _ = app.update(Message::SystemTheme(iced::theme::Mode::Dark));
         assert!(!app.light_theme());
+    }
+
+    /// ADR-058: a chosen theme applies at once and is saved; System uses
+    /// the mapped ids; unknown ids fall back with a note.
+    #[test]
+    fn theme_ids_mapping_and_fallback() {
+        use crate::theme::ThemeKind;
+        let mut app = ready_app(&["c"]);
+        app.settings_path = Some(std::path::PathBuf::from("unused-settings.json"));
+        let seq = app.settings_save_seq;
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("light")));
+        assert_eq!(app.active_theme().id, "light");
+        assert_eq!(app.theme().to_string(), "light");
+        assert_eq!(app.settings_save_seq, seq + 1, "saved");
+        assert_eq!(app.theme_note(), None);
+
+        // System with mapped ids (both built-ins here; the lists offer the
+        // themes of each base).
+        let _ = app.update(Message::SystemThemeMapped(ThemeKind::Dark, "light".into()));
+        let _ = app.update(Message::SystemThemeMapped(ThemeKind::Light, "dark".into()));
+        assert_eq!(app.settings.appearance.system_dark, "light");
+        assert_eq!(app.settings.appearance.system_light, "dark");
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::System));
+        for (mode, want) in [
+            (iced::theme::Mode::None, "light"),
+            (iced::theme::Mode::Dark, "light"),
+            (iced::theme::Mode::Light, "dark"),
+        ] {
+            let _ = app.update(Message::SystemTheme(mode));
+            assert_eq!(app.active_theme().id, want, "{mode:?}");
+        }
+
+        // Unknown ids: Dark (or Light for the light slot) with a note.
+        let _ = app.update(Message::SystemThemeMapped(ThemeKind::Light, "gone".into()));
+        assert_eq!(
+            app.active_theme().id,
+            "light",
+            "light slot falls back to Light"
+        );
+        assert_eq!(
+            app.theme_note().as_deref(),
+            Some("Theme 'gone' not found, using Light")
+        );
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme(
+            "missing",
+        )));
+        assert_eq!(app.active_theme().id, "dark");
+        assert_eq!(
+            app.theme_note().as_deref(),
+            Some("Theme 'missing' not found, using Dark")
+        );
+        // Choosing a known theme clears the note.
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("dark")));
+        assert_eq!(app.theme_note(), None);
     }
 
     #[test]
@@ -14861,9 +14962,9 @@ pub(crate) mod tests {
             };
             diff.spans_for(&file.hunks[0].lines[0]).map(<[_]>::len)
         };
-        let plain = godot_diff_app(settings::ThemeChoice::Dark, None);
+        let plain = godot_diff_app(settings::ThemeChoice::theme("dark"), None);
         assert_eq!(line(&plain), None);
-        let ini = godot_diff_app(settings::ThemeChoice::Dark, Some("INI"));
+        let ini = godot_diff_app(settings::ThemeChoice::theme("dark"), Some("INI"));
         assert!(line(&ini).is_some_and(|n| n > 0));
         let item = crate::ui::statusbar::language_item(&ini).unwrap();
         assert_eq!(item.label, "INI");
@@ -15420,7 +15521,7 @@ pub(crate) mod tests {
         use git_core::DiffLineKind;
         use settings::{DiffMode, ThemeChoice};
         for mode in [DiffMode::Hunk, DiffMode::Inline, DiffMode::Split] {
-            let mut app = word_diff_app(mode, ThemeChoice::Dark);
+            let mut app = word_diff_app(mode, ThemeChoice::theme("dark"));
             let diff = open_diff(&app);
             let Loadable::Ready(file) = &diff.diff else {
                 panic!("diff not loaded");
@@ -15553,7 +15654,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::EditorHighlightingToggled(true));
         assert!(open_diff(&app).spans_for(&line(&app)).is_some());
         // Another theme family: the dark result is not used for Light.
-        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::Light));
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("light")));
         assert_eq!(open_diff(&app).style.code_theme, CodeTheme::LIGHT);
         assert!(open_diff(&app).spans_for(&line(&app)).is_none());
     }
@@ -22542,7 +22643,10 @@ pub(crate) mod tests {
             palette::Mode::Choice(crate::settings_registry::Choice::Theme)
         );
         palette_choose(&mut app, "Light");
-        assert_eq!(app.settings.appearance.theme, settings::ThemeChoice::Light);
+        assert_eq!(
+            app.settings.appearance.theme,
+            settings::ThemeChoice::theme("light")
+        );
         let _ = app.update(checked(Shortcut::CommandPalette, false));
         palette_choose(&mut app, "Set: Diff view");
         palette_choose(&mut app, "Split");

@@ -259,22 +259,77 @@ impl Default for General {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// `appearance.theme` (ADR-058): a theme id or "system". Stored as one
+/// string; the removed "classic-dark" is read as "dark" (ADR-054).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThemeChoice {
-    /// Also read for the removed "classic-dark" (ADR-054).
-    #[default]
-    #[serde(alias = "classic-dark")]
-    Dark,
-    Light,
-    /// Follow the operating system.
+    /// A theme id of the registry (`crate::themes`); may be unknown.
+    Theme(String),
+    /// Follow the operating system with `system_dark` / `system_light`.
     System,
+}
+
+impl ThemeChoice {
+    pub const SYSTEM: &'static str = "system";
+
+    /// A theme by id.
+    pub fn theme(id: &str) -> Self {
+        Self::Theme(id.to_owned())
+    }
+
+    /// The stored string.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Theme(id) => id,
+            Self::System => Self::SYSTEM,
+        }
+    }
+
+    /// The choice for a stored string.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            Self::SYSTEM => Self::System,
+            "classic-dark" => Self::theme(crate::themes::DARK_ID),
+            id => Self::theme(id),
+        }
+    }
+}
+
+impl Default for ThemeChoice {
+    fn default() -> Self {
+        Self::theme(crate::themes::DARK_ID)
+    }
+}
+
+impl Serialize for ThemeChoice {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ThemeChoice {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(Self::parse(&value))
+    }
+}
+
+fn default_system_dark() -> String {
+    crate::themes::DARK_ID.to_owned()
+}
+
+fn default_system_light() -> String {
+    crate::themes::LIGHT_ID.to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
     pub theme: ThemeChoice,
+    /// Theme ids System uses when the operating system reports dark (or
+    /// nothing) and light (ADR-058).
+    pub system_dark: String,
+    pub system_light: String,
     /// Window scale in percent (70–200).
     pub zoom_percent: u32,
     /// Load avatars from Gravatar (ADR-026); off by default.
@@ -295,7 +350,9 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            theme: ThemeChoice::Dark,
+            theme: ThemeChoice::default(),
+            system_dark: default_system_dark(),
+            system_light: default_system_light(),
             zoom_percent: ZOOM_DEFAULT,
             avatars: false,
             toolbar_labels: true,
@@ -1070,10 +1127,44 @@ mod tests {
     fn classic_dark_loads_as_dark() {
         // The theme was removed (ADR-054); saved settings open in Dark.
         let parsed = parse(r#"{"appearance": {"theme": "classic-dark"}}"#).unwrap();
-        assert_eq!(parsed.appearance.theme, ThemeChoice::Dark);
+        assert_eq!(parsed.appearance.theme, ThemeChoice::theme("dark"));
         let json = to_json(&parsed);
         assert!(json.contains("\"dark\""), "{json}");
         assert!(!json.contains("classic-dark"), "{json}");
+    }
+
+    /// ADR-058: values written before M16 read as before.
+    #[test]
+    fn old_theme_values_still_load() {
+        for (stored, want) in [
+            ("dark", ThemeChoice::theme("dark")),
+            ("light", ThemeChoice::theme("light")),
+            ("system", ThemeChoice::System),
+            ("classic-dark", ThemeChoice::theme("dark")),
+        ] {
+            let text = format!(r#"{{"appearance": {{"theme": "{stored}"}}}}"#);
+            let parsed = parse(&text).unwrap();
+            assert_eq!(parsed.appearance.theme, want, "{stored}");
+            // The System mapping starts with Dark and Light.
+            assert_eq!(parsed.appearance.system_dark, "dark");
+            assert_eq!(parsed.appearance.system_light, "light");
+        }
+        // An unknown id is kept (the app falls back to Dark with a note).
+        let parsed = parse(r#"{"appearance": {"theme": "no-such-theme"}}"#).unwrap();
+        assert_eq!(parsed.appearance.theme, ThemeChoice::theme("no-such-theme"));
+    }
+
+    #[test]
+    fn theme_keys_round_trip() {
+        let mut settings = Settings::default();
+        settings.appearance.theme = ThemeChoice::System;
+        settings.appearance.system_dark = "monokai".into();
+        settings.appearance.system_light = "solarized-light".into();
+        let json = to_json(&settings);
+        assert!(json.contains(r#""theme": "system""#), "{json}");
+        assert_eq!(parse(&json).unwrap(), settings);
+        settings.appearance.theme = ThemeChoice::theme("warm-dark");
+        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
     }
 
     #[test]
@@ -1162,7 +1253,7 @@ mod tests {
     fn sample() -> Settings {
         let mut settings = Settings::default();
         settings.general.auto_fetch_minutes = 15;
-        settings.appearance.theme = ThemeChoice::Light;
+        settings.appearance.theme = ThemeChoice::theme("light");
         settings.appearance.zoom_percent = 120;
         settings.file_list.tree = true;
         settings.file_list.descending = true;
@@ -1261,7 +1352,7 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.version, VERSION);
         assert_eq!(settings.general.auto_fetch_minutes, 5);
-        assert_eq!(settings.appearance.theme, ThemeChoice::Dark);
+        assert_eq!(settings.appearance.theme, ThemeChoice::theme("dark"));
         assert_eq!(settings.appearance.zoom_percent, 100);
         assert!(!settings.appearance.avatars, "avatars are opt-in");
         assert_eq!(settings.tools.diff_tool, ToolChoice::GitConfig);
@@ -1284,7 +1375,7 @@ mod tests {
         }"#;
         let settings = parse(text).unwrap();
         assert_eq!(settings.general.auto_fetch_minutes, 0);
-        assert_eq!(settings.appearance.theme, ThemeChoice::Light);
+        assert_eq!(settings.appearance.theme, ThemeChoice::theme("light"));
         assert_eq!(settings.appearance.zoom_percent, 100);
         assert_eq!(settings.tools, ExternalTools::default());
         assert_eq!(parse("{}"), Ok(Settings::default()));

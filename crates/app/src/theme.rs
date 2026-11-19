@@ -328,6 +328,7 @@ pub fn palette(theme: &Theme) -> Arc<ThemePalette> {
 }
 
 /// iced theme of the base's default theme (`dark` or `light`).
+#[cfg(test)]
 pub fn app_theme(kind: ThemeKind) -> Theme {
     iced_theme(&crate::themes::default_of(kind))
 }

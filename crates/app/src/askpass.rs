@@ -46,15 +46,34 @@ pub fn prompt_from_args(args: &[String], marker_set: bool) -> Option<String> {
     }
 }
 
-/// The prompt follows the theme chosen in the settings (System counts as
-/// Dark here: the prompt has no time to ask the window system).
-fn prefers_light() -> bool {
-    crate::session::default_path()
-        .map(|path| path.with_file_name(crate::settings::FILE_NAME))
-        .is_some_and(|path| {
-            crate::settings::load(&path, None).settings.appearance.theme
-                == crate::settings::ThemeChoice::Light
-        })
+/// The theme of the prompt window (ADR-058): the theme chosen in the
+/// settings (read only). With "System", or when the settings file or the
+/// id is unusable, `None`: iced then follows the operating system's
+/// preference, and [`theme_for`] picks the mapped theme once the mode is
+/// known.
+fn saved_appearance() -> Option<crate::settings::Appearance> {
+    let path = crate::session::default_path()?.with_file_name(crate::settings::FILE_NAME);
+    std::fs::metadata(&path).ok()?;
+    Some(crate::settings::load(&path, None).settings.appearance)
+}
+
+/// Theme for the saved appearance and the operating system's mode.
+fn theme_for(
+    appearance: Option<&crate::settings::Appearance>,
+    mode: iced::theme::Mode,
+) -> Option<iced::Theme> {
+    use crate::settings::ThemeChoice;
+    let appearance = appearance?;
+    let id = match &appearance.theme {
+        ThemeChoice::Theme(id) => id,
+        ThemeChoice::System => match mode {
+            iced::theme::Mode::Light => &appearance.system_light,
+            iced::theme::Mode::Dark => &appearance.system_dark,
+            // Not known yet: iced follows the operating system.
+            iced::theme::Mode::None => return None,
+        },
+    };
+    crate::themes::get(id).map(|def| theme::iced_theme(&def))
 }
 
 /// Shows the prompt window, writes the answer to stdout and exits.
@@ -70,11 +89,7 @@ pub fn main(prompt: String) -> iced::Result {
     .title(|_: &Askpass| format!("{} – Authentication", git_core::identity::DISPLAY_NAME))
     // Also when the focused input captured the key.
     .subscription(|_: &Askpass| iced::event::listen_with(|event, _status, _window| escape(event)))
-    .theme(theme::app_theme(if prefers_light() {
-        theme::ThemeKind::Light
-    } else {
-        theme::ThemeKind::Dark
-    }))
+    .theme(|state: &Askpass| theme_for(state.appearance.as_ref(), state.system_mode))
     .settings(iced::Settings {
         default_text_size: 13.into(),
         ..iced::Settings::default()
@@ -128,6 +143,7 @@ pub enum Message {
     Submit,
     Answer(&'static str),
     Cancel,
+    SystemTheme(iced::theme::Mode),
 }
 
 struct Askpass {
@@ -135,6 +151,9 @@ struct Askpass {
     kind: PromptKind,
     input: String,
     answer: Arc<Mutex<Option<String>>>,
+    /// Appearance from `settings.json`, read once at start.
+    appearance: Option<crate::settings::Appearance>,
+    system_mode: iced::theme::Mode,
 }
 
 impl Askpass {
@@ -144,9 +163,12 @@ impl Askpass {
             prompt,
             input: String::new(),
             answer,
+            appearance: saved_appearance(),
+            system_mode: iced::theme::Mode::None,
         };
         let focus = iced::widget::operation::focus(INPUT);
-        (state, focus)
+        let mode = iced::system::theme().map(Message::SystemTheme);
+        (state, Task::batch([focus, mode]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -158,6 +180,10 @@ impl Askpass {
             Message::Submit => Some(self.input.clone()),
             Message::Answer(answer) => Some(answer.to_owned()),
             Message::Cancel => None,
+            Message::SystemTheme(mode) => {
+                self.system_mode = mode;
+                return Task::none();
+            }
         };
         if let Ok(mut slot) = self.answer.lock() {
             *slot = answer;
@@ -264,5 +290,36 @@ mod tests {
         // Without the marker a single argument is a repository path.
         assert_eq!(prompt_from_args(&args(&["/repo"]), false), None);
         assert_eq!(prompt_from_args(&args(&["/a", "/b"]), true), None);
+    }
+
+    /// ADR-058: the prompt uses the saved theme; System uses the mapped
+    /// theme once the mode is known; without a usable file or id iced
+    /// follows the operating system (`None`).
+    #[test]
+    fn prompt_theme_follows_the_settings() {
+        use crate::settings::{Appearance, ThemeChoice};
+        let name = |theme: Option<iced::Theme>| theme.map(|t| t.to_string());
+        let mut appearance = Appearance {
+            theme: ThemeChoice::theme("light"),
+            ..Appearance::default()
+        };
+        for mode in [iced::theme::Mode::None, iced::theme::Mode::Dark] {
+            assert_eq!(
+                name(theme_for(Some(&appearance), mode)).as_deref(),
+                Some("light")
+            );
+        }
+        appearance.theme = ThemeChoice::System;
+        appearance.system_light = "light".into();
+        appearance.system_dark = "dark".into();
+        let light = theme_for(Some(&appearance), iced::theme::Mode::Light);
+        assert_eq!(name(light).as_deref(), Some("light"));
+        let dark = theme_for(Some(&appearance), iced::theme::Mode::Dark);
+        assert_eq!(name(dark).as_deref(), Some("dark"));
+        assert_eq!(theme_for(Some(&appearance), iced::theme::Mode::None), None);
+        appearance.theme = ThemeChoice::theme("no-such-theme");
+        assert_eq!(theme_for(Some(&appearance), iced::theme::Mode::Dark), None);
+        // No settings file.
+        assert_eq!(theme_for(None, iced::theme::Mode::Light), None);
     }
 }
