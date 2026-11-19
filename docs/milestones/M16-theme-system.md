@@ -121,11 +121,13 @@ Note: the fixture is two snapshots per theme (`ui_check_themes`: `theme-<id>-gra
 
 Acceptance: as M16-04 for each theme; the theme names are listed for the ADR-033 check in `docs/HANDOVER.md` (Maintainer to-dos).
 
-### [ ] M16-06 Appearance list, System mapping and palette
+### [x] M16-06 Appearance list, System mapping and palette
 
 - Theme list with swatches grouped by base, System entry, mapping lists, "not found" note; palette "Set: Theme ›" and its current-value label from the registry.
 
 Acceptance: app tests: choosing each theme in Preferences and in the palette; the mapping lists appear only with System and offer only themes of the matching base; the note appears for an unknown id; snapshots of Preferences → Appearance in Dark and Light, with and without System.
+
+Note: the two groups sit side by side under the headings "Dark themes" and "Light themes" (a bare "Dark" heading would read like the theme of that name); System is a full-width entry below them, its two lists use the same layout. Each entry: a framed swatch strip in the theme's border color, the name, a check mark when current. Snapshots `theme-list-*` (`ui_check_theme_list`).
 
 ### [ ] M16-07 No hard-coded colors in views
 

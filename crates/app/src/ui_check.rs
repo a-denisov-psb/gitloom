@@ -1221,6 +1221,51 @@ mod tests {
         }
     }
 
+    /// Preferences → Appearance (M16-06): every theme is chosen by a
+    /// click; the System lists appear only with System and offer only the
+    /// themes of their base; an unknown id shows the note. Snapshots in Dark
+    /// and Light, with and without System.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_theme_list() {
+        use crate::settings::ThemeChoice;
+        use crate::theme::ThemeKind;
+        let mut app = crate::app::tests::ready_app(&["c", "b", "a"]);
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::Appearance,
+        ));
+        for def in crate::themes::all() {
+            click(&mut app, &def.name);
+            assert_eq!(app.settings.appearance.theme, ThemeChoice::theme(&def.id));
+            assert_eq!(app.active_theme().id, def.id);
+        }
+        let has = |app: &App, label: &str| simulator(app).find(label).is_ok();
+        assert!(!has(&app, "When the system is dark"));
+        for id in ["dark", "light"] {
+            app.settings.appearance.theme = ThemeChoice::theme(id);
+            snapshot(&app, &format!("theme-list-{id}"));
+        }
+        click(&mut app, "System");
+        assert_eq!(app.settings.appearance.theme, ThemeChoice::System);
+        assert!(has(&app, "When the system is dark"));
+        assert!(has(&app, "When the system is light"));
+        let _ = app.update(Message::SystemThemeMapped(
+            ThemeKind::Dark,
+            "monokai".into(),
+        ));
+        let _ = app.update(Message::SystemTheme(iced::theme::Mode::Dark));
+        snapshot(&app, "theme-list-system-dark");
+        let _ = app.update(Message::SystemThemeMapped(
+            ThemeKind::Light,
+            "warm-light".into(),
+        ));
+        let _ = app.update(Message::SystemTheme(iced::theme::Mode::Light));
+        snapshot(&app, "theme-list-system-light");
+        app.settings.appearance.theme = ThemeChoice::theme("gone");
+        assert!(has(&app, "Theme 'gone' not found, using Dark."));
+        snapshot(&app, "theme-list-unknown");
+    }
+
     /// Every theme of the registry (ADR-058, M16-04/05): the graph with the
     /// Gitflow layout, and a word diff with syntax colors next to staging
     /// and the status bar.

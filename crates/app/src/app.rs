@@ -632,7 +632,6 @@ pub enum Message {
     },
     ThemeChosen(settings::ThemeChoice),
     /// The theme System uses for a mode of the operating system (ADR-058).
-    #[allow(dead_code)] // Sent by the Appearance lists (M16-06).
     SystemThemeMapped(crate::theme::ThemeKind, String),
     /// Open the settings view (Ctrl+, , gear button, palette).
     SettingsOpened,

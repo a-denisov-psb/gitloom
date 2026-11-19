@@ -431,13 +431,12 @@ fn read<T>(f: impl FnOnce(&Registry) -> T) -> T {
 }
 
 /// The theme with `id`.
-#[allow(dead_code)] // Used from M16-03 / M16-06 on.
 pub fn get(id: &str) -> Option<Arc<ThemeDef>> {
     read(|r| r.themes.iter().find(|t| t.id == id).cloned())
 }
 
 /// The theme with `id`, Dark when there is none.
-#[allow(dead_code)] // Used from M16-03 / M16-06 on.
+#[cfg(test)]
 pub fn resolve(id: &str) -> Arc<ThemeDef> {
     get(id).unwrap_or_else(|| default_of(ThemeKind::Dark))
 }
@@ -459,13 +458,11 @@ pub fn default_of(base: ThemeKind) -> Arc<ThemeDef> {
 }
 
 /// Every theme in list order.
-#[allow(dead_code)] // Used from M16-03 / M16-06 on.
 pub fn all() -> Vec<Arc<ThemeDef>> {
     read(|r| r.themes.clone())
 }
 
 /// The themes of one base in list order.
-#[allow(dead_code)] // Used from M16-03 / M16-06 on.
 pub fn of_base(base: ThemeKind) -> Vec<Arc<ThemeDef>> {
     read(|r| {
         r.themes
