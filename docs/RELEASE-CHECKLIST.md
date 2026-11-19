@@ -216,6 +216,18 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Right next to each divider the scrollbars still work (drag the thumb, click the track).
 - [ ] Window at its minimum size (about 1000×670 at 100 % zoom): the staging area shows both frames and the Commit button in both positions, nothing cut off.
 
+## 7n. Language of a file (Windows required, Linux checked in CI)
+
+- [ ] Open the diff of a `project.godot` (or any file with an unknown extension): the status bar shows "Plain Text" and the file is not colored.
+- [ ] Click the language in the status bar: the palette lists "Auto Detect", "Plain Text" and the languages; the current entry is marked and selected; typing `ini` filters; Enter applies "INI": the diff (Hunk, Inline, Split) gets colors within a moment and the changed-character emphasis still works.
+- [ ] Blame and file history of the same file and its conflict view use the chosen language as well; another file with the same extension is not affected.
+- [ ] "Auto Detect" at the top of the list undoes the choice (plain again); "Plain Text" switches the colors off for a file that is normally highlighted.
+- [ ] The palette action "Change language mode…" opens the same list; without a file in the center it is disabled and says why.
+- [ ] The item is hidden without an open file and when Syntax highlighting is off in Preferences → Editor.
+- [ ] Restart Gitloom with the tab open: the choice is still there. Close the tab and open the repository again: the choice is gone and `session.json` has no entry for it.
+- [ ] The choice in one repository tab does not change the same path in another tab.
+- [ ] Window at its minimum size (about 1000×670): the status bar with the language item, the branch label, the version and the panel buttons fits, nothing overlaps; Dark and Light, 100 % and 125 %.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

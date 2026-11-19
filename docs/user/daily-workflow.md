@@ -40,7 +40,7 @@ The message cannot be edited when the commit is already on a remote ("Already pu
 
 ## Diffs
 
-Code is syntax highlighted (shown plain for a moment first; long files get their colors from the top down); font, size, tabs, line numbers and word wrap are set in Preferences → Editor. In changed lines the characters that differ from the line they replace have a stronger red or green background (for example only `pub(crate) ` when `fn x` became `pub(crate) fn x`); lines that have little in common are not marked.
+Code is syntax highlighted (shown plain for a moment first; long files get their colors from the top down); font, size, tabs, line numbers and word wrap are set in Preferences → Editor. In changed lines the characters that differ from the line they replace have a stronger red or green background (for example only `pub(crate) ` when `fn x` became `pub(crate) fn x`); lines that have little in common are not marked. If a file stays plain or gets the wrong colors (for example `project.godot`, which is INI), click the language at the right of the status bar, type a name such as `ini` and choose it; **Auto Detect** at the top of the list undoes this. The choice applies to that file in this repository and is forgotten when you close its tab.
 
 Clicking a file shows its diff in the center. The header has icons like GitKraken: **Blame**, **History**, the change arrows, the view toggle (**Hunk** / **Inline** / **Split**), **External** and **Close**; their tooltips name them and their shortcuts. Three views, switched in the header (or the palette, "Diff: … view"); the choice is remembered:
 
