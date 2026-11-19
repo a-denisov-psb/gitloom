@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7i); 1.0.0 is released from `develop` when the maintainer asks.
+**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7l); 1.0.0 is released from `develop` when the maintainer asks.
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M15 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 

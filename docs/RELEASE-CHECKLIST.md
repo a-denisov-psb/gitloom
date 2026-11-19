@@ -25,7 +25,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Ctrl+B creates a branch: type a name (an invalid one shows a red border with the reason), Enter creates and checks it out, Esc cancels.
 - [ ] Graph: ↑/↓/J/K, Shift+J/K, Shift+↑/↓ extend the selection, Ctrl+Home/End; Shift+F10 (and the Menu key) opens the commit menu, ↑/↓ and Enter run an entry, Esc closes.
 - [ ] Forms: "+" in the REMOTE section (type name, Tab to URL, Enter), rename a remote and a branch from their context menus (type the new name, Enter; with an upstream "Rename remote too"); Esc closes each form with one press.
-- [ ] Commit panel: type a summary, Tab to the description, Ctrl+Enter commits; Ctrl+Shift+M focuses the summary; Ctrl+Shift+Enter stages all and commits.
+- [ ] Staging area (details panel): type a summary, Tab to the description, Ctrl+Enter commits; Ctrl+Shift+M focuses the summary; Ctrl+Shift+Enter stages all and commits.
 - [ ] Interactive rebase panel: P/R/S/F/D, ↑/↓, Alt+↑/↓, typing into a reword message.
 - [ ] "Edit commit message" with a typed change (HEAD and an older commit) and "Squash N commits" after a Ctrl/Shift+click multi-selection.
 - [ ] Ctrl+= / Ctrl+- / Ctrl+0 zoom, F11 fullscreen, Ctrl+, Preferences, Ctrl+J / Ctrl+K panels, Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+1…9 tabs.
@@ -85,9 +85,9 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 
 ## 7b. New in 1.2 (M8; Windows required, Linux checked in CI)
 
-- [ ] Identity: on a fresh profile the global identity appears in Preferences → Identities as default; add a second identity, choose it in the commit panel ("Committing as …"), commit: author and committer of the new commit are that identity; "Use global identity" removes `user.name`/`user.email` from `.git/config`.
+- [ ] Identity: on a fresh profile the global identity appears in Preferences → Identities as default; add a second identity, choose it in the staging area ("Committing as …"), commit: author and committer of the new commit are that identity; "Use global identity" removes `user.name`/`user.email` from `.git/config`.
 - [ ] Default identity with "Keep the global Git config updated" on: setting another default changes `git config --global user.name`; off: nothing changes.
-- [ ] Without any identity (empty global config): the commit panel shows "No Git identity set", Commit is disabled with "Choose an identity first".
+- [ ] Without any identity (empty global config): the staging area shows "No Git identity set", Commit is disabled with "Choose an identity first".
 - [ ] SSH key with a passphrase: choose it in Preferences → Repository → SSH key, fetch an SSH remote: the passphrase prompt appears, the fetch works; "System default" restores the previous behavior; a hand-written `core.sshCommand` is only replaced after "Replace…".
 - [ ] External editor VS Code (`code.cmd`): Alt+E, the toolbar button "Editor", the palette and "Open in external editor" on a file in a folder with spaces open VS Code; no console window flashes up.
 
@@ -126,7 +126,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Left panel: branches before folders in LOCAL, REMOTE, GITFLOW and TAGS; tag folders collapse; the checked-out branch has a check next to its branch icon, also inside a folder.
 - [ ] Start screen: the three buttons have one size and the accent color in all themes, the "Ctrl+O" line is readable.
 - [ ] Preferences open as a centered window over the dimmed app; × and Esc close it, a click beside it does not, Tab stays inside; a small window shows them full size.
-- [ ] The status bar toggles (left end: left panel, right end: commit panel) hide and show the panels, in step with Ctrl+J / Ctrl+K; filled icon = shown, outline = hidden, no background; sharp at 125 %; none on the start screen; the toolbar has no toggles.
+- [ ] The status bar toggles (left end: left panel, right end: details panel) hide and show the panels, in step with Ctrl+J / Ctrl+K; filled icon = shown, outline = hidden, no background; sharp at 125 %; none on the start screen; the toolbar has no toggles.
 - [ ] The README screenshot matches the app.
 
 ## 7f. New in M12 (Windows required, Linux checked in CI)
@@ -173,8 +173,8 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] GITFLOW section: hover a feature, release and hotfix row: a flag left of the eye opens the finish dialog; during a merge the flag is muted and its tooltip says why; development and production have no flag.
 - [ ] The Gitflow layout shows "Experimental" in Preferences → Repository → Gitflow, "Gitflow layout (experimental)" in the gear menu and "Toggle Gitflow layout (experimental)" in the palette.
 - [ ] Narrow the Graph column step by step on a repository with many lanes: every commit stays visible, nodes of lanes that do not fit sit in the last lane in their colors; at the narrowest width all nodes are on one line; a double click on the border fits all lanes again.
-- [ ] Commit details: hover the message box of an unpushed commit, click the pencil: the editor opens; a click on the text only selects it; a pushed commit shows a muted pencil whose tooltip says why (the box itself has no tooltip); stashes have no pencil. In the editor the sparkle opens "Commit message prompt for commit <sha>" with that commit's diff (try a merge and the root commit too).
-- [ ] Change author: select three unpushed commits (one before a merge), right click → **Change author…**, choose a saved identity and then **Other…**: all three get the new author, author dates unchanged, the merge keeps its second parent; Ctrl+Z restores the branch in one step. With a pushed commit in the selection the entry is disabled and names it. In the message editor the first row reads "Authored by …" with a chevron (first entry "Keep original author"), the sparkle sits at its right end, and the editor looks like the commit panel; changing message and author at once is one undo step "Edit commit".
+- [ ] Commit details: hover the header or the message box of an unpushed commit, click the pencil at the right of the header: the message modal opens (since finding #43, see 7l); a click on the text only selects it; a pushed commit and a stash show the open icon and open the modal read-only with the reason. In the modal the sparkle opens "Commit message prompt for commit <sha>" with that commit's diff (try a merge and the root commit too).
+- [ ] Change author: select three unpushed commits (one before a merge), right click → **Change author…**, choose a saved identity and then **Other…**: all three get the new author, author dates unchanged, the merge keeps its second parent; Ctrl+Z restores the branch in one step. With a pushed commit in the selection the entry is disabled and names it. In the message modal the first row reads "Authored by …" with a chevron (first entry "Keep original author"), the sparkle sits at its right end, and the editor looks like the commit panel; changing message and author at once is one undo step "Edit commit".
 - [ ] Start screen: the three buttons are light accent tiles with normal text, readable in Dark and Light, hover and press visible.
 - [ ] Diff header: Blame, History, change arrows, Hunk / Inline / Split icons, External, Close; the tooltips name the action and its shortcut; Blame opens the blame view (at the commit of a commit diff) and is disabled with a reason for an untracked file and a stash.
 - [ ] Minimap in Inline and Split on a long file with changes at the top, middle and end: red and green marks (Split: left and right half), the visible range as a rectangle; click and drag jump there, the mouse wheel over the strip scrolls; no minimap in the Hunk view; scrolling a 20,000-line diff stays smooth.
@@ -195,6 +195,18 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Hovering a header shows a light background; clicking collapses/expands; "+" in REMOTE, the GITFLOW start button and the SUBMODULES right-click menu still work.
 - [ ] Semibold is visible; if the font has no semibold weight, only color and spacing differ (see task notes).
 
+## 7l. Details panel, message modal and minimum size (Windows required, Linux checked in CI)
+
+- [ ] Commit details (right and pinned to the bottom, Dark and Light, 100 % and 125 %): the panel itself never scrolls; the file list has its own frame and scrollbar; a very long message scrolls inside its box (at most about a fifth of the panel).
+- [ ] Header: the hash is at the left; hovering the header or the message shows the button at the right (pencil for an editable commit, otherwise the open icon); nothing jumps when it appears.
+- [ ] The button opens the message modal: edit an unpushed commit (Summary counter, Description, "Authored by" menu, sparkle prompt button); Ctrl+Enter saves, Ctrl+Z restores; Esc with changes asks "Discard changes?"; a pushed commit and a stash open read-only with the reason and "Copy message".
+- [ ] Tree mode: "Expand all" / "Collapse all" toggles; collapsing one folder switches the label back to "Expand all"; without folders the row is hidden.
+- [ ] Status bar: the new button moves the details panel between right and bottom (icon and tooltip follow); the panel toggle icon shows right or bottom; Ctrl+K hides and shows it in both positions; the position survives a restart.
+- [ ] Pinned to the bottom: Unstaged Files and Staged Files side by side, commit message and Commit button across the full width; the grey bar between the lists and the message can be dragged and is remembered; Stage all changes, stage/unstage, Amend, Commit and Discard all work.
+- [ ] Pinned to the bottom: a diff opens in the center above the panel; the merge, rebase and cherry-pick panels, stash details and a multi-commit selection look sensible.
+- [ ] Shrink the window to its minimum (about 1000×640 at 100 % zoom): nothing is cut off or unreachable in either position (graph, details, staging, diff, conflict view); Preferences, Clone, Change author, the message modal and the commit prompt fit; at 125 % and 150 % zoom the window cannot be made smaller than the scaled minimum.
+- [ ] Panes cannot be dragged below their minimum widths (left panel, graph, details panel) or heights (graph and panel when pinned).
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
@@ -213,3 +225,8 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] M15: can GitKraken change the author of a commit (context menu or details)? (Gitloom: yes, for unpushed commits.)
 - [ ] Fix/sidebar-section-headers: how does GitKraken 7.5.2 style the left panel section headers (color, weight, separators)? (Gitloom: full text color, semibold, hairline and extra space above every section but the first.)
 - [ ] Fix after M15: which diff and merge tools does GitKraken 7.5.2 offer in Preferences → General, and is there "Custom"? (Gitloom: presets VS Code, VSCodium, Zed, IntelliJ IDEA, Meld, WinMerge, Beyond Compare, plus Custom and Git's tools.)
+- [x] M14: what does the icon at the right of GitKraken's details header do? Answered 2026-11-19: Pin to bottom (Gitloom: status bar button, finding #44).
+- [ ] Fix after M15 (#44): where does GitKraken open the diff when the details panel is pinned to the bottom? (Gitloom: in the center above the panel.)
+- [ ] Fix after M15 (#44): is the pin per repository or global in GitKraken? (Gitloom: global.)
+- [ ] Fix after M15 (#44): does GitKraken show the grey splitter between the file lists and the commit message when the panel is on the right? (Gitloom: only at the bottom.)
+- [ ] Fix after M15 (#45): what is GitKraken's minimum window size? (Gitloom: about 1000×640 at 100 % zoom.)

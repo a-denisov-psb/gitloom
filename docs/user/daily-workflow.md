@@ -4,12 +4,13 @@
 
 Every commit is a row: branch and tag pills, the lane graph, the message, author, date and SHA. Each branch keeps its lane and color; merges and forks are curved lines. Local and remote branches on the same commit share one pill (a cloud icon names the remotes in its tooltip); more references collapse into "+N". Local branches show how many commits they are ahead (↑) or behind (↓) their upstream. Stashes are dashed squares with a stash icon attached to their base commit, labelled "WIP on <branch>" (or the message you gave). Large histories are cut off at 100 000 commits ("History truncated").
 
-- Click a commit for its details on the right; click a file there to see its diff.
+- Click a commit for its details in the details panel (right of the graph, or below it when pinned to the bottom); click a file there to see its diff.
 - Small pills at the right of the commit message mark where the age changes ("just now", "25 minutes ago", "yesterday", "3 days ago", "2 months ago"); they update every minute.
-- Ctrl+click and Shift+click (or Shift+↑/↓) select several commits; the right panel lists them.
+- Ctrl+click and Shift+click (or Shift+↑/↓) select several commits; the details panel lists them.
 - ↓/J and ↑/K move the selection, Shift+J/K follow the branch, Ctrl+Home/Ctrl+End jump to the first/last commit.
 - Clicking a branch in the left panel jumps to its commit. Branch and tag names with `/` are grouped into folders (click a folder or remote to collapse it; remembered per repository); every level lists branches (or tags) first, then folders. The checked-out branch is highlighted and has a check next to its branch icon.
-- The small panel icons at the left and right end of the status bar hide and show the left panel and the commit panel (also Ctrl+J and Ctrl+K); a filled side means the panel is shown.
+- The small panel icons at the left and right end of the status bar hide and show the left panel and the details panel (also Ctrl+J and Ctrl+K); a filled side means the panel is shown.
+- The arrow left of the details panel toggle moves the details panel to the bottom (under the graph, right of the left panel) and back; the palette has the same action ("Move details panel to the bottom" / "… to the right"). The panel toggle icon shows where the panel is. The choice is remembered; diffs, the conflict view and the file history still open in the center, above the panel.
 
 **Columns:** drag the border at the right of any column header to change that column's width (only that one changes); a double click sets the width that fits the visible rows, on the Commit message border it goes back to filling the free space. A table wider than the window scrolls sideways: the scrollbar below the rows, Shift+wheel or a horizontal wheel; the header moves along. The gear at the right end of the header shows or hides Author, Date and SHA and has **Reset column widths**. Widths are kept across restarts. A Graph column narrower than its lanes keeps every commit visible: the lanes that do not fit put their nodes into the column's last lane (in their own colors, without lines); at the narrowest width all nodes sit on one line.
 
@@ -21,18 +22,21 @@ Every commit is a row: branch and tag pills, the lane graph, the message, author
 
 ## Commit details
 
-- **commit: <sha>** at the top copies the full SHA with a click.
-- The message sits in a framed box; select text in it and copy it with Ctrl+C. Long descriptions scroll inside the box.
+The commit details never scroll as a whole; only the message box and the file list scroll inside their frames.
+
+- **commit: <sha>** at the top left copies the full SHA with a click. While the pointer is over this row or the message, a button appears at its right end: a pencil for a commit you can edit, otherwise an open icon; both open the message in a window (see below).
+- The message sits in a framed box of at most a fifth of the panel (at least three lines); select text in it and copy it with Ctrl+C. Long descriptions scroll inside the box.
 - The author block shows the avatar, the author and "authored <date>"; "committed by <name> <date>" when someone else committed (e.g. after a rebase or `git am`). `Co-authored-by:` lines at the end of the message appear as small avatars after "Co-authors:" (name and e-mail in the tooltip). **parent: <sha>** links select the parent and scroll to it.
-- The file list starts with a summary ("1 added · 2 modified · 1 deleted"). Its toolbar sorts A→Z or Z→A, switches between **Path** (full paths) and **Tree** (folders, with **Expand all** / **Collapse all**), and **View all files** lists every file of the commit, the unchanged ones muted; click one to see its content at that commit. These options are remembered.
+- A summary line ("2 changed files", "1 added · 1 modified") and a toolbar sit above the file list: it sorts A→Z or Z→A, switches between **Path** (full paths) and **Tree** (folders), and **View all files** lists every file of the commit, the unchanged ones muted; click one to see its content at that commit. These options are remembered.
+- The files are listed in their own frame with its own scrollbar. In Tree mode its first row is one button: **Collapse all** while every folder is open, otherwise **Expand all** (collapsing a single folder switches it back to **Expand all**). A stash shows its Staged, Unstaged and Untracked sections in the frame.
 
 ### Edit a commit message
 
-Hover the message box of a commit that you have not pushed yet and click the pencil at its top right: the box becomes an editor that looks like the commit panel: **Authored by …** with a menu to change the author (**Keep original author**, the repository's identity, saved identities, **Other…**), the sparkle for the commit message prompt, with the summary (and its counter) and the description. **Save** (Ctrl+Enter) or **Cancel** (Esc); one save changes message and author together. The sparkle opens **Copy commit message prompt…** for this commit (its diff against the first parent, the commits before it).
+Hover the commit details header or the message of a commit that you have not pushed yet and click the pencil at the right of the header (or use **Edit commit message…** in the command palette): the **Commit message** window opens with the parts of the staging area: **Authored by …** with a menu to change the author (**Keep original author**, the repository's identity, saved identities, **Other…**), the sparkle for the commit message prompt, the summary (and its counter) and the description, which grows with the text. **Save** (Ctrl+Enter, or Enter in the summary) or **Cancel** (Esc); one save changes message and author together and selects the rewritten commit. With changes, Esc, Cancel, × or a click beside the window ask **Discard changes?** (**Keep editing** / **Discard**). If saving fails (for example because the branch moved meanwhile), a notification explains it and the window stays open with your text. The sparkle opens **Copy commit message prompt…** for this commit (its diff against the first parent, the commits before it).
 
 **Change author…** in the menu of a commit changes the author of that commit, or of all selected commits when you right click one of several (Ctrl/Shift+click). Choose the repository's identity, a saved one or **Other…** (name and e-mail); the author dates are kept, Ctrl+Z restores all of them in one step. It is disabled with the reason (e.g. "a1b2c3d: Already pushed to origin/main …") when one of them cannot be changed. A click on the text itself only selects it. This works for the newest commit and for older ones on the checked-out branch, also when merges follow: Gitloom rebuilds the commits after it with the same files, authors and dates, and moves the branch. Your working tree and staged changes are not touched. Other branches and tags that contain the commit keep the old one; the editor lists them before you save. With commit signing on, the rebuilt commits are signed again; with it off, the editor says that their signatures are removed.
 
-The message cannot be edited when the commit is already on a remote ("Already pushed to origin/main. Use interactive rebase to change pushed history."), when it is not on the checked-out branch, or while a merge, rebase, cherry-pick or revert runs; the pencil is muted then and its tooltip says why. Stashes have no pencil. Ctrl+Z undoes the edit.
+The message cannot be edited when the commit is already on a remote ("Already pushed to origin/main. Use interactive rebase to change pushed history."), when it is not on the checked-out branch, while a merge, rebase, cherry-pick or revert runs, while Gitloom is busy, or for a stash ("Stashes cannot be edited"). The button then shows the open icon (**Open message**) and the window opens read-only: the reason at the top, the summary and description to select, **Copy message** (summary and description) and **Close**. Ctrl+Z undoes an edit.
 
 ## Diffs
 
@@ -52,7 +56,9 @@ In Inline and Split the arrows in the header jump to the previous / next change,
 
 ## Staging
 
-Select the **WIP** row at the top of the graph. The right panel lists unstaged, staged and conflicted files; changes made outside Gitloom (editor, build, a terminal) appear within a second.
+Select the **WIP** row at the top of the graph. The details panel lists unstaged, staged and conflicted files; changes made outside Gitloom (editor, build, a terminal) appear within a second.
+
+With the details panel at the bottom, **Unstaged Files** and **Staged Files** sit side by side (with the sort and **Path** / **Tree** buttons above them), **Discard all changes** is the trash icon left of the title, and the commit message and the **Commit** button span the full width. Drag the grey bar between the lists and the commit message up or down to share the height; the position is remembered.
 
 - Hover a file for **Stage** / **Unstage** and **Discard**; or right click it.
 - **Stage all changes** / **Unstage all changes**, Ctrl+Shift+S / Ctrl+Shift+U.
@@ -70,7 +76,7 @@ Write a summary (the counter inside the field shows the remaining characters of 
 
 **Amend previous commit** fills the message from the last commit; you can amend only the message. Gitloom warns when that commit is already pushed.
 
-With a detached HEAD, the commit panel reminds you to create a branch.
+With a detached HEAD, the staging area reminds you to create a branch.
 
 **Committing as <name> <email>** above the summary shows the identity the next commit uses; the tooltip says whether it comes from the repository's or the global Git config. Click it to use one of your saved identities in this repository (written to `user.name`/`user.email` of the repository config), **Use global identity** to remove the repository's own values, **Save as identity** to keep the current one, or **Manage identities…**. The same choices are in the command palette ("Choose identity…") and in Preferences → Repository → Identity. Without a name and email, the line reads "No Git identity set" and Commit, Amend and Continue stay disabled until you choose or add one. Saved identities and the default live in Preferences → Identities ([Settings](settings.md)).
 

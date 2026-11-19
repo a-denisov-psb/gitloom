@@ -18,7 +18,7 @@
 
 Below the global categories, the group **Repository · <name>** holds the settings of the active tab's repository:
 
-- **Identity**: the name and email the repository's commits use, with where they come from (repository or global Git config), and the same choices as "Committing as …" in the commit panel (see [Daily workflow](daily-workflow.md#committing)).
+- **Identity**: the name and email the repository's commits use, with where they come from (repository or global Git config), and the same choices as "Committing as …" in the staging area (see [Daily workflow](daily-workflow.md#committing)).
 - **SSH key**: the key for fetch, pull and push (see [Branches and remotes](branches-and-remotes.md#ssh-key-per-repository)).
 - **Commit**: the commit template like GitKraken's: **Apply this template to commit messages**, **Remove comments from commit messages** (lines starting with `core.commentChar`, `#` by default), **Summary**, description, **Save commit template**. It is Git's `commit.template` file; without one, saving creates `.git/gitloom/commit-template.txt` for this repository. A template in the global Git config is changed only after "This template is used by all repositories. Change it?".
 - **External editor**: **Use global setting** or a preset or custom command for this repository only (stored in its Git config); Alt+E, the toolbar, the palette and the file menus use it.
