@@ -188,6 +188,13 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Merge tool "VS Code" (or Meld/WinMerge) on a conflicted file: resolve, save, close: the file counts as resolved; closing without saving leaves it conflicted; Gitloom never hangs.
 - [ ] Without a diff tool: Ctrl+D shows "No diff tool" with "Define tool…", which opens External tools with the field focused.
 
+## 7k. Left panel section headers (Windows required, Linux checked in CI)
+
+- [ ] Left panel (Dark and Light, 100 % and 125 %): the six section headers are clearly distinguishable from folder and branch rows.
+- [ ] First visible section has no line above it; all others have a hairline and extra space, also when collapsed.
+- [ ] Hovering a header shows a light background; clicking collapses/expands; "+" in REMOTE, the GITFLOW start button and the SUBMODULES right-click menu still work.
+- [ ] Semibold is visible; if the font has no semibold weight, only color and spacing differ (see task notes).
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
@@ -204,4 +211,5 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] M15: does GitKraken show the diff minimap in the Hunk view too? (Gitloom: Inline and Split only.)
 - [ ] M15: which icons (or text) does GitKraken use for Blame and History in the diff header? (Gitloom: `file-user` and `history`.)
 - [ ] M15: can GitKraken change the author of a commit (context menu or details)? (Gitloom: yes, for unpushed commits.)
+- [ ] Fix/sidebar-section-headers: how does GitKraken 7.5.2 style the left panel section headers (color, weight, separators)? (Gitloom: full text color, semibold, hairline and extra space above every section but the first.)
 - [ ] Fix after M15: which diff and merge tools does GitKraken 7.5.2 offer in Preferences → General, and is there "Custom"? (Gitloom: presets VS Code, VSCodium, Zed, IntelliJ IDEA, Meld, WinMerge, Beyond Compare, plus Custom and Git's tools.)

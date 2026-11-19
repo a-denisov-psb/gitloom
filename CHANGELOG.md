@@ -67,6 +67,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- The section headers of the left panel (GITFLOW, LOCAL, REMOTE, STASHES, TAGS, SUBMODULES) stand out from the folders and branches below them: full text color, semibold, a hairline and extra space above each section, a light background on hover.
 - Syntax highlighting works for files of any length (up to 8 MB; it stopped at 20,000 lines): colors appear block by block from the top while the rest stays plain for a moment; lines over 5,000 bytes stay plain. Highlighting is about three times faster (oniguruma regex engine).
 
 - Diff header as icons like GitKraken: Blame (new: the file's blame at the commit of a commit diff, otherwise of the working file; disabled with the reason for untracked, stash, added and deleted files), History, change arrows, Hunk / Inline / Split as an icon toggle, External, Close; tooltips name the action and its shortcut.

@@ -427,14 +427,16 @@ pub fn bare(theme: &Theme, _status: button::Status) -> button::Style {
 }
 
 pub fn section_header(theme: &Theme, status: button::Status) -> button::Style {
+    // The title is always in the full text color (fix/sidebar-section-
+    // headers); hovering shows a background like a list item.
     let p = palette(theme);
-    let text_color = match status {
-        button::Status::Hovered => p.text,
-        _ => p.text_muted,
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => Some(p.bg_hover),
+        _ => None,
     };
     button::Style {
         border: Border::default(),
-        ..button_style(None, text_color)
+        ..button_style(background, p.text)
     }
 }
 
@@ -886,6 +888,28 @@ pub fn menu_item(theme: &Theme, status: button::Status) -> button::Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fix/sidebar-section-headers: the title keeps the full text color;
+    /// only hovering (and pressing) adds the list item background.
+    #[test]
+    fn section_headers_keep_the_text_color_and_show_hover() {
+        for (theme, p) in [(Theme::Dark, &DARK), (Theme::Light, &LIGHT)] {
+            for status in [
+                button::Status::Active,
+                button::Status::Hovered,
+                button::Status::Pressed,
+            ] {
+                let style = section_header(&theme, status);
+                assert_eq!(style.text_color, p.text);
+                let hover = status != button::Status::Active;
+                assert_eq!(
+                    style.background,
+                    hover.then_some(Background::Color(p.bg_hover)),
+                    "{status:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn start_buttons_reach_wcag_aa() {
