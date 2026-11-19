@@ -228,6 +228,18 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] The choice in one repository tab does not change the same path in another tab.
 - [ ] Window at its minimum size (about 1000×670): the status bar with the language item, the branch label, the version and the panel buttons fits, nothing overlaps; Dark and Light, 100 % and 125 %.
 
+## 7o. Themes (M16) (Windows required, Linux checked in CI)
+
+- [ ] Preferences → Appearance lists Dark themes (Dark, Dark+, Monokai, GitHub Dark, Warm Dark) and Light themes (Light, Light+, GitHub Light, Solarized Light, Warm Light) side by side with a color strip each, then System; the current one has a check mark.
+- [ ] Choose each of the ten themes and look at: the window, the graph with and without the Gitflow layout (lane and Git flow colors, ref pills, time markers), a diff in Hunk, Inline and Split (added and removed lines, changed-character emphasis), blame and file history, the conflict view, a dialog, a context menu, a toast, the start screen (New Tab) and Preferences. Text and icons are readable everywhere; nothing keeps the old theme's colors.
+- [ ] Syntax colors are readable in each theme (open a `.rs`, `.py` or `.json` diff).
+- [ ] Dark and Light look exactly as before M16.
+- [ ] "Set: Theme ›" in the command palette lists the same ten names and System, marks the current one and applies a choice at once.
+- [ ] Choose System: the lists "When the system is dark" and "When the system is light" appear and offer only dark or only light themes. Pick e.g. Monokai and Warm Light, then switch the Windows color mode (Settings → Personalization → Colors) while Gitloom runs: the window follows within a moment.
+- [ ] Old `settings.json` values still work: `"theme": "light"`, `"system"` and `"classic-dark"` (opens in Dark).
+- [ ] An unknown id (`"theme": "no-such-theme"` in `settings.json`, then start Gitloom): Dark is used and Preferences → Appearance says "Theme 'no-such-theme' not found, using Dark."
+- [ ] The askpass window (e.g. an HTTPS push that asks for a password) uses the chosen theme; with System it follows the Windows mode and the mapped themes.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
