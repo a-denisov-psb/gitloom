@@ -1532,7 +1532,7 @@ fn theme_editor(editor: &crate::theme_editor::Editor) -> Element<'_, Message> {
         muted("Colors of code in diffs, blame, file history and the conflict view.").size(12),
     ]
     .spacing(8);
-    column![
+    let controls = column![
         header,
         buttons,
         main,
@@ -1546,6 +1546,14 @@ fn theme_editor(editor: &crate::theme_editor::Editor) -> Element<'_, Message> {
         column![section("Graph"), rows(&lanes)].spacing(8),
         flow,
         syntax,
+    ]
+    .spacing(20)
+    .width(Length::FillPortion(3));
+    // The preview is drawn with the edited theme; everything else keeps
+    // the active one (ADR-044, ADR-059).
+    row![
+        controls,
+        container(crate::ui::theme_preview::view(editor)).width(Length::FillPortion(2)),
     ]
     .spacing(20)
     .into()

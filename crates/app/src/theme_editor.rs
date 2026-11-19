@@ -377,6 +377,78 @@ pub fn syntax_names() -> Vec<String> {
     names
 }
 
+/// Contrast warnings of a theme (M17-04, ADR-059); they never block
+/// saving.
+pub fn warnings(theme: &ThemeData) -> Vec<String> {
+    use crate::theme::contrast;
+    let p = &theme.palette;
+    let mut found = Vec::new();
+    let mut check = |what: &str, on: &str, fg: Color, bg: Color, need: f32| {
+        let ratio = contrast(fg, bg);
+        if ratio < need {
+            found.push(format!("{what} on {on}: {ratio:.1}:1 ({need}:1 needed)"));
+        }
+    };
+    for (on, bg) in [
+        ("background", p.bg_graph),
+        ("surface", p.bg_panel),
+        ("chrome", p.bg_chrome),
+        ("hover", p.bg_hover),
+        ("selected", p.bg_selected),
+    ] {
+        check("Text", on, p.text, bg, 4.5);
+    }
+    for (on, bg) in [("background", p.bg_graph), ("surface", p.bg_panel)] {
+        check("Muted text", on, p.text_muted, bg, 3.0);
+    }
+    for (what, color) in [
+        ("Accent", p.accent),
+        ("Success", p.success),
+        ("Warning", p.warning),
+        ("Danger", p.danger),
+    ] {
+        check(what, "background", color, p.bg_graph, 3.0);
+    }
+    let foreground = syntax_foreground(theme.syntax);
+    check("Syntax text", "background", foreground, p.bg_graph, 4.5);
+    found
+}
+
+/// Default text color of a syntax theme.
+pub fn syntax_foreground(syntax: CodeTheme) -> Color {
+    crate::highlight::theme(syntax)
+        .settings
+        .foreground
+        .map(|c| rgba8([c.r, c.g, c.b, c.a]))
+        .unwrap_or(Color::TRANSPARENT)
+}
+
+/// The code of the preview's diff (old and new file).
+pub const PREVIEW_OLD: &str =
+    "fn total(items: &[u32]) -> u32 {\n    let sum = items.iter().sum();\n    sum\n}\n";
+pub const PREVIEW_NEW: &str = "fn total(items: &[u32]) -> u64 {\n    let sum: u64 = items.iter().map(|&n| u64::from(n)).sum();\n    sum\n}\n";
+
+type PreviewCode = (crate::highlight::Outcome, crate::highlight::Outcome);
+
+/// The preview code highlighted with `syntax` (old, new), computed once per
+/// syntax theme (a few lines; at most one entry per embedded theme).
+pub fn preview_code(syntax: CodeTheme) -> PreviewCode {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    static CACHE: OnceLock<Mutex<HashMap<CodeTheme, PreviewCode>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Mutex::default);
+    let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
+    cache
+        .entry(syntax)
+        .or_insert_with(|| {
+            (
+                crate::highlight::highlight("preview.rs", PREVIEW_OLD, syntax),
+                crate::highlight::highlight("preview.rs", PREVIEW_NEW, syntax),
+            )
+        })
+        .clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +544,77 @@ mod tests {
         e.update(Edit::Picker(Field::Text));
         assert_eq!(e.picker, None);
         assert!(syntax_names().contains(&"OneHalfDark".to_owned()));
+    }
+
+    /// M17-04: every warning rule at its threshold.
+    #[test]
+    fn warnings_at_their_thresholds() {
+        let base = editor().data;
+        assert!(warnings(&base).is_empty(), "{:?}", warnings(&base));
+        let gray = |v: u8| Color::from_rgb8(v, v, v);
+        let black = gray(0);
+        // The darkest gray that reaches `need` on black.
+        let at = |need: f32| {
+            (0..=255u8)
+                .find(|v| crate::theme::contrast(gray(*v), black) >= need)
+                .unwrap()
+        };
+        let mut t = base.clone();
+        let p = &mut t.palette;
+        p.bg_graph = black;
+        p.bg_panel = black;
+        p.bg_chrome = black;
+        p.bg_hover = black;
+        p.bg_selected = black;
+        p.text = gray(at(4.5));
+        p.text_muted = gray(at(3.0));
+        p.accent = gray(at(3.0));
+        p.success = gray(at(3.0));
+        p.warning = gray(at(3.0));
+        p.danger = gray(at(3.0));
+        assert!(warnings(&t).is_empty(), "{:?}", warnings(&t));
+        type Slot = fn(&mut ThemePalette) -> &mut Color;
+        let cases: [(&str, Slot, f32); 6] = [
+            ("Text on background", |p| &mut p.text, 4.5),
+            ("Muted text on background", |p| &mut p.text_muted, 3.0),
+            ("Accent on background", |p| &mut p.accent, 3.0),
+            ("Success on background", |p| &mut p.success, 3.0),
+            ("Warning on background", |p| &mut p.warning, 3.0),
+            ("Danger on background", |p| &mut p.danger, 3.0),
+        ];
+        for (start, slot, need) in cases {
+            let mut bad = t.clone();
+            *slot(&mut bad.palette) = gray(at(need) - 1);
+            let found = warnings(&bad);
+            assert!(
+                found.iter().any(|w| w.starts_with(start)),
+                "{start}: {found:?}"
+            );
+        }
+        for (start, slot) in [
+            ("Text on surface", (|p| &mut p.bg_panel) as Slot),
+            ("Text on chrome", |p| &mut p.bg_chrome),
+            ("Text on hover", |p| &mut p.bg_hover),
+            ("Text on selected", |p| &mut p.bg_selected),
+            ("Muted text on surface", |p| &mut p.bg_panel),
+        ] {
+            let mut bad = t.clone();
+            *slot(&mut bad.palette) = gray(40);
+            let found = warnings(&bad);
+            assert!(
+                found.iter().any(|w| w.starts_with(start)),
+                "{start}: {found:?}"
+            );
+        }
+        // The syntax theme's text on the background.
+        let mut bad = base.clone();
+        bad.palette.bg_graph = syntax_foreground(bad.syntax);
+        let found = warnings(&bad);
+        assert!(
+            found
+                .iter()
+                .any(|w| w.starts_with("Syntax text on background")),
+            "{found:?}"
+        );
     }
 }

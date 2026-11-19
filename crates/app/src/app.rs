@@ -1360,6 +1360,8 @@ pub struct App {
     /// Theme files found in `themes/` (ADR-059), invalid ones with their
     /// reason; the valid ones are in the theme registry.
     pub theme_files: Vec<crate::theme_file::Entry>,
+    /// The theme data in the registry's preview slot (M17-04).
+    theme_preview: Option<crate::theme_file::ThemeData>,
     /// The last theme file action sent to the background (tests run it).
     #[cfg(test)]
     pub last_theme_op: Option<crate::theme_file::Op>,
@@ -1473,6 +1475,7 @@ impl App {
             settings_page: None,
             #[cfg(test)]
             last_theme_op: None,
+            theme_preview: None,
             theme_files: Vec::new(),
             settings_path: session_path
                 .as_deref()
@@ -3057,6 +3060,24 @@ impl App {
                 (&appearance.system_light, ThemeKind::Light)
             }
             settings::ThemeChoice::System => (&appearance.system_dark, ThemeKind::Dark),
+        }
+    }
+
+    /// Puts the edited theme into the registry's preview slot, or clears
+    /// it when no editor is open (M17-04).
+    fn sync_theme_preview(&mut self) {
+        let wanted = self
+            .settings_page
+            .as_ref()
+            .and_then(|p| p.theme_editor.as_ref())
+            .map(|e| e.data.clone());
+        if wanted != self.theme_preview {
+            crate::themes::set_preview(
+                wanted
+                    .clone()
+                    .map(|data| data.into_def(crate::themes::PREVIEW_ID.to_owned())),
+            );
+            self.theme_preview = wanted;
         }
     }
 
@@ -5030,6 +5051,7 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
+        self.sync_theme_preview();
         // Keep each tab's reason for disabled write actions current.
         let block = self.write_block();
         for tab in &mut self.tabs {
@@ -15135,6 +15157,42 @@ pub(crate) mod tests {
             .settings_page
             .as_ref()
             .is_some_and(|p| p.theme_editor.is_none()));
+        app.set_theme_files(Vec::new());
+    }
+
+    /// M17-04: an edit changes the preview, not the window or the editor
+    /// controls; closing the editor clears the preview.
+    #[test]
+    fn theme_preview_follows_the_edits_only() {
+        use crate::theme_editor::{Edit, Field};
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = themes_app(dir.path());
+        let _ = app.update(Message::ThemeNew);
+        run_theme_op(&mut app).unwrap();
+        let before = *crate::theme::palette(&app.theme());
+        let _ = app.update(Message::ThemeEdit(Edit::Hex(Field::Text, "#1f232b".into())));
+        let preview = crate::themes::palette_of(crate::themes::PREVIEW_ID).expect("preview");
+        assert_eq!(preview.text, iced::Color::from_rgb8(0x1f, 0x23, 0x2b));
+        assert_eq!(
+            *crate::theme::palette(&app.theme()),
+            before,
+            "window unchanged"
+        );
+        assert!(!crate::theme_editor::warnings(
+            &app.settings_page
+                .as_ref()
+                .unwrap()
+                .theme_editor
+                .as_ref()
+                .unwrap()
+                .data
+        )
+        .is_empty());
+        let _ = app.update(Message::ThemeEditorDiscard(Box::new(Message::Noop)));
+        assert!(crate::themes::palette_of(crate::themes::PREVIEW_ID).is_none());
         app.set_theme_files(Vec::new());
     }
 

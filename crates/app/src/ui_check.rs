@@ -1353,6 +1353,42 @@ mod tests {
         app.set_theme_files(Vec::new());
     }
 
+    /// The preview (M17-04) with a deliberately bad theme (text equal to
+    /// the background): the controls stay readable, the preview is not,
+    /// the warnings name it; Dark and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_theme_preview() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        use crate::settings::ThemeChoice;
+        use crate::theme_editor::{Edit, Field};
+        use crate::theme_file::{Entry, ThemeData};
+        for id in ["dark", "light"] {
+            let base = crate::themes::get(id).unwrap();
+            let def = ThemeData {
+                name: "Unreadable".into(),
+                ..ThemeData::of(&base)
+            }
+            .into_def("user:Unreadable".into());
+            let mut app = crate::app::tests::ready_app(&["c", "b", "a"]);
+            app.set_theme_files(vec![Entry::Theme(def.clone())]);
+            app.settings.appearance.theme = ThemeChoice::theme(id);
+            let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Themes));
+            let _ = app.update(Message::ThemeSelected(def.id.clone()));
+            let _ = app.update(Message::ThemeEditOpened);
+            snapshot(&app, &format!("theme-preview-{id}"));
+            let background = crate::theme_file::to_hex(base.palette.bg_graph);
+            let _ = app.update(Message::ThemeEdit(Edit::Hex(Field::Text, background)));
+            snapshot(&app, &format!("theme-preview-bad-{id}"));
+            let _ = app.update(Message::ThemeEditorDiscard(Box::new(Message::Noop)));
+        }
+        crate::themes::set_preview(None);
+        let mut app = crate::app::tests::ready_app(&["c"]);
+        app.set_theme_files(Vec::new());
+    }
+
     /// Every theme of the registry (ADR-058, M16-04/05): the graph with the
     /// Gitflow layout, and a word diff with syntax colors next to staging
     /// and the status bar.
