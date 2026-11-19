@@ -34,6 +34,7 @@ pub(crate) mod sidebar;
 pub(crate) mod start;
 pub(crate) mod statusbar;
 mod tabs;
+mod theme_preview;
 mod toasts;
 pub(crate) mod toolbar;
 

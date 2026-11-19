@@ -417,10 +417,20 @@ fn warm_light() -> ThemePalette {
 
 struct Registry {
     themes: Vec<Arc<ThemeDef>>,
+    /// The theme editor's preview (M17-04): reachable by its id only, not
+    /// listed.
+    preview: Option<Arc<ThemeDef>>,
 }
 
-static REGISTRY: LazyLock<RwLock<Registry>> =
-    LazyLock::new(|| RwLock::new(Registry { themes: builtins() }));
+/// Id of the theme editor's preview theme (M17-04).
+pub const PREVIEW_ID: &str = "preview:theme-editor";
+
+static REGISTRY: LazyLock<RwLock<Registry>> = LazyLock::new(|| {
+    RwLock::new(Registry {
+        themes: builtins(),
+        preview: None,
+    })
+});
 
 /// Runs `f` on the registry. A panic while the lock was held cannot leave
 /// the list half-changed (writers replace whole entries), so a poisoned
@@ -498,9 +508,22 @@ pub fn palette_of(id: &str) -> Option<Arc<ThemePalette>> {
     read(|r| {
         r.themes
             .iter()
+            .chain(r.preview.iter())
             .find(|t| t.id == id)
             .map(|t| Arc::clone(&t.palette))
     })
+}
+
+/// Sets (or clears) the preview theme of the theme editor; it gets the id
+/// [`PREVIEW_ID`]. The old one is dropped.
+pub fn set_preview(def: Option<ThemeDef>) {
+    let mut guard = REGISTRY.write().unwrap_or_else(PoisonError::into_inner);
+    guard.preview = def.map(|def| {
+        Arc::new(ThemeDef {
+            id: PREVIEW_ID.to_owned(),
+            ..def
+        })
+    });
 }
 
 /// Contrast of a syntax theme on `background` (ADR-058): its default

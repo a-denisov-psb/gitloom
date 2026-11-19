@@ -369,14 +369,13 @@ fn spans_of(ranges: &[(syntect::highlighting::Style, &str)], text_len: usize) ->
     spans
 }
 
-/// Highlights `content` of the file at `path` with `theme` in one go.
-#[cfg(test)]
+/// Highlights `content` of the file at `path` with `theme` in one go
+/// (tests and the few lines of the theme editor's preview).
 pub fn highlight(path: &str, content: &str, theme_id: CodeTheme) -> Outcome {
     highlight_in(path, content, theme_id, None)
 }
 
 /// [`highlight`] in a chosen language (ADR-057).
-#[cfg(test)]
 pub fn highlight_in(
     path: &str,
     content: &str,

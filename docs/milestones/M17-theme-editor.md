@@ -94,11 +94,13 @@ Acceptance: unit tests: hex parsing (`#RRGGBB`, `#RRGGBBAA`, without `#`; everyt
 
 Note: the picker is three RGB sliders (four with alpha for backdrop and the emphasis colors) under the color row, opened by its swatch: a hue and saturation/value field would need a canvas widget of its own or a new dependency (decision table: sliders then). The editor replaces the list on the Themes page (New theme opens it for the copy; "Edit…" for a selected user theme); "Discard changes?" also guards closing Preferences and switching the category. Save is disabled without changes; an empty name keeps the saved one. Snapshots `theme-editor-*` and `theme-one-feature-color`.
 
-### [ ] M17-04 Preview panel and contrast warnings
+### [x] M17-04 Preview panel and contrast warnings
 
 - The preview panel drawn with the edited palette only; the warning rules of the decisions table.
 
 Acceptance: app test: an edit changes the preview and not the editor controls; unit tests per warning rule at its threshold; a snapshot with a deliberately bad theme (text equal to background) shows readable controls, an unreadable preview and the warnings.
+
+Note: the preview sits right of the editor controls (3:2), drawn through `iced::widget::themer` with the registry's preview entry (`themes::PREVIEW_ID`, not listed, replaced after every update that changes the edited theme, cleared when the editor closes). The sample code is highlighted once per syntax theme. Snapshots `theme-preview-*`.
 
 ### [ ] M17-05 Documentation
 
