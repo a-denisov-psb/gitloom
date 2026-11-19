@@ -106,12 +106,14 @@ Acceptance: unit tests: old `settings.json` files with `"theme": "light"`, `"sys
 
 Note: `App::theme_kind` became `active_theme` (plus `theme_note`); the mapping is set by `Message::SystemThemeMapped(base, id)`. An unknown mapped id falls back to the default of its slot (Dark for the dark slot, Light for the light slot) with the same note. The askpass window returns no theme to iced while the file, the id or the System mode is unusable or unknown, so iced follows the operating system; it asks iced for the mode at start and then uses the mapped theme.
 
-### [ ] M16-04 Built-in themes: Dark+, Light+, Monokai
+### [x] M16-04 Built-in themes: Dark+, Light+, Monokai
 
 - Palettes (main colors, lanes, Git flow colors, overrides), syntax pairings and sources per the decisions table; third-party notices.
 - Contrast test over all registry themes (shared by M16-05).
 
 Acceptance: the contrast test passes for each theme; a snapshot of the fixture window (graph with the Gitflow layout, a diff with word diff and syntax colors, staging, status bar) per theme; `scripts/third-party-licenses.sh` output lists the sources.
+
+Note: the fixture is two snapshots per theme (`ui_check_themes`: `theme-<id>-graph` with the Gitflow layout, `theme-<id>-diff` with a Split word diff, staging and the status bar), since a diff replaces the graph. Light themes also keep status colors at 4.5:1 on the panel like Light.
 
 ### [ ] M16-05 Built-in themes: GitHub Dark, GitHub Light, Solarized Light, Warm Dark, Warm Light
 

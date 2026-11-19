@@ -1221,6 +1221,26 @@ mod tests {
         }
     }
 
+    /// Every theme of the registry (ADR-058, M16-04/05): the graph with the
+    /// Gitflow layout, and a word diff with syntax colors next to staging
+    /// and the status bar.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_themes() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        let (_repo, flow) = crate::snapshot::flow_tests::classic_snapshot();
+        for def in crate::themes::all() {
+            let choice = ThemeChoice::theme(&def.id);
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice.clone();
+            let view = app.tabs[0].view_mut().unwrap();
+            view.snapshot = std::sync::Arc::new(flow.with_flow_layout(true).unwrap());
+            snapshot(&app, &format!("theme-{}-graph", def.id));
+            let app = crate::app::tests::word_diff_app(DiffMode::Split, choice);
+            snapshot(&app, &format!("theme-{}-diff", def.id));
+        }
+    }
+
     /// Icons at fractional scales (M9-05): left panel headers (with the "+"
     /// of REMOTE and GITFLOW), toolbar and file lists at 100, 110, 125 and
     /// 150 %, both themes.

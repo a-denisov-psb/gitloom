@@ -9,7 +9,7 @@ use iced::theme::Palette;
 use iced::widget::{button, container, pane_grid, text};
 use iced::{Background, Border, Color, Theme};
 
-const fn hex(value: u32) -> Color {
+pub(crate) const fn hex(value: u32) -> Color {
     Color::from_rgb8(
         ((value >> 16) & 0xff) as u8,
         ((value >> 8) & 0xff) as u8,
