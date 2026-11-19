@@ -191,7 +191,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 ## 7k. Left panel section headers (Windows required, Linux checked in CI)
 
 - [ ] Left panel (Dark and Light, 100 % and 125 %): the six section headers are clearly distinguishable from folder and branch rows.
-- [ ] First visible section has no line above it; all others have a hairline and extra space, also when collapsed.
+- [ ] Every visible section, also the first one (GITFLOW, or LOCAL without Git flow), has a hairline above it; collapse all sections: each header sits centered between its two lines (Dark and Light, 100 % and 125 %).
 - [ ] Hovering a header shows a light background; clicking collapses/expands; "+" in REMOTE, the GITFLOW start button and the SUBMODULES right-click menu still work.
 - [ ] Semibold is visible; if the font has no semibold weight, only color and spacing differ (see task notes).
 
@@ -204,8 +204,17 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Status bar: the new button moves the details panel between right and bottom (icon and tooltip follow); the panel toggle icon shows right or bottom; Ctrl+K hides and shows it in both positions; the position survives a restart.
 - [ ] Pinned to the bottom: Unstaged Files and Staged Files side by side, commit message and Commit button across the full width; the grey bar between the lists and the message can be dragged and is remembered; Stage all changes, stage/unstage, Amend, Commit and Discard all work.
 - [ ] Pinned to the bottom: a diff opens in the center above the panel; the merge, rebase and cherry-pick panels, stash details and a multi-commit selection look sensible.
-- [ ] Shrink the window to its minimum (about 1000×640 at 100 % zoom): nothing is cut off or unreachable in either position (graph, details, staging, diff, conflict view); Preferences, Clone, Change author, the message modal and the commit prompt fit; at 125 % and 150 % zoom the window cannot be made smaller than the scaled minimum.
+- [ ] Shrink the window to its minimum (about 1000×670 at 100 % zoom): nothing is cut off or unreachable in either position (graph, details, staging, diff, conflict view); Preferences, Clone, Change author, the message modal and the commit prompt fit; at 125 % and 150 % zoom the window cannot be made smaller than the scaled minimum.
 - [ ] Panes cannot be dragged below their minimum widths (left panel, graph, details panel) or heights (graph and panel when pinned).
+
+## 7m. Section lines, staging list frames and dividers (Windows required, Linux checked in CI)
+
+- [ ] Staged and Unstaged lists sit in a frame like the commit details' file list, with the panel at the right and at the bottom, empty and with files; selected and hovered rows are readable in Dark and Light.
+- [ ] Scroll the branch tree far down and drag the divider between the left panel and the graph: the tree keeps its position and its scrollbar thumb does not follow the mouse.
+- [ ] Scroll the graph far down (and sideways) and drag the divider to the details panel at the right and, with the panel pinned to the bottom, the divider above it: the graph keeps its position.
+- [ ] Drag the grey bar between the staging lists and the commit message with long lists: the lists keep their scroll positions.
+- [ ] Right next to each divider the scrollbars still work (drag the thumb, click the track).
+- [ ] Window at its minimum size (about 1000×670 at 100 % zoom): the staging area shows both frames and the Commit button in both positions, nothing cut off.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
@@ -229,4 +238,4 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] Fix after M15 (#44): where does GitKraken open the diff when the details panel is pinned to the bottom? (Gitloom: in the center above the panel.)
 - [ ] Fix after M15 (#44): is the pin per repository or global in GitKraken? (Gitloom: global.)
 - [ ] Fix after M15 (#44): does GitKraken show the grey splitter between the file lists and the commit message when the panel is on the right? (Gitloom: only at the bottom.)
-- [ ] Fix after M15 (#45): what is GitKraken's minimum window size? (Gitloom: about 1000×640 at 100 % zoom.)
+- [ ] Fix after M15 (#45): what is GitKraken's minimum window size? (Gitloom: about 1000×670 at 100 % zoom.)

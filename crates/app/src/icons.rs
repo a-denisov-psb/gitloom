@@ -368,6 +368,17 @@ where
         layout::Node::new(limits.resolve(iced::Length::Fill, 1.0, Size::ZERO))
     }
 
+    /// Reports its bounds (tests find the lines by it).
+    fn operate(
+        &mut self,
+        _tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        operation.custom(None, layout.bounds(), &mut Hairline);
+    }
+
     fn draw(
         &self,
         _tree: &Tree,

@@ -265,12 +265,15 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 }
 
 /// Smallest height of the file lists at the bottom: the list header and
-/// two rows (finding #44).
-pub const STAGING_LISTS_MIN: f32 = LIST_HEADER_HEIGHT + 2.0 * FILE_ROW_HEIGHT;
+/// two rows in their frame (findings #44, #47).
+pub const STAGING_LISTS_MIN: f32 = LIST_HEADER_HEIGHT + FILE_FRAME_CHROME + 2.0 * FILE_ROW_HEIGHT;
 /// Staging area at the right with both lists at two rows: the header,
-/// two list sections and the commit box (finding #45).
+/// two list sections and the commit box (finding #45). Both sections get
+/// the same share, and at the panel's minimum width the Unstaged header
+/// wraps its buttons below the title, so each gets the wrapped header
+/// (measured again for the frames, finding #47).
 pub const STAGING_RIGHT_MIN: f32 = (2.0 * 10.0 + 13.0 * 1.3)
-    + 2.0 * STAGING_LISTS_MIN
+    + 2.0 * (STAGING_LISTS_MIN + LIST_HEADER_WRAP)
     + (2.0 * 12.0
         + LABEL_ROW_HEIGHT
         + IDENTITY_ROW_HEIGHT
@@ -284,6 +287,9 @@ pub const STAGING_MESSAGE_MIN: f32 =
     LABEL_ROW_HEIGHT + IDENTITY_ROW_HEIGHT + INPUT_HEIGHT + DESCRIPTION_TWO_LINES + 3.0 * 8.0;
 /// Header of a file list ("Unstaged Files (n)" and its button).
 pub const LIST_HEADER_HEIGHT: f32 = 2.0 * 6.0 + 12.0 * 1.3 + 2.0 * 3.0;
+/// A list header whose buttons wrap below the title adds the title line
+/// and the spacing between the lines (measured: 20.9 px).
+const LIST_HEADER_WRAP: f32 = 13.0 * 1.3 + 4.0;
 /// "Commit Message" and the Amend checkbox.
 const LABEL_ROW_HEIGHT: f32 = 13.0 * 1.3;
 /// "Committing as …" and the sparkle button.
@@ -1195,16 +1201,7 @@ fn details_content<'a>(
         };
     // The file list scrolls in its own frame; the panel never scrolls
     // (finding #42).
-    let frame = container(
-        crate::ui::vscroll(container(body).padding([4, 0]).width(Fill))
-            .width(Fill)
-            .height(Fill),
-    )
-    .width(Fill)
-    .height(Fill)
-    .padding(1)
-    .clip(true)
-    .style(theme::file_frame);
+    let frame = file_frame(body);
 
     // Hash at the left, the button slot at the right; the button shows
     // while the header or the message is hovered, its room is always kept
@@ -1438,11 +1435,42 @@ fn file_section_with_menu<'a>(
         None => header,
     };
 
+    // The list sits in the frame of the commit details' file list, also
+    // when it is empty (finding #47).
     column![
         header,
-        crate::ui::vscroll(Column::with_children(files)).height(Fill)
+        container(file_frame(Column::with_children(files)))
+            .padding([0.0, LIST_FRAME_MARGIN])
+            .height(Fill)
     ]
     .height(FillPortion(1))
+    .into()
+}
+
+/// Room left and right of a staging list's frame, in line with its header.
+const LIST_FRAME_MARGIN: f32 = 12.0;
+/// Height the frame adds to a list: its border and the padding inside.
+pub const FILE_FRAME_CHROME: f32 = 2.0 * 1.0 + 2.0 * FILE_FRAME_PADDING;
+/// Room above the first and below the last row inside a file frame.
+const FILE_FRAME_PADDING: f32 = 4.0;
+
+/// A file list scrolling in a frame with the `bg_inset` background: the
+/// commit details (finding #42) and the staging lists (finding #47).
+fn file_frame<'a>(list: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(
+        crate::ui::vscroll(
+            container(list)
+                .padding([FILE_FRAME_PADDING, 0.0])
+                .width(Fill),
+        )
+        .width(Fill)
+        .height(Fill),
+    )
+    .width(Fill)
+    .height(Fill)
+    .padding(1)
+    .clip(true)
+    .style(theme::file_frame)
     .into()
 }
 

@@ -26,12 +26,23 @@ pub const BOTTOM_GRAPH_MIN_HEIGHT: f32 = 120.0;
 pub const BOTTOM_PANEL_MIN_HEIGHT: f32 =
     STAGING_BOTTOM_FIXED + STAGING_LISTS_MIN + STAGING_MESSAGE_MIN + HINT_LINES;
 /// Details panel at the right: the staging area (the taller of details and
-/// staging) with both lists at two rows and two hint lines.
-pub const RIGHT_PANEL_MIN_HEIGHT: f32 = crate::ui::panel::STAGING_RIGHT_MIN + HINT_LINES;
+/// staging) with both lists at two rows and two hint lines, the first of
+/// which ("You are in detached HEAD; …") wraps at the panel's minimum
+/// width (measured, finding #47).
+pub const RIGHT_PANEL_MIN_HEIGHT: f32 =
+    crate::ui::panel::STAGING_RIGHT_MIN + HINT_LINES + HINT_TEXT_LINE;
 /// Two hint lines below the commit button.
 const HINT_LINES: f32 = 2.0 * EXTRA_LINE_HEIGHT;
+/// One more line of hint text (11 px) where a hint wraps.
+const HINT_TEXT_LINE: f32 = 11.0 * 1.3;
 /// Gap between panes (the pane grid's spacing).
 pub const PANE_SPACING: f32 = 1.0;
+/// Extra grab room of a pane divider (the pane grid's resize leeway): the
+/// grab area is `PANE_SPACING + DIVIDER_LEEWAY` wide, centered on the gap.
+pub const DIVIDER_LEEWAY: f32 = 6.0;
+/// How far the grab area of a divider reaches into the panes on both
+/// sides (finding #48).
+pub const DIVIDER_REACH: f32 = DIVIDER_LEEWAY / 2.0;
 /// Everything above and below the panes: tab bar, toolbar, status bar and
 /// the gaps between them (measured, see the `chrome_height_is_measured`
 /// UI check).
@@ -101,6 +112,9 @@ mod tests {
             "{min:?} must fit 1366 × 768 with a task bar"
         );
         assert_eq!(min.width, 1000.0);
+        // The staging area at the right with its framed lists decides the
+        // height (finding #47); RELEASE-CHECKLIST 7m names this size.
+        assert_eq!(min.height, 668.0, "{min:?}");
     }
 
     #[test]

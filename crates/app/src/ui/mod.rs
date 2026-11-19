@@ -16,6 +16,7 @@ mod column_handle;
 mod conflict;
 pub mod context_area;
 pub(crate) mod diff;
+mod divider_guard;
 mod file_history;
 pub(crate) mod graph;
 mod inert;
@@ -29,7 +30,7 @@ pub(crate) mod overlays;
 pub(crate) mod panel;
 mod rebase;
 pub(crate) mod settings;
-mod sidebar;
+pub(crate) mod sidebar;
 pub(crate) mod start;
 pub(crate) mod statusbar;
 mod tabs;
@@ -236,6 +237,15 @@ fn tab_body<'a>(app: &'a App, tab: &'a Tab) -> Element<'a, Message> {
     }
 }
 
+/// Id of the content of a pane (tests find the panes by it).
+pub fn pane_id(kind: PaneKind) -> iced::widget::Id {
+    iced::widget::Id::new(match kind {
+        PaneKind::Sidebar => "pane-sidebar",
+        PaneKind::Center => "pane-center",
+        PaneKind::Panel => "pane-panel",
+    })
+}
+
 fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
     pane_grid(&app.panes.state, move |_pane, kind, _maximized| {
         let content = match kind {
@@ -267,13 +277,17 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
                 },
             ),
         };
+        // Presses on a divider do not reach scrollbars below its grab
+        // area (finding #48).
+        let content =
+            divider_guard::divider_guard(content, app.panes.divider_edges(*kind), pane_id(*kind));
         pane_grid::Content::new(content)
     })
     .spacing(crate::layout::PANE_SPACING)
     // The pane minimums of `layout` apply (`Panes::clamped`); the grid's
     // own bound only stops a drag at the smallest of them (finding #45).
     .min_size(crate::layout::BOTTOM_GRAPH_MIN_HEIGHT)
-    .on_resize(6, Message::PaneResized)
+    .on_resize(crate::layout::DIVIDER_LEEWAY, Message::PaneResized)
     .style(theme::panes)
     .into()
 }
