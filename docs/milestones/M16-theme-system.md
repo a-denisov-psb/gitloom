@@ -96,13 +96,15 @@ Note: mechanism in ADR-058 (registry keyed by the iced theme name, `palette()` r
 
 Acceptance: unit tests: `lane_color` with 1, 2, 3 and 4 feature colors for the ids base+4 … base+7; cache keys differ per syntax theme; `derive` for sample inputs of both bases keeps text readable (4.5:1) on derived inset, hover, selected and header band; Dark and Light snapshots unchanged.
 
-### [ ] M16-03 Settings: theme id, System mapping, migration, askpass
+### [x] M16-03 Settings: theme id, System mapping, migration, askpass
 
 - `ThemeChoice` becomes an id or System; new `appearance.system_dark` and `appearance.system_light`; `App::theme_kind` becomes `active_theme`; `Message::ThemeChosen` carries the choice.
 - Old values and `classic-dark` still read; an unknown id falls back to Dark and sets a note for Appearance.
 - Askpass reads the choice (read only) with the OS preference as fallback.
 
 Acceptance: unit tests: old `settings.json` files with `"theme": "light"`, `"system"` and `"classic-dark"` read as before; unknown id → Dark with the note; round trip of the new keys; app tests: choosing a theme applies immediately and is saved; System follows `system_theme` (Light, Dark, None) with the mapped ids; askpass picks the saved theme and falls back without a settings file.
+
+Note: `App::theme_kind` became `active_theme` (plus `theme_note`); the mapping is set by `Message::SystemThemeMapped(base, id)`. An unknown mapped id falls back to the default of its slot (Dark for the dark slot, Light for the light slot) with the same note. The askpass window returns no theme to iced while the file, the id or the System mode is unusable or unknown, so iced follows the operating system; it asks iced for the mode at start and then uses the mapped theme.
 
 ### [ ] M16-04 Built-in themes: Dark+, Light+, Monokai
 
