@@ -293,6 +293,7 @@ Architecture decision records in short form. New entries at the bottom. Change a
   `system::theme_changes()` subscription, no extra feature), so "System" is offered. When
   the window system reports no preference (`Mode::None`), Dark is used. Style functions
   pick the palette from the iced theme they receive (`extended_palette().is_dark`).
+- Amended by ADR-058.
 
 ## ADR-028 Product identity in one place
 
@@ -619,7 +620,7 @@ Consequences: small discipline costs now; no behavior change for local repositor
 
 ## ADR-054 Remove Classic Dark
 
-- Status: accepted (2026-11-12)
+- Status: accepted; its limit to two themes is superseded by ADR-058 (the removal of the graph style tokens stays)
 - Context: maintainer decision: Gitloom offers only Dark and Light (plus System, which picks one of them from the operating system).
 - Decision: the theme "Classic Dark" (M11-01, M11-04) and its graph-only style tokens are removed: row tint, filled ref pills, the line from a pill to its node, ringed nodes, header column separators and panel shadows (`row_tint_alpha`, `ref_pill`/`PillStyle`, `ref_connector`, `column_separator`, `panel_shadow`, `node_style`/`NodeStyle`). The token `header_band` stays. A stored `"theme": "classic-dark"` in `settings.json` is read as Dark.
 - Consequences: Dark and Light are unchanged pixel for pixel (snapshot comparison); new visual details still go into `ThemePalette` (ADR-048), with values for Dark and Light only.
@@ -665,3 +666,34 @@ Consequences: small discipline costs now; no behavior change for local repositor
   - The item is hidden for binary files and while the file history shows no diff; "Change language mode…" is disabled with "Open a file first" there, and with "Turn on Syntax highlighting in Preferences → Editor" while highlighting is off.
   - The item has no hover background: the pin button it is modelled on has none either (muted, the text color on hover). It is at most 150 px wide (the 27-character "Semi-Colon Separated Values" is clipped); at the window minimum of 1000 px it fits with the branch label, the commit count, the version and the panel buttons (layout test).
   - In the list, "Auto Detect" shows the detected name and, when it is the current entry, "<name> · Current".
+
+## ADR-058 Theme registry and built-in themes
+
+- Status: accepted (M16 plan, 2026-11-19)
+- Context: ADR-027 offered Dark and Light with one runtime palette. ADR-054 removed Classic Dark, a graph look built from style tokens, and kept two themes. The maintainer now wants a choice of color themes and, in M17, themes of their own, without bringing the graph style tokens back.
+- Decision:
+  - A theme is data: id, name, base (Dark or Light), `ThemePalette` and the name of an embedded syntect theme, kept in a registry. Themes are colors only. The style tokens removed by ADR-054 stay removed; the token `header_band` and future color tokens belong to the palette (ADR-048).
+  - Ten built-in themes: Dark, Light (unchanged values), Dark+, Light+, Monokai, GitHub Dark, GitHub Light, Solarized Light, Warm Dark, Warm Light. The limit of ADR-054 to two themes no longer applies.
+  - Ten main colors define a theme (background, surface, chrome, text, text muted, accent, border, success, warning, danger). `ThemePalette::derive` computes inset, hover, selected, header band, backdrop, node text and the diff emphasis colors from them. Dark and Light stay explicit; the new built-ins use `derive` plus overrides.
+  - Git flow colors: production, hotfix, release, development and unknown have one color each; the feature colors are a list of 1–4. One entry means a fixed color for every feature branch, several are cycled as before. `git-graph` is unchanged: `lane_color` maps its four feature color ids to `features[i % len]`.
+  - Each theme names one embedded `two-face` theme for syntax colors, replacing the Dark/Light pairing of ADR-047; engine, cache, limits and Gitloom's own diff backgrounds stay.
+  - `settings.json`: `appearance.theme` is an id or `system`; `appearance.system_dark` and `appearance.system_light` name the themes System uses. Old values stay valid, `classic-dark` is read as `dark`, an unknown id means Dark with a visible note (ADR-044).
+  - Names and values: hex values come from published palettes only where the license allows, with the sources in the third-party notices; the theme names go through the ADR-033 brand check.
+- Why: one rendering path for every theme (ADR-048); nothing in a view depends on a specific theme.
+- Consequences: views take colors only from the palette (a test checks it); every built-in is covered by contrast tests and a snapshot; a theme must bring its syntax pairing; adding a visual detail means adding a palette field with a value for every theme.
+- Implementation notes: filled in by M16 (access mechanism, syntax pairings, sources).
+
+## ADR-059 Theme files and the theme editor
+
+- Status: accepted (M17 plan, 2026-11-19)
+- Context: With the registry of ADR-058 users can choose among ten themes. They also want their own and want to share them without a build or a plugin system.
+- Decision:
+  - One JSON file per user theme in `themes/` inside the config directory (`~/.config/gitloom/themes/`, `~/Library/Application Support/Gitloom/themes/`, `%APPDATA%\Gitloom\config\themes\`). The id is `user:<file stem>`.
+  - Keys: `format` (1), `name`, `base` (`dark` or `light`), `syntax` (embedded theme name), `colors` (the ten main colors and optional `inset`, `hover`, `selected`, `header_band`, `backdrop`, `diff_added_emphasis`, `diff_removed_emphasis`), `lanes` (eight colors), `flow` (`production`, `hotfix`, `release`, `development`, `unknown`, `features` with 1–4 colors). Colors are `#RRGGBB` or `#RRGGBBAA`. Required: `name`, `base` and the ten main colors. Missing optional colors come from `derive`; missing `lanes`, `flow` and `syntax` come from the built-in theme `dark` or `light` of the same base. Unknown keys are ignored. The editor always writes the complete set.
+  - A file that cannot be read or fails validation is not changed, not loaded and listed as invalid with the reason; the app never fails because of a theme file.
+  - Editing: built-in themes are read only; "New theme" duplicates the selected theme. The editor has Save, Save and use, Revert and an unsaved-changes dialog. A button derives the secondary colors from the main colors on request; there is no automatic linking.
+  - Preview: a panel drawn with the edited palette only; the editor controls keep the active theme, so a bad combination cannot lock the user out of Preferences. Contrast warnings never block saving.
+  - Themes are settings, not undo entries (ADR-043). Revert, Delete and choosing another theme are the ways back (ADR-044).
+- Why: plain files are easy to copy, version and share; derive-on-request avoids linked-value surprises; the separate preview keeps the settings usable whatever the colors are.
+- Consequences: the format is a public contract from 1.0.0 on (`format` allows changes); theme file errors need user-readable reasons; the user guide documents the format.
+- Implementation notes: filled in by M17.

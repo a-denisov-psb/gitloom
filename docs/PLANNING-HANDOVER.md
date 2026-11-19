@@ -109,6 +109,8 @@ One line per milestone: version, date, scope, notable deviations.
 | M13 Git flow graph layout | 1.0.0 (unreleased) | 2026-11-12 | Git flow layout (classifier, lane groups and colors, toggle per repository, faded labels and tooltips for deleted branches), ref menus and file menus like GitKraken | Tag entries without exactly one remote ask for it ("Push <t>…"); Open file location of commit files disabled only for files deleted there (no UI-thread I/O); commit files use `git difftool` for the temporary files |
 | M14 Commit details like GitKraken | 1.0.0 (unreleased) | 2026-11-12 | Details header and framed message box, author block with co-authors and parent links, file list summary/sort/Path/Tree/all files, editing unpushed commit messages by a click (ADR-051), graph time markers | Two themes (ADR-054); messages selectable through read-only editors, editable ones plain until clicked; unchanged files open in the blame view; time marker text in the normal color for WCAG AA; `GitWriter::run_with_env` for the author of rebuilt commits |
 | M15 Polish before 1.0.0 | 1.0.0 (unreleased) | 2026-11-13 | Conflict view for UTF-16 and 8-bit text, editor picker, production branch fallback, GITFLOW finish flag, Gitflow layout experimental, overflow slot for narrow graph columns, pencil editing and commit prompt per commit, calmer start buttons, diff header icons with Blame, diff minimap, change author of unpushed commits (planning update 6) | Graph minimum width one whole lane (+4 px); Blame icon `file-user`; Blame disabled for deleted working files; ADR-051 amendment (`rewrite_unpushed`) |
+| M16 Theme system | 1.0.0 (unreleased) | planned | Ten built-in themes, theme registry, System mapping, feature color list, syntax theme per theme (ADR-058) | – |
+| M17 Theme editor | 1.0.0 (unreleased) | planned | Preferences → Themes: duplicate, edit, preview, save, import and export theme files (ADR-059) | – |
 | M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
@@ -129,6 +131,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - 2026-11-11 planning update: tree order branches first (M11-11), Templates page and stash template (M10-10), external editor per repository (M10-11), Preferences modal, panel toggles, README screenshot, stash folders and rename, bulk delete, palette settings, M14 commit details with ADR-051 (only unpushed commits editable), custom commands after 1.0.0.
 
 - 2026-11-13 planning updates 5 and 6: M15 polish before 1.0.0 (findings #28–#37), ADR-051 amendment (change author).
+- 2026-11-19 planning update 12: M16 theme system and M17 theme editor before 1.0.0, ADR-058, ADR-059 (ADR-054 limit to two themes superseded, ADR-027 amended).
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -155,7 +158,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7n, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M15 are done (ADR-042).
+1. Next: M16, M17, then the final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7p, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M15 are done (ADR-042).
 2. Planning after 1.0.0: backlog items in `docs/ROADMAP.md` (custom commands, WSL mode, SSH remote, …).
 3. M6-10 (SignPath) can happen any time before 1.0.0.
 
