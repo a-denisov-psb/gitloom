@@ -86,11 +86,13 @@ Acceptance: app tests: duplicating a built-in creates `<name> copy.json` and sel
 
 Note: for a built-in, Rename… and Delete… are shown disabled with the reason ("Built-in themes cannot be changed; \"New theme\" makes a copy") rather than hidden (ADR-044: the way to a changeable copy stays visible); a lock icon marks built-ins and "In use" the active theme. The file actions run as `theme_file::Op` through `theme_file::apply` off the UI thread; the Lucide icon `lock` was added.
 
-### [ ] M17-03 Editor sections, color rows, save and derive
+### [x] M17-03 Editor sections, color rows, save and derive
 
 - Sections and color rows as decided; Save, Save and use, Revert, unsaved-changes dialog; the Derive button and its hint; the feature color list with 1–4 entries; the syntax theme list.
 
 Acceptance: unit tests: hex parsing (`#RRGGBB`, `#RRGGBBAA`, without `#`; everything else rejected); Derive changes only the derived fields; the feature list keeps 1 to 4 entries. App tests: editing a main color and saving changes the file and the active window; an invalid hex value is marked and not applied; Revert; closing with changes asks; Save and use selects the theme; a one-entry feature list colors all feature lanes the same (snapshot of the graph fixture with the Gitflow layout). Snapshots of the editor for a duplicated built-in in Dark and Light.
+
+Note: the picker is three RGB sliders (four with alpha for backdrop and the emphasis colors) under the color row, opened by its swatch: a hue and saturation/value field would need a canvas widget of its own or a new dependency (decision table: sliders then). The editor replaces the list on the Themes page (New theme opens it for the copy; "Edit…" for a selected user theme); "Discard changes?" also guards closing Preferences and switching the category. Save is disabled without changes; an empty name keeps the saved one. Snapshots `theme-editor-*` and `theme-one-feature-color`.
 
 ### [ ] M17-04 Preview panel and contrast warnings
 

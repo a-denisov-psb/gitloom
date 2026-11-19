@@ -53,6 +53,7 @@ mod stash_template;
 #[path = "../../git-core/tests/support/mod.rs"]
 mod test_repo;
 mod theme;
+mod theme_editor;
 mod theme_file;
 mod themes;
 mod toast;

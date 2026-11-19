@@ -1344,6 +1344,11 @@ mod tests {
                 "colors read from theme files",
             ),
             (
+                "theme_editor.rs",
+                "Color::from_rgba8(r, g, b,",
+                "colors typed or picked in the theme editor",
+            ),
+            (
                 "ui/diff.rs",
                 "Color::from_rgba8(r, g, b,",
                 "syntect span color of the syntax theme",
@@ -1386,7 +1391,14 @@ mod tests {
             }
             let text = std::fs::read_to_string(&path).unwrap();
             // Code after the test module is test code.
-            let code = text.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
+            let code = [
+                "#[cfg(test)]\nmod tests",
+                "#[cfg(test)]\npub(crate) mod tests",
+            ]
+            .iter()
+            .filter_map(|start| text.find(start))
+            .min()
+            .map_or(text.as_str(), |end| &text[..end]);
             for (number, line) in code.lines().enumerate() {
                 if line.trim_start().starts_with("//") {
                     continue;
