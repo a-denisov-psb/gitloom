@@ -2,9 +2,9 @@
 
 ## Current milestone
 
-**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7n); 1.0.0 is released from `develop` when the maintainer asks.
+**M16 – Theme system** → [`milestones/M16-theme-system.md`](milestones/M16-theme-system.md), then M17 (theme editor). After M17: **Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7p); 1.0.0 is released from `develop` when the maintainer asks.
 
-Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M15 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
+Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M17 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
 ## Vision
 
@@ -32,6 +32,8 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M13 | 1.0.0 | Git flow graph layout | Done |
 | M14 | 1.0.0 | Commit details like GitKraken | Done |
 | M15 | 1.0.0 | Polish before 1.0.0 | Done |
+| M16 | 1.0.0 | Theme system | Planned |
+| M17 | 1.0.0 | Theme editor | Planned |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -127,6 +129,14 @@ Commit details like GitKraken: framed message box that edits unpushed commits by
 ### M15 – Polish before 1.0.0 (done)
 
 Findings of the maintainer after M14 (2026-11-13): the conflict view handles UTF-16 and 8-bit text files; the repository editor picker returns to the global setting and shows short labels; Git flow proposes `init.defaultBranch` when neither `main` nor `master` exists; GITFLOW rows finish by a hover flag and the Gitflow layout is marked experimental; a narrow Graph column clamps overflowing lanes to its right edge, so every commit stays visible (one line at the minimum, like GitKraken); the commit message is edited through a pencil icon, with the commit message prompt for that commit in the editor; calmer start screen buttons; diff header as icons with Blame and a minimap in Inline and Split. Planning update 6: the author of unpushed commits can be changed from the commit menu (also for several commits) and in the message editor, which now looks like the commit panel (ADR-051 amendment). Details: [`milestones/M15-polish.md`](milestones/M15-polish.md).
+
+### M16 – Theme system (planned)
+
+Ten built-in themes instead of Dark and Light (Dark, Light, Dark+, Light+, Monokai, GitHub Dark, GitHub Light, Solarized Light, Warm Dark, Warm Light), chosen in Preferences → Appearance or the command palette; System uses one dark and one light theme of the user's choice. The palette becomes runtime data with ten main colors and derived secondary colors; every theme brings its lane colors, Git flow colors (feature branches as a list of 1–4 colors, one entry = fixed color) and an embedded syntax theme. Themes are colors only; the graph style tokens of Classic Dark stay removed (ADR-054, ADR-058). Details: [`milestones/M16-theme-system.md`](milestones/M16-theme-system.md).
+
+### M17 – Theme editor (planned)
+
+Own themes: duplicate any theme, edit main, secondary, lane and Git flow colors and the syntax theme in Preferences → Themes, check them in a preview that cannot make the settings unreadable, save them as JSON files, import and export. Details: [`milestones/M17-theme-editor.md`](milestones/M17-theme-editor.md).
 
 ## Non-goals
 
