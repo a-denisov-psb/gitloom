@@ -10,7 +10,7 @@ use crate::overlay::{ContextMenu, Form, FormAction, FormField, MenuEntry, Modal}
 use crate::palette::{self, Palette};
 use crate::panes::Panes;
 use crate::repo_view::{
-    CenterView, CommitDetails, DetailChanges, DiffLayout, Guarded, LastWrite, Loadable,
+    self, CenterView, CommitDetails, DetailChanges, DiffLayout, Guarded, LastWrite, Loadable,
     NetworkKind, NetworkOp, NetworkRequest, Queued, RepoView, Section, Selection, WatchState,
     WriteOp,
 };
@@ -312,9 +312,11 @@ pub enum Message {
         tab: TabId,
         path: String,
         rev: Option<String>,
-        theme: crate::highlight::CodeTheme,
-        outcome: crate::highlight::Outcome,
+        highlight: crate::file_history::BlameHighlight,
     },
+    /// A language was chosen for the file of the code view in the center
+    /// of the active tab (ADR-057); `None`: Auto Detect.
+    LanguageChosen(Option<String>),
     /// Syntax highlighting of a diff arrived (M11-09).
     DiffHighlighted {
         tab: TabId,
@@ -1389,6 +1391,9 @@ pub struct App {
     session_path: Option<PathBuf>,
     /// The session file was read; before that nothing is written.
     session_loaded: bool,
+    /// Languages chosen for files (ADR-057) of restored tabs whose
+    /// repository is not open yet, by the stored repository root.
+    restored_languages: std::collections::BTreeMap<PathBuf, session::LanguageOverrides>,
     /// Paths from the command line, opened once the session is restored.
     pending_paths: Vec<PathBuf>,
     save_seq: u64,
@@ -1462,6 +1467,7 @@ impl App {
             modifiers: keyboard::Modifiers::default(),
             session_path: session_path.clone(),
             session_loaded: false,
+            restored_languages: Default::default(),
             pending_paths: paths,
             save_seq: 0,
             next_tab: 0,
@@ -2747,6 +2753,11 @@ impl App {
         // Before opening: the loaders read stored per-repository state
         // (hidden branches).
         self.session = session;
+        // Chosen languages live as long as their tab (ADR-057): only those
+        // of the restored tabs are kept, until each repository is open.
+        let mut languages = std::mem::take(&mut self.session.language_overrides);
+        languages.retain(|root, _| paths.contains(root));
+        self.restored_languages = languages;
         let mut tasks = Vec::new();
         if !paths.is_empty() {
             // Replace the untouched start tab with the restored tabs.
@@ -2811,6 +2822,7 @@ impl App {
             panes: self.panes.ratios,
             ref_filters: self.ref_filters(),
             collapsed_folders: self.collapsed_folders(),
+            language_overrides: self.language_overrides(),
             pull_mode: self.pull_mode.into(),
             update: self.update_state.clone(),
         }
@@ -2829,6 +2841,30 @@ impl App {
             }
         }
         filters
+    }
+
+    /// Stored languages of files (ADR-057): unlike the hidden branches and
+    /// collapsed folders, only those of the open tabs (closing a tab drops
+    /// them); a restored tab that is still loading keeps its stored ones.
+    fn language_overrides(
+        &self,
+    ) -> std::collections::BTreeMap<PathBuf, session::LanguageOverrides> {
+        let mut languages = std::collections::BTreeMap::new();
+        for tab in &self.tabs {
+            match &tab.state {
+                TabState::Ready(view) if !view.language_overrides.is_empty() => {
+                    let root = view.backend.path().to_path_buf();
+                    languages.insert(root, view.language_overrides.clone());
+                }
+                TabState::Loading { path } | TabState::Failed { path, .. } => {
+                    if let Some(stored) = self.restored_languages.get(path) {
+                        languages.insert(path.clone(), stored.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        languages
     }
 
     /// Stored collapsed folders: those of open repositories replace the
@@ -2950,6 +2986,10 @@ impl App {
         self.tabs.get(self.active)
     }
 
+    pub fn active_view(&self) -> Option<&RepoView> {
+        self.active_tab().and_then(Tab::view)
+    }
+
     fn active_view_mut(&mut self) -> Option<&mut RepoView> {
         self.tabs.get_mut(self.active).and_then(Tab::view_mut)
     }
@@ -2997,7 +3037,11 @@ impl App {
 
     fn close_tab(&mut self, id: TabId) {
         if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
-            self.tabs.remove(index);
+            let tab = self.tabs.remove(index);
+            // The languages of a restored tab go with it (ADR-057).
+            if let TabState::Loading { path } | TabState::Failed { path, .. } = &tab.state {
+                self.restored_languages.remove(path);
+            }
             if self.active > index || self.active >= self.tabs.len() {
                 self.active = self.active.saturating_sub(1);
             }
@@ -3087,6 +3131,11 @@ impl App {
             Shortcut::EditCommitMessage => {
                 if self.action_block(shortcut).is_none() {
                     return self.update(Message::CommitModalOpen);
+                }
+            }
+            Shortcut::SelectLanguage => {
+                if self.action_block(shortcut).is_none() {
+                    return self.open_palette(palette::Mode::Language);
                 }
             }
             Shortcut::NewTab => {
@@ -4942,6 +4991,9 @@ impl App {
                 return Some("Select one commit".to_owned());
             }
         }
+        if id == Shortcut::SelectLanguage {
+            return self.language_block();
+        }
         if id == Shortcut::OpenRemoteWebsite && self.remote_websites().is_empty() {
             return Some("No remote with a website".to_owned());
         }
@@ -4983,7 +5035,16 @@ impl App {
     fn open_palette(&mut self, mode: palette::Mode) -> Task<Message> {
         self.context_menu = None;
         self.shortcut_list = None;
-        self.palette = Some(Palette::new(mode, self.palette_entries(mode)));
+        let mut palette = Palette::new(mode, self.palette_entries(mode));
+        if mode == palette::Mode::Language {
+            // The current language is selected (ADR-057).
+            let current = self
+                .language_file()
+                .and_then(|file| self.active_view()?.language_for(file.path))
+                .map(str::to_owned);
+            palette.select_where(|e| e.target == palette::Target::Language(current.clone()));
+        }
+        self.palette = Some(palette);
         iced::widget::operation::focus(PALETTE_INPUT)
     }
 
@@ -5005,6 +5066,7 @@ impl App {
                             Shortcut::CheckoutBranch => Target::Mode(Mode::CheckoutBranch),
                             Shortcut::ChooseIdentity => Target::Mode(Mode::ChooseIdentity),
                             Shortcut::FileHistory => Target::Mode(Mode::Files),
+                            Shortcut::SelectLanguage => Target::Mode(Mode::Language),
                             id => Target::Action(id),
                         };
                         // The pin action names where the panel goes (finding #44).
@@ -5124,7 +5186,95 @@ impl App {
                 .into_iter()
                 .map(|(name, url)| Entry::new(name, Target::Link(url.clone())).detail(url))
                 .collect(),
+            Mode::Language => self.language_entries(),
         }
+    }
+
+    /// The language list (ADR-057): "Auto Detect" with what detection
+    /// finds, "Plain Text", then every language; the current entry says so.
+    fn language_entries(&self) -> Vec<palette::Entry> {
+        use palette::{Entry, Target};
+        let Some(file) = self.language_file() else {
+            return Vec::new();
+        };
+        let chosen = self.active_view().and_then(|v| v.language_for(file.path));
+        let mark = |entry: Entry, current: bool| {
+            if current {
+                let detail = match entry.detail.as_deref() {
+                    Some(detail) => format!("{detail} · Current"),
+                    None => "Current".to_owned(),
+                };
+                entry.detail(detail)
+            } else {
+                entry
+            }
+        };
+        let names = std::iter::once(crate::highlight::PLAIN_TEXT)
+            .chain(crate::highlight::language_names().iter().copied());
+        std::iter::once(mark(
+            Entry::new("Auto Detect", Target::Language(None)).detail(file.detected),
+            chosen.is_none(),
+        ))
+        .chain(names.map(|name| {
+            mark(
+                Entry::new(name, Target::Language(Some(name.to_owned()))),
+                chosen == Some(name),
+            )
+        }))
+        .collect()
+    }
+
+    /// The file whose language the status bar shows and the language list
+    /// changes (ADR-057): the code view in the center of the active tab,
+    /// while syntax highlighting is on.
+    pub fn language_file(&self) -> Option<repo_view::CodeFile<'_>> {
+        if !self.settings.editor.syntax_highlighting {
+            return None;
+        }
+        self.active_view()?.code_file()
+    }
+
+    /// Why "Change language mode…" cannot run (ADR-057).
+    fn language_block(&self) -> Option<String> {
+        if self.language_file().is_some() {
+            return None;
+        }
+        let file = self.active_view().and_then(RepoView::code_file);
+        Some(if file.is_some() {
+            "Turn on Syntax highlighting in Preferences → Editor".to_owned()
+        } else {
+            "Open a file first".to_owned()
+        })
+    }
+
+    /// Sets the language of the file in the center of the active tab, or
+    /// with `None` (Auto Detect) removes it (ADR-057), and highlights every
+    /// view of the file in the tab again: the new jobs replace (and stop)
+    /// the old ones, whose late results no longer match. A view setting,
+    /// not an undo entry (ADR-043); Auto Detect is the way back (ADR-044).
+    fn choose_language(&mut self, language: Option<String>) -> Task<Message> {
+        let Some(tab) = self.active_tab().map(|t| t.id) else {
+            return Task::none();
+        };
+        let Some(view) = self.active_view_mut() else {
+            return Task::none();
+        };
+        let Some(path) = view.code_file().map(|f| f.path.to_owned()) else {
+            return Task::none();
+        };
+        match language {
+            Some(name) => {
+                view.language_overrides.insert(path, name);
+            }
+            None => {
+                view.language_overrides.remove(&path);
+            }
+        }
+        Task::batch([
+            self.highlight_diff(tab),
+            self.highlight_blame(tab),
+            self.highlight_conflict(tab),
+        ])
     }
 
     /// Palette entries of the settings registry (M12-12): toggles, choice
@@ -5300,6 +5450,7 @@ impl App {
             Target::Identity(choice) => self.update(Message::IdentityChosen(choice)),
             Target::Link(url) => self.update(Message::OpenLink(url)),
             Target::Setting(setting) => self.run_setting(setting),
+            Target::Language(language) => self.update(Message::LanguageChosen(language)),
             Target::Mode(_) => Task::none(),
         }
     }
@@ -5848,41 +5999,48 @@ impl App {
     fn highlight_conflict(&mut self, tab: TabId) -> Task<Message> {
         let style = self.editor_style();
         let cache = Arc::clone(&self.highlight_cache);
-        let Some(CenterView::Conflict(conflict)) = self
-            .tab_mut(tab)
-            .and_then(Tab::view_mut)
-            .map(|v| &mut v.center)
-        else {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let overrides = &view.language_overrides;
+        let CenterView::Conflict(conflict) = &mut view.center else {
             return Task::none();
         };
         let theme = style.code_theme;
         let Some(text) = conflict.text() else {
             return Task::none();
         };
+        let language = repo_view::language_in(overrides, &conflict.path).map(str::to_owned);
+        let language_ref = language.as_deref();
         if !style.highlight
-            || conflict
-                .highlight
-                .as_ref()
-                .is_some_and(|h| h.theme == theme && h.ours.is_complete() && h.theirs.is_complete())
+            || conflict.highlight.as_ref().is_some_and(|h| {
+                h.theme == theme
+                    && h.language.as_deref() == language_ref
+                    && h.ours.is_complete()
+                    && h.theirs.is_complete()
+            })
             || conflict
                 .highlight_job
                 .as_ref()
-                .is_some_and(|j| j.theme == theme)
+                .is_some_and(|j| j.is_for(theme, language_ref))
         {
             return Task::none();
         }
         let (ours, theirs) = crate::highlight::conflict_texts(text);
         let path = conflict.path.clone();
-        let job = crate::highlight::Job::new(theme);
+        let job = crate::highlight::Job::new(theme, language_ref);
         let watch = job.watch();
         conflict.highlight_job = Some(job);
-        let files = vec![(path.clone(), ours), (path.clone(), theirs)];
+        let files = vec![
+            crate::highlight::Source::new(path.clone(), ours, language_ref),
+            crate::highlight::Source::new(path.clone(), theirs, language_ref),
+        ];
         highlight_task(
             cache,
             theme,
             watch,
             move || Ok(files),
-            move |outcomes| {
+            move |outcomes, detected| {
                 let mut outcomes = outcomes.into_iter();
                 let (Some(ours), Some(theirs)) = (outcomes.next(), outcomes.next()) else {
                     return Message::Noop;
@@ -5892,6 +6050,8 @@ impl App {
                     path: path.clone(),
                     highlight: crate::conflict::ConflictHighlight {
                         theme,
+                        language: language.clone(),
+                        detected: crate::highlight::detected_of(detected),
                         ours,
                         theirs,
                     },
@@ -5904,30 +6064,31 @@ impl App {
     fn highlight_blame(&mut self, tab: TabId) -> Task<Message> {
         let style = self.editor_style();
         let cache = Arc::clone(&self.highlight_cache);
-        let Some(blame) =
-            self.tab_mut(tab)
-                .and_then(Tab::view_mut)
-                .and_then(|view| match &mut view.center {
-                    CenterView::FileHistory(history) => history.blame.as_mut(),
-                    _ => None,
-                })
-        else {
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+            return Task::none();
+        };
+        let overrides = &view.language_overrides;
+        let Some(blame) = (match &mut view.center {
+            CenterView::FileHistory(history) => history.blame.as_mut(),
+            _ => None,
+        }) else {
             return Task::none();
         };
         let theme = style.code_theme;
         let Loadable::Ready(lines) = &blame.blame else {
             return Task::none();
         };
+        let language = repo_view::language_in(overrides, &blame.path).map(str::to_owned);
+        let language_ref = language.as_deref();
         if !style.highlight
             || lines.binary
-            || blame
-                .highlight
-                .as_ref()
-                .is_some_and(|(t, o)| *t == theme && o.is_complete())
+            || blame.highlight.as_ref().is_some_and(|h| {
+                h.theme == theme && h.language.as_deref() == language_ref && h.outcome.is_complete()
+            })
             || blame
                 .highlight_job
                 .as_ref()
-                .is_some_and(|j| j.theme == theme)
+                .is_some_and(|j| j.is_for(theme, language_ref))
         {
             return Task::none();
         }
@@ -5939,22 +6100,30 @@ impl App {
             .join("\n");
         text.push('\n');
         let (path, rev) = (blame.path.clone(), blame.rev.clone());
-        let job = crate::highlight::Job::new(theme);
+        let job = crate::highlight::Job::new(theme, language_ref);
         let watch = job.watch();
         blame.highlight_job = Some(job);
-        let files = vec![(path.clone(), text)];
+        let files = vec![crate::highlight::Source::new(
+            path.clone(),
+            text,
+            language_ref,
+        )];
         highlight_task(
             cache,
             theme,
             watch,
             move || Ok(files),
-            move |outcomes| match outcomes.into_iter().next() {
+            move |outcomes, detected| match outcomes.into_iter().next() {
                 Some(outcome) => Message::BlameHighlighted {
                     tab,
                     path: path.clone(),
                     rev: rev.clone(),
-                    theme,
-                    outcome,
+                    highlight: crate::file_history::BlameHighlight {
+                        theme,
+                        language: language.clone(),
+                        detected: crate::highlight::detected_of(detected),
+                        outcome,
+                    },
                 },
                 None => Message::Noop,
             },
@@ -5972,6 +6141,7 @@ impl App {
             return Task::none();
         };
         let backend = Arc::clone(&view.backend);
+        let overrides = &view.language_overrides;
         let Some(diff) = view.center.diff_mut() else {
             return Task::none();
         };
@@ -5979,17 +6149,18 @@ impl App {
         let Loadable::Ready(file) = &diff.diff else {
             return Task::none();
         };
+        // The new path decides for both sides (ADR-057).
+        let language = repo_view::language_in(overrides, &diff.request.path).map(str::to_owned);
         if !diff.style.highlight
             || file.binary
             || file.too_large
-            || diff
-                .highlight
-                .as_ref()
-                .is_some_and(|h| h.theme == theme && h.old.is_complete() && h.new.is_complete())
+            || diff.highlight.as_ref().is_some_and(|h| {
+                h.is_for(theme, language.as_deref()) && h.old.is_complete() && h.new.is_complete()
+            })
             || diff
                 .highlight_job
                 .as_ref()
-                .is_some_and(|j| j.theme == theme)
+                .is_some_and(|j| j.is_for(theme, language.as_deref()))
         {
             return Task::none();
         }
@@ -5998,11 +6169,12 @@ impl App {
         let loaded = diff.layout.has_blocks().then(|| file.clone());
         let path = request.path.clone();
         let old_path = file.old_path.clone().unwrap_or_else(|| path.clone());
-        let job = crate::highlight::Job::new(theme);
+        let job = crate::highlight::Job::new(theme, language.as_deref());
         let watch = job.watch();
         diff.highlight_job = Some(job);
         let load = {
             let request = request.clone();
+            let language = language.clone();
             move || {
                 let full = match loaded {
                     Some(file) => file,
@@ -6011,19 +6183,34 @@ impl App {
                         .map_err(|e| e.to_string())?,
                 };
                 let (old, new) = crate::highlight::diff_texts(&full);
-                Ok(vec![(old_path, old), (path, new)])
+                let language = language.as_deref();
+                Ok(vec![
+                    crate::highlight::Source::new(old_path, old, language),
+                    crate::highlight::Source::new(path, new, language),
+                ])
             }
         };
-        highlight_task(cache, theme, watch, load, move |outcomes| {
+        highlight_task(cache, theme, watch, load, move |outcomes, detected| {
             let mut outcomes = outcomes.into_iter();
             let (Some(old), Some(new)) = (outcomes.next(), outcomes.next()) else {
                 return Message::Noop;
+            };
+            // New side first: the file as it is now.
+            let detected = match detected {
+                [old, new] => crate::highlight::detected_of(&[*new, *old]),
+                _ => crate::highlight::detected_of(detected),
             };
             Message::DiffHighlighted {
                 tab,
                 request: request.clone(),
                 generation,
-                sides: Arc::new(crate::highlight::DiffSides { theme, old, new }),
+                sides: Arc::new(crate::highlight::DiffSides {
+                    theme,
+                    language: language.clone(),
+                    detected,
+                    old,
+                    new,
+                }),
             }
         })
     }
@@ -6686,14 +6873,15 @@ impl App {
                 highlight,
             } => {
                 let current = self.editor_style().code_theme == highlight.theme;
-                if let Some(CenterView::Conflict(conflict)) = self
-                    .tab_mut(tab)
-                    .and_then(Tab::view_mut)
-                    .map(|v| &mut v.center)
-                {
-                    // Stale: another file, or a result for an older theme.
-                    if conflict.path == path && current {
-                        conflict.highlight = Some(highlight);
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    let language = repo_view::language_in(&view.language_overrides, &path);
+                    // Stale: another file, or a result for an older theme
+                    // or language.
+                    let current = current && highlight.language.as_deref() == language;
+                    if let CenterView::Conflict(conflict) = &mut view.center {
+                        if conflict.path == path && current {
+                            conflict.highlight = Some(highlight);
+                        }
                     }
                 }
             }
@@ -6701,24 +6889,25 @@ impl App {
                 tab,
                 path,
                 rev,
-                theme,
-                outcome,
+                highlight,
             } => {
-                // A result for an older theme is stale.
-                let current = self.editor_style().code_theme == theme;
-                if let Some(blame) = self
-                    .tab_mut(tab)
-                    .and_then(Tab::view_mut)
-                    .and_then(|view| match &mut view.center {
+                // A result for an older theme or language is stale.
+                let current = self.editor_style().code_theme == highlight.theme;
+                if let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) {
+                    let language = repo_view::language_in(&view.language_overrides, &path);
+                    let current = current && highlight.language.as_deref() == language;
+                    if let Some(blame) = match &mut view.center {
                         CenterView::FileHistory(history) => history.blame.as_mut(),
                         _ => None,
-                    })
+                    }
                     .filter(|b| b.path == path && b.rev == rev)
                     .filter(|_| current)
-                {
-                    blame.highlight = Some((theme, outcome));
+                    {
+                        blame.highlight = Some(highlight);
+                    }
                 }
             }
+            Message::LanguageChosen(language) => return self.choose_language(language),
             Message::EditorHighlightingToggled(on) => {
                 self.settings.editor.syntax_highlighting = on;
                 self.restyle_code_views();
@@ -6730,16 +6919,17 @@ impl App {
                 generation,
                 sides,
             } => {
-                let Some(diff) = self
-                    .tab_mut(tab)
-                    .and_then(Tab::view_mut)
-                    .and_then(|v| v.center.diff_mut())
-                else {
+                let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
+                    return Task::none();
+                };
+                let overrides = &view.language_overrides;
+                let Some(diff) = view.center.diff_mut() else {
                     return Task::none();
                 };
                 // A result for another file, an older load or another
-                // theme is stale.
-                let current = diff.style.code_theme == sides.theme;
+                // theme or language is stale.
+                let language = repo_view::language_in(overrides, &diff.request.path);
+                let current = sides.is_for(diff.style.code_theme, language);
                 if diff.request == request && diff.generation == generation && current {
                     diff.highlight = Some(sides);
                 }
@@ -11332,8 +11522,21 @@ impl App {
                         view.folders_collapsed = opened.folders;
                         TabState::Ready(Box::new(view))
                     }
-                    Err(error) => TabState::Failed { path, error },
+                    Err(error) => TabState::Failed {
+                        path: path.clone(),
+                        error,
+                    },
                 };
+                // A restored tab gets its chosen languages back (ADR-057).
+                let ready = self.tabs.iter().any(|t| t.id == id && t.view().is_some());
+                if let Some(languages) = ready
+                    .then(|| self.restored_languages.remove(&path))
+                    .flatten()
+                {
+                    if let Some(view) = self.tab_mut(id).and_then(Tab::view_mut) {
+                        view.language_overrides = languages;
+                    }
+                }
                 if let Some(root) = self
                     .tab_mut(id)
                     .and_then(|t| t.view())
@@ -12984,15 +13187,16 @@ fn same_repo(root: &std::path::Path, path: &std::path::Path) -> bool {
 
 /// Runs blocking work (Git, file I/O) on tokio's blocking pool.
 /// Runs [`crate::highlight::run`] off the UI thread on the files `load`
-/// returns and emits a message (from `message`) after every block, so the
+/// returns and emits a message (from `message`, with what detection finds
+/// per file) after every block, so the
 /// lines done so far show at once (fix after M15). A failed `load` leaves
 /// the view plain: highlighting is optional.
 fn highlight_task(
     cache: Arc<std::sync::Mutex<crate::highlight::Cache>>,
     theme: crate::highlight::CodeTheme,
     watch: crate::highlight::Watch,
-    load: impl FnOnce() -> Result<Vec<(String, String)>, String> + Send + 'static,
-    message: impl Fn(Vec<crate::highlight::Outcome>) -> Message + Send + 'static,
+    load: impl FnOnce() -> Result<Vec<crate::highlight::Source>, String> + Send + 'static,
+    message: impl Fn(Vec<crate::highlight::Outcome>, &[&'static str]) -> Message + Send + 'static,
 ) -> Task<Message> {
     let stream = iced::stream::channel(
         16,
@@ -13004,13 +13208,18 @@ fn highlight_task(
                 let Ok(files) = load() else {
                     return;
                 };
+                // What detection finds per file (ADR-057), for the status bar.
+                let detected: Arc<[&'static str]> = files
+                    .iter()
+                    .map(crate::highlight::Source::detected)
+                    .collect();
                 crate::highlight::run(&cache, files, theme, &watch, |outcomes| {
-                    let _ = sender.unbounded_send(outcomes);
+                    let _ = sender.unbounded_send((outcomes, Arc::clone(&detected)));
                 });
             });
             // The sender is dropped when the job ends, which ends this loop.
-            while let Some(outcomes) = results.next().await {
-                let _ = output.send(message(outcomes)).await;
+            while let Some((outcomes, detected)) = results.next().await {
+                let _ = output.send(message(outcomes, &detected)).await;
             }
             let _ = work.await;
         },
@@ -13716,6 +13925,8 @@ pub(crate) mod tests {
             .filter(|a| a.id != Shortcut::OpenRemoteWebsite)
             // Conflict steps need an open conflict view (M12-04).
             .filter(|a| !matches!(a.id, Shortcut::ConflictStep { .. }))
+            // The language list needs a file in the center (ADR-057).
+            .filter(|a| a.id != Shortcut::SelectLanguage)
             .filter(|a| app.action_block(a.id).is_some())
             .map(|a| a.label.as_str())
             .collect();
@@ -14575,6 +14786,88 @@ pub(crate) mod tests {
 
     /// A 600-line file in `mode` with changes at the top, in the middle and
     /// at the end (M15-09).
+    /// The diff of `project.godot` (INI, unknown extension) in `theme`,
+    /// with `language` chosen and its highlighting arrived (ADR-057).
+    pub(crate) fn godot_diff_app(theme: settings::ThemeChoice, language: Option<&str>) -> App {
+        let mut app = staging_app(&["project.godot"], &[]);
+        let _ = app.update(Message::ThemeChosen(theme));
+        let _ = app.update(Message::DiffModeChanged(settings::DiffMode::Inline));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "project.godot".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old = "; Engine configuration file.\n; Do not edit by hand.\n\nconfig_version=5\n\n\
+                   [application]\n\nconfig/name=\"Game\"\nrun/main_scene=\"res://main.tscn\"\n\n\
+                   [display]\n\nwindow/size/viewport_width=1280\n";
+        let new = old
+            .replace("\"Game\"", "\"Space Game\"")
+            .replace("1280\n", "1920\nwindow/size/viewport_height=1080\n");
+        let text =
+            git_core::text_diff_with(old.as_bytes(), new.as_bytes(), git_core::DiffContext::Full);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: git_core::DiffContext::Full,
+            result: Ok(git_core::FileDiff {
+                old_path: Some("project.godot".into()),
+                new_path: Some("project.godot".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        if language.is_some() {
+            let _ = app.update(Message::LanguageChosen(language.map(str::to_owned)));
+        }
+        let diff = open_diff(&app);
+        let code_theme = diff.style.code_theme;
+        let sides = crate::highlight::DiffSides {
+            theme: code_theme,
+            language: language.map(str::to_owned),
+            detected: crate::highlight::PLAIN_TEXT,
+            old: crate::highlight::highlight_in("project.godot", old, code_theme, language),
+            new: crate::highlight::highlight_in("project.godot", &new, code_theme, language),
+        };
+        let message = Message::DiffHighlighted {
+            tab,
+            request: diff.request.clone(),
+            generation: diff.generation,
+            sides: Arc::new(sides),
+        };
+        let _ = app.update(message);
+        let _ = app.update(Message::DiffScrolled {
+            offset: 0.0,
+            height: 600.0,
+            width: 1000.0,
+        });
+        app
+    }
+
+    #[test]
+    fn godot_diff_is_colored_in_ini_only() {
+        let line = |app: &App| {
+            let diff = open_diff(app);
+            let Loadable::Ready(file) = &diff.diff else {
+                panic!("diff not loaded");
+            };
+            diff.spans_for(&file.hunks[0].lines[0]).map(<[_]>::len)
+        };
+        let plain = godot_diff_app(settings::ThemeChoice::Dark, None);
+        assert_eq!(line(&plain), None);
+        let ini = godot_diff_app(settings::ThemeChoice::Dark, Some("INI"));
+        assert!(line(&ini).is_some_and(|n| n > 0));
+        let item = crate::ui::statusbar::language_item(&ini).unwrap();
+        assert_eq!(item.label, "INI");
+        assert_eq!(
+            item.tooltip,
+            "Select language for project.godot\nSet manually; choose Auto Detect to undo"
+        );
+    }
+
     pub(crate) fn minimap_app(mode: settings::DiffMode) -> App {
         let mut app = staging_app(&["a"], &[]);
         let _ = app.update(Message::DiffModeChanged(mode));
@@ -15203,6 +15496,8 @@ pub(crate) mod tests {
             generation: diff.generation,
             sides: Arc::new(crate::highlight::DiffSides {
                 theme,
+                language: None,
+                detected: "Rust",
                 old: crate::highlight::highlight(&path, old, theme),
                 new: crate::highlight::highlight(&path, new, theme),
             }),
@@ -15223,6 +15518,8 @@ pub(crate) mod tests {
             generation: diff.generation,
             sides: Arc::new(crate::highlight::DiffSides {
                 theme,
+                language: None,
+                detected: "Rust",
                 old: crate::highlight::highlight("a.rs", &old, theme),
                 new: crate::highlight::highlight("a.rs", &new, theme),
             }),
@@ -15329,8 +15626,12 @@ pub(crate) mod tests {
         assert!(open_diff(&app).highlight.is_none(), "after b.rs loaded");
         // The first block of b.rs arrives: its lines are colored, the
         // rest stays plain until the next block.
-        let mut job =
-            crate::highlight::Progressive::new("b.rs", Arc::from(new.as_str()), CodeTheme::Dark);
+        let mut job = crate::highlight::Progressive::new(
+            "b.rs",
+            Arc::from(new.as_str()),
+            CodeTheme::Dark,
+            None,
+        );
         assert!(!job.step());
         let generation = open_diff(&app).generation;
         let partial = |new| Message::DiffHighlighted {
@@ -15339,6 +15640,8 @@ pub(crate) mod tests {
             generation,
             sides: Arc::new(crate::highlight::DiffSides {
                 theme: CodeTheme::Dark,
+                language: None,
+                detected: "Rust",
                 old: crate::highlight::Outcome::Plain(crate::highlight::Plain::UnknownType),
                 new,
             }),
@@ -18925,6 +19228,8 @@ pub(crate) mod tests {
             path: "src/lib.rs".into(),
             highlight: crate::conflict::ConflictHighlight {
                 theme,
+                language: None,
+                detected: "Rust",
                 ours: crate::highlight::highlight("src/lib.rs", &ours, theme),
                 theirs: crate::highlight::highlight("src/lib.rs", &theirs, theme),
             },
@@ -23550,5 +23855,405 @@ pub(crate) mod tests {
         assert!(same_repo(root, std::path::Path::new("/work/repo/src/ui")));
         assert!(!same_repo(root, std::path::Path::new("/work/repository")));
         assert!(!same_repo(root, std::path::Path::new("/work")));
+    }
+
+    // Language of a file (ADR-057).
+
+    fn diff_job_language(app: &App) -> Option<Option<String>> {
+        open_diff(app)
+            .highlight_job
+            .as_ref()
+            .map(|j| j.language.clone())
+    }
+
+    /// `message` (a highlighting result) as if it were made in `language`.
+    fn in_language(mut message: Message, language: Option<&str>) -> Message {
+        let language = language.map(str::to_owned);
+        match &mut message {
+            Message::DiffHighlighted { sides, .. } => Arc::make_mut(sides).language = language,
+            Message::ConflictHighlighted { highlight, .. } => highlight.language = language,
+            Message::BlameHighlighted { highlight, .. } => highlight.language = language,
+            _ => panic!("not a highlighting result"),
+        }
+        message
+    }
+
+    #[test]
+    fn choosing_a_language_restarts_the_diff_and_ignores_late_results() {
+        use crate::highlight::CodeTheme;
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let late = highlighted(&app, CodeTheme::Dark);
+        assert_eq!(diff_job_language(&app), Some(None));
+        let item = crate::ui::statusbar::language_item(&app).unwrap();
+        assert_eq!(
+            item.label,
+            crate::highlight::PLAIN_TEXT,
+            "\"a\" has no type"
+        );
+        assert_eq!(item.tooltip, "Select language for a");
+
+        let _ = app.update(Message::LanguageChosen(Some("INI".into())));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            view.language_overrides.get("a").map(String::as_str),
+            Some("INI")
+        );
+        // A new job in the chosen language replaced the old one.
+        assert_eq!(diff_job_language(&app), Some(Some("INI".into())));
+        // The label follows at once, before any result arrived.
+        let item = crate::ui::statusbar::language_item(&app).unwrap();
+        assert_eq!(item.label, "INI");
+        assert!(item
+            .tooltip
+            .ends_with("Set manually; choose Auto Detect to undo"));
+
+        // A late result of the old job is ignored, the new one applies.
+        let _ = app.update(late.clone());
+        assert!(open_diff(&app).highlight.is_none());
+        let _ = app.update(in_language(late.clone(), Some("INI")));
+        let sides = open_diff(&app).highlight.clone().unwrap();
+        assert_eq!(sides.language.as_deref(), Some("INI"));
+        let _ = app.update(late.clone());
+        assert_eq!(open_diff(&app).highlight, Some(sides));
+
+        // Auto Detect removes the choice and highlights again.
+        let _ = app.update(Message::LanguageChosen(None));
+        assert!(app.tabs[0].view().unwrap().language_overrides.is_empty());
+        assert_eq!(diff_job_language(&app), Some(None));
+        let _ = app.update(late);
+        assert_eq!(open_diff(&app).highlight.as_ref().unwrap().language, None);
+        let item = crate::ui::statusbar::language_item(&app).unwrap();
+        assert_eq!(item.tooltip, "Select language for a");
+    }
+
+    #[test]
+    fn an_unknown_stored_language_counts_as_no_choice() {
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        if let Some(view) = app.tabs[0].view_mut() {
+            view.language_overrides
+                .insert("a".into(), "Gone After An Update".into());
+        }
+        assert_eq!(app.tabs[0].view().unwrap().language_for("a"), None);
+        let item = crate::ui::statusbar::language_item(&app).unwrap();
+        assert_eq!(item.label, crate::highlight::PLAIN_TEXT);
+        assert_eq!(item.tooltip, "Select language for a");
+    }
+
+    #[test]
+    fn choosing_a_language_restarts_the_file_history_diff_and_blame() {
+        use crate::file_history::HistoryMode;
+        let mut app = file_history_app(settings::DiffMode::Inline);
+        let tab = app.tabs[0].id;
+        let job = |app: &App| {
+            history(app)
+                .diff
+                .as_ref()
+                .and_then(|d| d.highlight_job.as_ref())
+                .map(|j| j.language.clone())
+        };
+        assert_eq!(job(&app), Some(None));
+        let _ = app.update(Message::LanguageChosen(Some("INI".into())));
+        assert_eq!(job(&app), Some(Some("INI".into())));
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.code_file().unwrap().path, "f.txt");
+
+        // Blame of the same file uses the same choice.
+        let _ = app.update(Message::HistoryModeChosen(HistoryMode::Blame));
+        let blame = git_core::parse_porcelain(
+            b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1\nauthor A\nsummary s\n\t[a]\n",
+        );
+        let _ = app.update(Message::BlameLoaded {
+            tab,
+            path: "f.txt".into(),
+            rev: None,
+            result: Ok(blame),
+        });
+        let blame_job = |app: &App| {
+            blame_of(app)
+                .highlight_job
+                .as_ref()
+                .map(|j| j.language.clone())
+        };
+        assert_eq!(blame_job(&app), Some(Some("INI".into())));
+        let result = |language: Option<&str>| Message::BlameHighlighted {
+            tab,
+            path: "f.txt".into(),
+            rev: None,
+            highlight: crate::file_history::BlameHighlight {
+                theme: crate::highlight::CodeTheme::Dark,
+                language: language.map(str::to_owned),
+                detected: crate::highlight::PLAIN_TEXT,
+                outcome: crate::highlight::highlight_in(
+                    "f.txt",
+                    "[a]\n",
+                    crate::highlight::CodeTheme::Dark,
+                    language,
+                ),
+            },
+        };
+        // Auto Detect: the blame starts again, a late INI result is stale.
+        let _ = app.update(Message::LanguageChosen(None));
+        assert_eq!(blame_job(&app), Some(None));
+        let _ = app.update(result(Some("INI")));
+        assert!(blame_of(&app).highlight.is_none());
+        let _ = app.update(result(None));
+        assert!(blame_of(&app).highlight.is_some());
+        assert!(app.tabs[0].view().unwrap().language_overrides.is_empty());
+    }
+
+    #[test]
+    fn choosing_a_language_restarts_the_conflict_view() {
+        let mut app = rust_conflict_app();
+        let tab = app.tabs[0].id;
+        let conflict = |app: &App| match &app.tabs[0].view().unwrap().center {
+            CenterView::Conflict(conflict) => {
+                (conflict.highlight.clone(), conflict.highlight_job.clone())
+            }
+            _ => panic!("no conflict view"),
+        };
+        let (before, _) = conflict(&app);
+        let before = before.unwrap();
+        assert_eq!(before.language, None);
+        let _ = app.update(Message::LanguageChosen(Some(
+            crate::highlight::PLAIN_TEXT.into(),
+        )));
+        let (_, job) = conflict(&app);
+        assert_eq!(
+            job.unwrap().language.as_deref(),
+            Some(crate::highlight::PLAIN_TEXT)
+        );
+        // The old result arriving late does not apply; the new one does.
+        let stale = Message::ConflictHighlighted {
+            tab,
+            path: "src/lib.rs".into(),
+            highlight: before.clone(),
+        };
+        let mut fresh = before;
+        fresh.language = Some(crate::highlight::PLAIN_TEXT.into());
+        let _ = app.update(Message::ConflictHighlighted {
+            tab,
+            path: "src/lib.rs".into(),
+            highlight: fresh.clone(),
+        });
+        let _ = app.update(stale);
+        assert_eq!(conflict(&app).0, Some(fresh));
+        let item = crate::ui::statusbar::language_item(&app).unwrap();
+        assert_eq!(item.label, crate::highlight::PLAIN_TEXT);
+    }
+
+    #[test]
+    fn the_language_item_needs_a_code_view_and_highlighting() {
+        let mut app = ready_app(&["c"]);
+        assert!(crate::ui::statusbar::language_item(&app).is_none(), "graph");
+        assert_eq!(
+            app.action_block(Shortcut::SelectLanguage).as_deref(),
+            Some("Open a file first")
+        );
+        let (start, _) = App::new(Vec::new(), None);
+        assert_eq!(
+            start.action_block(Shortcut::SelectLanguage).as_deref(),
+            Some("Open a file first")
+        );
+        // The action is listed disabled with its reason.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let entry = app
+            .palette
+            .as_ref()
+            .unwrap()
+            .shown()
+            .find(|e| e.label == "Change language mode…")
+            .cloned()
+            .unwrap();
+        assert_eq!(entry.disabled.as_deref(), Some("Open a file first"));
+        assert_eq!(entry.detail, None, "no shortcut");
+        // Running it does nothing.
+        let _ = app.update(Message::PaletteClosed);
+        let _ = app.update(checked(Shortcut::SelectLanguage, false));
+        assert!(app.palette.is_none());
+
+        let mut app = wide_diff_app(settings::DiffMode::Split);
+        assert!(crate::ui::statusbar::language_item(&app).is_some());
+        assert_eq!(app.action_block(Shortcut::SelectLanguage), None);
+        let _ = app.update(Message::EditorHighlightingToggled(false));
+        assert!(crate::ui::statusbar::language_item(&app).is_none());
+        assert_eq!(
+            app.action_block(Shortcut::SelectLanguage).as_deref(),
+            Some("Turn on Syntax highlighting in Preferences → Editor")
+        );
+    }
+
+    #[test]
+    fn the_language_list_marks_and_selects_the_current_entry() {
+        let mut app = wide_diff_app(settings::DiffMode::Hunk);
+        let _ = app.update(checked(Shortcut::SelectLanguage, false));
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.mode, palette::Mode::Language);
+        assert_eq!(palette.mode.placeholder(), "Select language: type a name");
+        let shown: Vec<_> = palette.shown().cloned().collect();
+        let names = crate::highlight::language_names();
+        assert_eq!(shown.len(), (2 + names.len()).min(palette::MAX_SHOWN));
+        assert_eq!(shown[0].label, "Auto Detect");
+        assert_eq!(shown[0].detail.as_deref(), Some("Plain Text · Current"));
+        assert_eq!(shown[0].target, palette::Target::Language(None));
+        assert_eq!(shown[1].label, "Plain Text");
+        assert_eq!(shown[1].detail, None);
+        let labels: Vec<&str> = shown[2..].iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(labels, names[..labels.len()]);
+        assert_eq!(palette.selected, 0);
+
+        // Typing filters; Enter applies.
+        let _ = app.update(Message::PaletteQuery("ini".into()));
+        let palette = app.palette.as_ref().unwrap();
+        assert_eq!(palette.selected_entry().unwrap().label, "INI");
+        let _ = app.update(checked(Shortcut::Confirm, true));
+        assert!(app.palette.is_none());
+        assert_eq!(app.tabs[0].view().unwrap().language_for("a"), Some("INI"));
+
+        // Opened again (from the status bar): INI is current and selected.
+        let _ = app.update(Message::ShortcutChecked {
+            shortcut: Shortcut::SelectLanguage,
+            text_input_focused: false,
+        });
+        let palette = app.palette.as_ref().unwrap();
+        let selected = palette.selected_entry().unwrap();
+        assert_eq!(selected.label, "INI");
+        assert_eq!(selected.detail.as_deref(), Some("Current"));
+        let auto = palette.shown().next().unwrap();
+        assert_eq!(auto.detail.as_deref(), Some("Plain Text"));
+        // Esc closes without a change.
+        let _ = app.update(checked(Shortcut::Close, true));
+        assert!(app.palette.is_none());
+        assert_eq!(app.tabs[0].view().unwrap().language_for("a"), Some("INI"));
+        // The palette action opens the same list.
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("change language".into()));
+        let _ = app.update(checked(Shortcut::Confirm, true));
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.mode),
+            Some(palette::Mode::Language)
+        );
+    }
+
+    #[test]
+    fn languages_are_stored_while_the_tab_is_open() {
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let root = app.tabs[0].view().unwrap().backend.path().to_path_buf();
+        assert!(app.current_session().language_overrides.is_empty());
+        let _ = app.update(Message::LanguageChosen(Some("INI".into())));
+        assert_eq!(app.current_session().language_overrides[&root]["a"], "INI");
+        // A choice equal to the detection is stored as well.
+        let _ = app.update(Message::LanguageChosen(Some(
+            crate::highlight::PLAIN_TEXT.into(),
+        )));
+        assert_eq!(
+            app.current_session().language_overrides[&root]["a"],
+            crate::highlight::PLAIN_TEXT
+        );
+        // Auto Detect: the repository leaves the session.
+        let _ = app.update(Message::LanguageChosen(None));
+        assert!(app.current_session().language_overrides.is_empty());
+        // Closing the tab drops the choice.
+        let _ = app.update(Message::LanguageChosen(Some("INI".into())));
+        let id = app.tabs[0].id;
+        let _ = app.update(Message::TabClosed(id));
+        assert!(app.current_session().language_overrides.is_empty());
+    }
+
+    #[test]
+    fn a_choice_applies_to_its_tab_only() {
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        // A second tab showing the same path.
+        let other = wide_diff_app(settings::DiffMode::Inline);
+        let (TabState::Ready(view), id) = (
+            std::mem::replace(&mut app.tabs[0].state, TabState::Start),
+            app.tabs[0].id,
+        ) else {
+            panic!("not ready");
+        };
+        app.tabs[0].state = TabState::Ready(view);
+        let mut second = other.tabs.into_iter().next().unwrap();
+        second.id = TabId(id.0 + 100);
+        app.tabs.push(second);
+        app.active = 1;
+        let _ = app.update(Message::LanguageChosen(Some("INI".into())));
+        assert_eq!(app.tabs[1].view().unwrap().language_for("a"), Some("INI"));
+        assert_eq!(app.tabs[0].view().unwrap().language_for("a"), None);
+        let job = |tab: &Tab| match &tab.view().unwrap().center {
+            CenterView::Diff(diff) => diff.highlight_job.as_ref().map(|j| j.language.clone()),
+            _ => None,
+        };
+        assert_eq!(job(&app.tabs[0]), Some(None));
+        assert_eq!(job(&app.tabs[1]), Some(Some("INI".into())));
+    }
+
+    #[test]
+    fn restored_tabs_get_their_languages_back() {
+        let snapshot = Arc::clone(&ready_app(&["c"]).tabs[0].view().unwrap().snapshot);
+        let opened = |snapshot: &Arc<RepoSnapshot>| Opened {
+            backend: Arc::new(git_core::MockBackend::new("mock")),
+            snapshot: Arc::clone(snapshot),
+            filter: Default::default(),
+            folders: Default::default(),
+        };
+        let languages = |entries: &[(&str, &str)]| -> session::LanguageOverrides {
+            entries
+                .iter()
+                .map(|(path, name)| (path.to_string(), name.to_string()))
+                .collect()
+        };
+        let mut session = Session {
+            tabs: vec![PathBuf::from("."), PathBuf::from("/b")],
+            ..Session::default()
+        };
+        session
+            .language_overrides
+            .insert(".".into(), languages(&[("project.godot", "INI")]));
+        session
+            .language_overrides
+            .insert("/b".into(), languages(&[("x.cfg", "INI")]));
+        // A repository without a tab (left over): not kept.
+        session
+            .language_overrides
+            .insert("/closed".into(), languages(&[("y", "INI")]));
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(loaded(session));
+        // While the tabs load (the session is saved meanwhile), the stored
+        // choices stay.
+        let stored = app.current_session().language_overrides;
+        assert_eq!(stored.len(), 2);
+        assert!(stored.contains_key(&PathBuf::from(".")));
+        assert!(stored.contains_key(&PathBuf::from("/b")));
+        let first = app.tabs[0].id;
+        let _ = app.update(Message::RepoOpened {
+            tab: first,
+            generation: 1,
+            result: Ok(opened(&snapshot)),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(view.language_for("project.godot"), Some("INI"));
+        assert_eq!(app.current_session().language_overrides, stored);
+        // The second tab is closed before it opened: its choices go.
+        let second = app.tabs[1].id;
+        let _ = app.update(Message::TabClosed(second));
+        assert_eq!(
+            app.current_session()
+                .language_overrides
+                .keys()
+                .collect::<Vec<_>>(),
+            [&PathBuf::from(".")]
+        );
+        // Closed and opened again: the choice is gone.
+        let _ = app.update(Message::TabClosed(first));
+        assert!(app.current_session().language_overrides.is_empty());
+        let _ = app.update(Message::FolderPicked(Some(PathBuf::from("."))));
+        let id = app.tabs[0].id;
+        let generation = app.tabs[0].generation;
+        let _ = app.update(Message::RepoOpened {
+            tab: id,
+            generation,
+            result: Ok(opened(&snapshot)),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert!(view.language_overrides.is_empty());
     }
 }

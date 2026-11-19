@@ -12,6 +12,17 @@ pub enum HistoryMode {
     Blame,
 }
 
+/// Highlighted blamed file (M11-09).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameHighlight {
+    pub theme: crate::highlight::CodeTheme,
+    /// The language chosen for the file (ADR-057), `None`: detected.
+    pub language: Option<String>,
+    /// What detection finds for the file.
+    pub detected: &'static str,
+    pub outcome: crate::highlight::Outcome,
+}
+
 /// Blame of the file at one revision.
 #[derive(Debug)]
 pub struct BlameView {
@@ -24,8 +35,8 @@ pub struct BlameView {
     pub cancel: CancelToken,
     pub scroll_id: iced::widget::Id,
     pub scroll: Scroll,
-    /// Syntax highlighting of the blamed file (M11-09) and its theme.
-    pub highlight: Option<(crate::highlight::CodeTheme, crate::highlight::Outcome)>,
+    /// Syntax highlighting of the blamed file (M11-09).
+    pub highlight: Option<BlameHighlight>,
     /// The running highlighting job; replacing it stops the old one.
     pub highlight_job: Option<crate::highlight::Job>,
 }
@@ -38,7 +49,7 @@ impl BlameView {
         theme: crate::highlight::CodeTheme,
     ) -> Option<&[crate::highlight::Span]> {
         match &self.highlight {
-            Some((t, outcome)) if *t == theme => outcome.line(index),
+            Some(h) if h.theme == theme => h.outcome.line(index),
             _ => None,
         }
     }

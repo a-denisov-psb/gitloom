@@ -23,6 +23,8 @@ pub enum Mode {
     RemoteWebsites,
     /// Values of a setting (M12-12).
     Choice(crate::settings_registry::Choice),
+    /// Languages for the file in the center (ADR-057).
+    Language,
 }
 
 impl Mode {
@@ -35,6 +37,7 @@ impl Mode {
             Self::Files => "File history: type a file path",
             Self::RemoteWebsites => "Open remote in browser: type a remote name",
             Self::Choice(choice) => choice.placeholder(),
+            Self::Language => "Select language: type a name",
         }
     }
 }
@@ -56,6 +59,9 @@ pub enum Target {
     Link(String),
     /// A setting entry (M12-12).
     Setting(SettingTarget),
+    /// The language of the file in the center (ADR-057); `None`: Auto
+    /// Detect.
+    Language(Option<String>),
 }
 
 /// What a settings entry of the palette does (M12-12).
@@ -197,6 +203,15 @@ impl Palette {
 
     pub fn select(&mut self, index: usize) {
         if index < self.matches.len() {
+            self.selected = index;
+        }
+    }
+
+    /// Selects the first shown entry that `is` accepts (the current value
+    /// of a list when it opens).
+    pub fn select_where(&mut self, is: impl Fn(&Entry) -> bool) {
+        let found = self.shown().position(is);
+        if let Some(index) = found {
             self.selected = index;
         }
     }

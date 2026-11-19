@@ -432,6 +432,18 @@ pub fn bare(theme: &Theme, _status: button::Status) -> button::Style {
     button_style(None, palette(theme).text)
 }
 
+/// Text button of the status bar (the language item, ADR-057): no
+/// background in any state like the pin button; muted, the text color on
+/// hover.
+pub fn status_item(theme: &Theme, status: button::Status) -> button::Style {
+    let p = palette(theme);
+    let color = match status {
+        button::Status::Hovered | button::Status::Pressed => p.text,
+        _ => p.text_muted,
+    };
+    button_style(None, color)
+}
+
 pub fn section_header(theme: &Theme, status: button::Status) -> button::Style {
     // The title is always in the full text color (fix/sidebar-section-
     // headers); hovering shows a background like a list item.

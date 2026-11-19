@@ -693,6 +693,78 @@ impl RepoView {
     }
 }
 
+/// The language chosen for `path` in `overrides` (ADR-057), if it names a
+/// syntax of the bundled set ("Plain Text" included); an unknown name
+/// counts as no choice.
+pub fn language_in<'a>(
+    overrides: &'a crate::session::LanguageOverrides,
+    path: &str,
+) -> Option<&'a str> {
+    crate::highlight::known_language(overrides.get(path).map(String::as_str))
+}
+
+/// The file a code view in the center shows (ADR-057): its
+/// repository-relative path (after a rename the new one) and what
+/// detection finds for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodeFile<'a> {
+    pub path: &'a str,
+    pub detected: &'static str,
+}
+
+impl RepoView {
+    /// The language chosen for `path` (ADR-057), see [`language_in`].
+    pub fn language_for(&self, path: &str) -> Option<&str> {
+        language_in(&self.language_overrides, path)
+    }
+
+    /// The file of the code view in the center (ADR-057): a diff in any
+    /// mode, the blame or the selected commit's diff of the file history,
+    /// or the conflict view; `None` for the graph, the rebase panel, a
+    /// binary file or a file history without a diff.
+    pub fn code_file(&self) -> Option<CodeFile<'_>> {
+        let from_path = |path: &str| crate::highlight::syntax_name(path, "", None);
+        fn diff(
+            diff: &DiffView,
+            from_path: impl Fn(&str) -> &'static str,
+        ) -> Option<(&str, &'static str)> {
+            if matches!(&diff.diff, Loadable::Ready(file) if file.binary) {
+                return None;
+            }
+            let path = diff.request.path.as_str();
+            let detected = diff.highlight.as_ref().map(|h| h.detected);
+            Some((path, detected.unwrap_or_else(|| from_path(path))))
+        }
+        let (path, detected) = match &self.center {
+            CenterView::Diff(view) => diff(view, from_path)?,
+            CenterView::FileHistory(history) => match history.mode {
+                crate::file_history::HistoryMode::History => {
+                    diff(history.diff.as_ref()?, from_path)?
+                }
+                crate::file_history::HistoryMode::Blame => {
+                    let blame = history.blame.as_ref()?;
+                    if matches!(&blame.blame, Loadable::Ready(b) if b.binary) {
+                        return None;
+                    }
+                    let path = blame.path.as_str();
+                    let detected = blame.highlight.as_ref().map(|h| h.detected);
+                    (path, detected.unwrap_or_else(|| from_path(path)))
+                }
+            },
+            CenterView::Conflict(conflict) => {
+                if matches!(conflict.loaded, Loadable::Ready(_)) && conflict.text().is_none() {
+                    return None;
+                }
+                let path = conflict.path.as_str();
+                let detected = conflict.highlight.as_ref().map(|h| h.detected);
+                (path, detected.unwrap_or_else(|| from_path(path)))
+            }
+            CenterView::Graph | CenterView::Rebase(_) => return None,
+        };
+        Some(CodeFile { path, detected })
+    }
+}
+
 impl CenterView {
     /// The diff shown in the center: the diff view, or the selected
     /// commit's diff in the file history.
@@ -869,6 +941,9 @@ pub struct RepoView {
     /// Collapsed branch folders and remotes of the left panel
     /// ([`crate::branch_tree::folder_key`]); stored per repository.
     pub folders_collapsed: std::collections::BTreeSet<String>,
+    /// Languages chosen for single files (ADR-057): repository-relative
+    /// path → syntax name; stored in the session while the tab is open.
+    pub language_overrides: crate::session::LanguageOverrides,
     /// LOCAL and REMOTE trees for the current snapshot, text filter and
     /// hide/solo state; rebuilt only when one of them changes (M7-14).
     sidebar_cache: std::cell::RefCell<Option<SidebarCache>>,
@@ -1237,6 +1312,7 @@ impl RepoView {
             filter: String::new(),
             collapsed: HashSet::new(),
             folders_collapsed: Default::default(),
+            language_overrides: Default::default(),
             flow_finishing: false,
             flow_resumed_at: None,
             sidebar_cache: Default::default(),

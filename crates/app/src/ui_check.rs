@@ -3147,11 +3147,11 @@ mod tests {
         for (name, text) in [("app.rs", &app_rs), ("100k lines", &synthetic)] {
             let lines = text.lines().count();
             let cache = std::sync::Mutex::new(crate::highlight::Cache::default());
-            let job = crate::highlight::Job::new(theme);
+            let job = crate::highlight::Job::new(theme, None);
             let start = Instant::now();
             let mut first = None;
             let mut rounds = 0;
-            let files = vec![("a.rs".to_owned(), text.clone())];
+            let files = vec![crate::highlight::Source::new("a.rs", text.clone(), None)];
             crate::highlight::run(&cache, files, theme, &job.watch(), |_| {
                 first.get_or_insert(start.elapsed());
                 rounds += 1;
@@ -3212,8 +3212,11 @@ mod tests {
         let (old, new) = crate::highlight::diff_texts(file);
         let mut partials = Vec::new();
         let cache = std::sync::Mutex::new(crate::highlight::Cache::default());
-        let job = crate::highlight::Job::new(theme);
-        let files = vec![("app.rs".to_owned(), old), ("app.rs".to_owned(), new)];
+        let job = crate::highlight::Job::new(theme, None);
+        let files = vec![
+            crate::highlight::Source::new("app.rs", old, None),
+            crate::highlight::Source::new("app.rs", new, None),
+        ];
         let start = Instant::now();
         let mut first = None;
         crate::highlight::run(&cache, files, theme, &job.watch(), |o| {
@@ -3237,7 +3240,13 @@ mod tests {
                 tab,
                 request: request.clone(),
                 generation,
-                sides: Arc::new(crate::highlight::DiffSides { theme, old, new }),
+                sides: Arc::new(crate::highlight::DiffSides {
+                    theme,
+                    language: None,
+                    detected: "Rust",
+                    old,
+                    new,
+                }),
             });
             worst_update = worst_update.max(start.elapsed());
             let offset = (step % 7) as f32 / 6.0 * rows * row_height;
@@ -3618,6 +3627,82 @@ mod tests {
             let _ = app.update(Message::SystemScaleChanged(1.25));
             snapshot_scaled(&app, &format!("statusbar-125-{theme}"), 1.25);
         }
+    }
+
+    /// ADR-057: at the window minimum width the language item with the
+    /// longest language name keeps to its width, and it, the branch label,
+    /// the commit count, the version and the pin and panel buttons do not
+    /// overlap and stay inside the window; both details panel positions.
+    /// Layout only, part of every run.
+    #[test]
+    fn status_bar_language_item_fits_at_the_window_minimum() {
+        use crate::panes::DetailsPanelPosition;
+        use crate::ui::statusbar::{LANGUAGE_MAX_WIDTH, PIN_GAP};
+        let min = crate::layout::window_min();
+        let size = (min.width, min.height);
+        let longest = *crate::highlight::language_names()
+            .iter()
+            .max_by_key(|name| name.chars().count())
+            .unwrap();
+        for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+            let mut app = crate::app::tests::godot_diff_app(
+                crate::settings::ThemeChoice::Dark,
+                Some(longest),
+            );
+            app.panes.set_position(position);
+            let _ = app.update(Message::WindowResized(min));
+            let view = app.tabs[0].view().unwrap();
+            let branch = format!("branch: {}", view.snapshot.branch_label());
+            let label = bounds_in(&app, size, longest);
+            let branch = bounds_in(&app, size, &branch);
+            let version = bounds_in(&app, size, concat!("v", env!("CARGO_PKG_VERSION")));
+            // Clipped to the item (button padding 4 on both sides).
+            assert!(label.width <= LANGUAGE_MAX_WIDTH - 8.0, "{label:?}");
+            assert!(label.x > 0.0);
+            // 16 px row spacing between the item and the branch label.
+            assert!(
+                label.x + label.width + 4.0 + 16.0 <= branch.x + 0.5,
+                "{label:?} {branch:?}"
+            );
+            assert!(branch.x + branch.width < version.x);
+            // Pin and panel toggle (22 px each) and the 12 px padding.
+            let end = version.x + version.width + 16.0 + 22.0 + PIN_GAP + 22.0 + 12.0;
+            assert!(end <= min.width + 0.5, "{end} > {}", min.width);
+            assert!(label.y >= min.height - 26.0, "in the status bar");
+        }
+    }
+
+    /// ADR-057: the status bar with the language item (Dark and Light,
+    /// 100 % and 125 %) on the INI-colored diff of `project.godot`, and the
+    /// language list filtered by "ini".
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_language_mode() {
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            let mut app = crate::app::tests::godot_diff_app(choice, Some("INI"));
+            snapshot(&app, &format!("language-statusbar-{theme}"));
+            let _ = app.update(Message::SystemScaleChanged(1.25));
+            snapshot_scaled(&app, &format!("language-statusbar-125-{theme}"), 1.25);
+            let mut app = crate::app::tests::godot_diff_app(choice, None);
+            snapshot(&app, &format!("language-auto-{theme}"));
+            let _ = app.update(crate::app::tests::checked(
+                crate::shortcuts::Shortcut::SelectLanguage,
+                false,
+            ));
+            snapshot(&app, &format!("language-palette-{theme}"));
+            let _ = app.update(Message::PaletteQuery("ini".into()));
+            snapshot(&app, &format!("language-palette-ini-{theme}"));
+        }
+        // The longest name at the window minimum.
+        let min = crate::layout::window_min();
+        let longest = *crate::highlight::language_names()
+            .iter()
+            .max_by_key(|name| name.chars().count())
+            .unwrap();
+        let mut app = crate::app::tests::godot_diff_app(ThemeChoice::Dark, Some(longest));
+        let _ = app.update(Message::WindowResized(min));
+        snapshot_sized(&app, "language-minimum-longest", (min.width, min.height));
     }
 
     /// Finding #44: the status bar with the pin button in both positions

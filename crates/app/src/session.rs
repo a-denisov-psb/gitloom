@@ -40,6 +40,11 @@ pub struct Session {
     /// repository root (M7-14; default expanded).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub collapsed_folders: std::collections::BTreeMap<PathBuf, std::collections::BTreeSet<String>>,
+    /// Languages chosen for single files (ADR-057): repository root →
+    /// repository-relative path with `/` → syntax name. Only open
+    /// repositories are written, so the entries live as long as the tab.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub language_overrides: std::collections::BTreeMap<PathBuf, LanguageOverrides>,
     /// Last update check and the dismissed version (M6-06).
     #[serde(
         default,
@@ -47,6 +52,10 @@ pub struct Session {
     )]
     pub update: crate::update::UpdateState,
 }
+
+/// Languages chosen for the files of one repository (ADR-057):
+/// repository-relative path with `/` → syntax name.
+pub type LanguageOverrides = std::collections::BTreeMap<String, String>;
 
 /// [`git_core::PullMode`] as stored in the session file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -89,6 +98,7 @@ impl Default for Session {
             pull_mode: PullModeSetting::default(),
             ref_filters: Default::default(),
             collapsed_folders: Default::default(),
+            language_overrides: Default::default(),
             update: Default::default(),
         }
     }
@@ -246,6 +256,10 @@ mod tests {
             ]
             .into(),
         );
+        session.language_overrides.insert(
+            PathBuf::from("/a"),
+            [("project.godot".to_owned(), "INI".to_owned())].into(),
+        );
         session
     }
 
@@ -261,6 +275,19 @@ mod tests {
         session.collapsed_folders.clear();
         let text = to_json(&session);
         assert!(!text.contains("collapsed_folders"));
+        assert_eq!(parse(&text), Ok(session));
+    }
+
+    #[test]
+    fn language_overrides_are_written_only_when_there_are_some() {
+        let text = to_json(&sample());
+        assert!(text.contains("\"language_overrides\""));
+        assert!(text.contains("\"project.godot\": \"INI\""));
+        let mut session = sample();
+        session.language_overrides.clear();
+        let text = to_json(&session);
+        assert!(!text.contains("language_overrides"));
+        // Files written before the field existed load.
         assert_eq!(parse(&text), Ok(session));
     }
 

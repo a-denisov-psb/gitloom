@@ -57,6 +57,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         if view.refreshing {
             content = content.push(muted("Refreshing…").size(12));
         }
+        if let Some(item) = language_item(app) {
+            content = content.push(language_button(item));
+        }
         content = content
             .push(muted(format!("branch: {}", snapshot.branch_label())).size(12))
             .push(muted(commit_count(snapshot.commit_count(), snapshot.truncated)).size(12));
@@ -76,6 +79,51 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
 
     container(content).width(Fill).style(theme::chrome).into()
+}
+
+/// Widest the language item gets (ADR-057); longer names are clipped, so
+/// the status bar fits the window minimum with the longest name.
+pub const LANGUAGE_MAX_WIDTH: f32 = 150.0;
+
+/// What the language item shows (ADR-057).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageItem {
+    /// Name of the syntax the file is highlighted with.
+    pub label: String,
+    pub tooltip: String,
+}
+
+/// The language item of the file in the center, if one is shown and
+/// syntax highlighting is on (ADR-057).
+pub fn language_item(app: &App) -> Option<LanguageItem> {
+    let file = app.language_file()?;
+    let view = app.active_view()?;
+    let chosen = view.language_for(file.path);
+    let name = file.path.rsplit('/').next().unwrap_or(file.path);
+    let mut tooltip = format!("Select language for {name}");
+    if chosen.is_some() {
+        tooltip.push_str("\nSet manually; choose Auto Detect to undo");
+    }
+    Some(LanguageItem {
+        label: chosen.unwrap_or(file.detected).to_owned(),
+        tooltip,
+    })
+}
+
+/// The language of the file in the center (ADR-057): muted 12 px text like
+/// its neighbours, the text color on hover like the pin button; a click
+/// opens the language list.
+fn language_button<'a>(item: LanguageItem) -> Element<'a, Message> {
+    let label = text(item.label).size(12).wrapping(text::Wrapping::None);
+    let button = button(label)
+        .on_press(Message::ShortcutChecked {
+            shortcut: crate::shortcuts::Shortcut::SelectLanguage,
+            text_input_focused: false,
+        })
+        .padding([0, 4])
+        .style(theme::status_item);
+    let clipped = container(button).max_width(LANGUAGE_MAX_WIDTH).clip(true);
+    crate::ui::panel::with_tooltip_text_at(clipped.into(), item.tooltip, tooltip::Position::Top)
 }
 
 /// Gap between the pin button and the details panel toggle.
