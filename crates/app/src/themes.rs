@@ -52,10 +52,10 @@ impl ThemeDef {
 }
 
 // Palettes of the built-in themes (ADR-058). Values from published,
-// MIT-licensed palettes where they exist (VS Code's Dark+ and Light+,
-// Monokai's colors as used by the VS Code theme; see the third-party
-// notices), adjusted where Gitloom's contrast checks need it; the rest by
-// eye. Secondary colors are derived from the main colors.
+// MIT-licensed palettes where they exist (VS Code's Dark+, Light+ and
+// Monokai, GitHub's Primer, Solarized; see the third-party notices),
+// adjusted where Gitloom's contrast checks need it; Warm Dark and Warm
+// Light are own values (warm neutrals, terracotta accent). Secondary colors are derived from the main colors.
 
 /// The built-in themes in list order.
 fn builtins() -> Vec<Arc<ThemeDef>> {
@@ -84,6 +84,41 @@ fn builtins() -> Vec<Arc<ThemeDef>> {
             ThemeKind::Dark,
             monokai(),
             CodeTheme(EmbeddedThemeName::MonokaiExtended),
+        ),
+        ThemeDef::builtin(
+            "github-dark",
+            "GitHub Dark",
+            ThemeKind::Dark,
+            github_dark(),
+            CodeTheme(EmbeddedThemeName::ColdarkDark),
+        ),
+        ThemeDef::builtin(
+            "github-light",
+            "GitHub Light",
+            ThemeKind::Light,
+            github_light(),
+            CodeTheme(EmbeddedThemeName::Github),
+        ),
+        ThemeDef::builtin(
+            "solarized-light",
+            "Solarized Light",
+            ThemeKind::Light,
+            solarized_light(),
+            CodeTheme(EmbeddedThemeName::Github),
+        ),
+        ThemeDef::builtin(
+            "warm-dark",
+            "Warm Dark",
+            ThemeKind::Dark,
+            warm_dark(),
+            CodeTheme(EmbeddedThemeName::GruvboxDark),
+        ),
+        ThemeDef::builtin(
+            "warm-light",
+            "Warm Light",
+            ThemeKind::Light,
+            warm_light(),
+            CodeTheme(EmbeddedThemeName::GruvboxLight),
         ),
     ]
     .into_iter()
@@ -200,6 +235,184 @@ fn monokai() -> ThemePalette {
         diff_removed_emphasis: main.danger.scale_alpha(0.26),
         ..ThemePalette::derive(main, ThemeKind::Dark).with_graph(lanes, flow)
     }
+}
+
+/// GitHub Dark.
+fn github_dark() -> ThemePalette {
+    let main = MainColors {
+        background: hex(0x0d1117),
+        surface: hex(0x161b22),
+        chrome: hex(0x010409),
+        text: hex(0xe6edf3),
+        text_muted: hex(0x8d96a0),
+        accent: hex(0x2f81f7),
+        border: hex(0x30363d),
+        success: hex(0x3fb950),
+        warning: hex(0xd29922),
+        danger: hex(0xf85149),
+    };
+    let lanes = [
+        hex(0x58a6ff),
+        hex(0xff7b72),
+        hex(0x3fb950),
+        hex(0xd29922),
+        hex(0xbc8cff),
+        hex(0x39c5cf),
+        hex(0xffa657),
+        hex(0xf778ba),
+    ];
+    let flow = FlowColors {
+        production: hex(0x3fb950),
+        hotfix: hex(0x39c5cf),
+        release: hex(0x58a6ff),
+        development: hex(0xbc8cff),
+        unknown: hex(0x8b949e),
+        features: FeatureColors::four([hex(0xf778ba), hex(0xff7b72), hex(0xffa657), hex(0xd29922)]),
+    };
+    ThemePalette::derive(main, ThemeKind::Dark).with_graph(lanes, flow)
+}
+
+/// GitHub Light.
+fn github_light() -> ThemePalette {
+    let main = MainColors {
+        background: hex(0xffffff),
+        surface: hex(0xf6f8fa),
+        chrome: hex(0xeaeef2),
+        text: hex(0x1f2328),
+        text_muted: hex(0x59636e),
+        accent: hex(0x0969da),
+        border: hex(0xd0d7de),
+        success: hex(0x1a7f37),
+        warning: hex(0x9a6700),
+        danger: hex(0xd1242f),
+    };
+    let lanes = [
+        hex(0x0969da),
+        hex(0xcf222e),
+        hex(0x1a7f37),
+        hex(0x9a6700),
+        hex(0x8250df),
+        hex(0x1b7c83),
+        hex(0xbc4c00),
+        hex(0xbf3989),
+    ];
+    let flow = FlowColors {
+        production: hex(0x1a7f37),
+        hotfix: hex(0x1b7c83),
+        release: hex(0x0969da),
+        development: hex(0x8250df),
+        unknown: hex(0x6e7781),
+        features: FeatureColors::four([hex(0xbf3989), hex(0xcf222e), hex(0xbc4c00), hex(0x9a6700)]),
+    };
+    ThemePalette::derive(main, ThemeKind::Light).with_graph(lanes, flow)
+}
+
+/// Solarized Light.
+fn solarized_light() -> ThemePalette {
+    let main = MainColors {
+        background: hex(0xfdf6e3),
+        surface: hex(0xeee8d5),
+        chrome: hex(0xe4ddc8),
+        text: hex(0x073642),
+        text_muted: hex(0x4a5b61),
+        accent: hex(0x1b659c),
+        border: hex(0xd6cdb5),
+        success: hex(0x4f5c00),
+        warning: hex(0x7a5c00),
+        danger: hex(0xb02522),
+    };
+    let lanes = [
+        hex(0x268bd2),
+        hex(0xdc322f),
+        hex(0x6a7a00),
+        hex(0x8f6c00),
+        hex(0x6c71c4),
+        hex(0x1f7f78),
+        hex(0xcb4b16),
+        hex(0xd33682),
+    ];
+    let flow = FlowColors {
+        production: hex(0x6a7a00),
+        hotfix: hex(0x1f7f78),
+        release: hex(0x268bd2),
+        development: hex(0x6c71c4),
+        unknown: hex(0x657b83),
+        features: FeatureColors::four([hex(0xd33682), hex(0xdc322f), hex(0xcb4b16), hex(0x8f6c00)]),
+    };
+    ThemePalette {
+        bg_selected: hex(0xcddae0),
+        ..ThemePalette::derive(main, ThemeKind::Light).with_graph(lanes, flow)
+    }
+}
+
+/// Warm Dark.
+fn warm_dark() -> ThemePalette {
+    let main = MainColors {
+        background: hex(0x282725),
+        surface: hex(0x31302d),
+        chrome: hex(0x201f1d),
+        text: hex(0xefebe2),
+        text_muted: hex(0xaaa69c),
+        accent: hex(0xd0714e),
+        border: hex(0x3e3c38),
+        success: hex(0x8fb573),
+        warning: hex(0xd9a548),
+        danger: hex(0xe0695a),
+    };
+    let lanes = [
+        hex(0xd0714e),
+        hex(0xe3a35c),
+        hex(0x8fb573),
+        hex(0x6fa8c7),
+        hex(0xc48bb5),
+        hex(0x5fb3a3),
+        hex(0xd97a7a),
+        hex(0xb9a56b),
+    ];
+    let flow = FlowColors {
+        production: hex(0x8fb573),
+        hotfix: hex(0x5fb3a3),
+        release: hex(0x6fa8c7),
+        development: hex(0xc48bb5),
+        unknown: hex(0x9a958a),
+        features: FeatureColors::four([hex(0xd0714e), hex(0xd97a7a), hex(0xe3a35c), hex(0xb9a56b)]),
+    };
+    ThemePalette::derive(main, ThemeKind::Dark).with_graph(lanes, flow)
+}
+
+/// Warm Light.
+fn warm_light() -> ThemePalette {
+    let main = MainColors {
+        background: hex(0xfbf8f1),
+        surface: hex(0xf3efe5),
+        chrome: hex(0xe9e4d8),
+        text: hex(0x37332b),
+        text_muted: hex(0x625d52),
+        accent: hex(0xa9512f),
+        border: hex(0xdcd5c6),
+        success: hex(0x466e33),
+        warning: hex(0x7e5900),
+        danger: hex(0xa8362b),
+    };
+    let lanes = [
+        hex(0xb85a38),
+        hex(0x9c6a12),
+        hex(0x4f7a3a),
+        hex(0x2f6f99),
+        hex(0x8e4f84),
+        hex(0x2f7d72),
+        hex(0xb03f4a),
+        hex(0x6f6a2a),
+    ];
+    let flow = FlowColors {
+        production: hex(0x4f7a3a),
+        hotfix: hex(0x2f7d72),
+        release: hex(0x2f6f99),
+        development: hex(0x8e4f84),
+        unknown: hex(0x7a7468),
+        features: FeatureColors::four([hex(0xb85a38), hex(0xb03f4a), hex(0x9c6a12), hex(0x6f6a2a)]),
+    };
+    ThemePalette::derive(main, ThemeKind::Light).with_graph(lanes, flow)
 }
 
 struct Registry {
@@ -441,7 +654,13 @@ mod tests {
             ("dark-plus", "Dark+", ThemeKind::Dark),
             ("light-plus", "Light+", ThemeKind::Light),
             ("monokai", "Monokai", ThemeKind::Dark),
+            ("github-dark", "GitHub Dark", ThemeKind::Dark),
+            ("github-light", "GitHub Light", ThemeKind::Light),
+            ("solarized-light", "Solarized Light", ThemeKind::Light),
+            ("warm-dark", "Warm Dark", ThemeKind::Dark),
+            ("warm-light", "Warm Light", ThemeKind::Light),
         ];
+        assert_eq!(all().len(), expected.len(), "ten built-ins");
         for (id, name, base) in expected {
             let def = get(id).unwrap_or_else(|| panic!("{id} missing"));
             assert_eq!((def.name.as_str(), def.base), (name, base), "{id}");
