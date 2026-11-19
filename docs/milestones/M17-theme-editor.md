@@ -69,12 +69,14 @@ Open: none (GitKraken has no theme editor; Gitloom extension).
 
 ## Tasks
 
-### [ ] M17-01 Theme files: format, load, save, validation, registry
+### [x] M17-01 Theme files: format, load, save, validation, registry
 
 - Pure module for the format of ADR-059: parse, serialize, validate, fill gaps (`derive`, built-in defaults), id from the file name.
 - User themes join the registry at start and are replaced at runtime when saved, imported, renamed or deleted (no leaks); unreadable files are kept as invalid entries with their reason.
 
 Acceptance: unit tests: a minimal file (name, base, main colors) loads and derives the rest; a complete file round-trips (`load(save(theme)) == theme`); invalid hex, missing base, unknown keys (ignored), zero and five feature colors (error), BOM and CRLF, a name collision, an unreadable file (kept, listed); no panics on random bytes.
+
+Note: the name collision test covers `unique_stem` ("<stem> 2", "<stem> 3", compared without regard to case) and `stem_for_name`, used by import and New theme (M17-02). User themes load in the startup task with the settings; tests that change the process-wide registry hold `themes::TEST_USER_THEMES`, and the contrast test checks the built-ins only.
 
 ### [ ] M17-02 Themes category: list and file actions
 

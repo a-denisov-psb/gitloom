@@ -1339,6 +1339,11 @@ mod tests {
             ("theme.rs", "", "the palettes and color helpers live here"),
             ("themes.rs", "", "the built-in palettes"),
             (
+                "theme_file.rs",
+                "Color::from_rgba8(r, g, b,",
+                "colors read from theme files",
+            ),
+            (
                 "ui/diff.rs",
                 "Color::from_rgba8(r, g, b,",
                 "syntect span color of the syntax theme",

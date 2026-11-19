@@ -473,6 +473,26 @@ pub fn of_base(base: ThemeKind) -> Vec<Arc<ThemeDef>> {
     })
 }
 
+/// Replaces the user themes (ADR-059) with `themes`; built-ins stay
+/// first. Old entries are dropped, not leaked.
+pub fn set_user_themes(themes: Vec<ThemeDef>) {
+    let mut guard = REGISTRY.write().unwrap_or_else(PoisonError::into_inner);
+    guard
+        .themes
+        .retain(|t| !t.id.starts_with(crate::theme_file::ID_PREFIX));
+    guard.themes.extend(
+        themes
+            .into_iter()
+            .filter(|t| t.id.starts_with(crate::theme_file::ID_PREFIX))
+            .map(Arc::new),
+    );
+}
+
+/// Serializes tests that change the user themes of the process-wide
+/// registry.
+#[cfg(test)]
+pub static TEST_USER_THEMES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Palette of the theme with `id` (the iced theme name).
 pub fn palette_of(id: &str) -> Option<Arc<ThemePalette>> {
     read(|r| {
@@ -563,7 +583,7 @@ mod tests {
     #[test]
     fn every_theme_passes_the_contrast_checks() {
         use crate::theme::{contrast, mix};
-        for def in all() {
+        for def in builtins() {
             let p = &*def.palette;
             let id = &def.id;
             for (bg_name, bg) in [
@@ -657,7 +677,7 @@ mod tests {
             ("warm-dark", "Warm Dark", ThemeKind::Dark),
             ("warm-light", "Warm Light", ThemeKind::Light),
         ];
-        assert_eq!(all().len(), expected.len(), "ten built-ins");
+        assert_eq!(builtins().len(), expected.len(), "ten built-ins");
         for (id, name, base) in expected {
             let def = get(id).unwrap_or_else(|| panic!("{id} missing"));
             assert_eq!((def.name.as_str(), def.base), (name, base), "{id}");
@@ -666,5 +686,38 @@ mod tests {
             assert_eq!(theme.extended_palette().is_dark, base == ThemeKind::Dark);
             assert_eq!(*crate::theme::palette(&theme), *def.palette);
         }
+    }
+
+    /// User themes join after the built-ins and are replaced without
+    /// leaking the old palettes (ADR-059).
+    #[test]
+    fn user_themes_are_replaced_not_leaked() {
+        let _lock = TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let user = |id: &str, name: &str| ThemeDef {
+            id: id.into(),
+            name: name.into(),
+            base: ThemeKind::Light,
+            palette: Arc::new(LIGHT),
+            syntax: CodeTheme::LIGHT,
+        };
+        set_user_themes(vec![user("user:a", "A"), user("user:b", "B")]);
+        let a = get("user:a").expect("a");
+        let weak = Arc::downgrade(&a.palette);
+        drop(a);
+        assert_eq!(all().last().map(|t| t.id.clone()), Some("user:b".into()));
+        assert_eq!(
+            all().iter().filter(|t| t.id.starts_with("user:")).count(),
+            2
+        );
+        // Built-in ids cannot be taken over.
+        set_user_themes(vec![user("user:a", "A2"), user("dark", "Fake")]);
+        assert_eq!(get("user:a").map(|t| t.name.clone()), Some("A2".into()));
+        assert!(get("user:b").is_none());
+        assert_eq!(get("dark").map(|t| t.name.clone()), Some("Dark".into()));
+        assert!(weak.upgrade().is_none(), "old palette freed");
+        set_user_themes(Vec::new());
+        assert!(get("user:a").is_none());
     }
 }
