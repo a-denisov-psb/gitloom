@@ -1204,24 +1204,149 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(
     .into()
 }
 
+/// One theme of the Appearance lists (ADR-058): a swatch strip
+/// (background, surface, accent, text, three lane colors), the name and a
+/// check mark when it is the current one.
+fn theme_entry<'a>(
+    def: &crate::themes::ThemeDef,
+    current: bool,
+    message: Message,
+) -> Element<'a, Message> {
+    let p = &def.palette;
+    let colors = [
+        p.bg_graph, p.bg_panel, p.accent, p.text, p.lanes[0], p.lanes[1], p.lanes[2],
+    ];
+    let border = p.border;
+    let strip = row(colors.into_iter().map(|color| {
+        container(space::horizontal())
+            .width(10)
+            .height(16)
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(color.into()),
+                ..container::Style::default()
+            })
+            .into()
+    }));
+    // The strip's frame is the theme's own border, so dark swatches stay
+    // apart from a dark background and light ones from a light one.
+    let strip = container(strip)
+        .padding(1)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(border.into()),
+            border: iced::Border::default().rounded(2),
+            ..container::Style::default()
+        });
+    let mark: Element<'a, Message> = if current {
+        crate::icons::tinted(crate::icons::Icon::Check, 14.0, |p| p.accent).into()
+    } else {
+        space::horizontal().width(14).into()
+    };
+    button(
+        row![strip, text(def.name.clone()), space::horizontal(), mark]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+    )
+    .on_press(message)
+    .padding([4, 8])
+    .width(Fill)
+    .style(theme::list_item(current))
+    .into()
+}
+
+/// A column of theme entries under a small heading.
+fn theme_group<'a>(
+    heading: &'a str,
+    themes: &[std::sync::Arc<crate::themes::ThemeDef>],
+    current: &str,
+    message: impl Fn(&str) -> Message,
+) -> Element<'a, Message> {
+    let mut list = column![muted(heading).size(12)].spacing(2).width(Fill);
+    for def in themes {
+        list = list.push(theme_entry(def, def.id == current, message(&def.id)));
+    }
+    list.into()
+}
+
+/// The themes listed under a base: in the Theme list's column and in
+/// the System list of that mode (ADR-058: only themes of the base).
+fn slot_themes(base: crate::theme::ThemeKind) -> Vec<std::sync::Arc<crate::themes::ThemeDef>> {
+    crate::themes::of_base(base)
+}
+
+/// Appearance → Theme (ADR-058): the themes grouped Dark and Light side by
+/// side, then System; with System, the themes used for a dark and a light
+/// operating system.
+fn theme_choice(app: &App) -> Element<'_, Message> {
+    use crate::theme::ThemeKind;
+    let appearance = &app.settings.appearance;
+    let chosen = match &appearance.theme {
+        ThemeChoice::Theme(id) => id.as_str(),
+        ThemeChoice::System => "",
+    };
+    let choose = |id: &str| Message::ThemeChosen(ThemeChoice::theme(id));
+    let dark = slot_themes(ThemeKind::Dark);
+    let light = slot_themes(ThemeKind::Light);
+    let system = appearance.theme == ThemeChoice::System;
+    let system_entry = button(
+        row![
+            text("System"),
+            space::horizontal(),
+            if system {
+                Element::from(crate::icons::tinted(crate::icons::Icon::Check, 14.0, |p| {
+                    p.accent
+                }))
+            } else {
+                space::horizontal().width(14).into()
+            }
+        ]
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(Message::ThemeChosen(ThemeChoice::System))
+    .padding([4, 8])
+    .width(Fill)
+    .style(theme::list_item(system));
+    let mut content = column![
+        row![
+            theme_group("Dark themes", &dark, chosen, choose),
+            theme_group("Light themes", &light, chosen, choose),
+        ]
+        .spacing(16),
+        container(system_entry).width(Length::FillPortion(1)),
+    ]
+    .spacing(8)
+    .max_width(640);
+    if system {
+        content = content.push(
+            row![
+                theme_group(
+                    "When the system is dark",
+                    &dark,
+                    &appearance.system_dark,
+                    |id| Message::SystemThemeMapped(ThemeKind::Dark, id.to_owned()),
+                ),
+                theme_group(
+                    "When the system is light",
+                    &light,
+                    &appearance.system_light,
+                    |id| Message::SystemThemeMapped(ThemeKind::Light, id.to_owned()),
+                ),
+            ]
+            .spacing(16),
+        );
+    }
+    content.into()
+}
+
 fn appearance(app: &App) -> Element<'_, Message> {
     let appearance = &app.settings.appearance;
     let system_note = match app.system_theme {
         iced::theme::Mode::Light => "System: follows the operating system (now light).",
         iced::theme::Mode::Dark => "System: follows the operating system (now dark).",
         iced::theme::Mode::None => {
-            "System: the operating system reports no preference here, so Dark is used."
+            "System: the operating system reports no mode here, so the dark choice is used."
         }
     };
-    let theme_field = field(
-        "Theme",
-        segmented(
-            &[("dark", "Dark"), ("light", "Light"), ("system", "System")],
-            appearance.theme.as_str(),
-            |id| Message::ThemeChosen(ThemeChoice::parse(id)),
-        ),
-        system_note,
-    );
+    let theme_field = field("Theme", theme_choice(app), system_note);
     // An unknown chosen or mapped id is named (ADR-044, ADR-058).
     let theme_field: Element<'_, Message> = match app.theme_note() {
         Some(note) => column![
@@ -1570,5 +1695,19 @@ mod tests {
         assert!(options
             .iter()
             .any(|o| o.pick == ToolPick::Git("custom".into())));
+    }
+
+    /// The System lists offer only themes of their base (M16-06): five
+    /// dark and five light built-ins.
+    #[test]
+    fn system_lists_hold_their_base_only() {
+        use crate::theme::ThemeKind;
+        for base in [ThemeKind::Dark, ThemeKind::Light] {
+            let themes = slot_themes(base);
+            assert!(themes.iter().all(|t| t.base == base), "{base:?}");
+            assert!(themes.len() >= 5, "{base:?}");
+        }
+        let count = slot_themes(ThemeKind::Dark).len() + slot_themes(ThemeKind::Light).len();
+        assert_eq!(count, crate::themes::all().len());
     }
 }

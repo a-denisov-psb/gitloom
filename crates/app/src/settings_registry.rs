@@ -546,4 +546,28 @@ mod tests {
             1.0
         );
     }
+
+    /// The palette's "Set: Theme ›" lists every registry theme and System
+    /// and chooses each of them (M16-06).
+    #[test]
+    fn theme_choice_lists_the_registry() {
+        let options = Choice::Theme.options("");
+        let themes = crate::themes::all();
+        assert_eq!(options.len(), themes.len() + 1);
+        assert_eq!(options.last().map(String::as_str), Some("System"));
+        for def in themes {
+            assert!(options.contains(&def.name), "{}", def.name);
+            match Choice::Theme.messages(&def.name).as_slice() {
+                [Message::ThemeChosen(choice)] => {
+                    assert_eq!(*choice, ThemeChoice::theme(&def.id));
+                }
+                other => panic!("{}: {other:?}", def.name),
+            }
+        }
+        assert!(matches!(
+            Choice::Theme.messages("System").as_slice(),
+            [Message::ThemeChosen(ThemeChoice::System)]
+        ));
+        assert!(Choice::Theme.messages("No Such Theme").is_empty());
+    }
 }
