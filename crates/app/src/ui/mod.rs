@@ -269,8 +269,10 @@ fn panes<'a>(app: &'a App, view: &'a RepoView) -> Element<'a, Message> {
         };
         pane_grid::Content::new(content)
     })
-    .spacing(1)
-    .min_size(160)
+    .spacing(crate::layout::PANE_SPACING)
+    // The pane minimums of `layout` apply (`Panes::clamped`); the grid's
+    // own bound only stops a drag at the smallest of them (finding #45).
+    .min_size(crate::layout::BOTTOM_GRAPH_MIN_HEIGHT)
     .on_resize(6, Message::PaneResized)
     .style(theme::panes)
     .into()

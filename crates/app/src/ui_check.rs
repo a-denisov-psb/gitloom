@@ -2386,6 +2386,264 @@ mod tests {
         assert!(simulator(&app).find("Unstaged Files (2)").is_ok());
     }
 
+    /// Bounds of the widget showing `label` in a window of `size`.
+    fn bounds_in(app: &App, size: (f32, f32), label: &str) -> iced::Rectangle {
+        let mut sim = Simulator::with_size(settings(), size, app.view());
+        let found = sim
+            .find(label)
+            .unwrap_or_else(|e| panic!("no {label:?}: {e}"));
+        iced_test::selector::Bounded::bounds(&found)
+    }
+
+    /// Finding #45: `layout::CHROME_HEIGHT` is the measured height of the
+    /// tab bar, toolbar, status bar and their gaps. Layout only.
+    #[test]
+    fn chrome_height_is_measured() {
+        let mut app = crate::app::tests::staging_app(&["a.txt"], &["b.txt"]);
+        let _ = app.update(Message::WipSelected);
+        // Right: the staging header text sits 10 px below the pane top.
+        let title = bounds_in(&app, SIZE, "2 file changes on HEAD (c)");
+        let version = bounds_in(&app, SIZE, concat!("v", env!("CARGO_PKG_VERSION")));
+        let pane_top = title.y - 10.0;
+        // Status bar: 26 px (padding 3, the 20 px toggles), the text in
+        // its middle; 1 px gap above the bar.
+        let pane_bottom = version.center_y() - 13.0 - 1.0;
+        let chrome = SIZE.1 - (pane_bottom - pane_top);
+        assert!(
+            (chrome - crate::layout::CHROME_HEIGHT).abs() <= 1.5,
+            "measured {chrome}"
+        );
+    }
+
+    /// Finding #45: at the window minimum (100 % zoom) nothing of the
+    /// staging area is cut off in either position: both lists show their
+    /// header and two rows, the commit message its fields, the Commit
+    /// button and a hint stay inside the panel. Layout only.
+    #[test]
+    fn staging_fits_at_the_window_minimum() {
+        use crate::panes::DetailsPanelPosition;
+        let min = crate::layout::window_min();
+        let size = (min.width, min.height);
+        for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+            let mut app = crate::app::tests::staging_app(
+                &["a1.txt", "a2.txt", "a3.txt", "a4.txt"],
+                &["s1.txt", "s2.txt", "s3.txt"],
+            );
+            app.panes.set_position(position);
+            let _ = app.update(Message::WindowResized(min));
+            let _ = app.update(Message::WipSelected);
+            let status = bounds_in(&app, size, concat!("v", env!("CARGO_PKG_VERSION")));
+            let commit = bounds_in(&app, size, "Commit changes to 3 files");
+            assert!(
+                commit.y + commit.height <= status.y - 3.0,
+                "{position:?}: commit button {commit:?} below the panel"
+            );
+            let hint = bounds_in(&app, size, "Enter a commit summary");
+            assert!(
+                hint.y + hint.height <= status.y,
+                "{position:?}: hint {hint:?}"
+            );
+            let summary_label = match position {
+                DetailsPanelPosition::Right => "Commit",
+                DetailsPanelPosition::Bottom => "Commit Message",
+            };
+            let label = bounds_in(&app, size, summary_label);
+            for (header, second) in [
+                ("Unstaged Files (4)", "a2.txt"),
+                ("Staged Files (3)", "s2.txt"),
+            ] {
+                let header = bounds_in(&app, size, header);
+                let row = bounds_in(&app, size, second);
+                assert!(row.y > header.y, "{position:?}");
+                let limit = match position {
+                    // At the bottom the lists end above the message.
+                    DetailsPanelPosition::Bottom => label.y,
+                    // At the right the staged list ends above the box.
+                    DetailsPanelPosition::Right => label.y,
+                };
+                assert!(
+                    row.y + row.height <= limit,
+                    "{position:?}: {second} {row:?} cut off above {limit}"
+                );
+            }
+            // The graph keeps its minimum height above the panel.
+            if position == DetailsPanelPosition::Bottom {
+                let graph = bounds_in(&app, size, "BRANCH / TAG");
+                let header = bounds_in(&app, size, "Unstaged Files (4)");
+                assert!(
+                    header.y - graph.y >= crate::layout::BOTTOM_GRAPH_MIN_HEIGHT,
+                    "graph {graph:?}, panel {header:?}"
+                );
+            }
+        }
+    }
+
+    /// The apps of the minimum size checks: (name, app) for the graph with
+    /// details right and at the bottom, staging right and at the bottom,
+    /// a diff, the conflict view and the large modals.
+    fn minimum_size_apps() -> Vec<(String, App, Vec<&'static str>)> {
+        use crate::panes::DetailsPanelPosition;
+        let min = crate::layout::window_min();
+        let sized = |mut app: App| {
+            let _ = app.update(Message::WindowResized(min));
+            app
+        };
+        let mut out = Vec::new();
+        for (position, name) in [
+            (DetailsPanelPosition::Right, "right"),
+            (DetailsPanelPosition::Bottom, "bottom"),
+        ] {
+            let mut app = file_list_app();
+            app.panes.set_position(position);
+            out.push((format!("details-{name}"), sized(app), vec!["commit:"]));
+            let mut app = crate::app::tests::staging_app(
+                &["src/main.rs", "src/ui/panel.rs", "README.md"],
+                &["Cargo.toml", "src/lib.rs"],
+            );
+            app.panes.set_position(position);
+            let _ = app.update(Message::WipSelected);
+            out.push((
+                format!("staging-{name}"),
+                sized(app),
+                vec!["Commit changes to 2 files", "Stage all changes"],
+            ));
+        }
+        let app = crate::app::tests::minimap_app(crate::settings::DiffMode::Hunk);
+        out.push(("diff".into(), sized(app), vec![]));
+        let app = crate::app::tests::rust_conflict_app();
+        out.push(("conflict".into(), sized(app), vec![]));
+        // Modals.
+        let mut app = crate::app::tests::ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpened);
+        out.push(("preferences".into(), sized(app), vec![]));
+        let mut app = start_app();
+        let _ = app.update(Message::CloneStart);
+        out.push(("clone".into(), sized(app), vec!["Clone", "Cancel"]));
+        let mut app = details_app(&[
+            ("c2", "Fix the typo", "Why.\n\nMore."),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::ChangeAuthorStart(vec!["c2".into()]));
+        if app.form.is_none() {
+            // The fixture is detached: on a branch the dialog opens.
+            let view = app.tabs[0].view_mut().unwrap();
+            let mut snapshot = (*view.snapshot).clone();
+            snapshot.head = git_core::Head::Branch {
+                name: "main".into(),
+                target: "c2".into(),
+            };
+            view.snapshot = std::sync::Arc::new(snapshot);
+            let _ = app.update(Message::ChangeAuthorStart(vec!["c2".into()]));
+        }
+        out.push((
+            "change-author".into(),
+            sized(app),
+            vec!["Change author", "Cancel"],
+        ));
+        let mut app = details_app(&[
+            (
+                "c2",
+                "Fix the typo",
+                &"A long line of the description.\n".repeat(30),
+            ),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(None),
+        });
+        let _ = app.update(Message::CommitModalOpen);
+        let _ = app.update(Message::CommitModalFactsLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(git_core::reword::EditFacts {
+                branch: "main".into(),
+                keep_old: vec!["backup".into(), "v1.2".into()],
+                drops_signature: true,
+            }),
+        });
+        out.push(("message-edit".into(), sized(app), vec!["Save", "Cancel"]));
+        let mut app = details_app(&[
+            (
+                "c2",
+                "Fix the typo",
+                &"A long line of the description.\n".repeat(30),
+            ),
+            ("c1", "Initial", ""),
+        ]);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(Some(
+                git_core::reword::EditBlock::Pushed("origin/main".into()).reason(),
+            )),
+        });
+        let _ = app.update(Message::CommitModalOpen);
+        out.push((
+            "message-read-only".into(),
+            sized(app),
+            vec!["Copy message", "Close"],
+        ));
+        let mut app = crate::app::tests::ready_app(&["c"]);
+        let input = git_core::prompt::PromptInput {
+            source: git_core::prompt::PromptSource::Staged,
+            branch: "main".into(),
+            recent: vec!["Add login form".into()],
+            files: vec![git_core::prompt::PromptFile::new(
+                "M",
+                "src/login.rs",
+                Some((3, 1)),
+                Ok("diff --git a/src/login.rs b/src/login.rs\n@@ -1 +1 @@\n-old\n+new\n".into()),
+            )],
+        };
+        let prompt = git_core::prompt::build(git_core::prompt::DEFAULT_INSTRUCTION, None, &input);
+        let _ = app.update(Message::PromptReady(Ok(prompt)));
+        out.push(("commit-prompt".into(), sized(app), vec!["Copy", "Close"]));
+        out
+    }
+
+    /// Finding #45: at the window minimum (100 % zoom) the buttons of the
+    /// staging area and of the large modals lie inside the window. Layout
+    /// only, part of every run.
+    #[test]
+    fn buttons_fit_at_the_window_minimum() {
+        let min = crate::layout::window_min();
+        for (name, app, labels) in minimum_size_apps() {
+            for label in labels {
+                let found = bounds_in(&app, (min.width, min.height), label);
+                assert!(
+                    found.x >= 0.0
+                        && found.y >= 0.0
+                        && found.x + found.width <= min.width
+                        && found.y + found.height <= min.height - 26.0,
+                    "{name}: {label:?} at {found:?} outside {min:?}"
+                );
+            }
+        }
+    }
+
+    /// Finding #45: snapshots at the window minimum, 100 % zoom, Dark.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_minimum_size() {
+        let min = crate::layout::window_min();
+        for (name, app, _) in minimum_size_apps() {
+            snapshot_sized(&app, &format!("minimum-{name}"), (min.width, min.height));
+        }
+    }
+
     fn finish_requests(messages: &[Message]) -> Vec<String> {
         let mut names: Vec<String> = messages
             .iter()

@@ -28,6 +28,7 @@ mod graph_columns;
 mod highlight;
 mod icons;
 mod launch;
+mod layout;
 mod menus;
 mod message_modal;
 mod nav;
@@ -112,7 +113,11 @@ fn main() -> iced::Result {
         default_text_size: 13.into(),
         ..iced::Settings::default()
     })
-    .window(app_icon::window_settings(iced::Size::new(1400.0, 860.0)))
+    .window(iced::window::Settings {
+        // 100 % zoom until the settings are loaded (finding #45).
+        min_size: Some(layout::window_min()),
+        ..app_icon::window_settings(iced::Size::new(1400.0, 860.0))
+    })
     // The session is saved before the window closes.
     .exit_on_close_request(false)
     .run()

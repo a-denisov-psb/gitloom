@@ -16,6 +16,18 @@ use crate::ui::muted;
 
 const DIALOG_WIDTH: f32 = 520.0;
 
+/// Room kept between a dialog and the window edge (finding #45).
+const DIALOG_MARGIN: f32 = 16.0;
+
+/// Centers `dialog` in the window; it is never larger than the window
+/// minus [`DIALOG_MARGIN`] and its content scrolls when the window is too
+/// low (finding #45: small windows at a high zoom).
+fn fit<'a>(dialog: iced::widget::Container<'a, Message>) -> iced::widget::Container<'a, Message> {
+    container(crate::ui::vscroll(container(dialog).center_x(Fill)).width(Fill))
+        .padding(DIALOG_MARGIN)
+        .center(Fill)
+}
+
 /// Dialog centered over a dimmed, input-blocking backdrop.
 pub fn modal(modal: &Modal) -> Element<'_, Message> {
     let mut content = column![text(&modal.title).size(17), text(&modal.text)].spacing(12);
@@ -56,13 +68,14 @@ pub fn modal(modal: &Modal) -> Element<'_, Message> {
     content = content.push(row![space::horizontal()].extend(buttons).spacing(8));
 
     let dialog = container(content)
-        .width(DIALOG_WIDTH)
+        .width(Fill)
+        .max_width(DIALOG_WIDTH)
         .padding(20)
         .style(theme::dialog);
 
     // The backdrop swallows clicks so nothing below reacts while the dialog is open.
     opaque(
-        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
+        mouse_area(fit(dialog).style(theme::backdrop))
             .on_press(Message::ModalClosed)
             .interaction(iced::mouse::Interaction::Idle),
     )
@@ -137,12 +150,12 @@ pub fn form(form: &Form) -> Element<'_, Message> {
         .spacing(8),
     );
     let dialog = container(content)
-        .width(DIALOG_WIDTH)
+        .width(Fill)
+        .max_width(DIALOG_WIDTH)
         .padding(20)
         .style(theme::dialog);
     opaque(
-        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
-            .interaction(iced::mouse::Interaction::Idle),
+        mouse_area(fit(dialog).style(theme::backdrop)).interaction(iced::mouse::Interaction::Idle),
     )
 }
 
@@ -441,12 +454,12 @@ pub fn clone_dialog(dialog: &crate::clone_dialog::CloneDialog) -> Element<'_, Me
         .spacing(8),
     );
     let dialog = container(content)
-        .width(DIALOG_WIDTH)
+        .width(Fill)
+        .max_width(DIALOG_WIDTH)
         .padding(20)
         .style(theme::dialog);
     opaque(
-        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
-            .interaction(iced::mouse::Interaction::Idle),
+        mouse_area(fit(dialog).style(theme::backdrop)).interaction(iced::mouse::Interaction::Idle),
     )
 }
 
@@ -501,12 +514,12 @@ pub fn prompt_dialog(prompt: &git_core::prompt::Prompt) -> Element<'_, Message> 
     ]
     .spacing(12);
     let dialog = container(content)
-        .width(720)
+        .width(Fill)
+        .max_width(720)
         .padding(20)
         .style(theme::dialog);
     opaque(
-        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
-            .interaction(iced::mouse::Interaction::Idle),
+        mouse_area(fit(dialog).style(theme::backdrop)).interaction(iced::mouse::Interaction::Idle),
     )
 }
 
@@ -613,12 +626,12 @@ pub fn init_dialog(dialog: &crate::clone_dialog::InitDialog) -> Element<'_, Mess
         .spacing(8),
     );
     let dialog = container(content)
-        .width(DIALOG_WIDTH)
+        .width(Fill)
+        .max_width(DIALOG_WIDTH)
         .padding(20)
         .style(theme::dialog);
     opaque(
-        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
-            .interaction(iced::mouse::Interaction::Idle),
+        mouse_area(fit(dialog).style(theme::backdrop)).interaction(iced::mouse::Interaction::Idle),
     )
 }
 
@@ -656,12 +669,12 @@ pub fn message_dialog(dialog: &crate::overlay::MessageDialog) -> Element<'_, Mes
         .spacing(8),
     );
     let dialog = container(content)
-        .width(DIALOG_WIDTH)
+        .width(Fill)
+        .max_width(DIALOG_WIDTH)
         .padding(20)
         .style(theme::dialog);
     opaque(
-        mouse_area(container(dialog).center(Fill).style(theme::backdrop))
-            .interaction(iced::mouse::Interaction::Idle),
+        mouse_area(fit(dialog).style(theme::backdrop)).interaction(iced::mouse::Interaction::Idle),
     )
 }
 

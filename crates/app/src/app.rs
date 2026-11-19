@@ -6107,7 +6107,11 @@ impl App {
             return flash;
         }
         self.settings.appearance.zoom_percent = percent;
-        Task::batch([flash, self.save_settings()])
+        // The pane room in logical pixels changes with the zoom; the
+        // window minimum is set again (finding #45).
+        self.panes
+            .set_area(crate::layout::pane_area(self.window_size()));
+        Task::batch([flash, self.save_settings(), window_min_task()])
     }
 
     /// Shows `text` in the status bar for a moment.
@@ -7204,9 +7208,18 @@ impl App {
                 if let Some(notice) = notice {
                     self.status = notice;
                 }
+                let zoom = self.settings.appearance.zoom_percent;
                 self.settings = settings;
                 self.panes
                     .set_position(self.settings.appearance.details_panel);
+                // The loaded zoom may differ: minimum and pane room follow.
+                let min = if zoom == self.settings.appearance.zoom_percent {
+                    Task::none()
+                } else {
+                    self.panes
+                        .set_area(crate::layout::pane_area(self.window_size()));
+                    window_min_task()
+                };
                 if let Some(page) = &mut self.settings_page {
                     *page = settings::Page::new(&self.settings).with_category(page.category);
                 }
@@ -7215,7 +7228,7 @@ impl App {
                 } else {
                     Task::none()
                 };
-                return Task::batch([save, self.restart_auto_fetch()]);
+                return Task::batch([save, self.restart_auto_fetch(), min]);
             }
             Message::SettingsOpened => return self.open_settings(),
             Message::SystemTheme(mode) => {
@@ -7979,9 +7992,17 @@ impl App {
             Message::WindowResized(size) => {
                 self.window_size = size;
                 self.window_scale = self.scale_factor();
+                self.panes
+                    .set_area(crate::layout::pane_area(self.window_size()));
             }
             Message::WindowOpened(id) => {
-                return window::scale_factor(id).map(Message::SystemScaleChanged);
+                return Task::batch([
+                    window::scale_factor(id).map(Message::SystemScaleChanged),
+                    // Not every platform reports a resize at start; the
+                    // pane minimums need the size (finding #45).
+                    window::size(id).map(Message::WindowResized),
+                    window_min_task(),
+                ]);
             }
             Message::SystemScaleChanged(scale) => {
                 if scale.is_finite() && scale > 0.0 {
@@ -11972,6 +11993,17 @@ fn full_message(commit: &git_core::Commit) -> String {
     } else {
         format!("{}\n\n{}", commit.summary, commit.body)
     }
+}
+
+/// Sets the window minimum (finding #45): derived from the pane minimums
+/// in logical pixels, which iced scales with the zoom, and limited to the
+/// monitor the window is on.
+fn window_min_task() -> Task<Message> {
+    window::latest().and_then(|id| {
+        window::monitor_size(id).then(move |monitor| {
+            window::set_min_size(id, Some(crate::layout::window_min_on(monitor)))
+        })
+    })
 }
 
 /// Ratio of the staging splitter after a drag by `dy` from `start` in a

@@ -25,7 +25,11 @@ const LINE: f32 = 13.0 * 1.3;
 const DESCRIPTION_MIN: f32 = 6.0 * LINE + 12.0;
 /// Room of everything besides the description: paddings, title, author
 /// row, summary, buttons and the spacing between them.
-const FIXED: f32 = 2.0 * 20.0 + 24.0 + 20.0 + 32.0 + 30.0 + 4.0 * 12.0;
+const FIXED: f32 = 2.0 * 20.0 + 24.0 + 22.0 + 31.0 + 30.0 + 5.0 * 12.0 + SLACK;
+/// Rounding of the text and button heights.
+const SLACK: f32 = 8.0;
+/// A note line (11 px text, spacing 2).
+const NOTE_LINE: f32 = 11.0 * 1.3 + 2.0;
 
 /// Width and the highest height of the modal in a `window` large:
 /// 640 × 70 % of the window, inside the window with a margin.
@@ -40,6 +44,8 @@ pub fn bounds(window: Size) -> Size {
 
 /// Highest description in a modal at most `max_height` high with `extra`
 /// room taken by notes and hints; never below six lines.
+/// The five gaps are the title's and those between the author row,
+/// summary, description, notes and buttons.
 fn description_max(max_height: f32, extra: f32) -> f32 {
     (max_height - FIXED - extra).max(DESCRIPTION_MIN)
 }
@@ -120,17 +126,17 @@ fn edit(modal: &MessageModal, max_height: f32, busy: bool) -> Element<'_, Messag
     if let Loadable::Ready(facts) = &modal.facts {
         for name in &facts.keep_old {
             notes = notes.push(muted(format!("{name} keeps the old commit")).size(11));
-            extra += 16.0;
+            extra += NOTE_LINE;
         }
         if facts.drops_signature {
             notes = notes.push(
                 muted("Signatures of the rewritten commits are removed (signing is off)").size(11),
             );
-            extra += 16.0;
+            extra += NOTE_LINE;
         }
     }
     let error = modal.error.as_ref().map(|e| {
-        extra += 28.0;
+        extra += NOTE_LINE + 12.0;
         text(e.clone()).size(11).style(theme::text_danger)
     });
     let body = text_editor(&modal.body)
@@ -189,7 +195,8 @@ fn read_only<'a>(
     let mut content = column![].spacing(12);
     let mut extra = 0.0;
     if !reason.is_empty() {
-        extra += 40.0;
+        // Two lines at most, padding 6, the gap below.
+        extra += 2.0 * 12.0 * 1.3 + 12.0 + 12.0;
         content = content.push(
             container(
                 row![

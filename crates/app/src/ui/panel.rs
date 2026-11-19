@@ -267,6 +267,17 @@ fn staging(view: &RepoView) -> Element<'_, Message> {
 /// Smallest height of the file lists at the bottom: the list header and
 /// two rows (finding #44).
 pub const STAGING_LISTS_MIN: f32 = LIST_HEADER_HEIGHT + 2.0 * FILE_ROW_HEIGHT;
+/// Staging area at the right with both lists at two rows: the header,
+/// two list sections and the commit box (finding #45).
+pub const STAGING_RIGHT_MIN: f32 = (2.0 * 10.0 + 13.0 * 1.3)
+    + 2.0 * STAGING_LISTS_MIN
+    + (2.0 * 12.0
+        + LABEL_ROW_HEIGHT
+        + IDENTITY_ROW_HEIGHT
+        + INPUT_HEIGHT
+        + 90.0
+        + COMMIT_BUTTON_HEIGHT
+        + 4.0 * 8.0);
 /// Smallest height of the commit message area at the bottom: the label
 /// row, the identity, the summary and two lines of the description.
 pub const STAGING_MESSAGE_MIN: f32 =
@@ -310,7 +321,7 @@ fn staging_bottom(
 }
 
 /// A warning or hint line below the commit button (11 px text, spacing).
-const EXTRA_LINE_HEIGHT: f32 = 11.0 * 1.3 + 8.0;
+pub const EXTRA_LINE_HEIGHT: f32 = 11.0 * 1.3 + 8.0;
 
 /// Room shared by the lists and the message at a panel `height`, with
 /// `extras` lines below the commit button.
@@ -458,7 +469,10 @@ fn staging_bottom_content(
     let extras = parts.extra_count;
     let room = staging_split_room(height, extras);
     let ratio = crate::panes::clamp_split(ratio, room, STAGING_LISTS_MIN, STAGING_MESSAGE_MIN);
-    let lists_portion = (ratio * 1000.0).round().clamp(1.0, 999.0) as u16;
+    // The lists get their exact share (never below their minimum); the
+    // message takes the rest, so an estimate that is a little off only
+    // changes the message area.
+    let lists_height = (room * ratio).max(STAGING_LISTS_MIN);
     let lists = row![
         container(left).width(Fill).height(Fill),
         container(space::vertical())
@@ -467,7 +481,7 @@ fn staging_bottom_content(
             .style(theme::divider),
         container(right).width(Fill).height(Fill),
     ]
-    .height(FillPortion(lists_portion));
+    .height(lists_height);
     let splitter = crate::ui::split_handle::split_handle(
         Message::StagingSplitStart,
         move |dy| Message::StagingSplitDragged { dy, room },
@@ -481,7 +495,7 @@ fn staging_bottom_content(
     ]
     .spacing(8)
     .padding([0, 12])
-    .height(FillPortion(1000 - lists_portion));
+    .height(Fill);
     // The operation's buttons share the row of the commit button.
     let commit_row = match parts.operation {
         Some(buttons) => row![
