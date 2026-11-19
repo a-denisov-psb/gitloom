@@ -55,12 +55,12 @@ Open: none. Themes beyond Dark and Light are a Gitloom extension (UX-PARITY).
 
 ## Milestone acceptance
 
-- [ ] Ten built-in themes can be chosen in Preferences → Appearance and in the command palette; window, graph (also with the Gitflow layout), diffs, blame, file history, conflict view, dialogs, toasts and the start screen follow the theme.
-- [ ] Dark and Light look exactly as before (snapshot comparison).
-- [ ] System uses the mapped dark or light theme; old `settings.json` values still work; an unknown id falls back to Dark with a visible note.
-- [ ] A feature color list with one entry colors all feature branches the same.
-- [ ] Every built-in passes the contrast checks; no view uses a hard-coded color.
-- [ ] User guide, UX-PARITY, release checklist (section 7o) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] Ten built-in themes can be chosen in Preferences → Appearance and in the command palette; window, graph (also with the Gitflow layout), diffs, blame, file history, conflict view, dialogs, toasts and the start screen follow the theme.
+- [x] Dark and Light look exactly as before (snapshot comparison).
+- [x] System uses the mapped dark or light theme; old `settings.json` values still work; an unknown id falls back to Dark with a visible note.
+- [x] A feature color list with one entry colors all feature branches the same.
+- [x] Every built-in passes the contrast checks; no view uses a hard-coded color.
+- [x] User guide, UX-PARITY, release checklist (section 7o) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
@@ -137,7 +137,7 @@ Acceptance: the test passes; the allow list is short and commented.
 
 Note: `theme::tests::views_use_no_hard_coded_colors`; the allow list also names `themes.rs` (the built-in palettes moved there in M16-04) and skips test code (`ui_check.rs`, everything after `mod tests`). One color moved: the signature badge icon fell back to black, now to the palette's text color.
 
-### [ ] M16-08 Documentation
+### [x] M16-08 Documentation
 
 - User guide (`docs/user/settings.md` Appearance row, `coming-from-gitkraken.md`), UX-PARITY row "Themes" (Gitloom extension: ten themes and System mapping; GitKraken has few), `docs/ARCHITECTURE.md` (registry), ADR-027 and ADR-054 status lines, ADR-058 implementation notes (mechanism, syntax pairings, sources).
 - `docs/RELEASE-CHECKLIST.md` section "7o. Themes (M16) (Windows required, Linux checked in CI)": choose each of the ten themes and look at the window, graph with and without the Gitflow layout, diff, blame, conflict view, dialogs, toasts, start screen and Preferences; syntax colors readable in each theme; System follows the OS while the app runs (switch the Windows theme); old `settings.json` values; unknown id note; askpass window follows the theme.
