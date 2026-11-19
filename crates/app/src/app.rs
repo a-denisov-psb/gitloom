@@ -322,6 +322,13 @@ pub enum Message {
         generation: u64,
         sides: Arc<crate::highlight::DiffSides>,
     },
+    /// The word diff of a loaded diff arrived (fix after M15).
+    WordDiffComputed {
+        tab: TabId,
+        request: DiffRequest,
+        generation: u64,
+        emphasis: Arc<crate::word_diff::Emphasis>,
+    },
     /// Nothing to do (an optional background result that did not come).
     Noop,
     /// Toasts (M12-02): close, timer ran out, pointer entered/left,
@@ -602,8 +609,17 @@ pub enum Message {
     },
     /// Tools listed in Preferences → External tools.
     ToolsLoaded(Result<(git_core::ToolInfo, git_core::ToolInfo), String>),
-    DiffToolChosen(crate::settings::ToolChoice),
-    MergeToolChosen(crate::settings::ToolChoice),
+    /// Preferences → External tools: a diff/merge tool list entry, and
+    /// the command typed into its field (fix after M15).
+    DiffToolChosen(crate::settings::ToolPick),
+    MergeToolChosen(crate::settings::ToolPick),
+    DiffToolCommandInput(String),
+    MergeToolCommandInput(String),
+    /// "Define tool…" of the "No diff tool" / "No merge tool" dialog:
+    /// External tools with the command field focused.
+    DefineTool {
+        merge: bool,
+    },
     /// Open the settings view at a category ("Open settings" in dialogs).
     SettingsOpenedAt(settings::Category),
     /// "Load avatars from Gravatar" switched in Appearance.
@@ -5276,14 +5292,60 @@ impl App {
         )
     }
 
-    /// Tool to pass as `--tool` for `choice`: `Err` when the choice is
-    /// "None"; `Ok(None)` for Git's configured tool.
-    fn tool_argument(choice: &settings::ToolChoice) -> Result<Option<String>, ExternalToolError> {
+    /// The tool Git runs for `choice`: `Err` for "None" and an empty
+    /// command; a command template becomes a shell command for Git
+    /// (ADR-055).
+    fn tool_argument(
+        choice: &settings::ToolChoice,
+    ) -> Result<git_core::ToolSelection, ExternalToolError> {
         match choice {
-            settings::ToolChoice::GitConfig => Ok(None),
-            settings::ToolChoice::Tool(name) => Ok(Some(name.clone())),
+            settings::ToolChoice::GitConfig => Ok(git_core::ToolSelection::Configured),
+            settings::ToolChoice::Tool(name) => Ok(git_core::ToolSelection::Named(name.clone())),
             settings::ToolChoice::None => Err(ExternalToolError::NotConfigured),
+            settings::ToolChoice::Command(command) => {
+                let platform = crate::launch::Platform::current();
+                let words = crate::launch::split_words_for(platform, command).map_err(|_| {
+                    ExternalToolError::Failed(
+                        "The tool command in Preferences → External tools has an unclosed quote"
+                            .to_owned(),
+                    )
+                })?;
+                if words.is_empty() {
+                    return Err(ExternalToolError::NotConfigured);
+                }
+                let windows = platform == crate::launch::Platform::Windows;
+                Ok(git_core::ToolSelection::Command(
+                    git_core::tool_shell_command(&words, windows),
+                ))
+            }
         }
+    }
+
+    /// A diff or merge tool list entry was picked (fix after M15): presets
+    /// fill the command field, "Custom" keeps (and focuses) it.
+    fn choose_tool(&mut self, kind: git_core::ToolKind, pick: settings::ToolPick) -> Task<Message> {
+        let custom = pick == settings::ToolPick::Custom;
+        if let Some(page) = &mut self.settings_page {
+            *page.tool_custom_mut(kind) = custom;
+        }
+        let choice = self.settings.tools.choice_mut(kind);
+        let field = crate::ui::settings::tool_input(kind);
+        *choice = match pick {
+            settings::ToolPick::GitConfig => settings::ToolChoice::GitConfig,
+            settings::ToolPick::None => settings::ToolChoice::None,
+            settings::ToolPick::Git(name) => settings::ToolChoice::Tool(name),
+            settings::ToolPick::Preset(preset) => {
+                settings::ToolChoice::Command(preset.template(kind).unwrap_or_default().to_owned())
+            }
+            // The setting changes once something is typed.
+            settings::ToolPick::Custom => return iced::widget::operation::focus(field),
+        };
+        let command = matches!(choice, settings::ToolChoice::Command(_));
+        let save = self.save_settings();
+        if command {
+            return Task::batch([save, iced::widget::operation::focus(field)]);
+        }
+        save
     }
 
     /// Opens the shown diff (diff view or file history) in the external
@@ -5326,6 +5388,7 @@ impl App {
             return Task::none();
         };
         let choice = self.settings.tools.diff_tool.clone();
+        let name = settings::tool_name(&choice, git_core::ToolKind::Diff);
         let tool = match Self::tool_argument(&choice) {
             Ok(tool) => tool,
             Err(error) => {
@@ -5342,23 +5405,15 @@ impl App {
         let writer = Arc::clone(&view.writer);
         self.status = format!(
             "Waiting for {}…",
-            tool.as_deref().unwrap_or("the external diff tool")
+            name.as_deref().unwrap_or("the external diff tool")
         );
         Task::perform(
             blocking(move || {
                 let result = run_tool(
                     writer.as_ref(),
                     git_core::ToolKind::Diff,
-                    tool.is_some(),
-                    |git| {
-                        git_core::run_difftool(
-                            git,
-                            &target,
-                            tool.as_deref(),
-                            &path,
-                            old_path.as_deref(),
-                        )
-                    },
+                    tool.is_explicit(),
+                    |git| git_core::run_difftool(git, &target, &tool, &path, old_path.as_deref()),
                 );
                 Ok(result)
             }),
@@ -5378,14 +5433,19 @@ impl App {
         if self.write_block().is_some() {
             return Task::none();
         }
+        let name = settings::tool_name(&self.settings.tools.merge_tool, git_core::ToolKind::Merge);
         let tool = match Self::tool_argument(&self.settings.tools.merge_tool) {
             Ok(tool) => tool,
-            Err(error) => {
-                return self.update(Message::ExternalToolFinished {
-                    tab,
-                    merge_path: None,
-                    result: Err(error),
-                })
+            // Nothing ran: no refresh, but the merge tool's dialog or toast
+            // (not the diff tool's).
+            Err(ExternalToolError::NotConfigured) => {
+                self.modal = Some(tool_missing_dialog(true));
+                return Task::none();
+            }
+            Err(ExternalToolError::Failed(error)) => {
+                self.toasts
+                    .push(crate::toast::Toast::git_error("Merge tool failed", error));
+                return Task::none();
             }
         };
         let Some(view) = self.active_view_mut() else {
@@ -5396,7 +5456,7 @@ impl App {
         }
         let label = format!(
             "Waiting for {}",
-            tool.as_deref().unwrap_or("the merge tool")
+            name.as_deref().unwrap_or("the merge tool")
         );
         view.busy = Some(label);
         let writer = Arc::clone(&view.writer);
@@ -5407,8 +5467,8 @@ impl App {
                 Ok(run_tool(
                     writer.as_ref(),
                     git_core::ToolKind::Merge,
-                    tool.is_some(),
-                    |git| git_core::run_mergetool(git, tool.as_deref(), &path, delete_orig),
+                    tool.is_explicit(),
+                    |git| git_core::run_mergetool(git, &tool, &path, delete_orig),
                 ))
             }),
             move |result: Result<_, String>| Message::ExternalToolFinished {
@@ -5695,27 +5755,27 @@ impl App {
     }
 
     /// Requests highlighting for the open diffs of all tabs that lack a
-    /// result for the current theme.
-    fn highlight_code_views(&self) -> Task<Message> {
-        Task::batch(self.tabs.iter().flat_map(|tab| {
+    /// result (or a running job) for the current theme.
+    fn highlight_code_views(&mut self) -> Task<Message> {
+        let tabs: Vec<TabId> = self.tabs.iter().map(|t| t.id).collect();
+        Task::batch(tabs.into_iter().flat_map(|tab| {
             [
-                self.highlight_diff(tab.id),
-                self.highlight_blame(tab.id),
-                self.highlight_conflict(tab.id),
+                self.highlight_diff(tab),
+                self.highlight_blame(tab),
+                self.highlight_conflict(tab),
             ]
         }))
     }
 
     /// Highlights the ours and theirs files of the conflict open in `tab`
     /// (M11-09).
-    fn highlight_conflict(&self, tab: TabId) -> Task<Message> {
+    fn highlight_conflict(&mut self, tab: TabId) -> Task<Message> {
         let style = self.editor_style();
+        let cache = Arc::clone(&self.highlight_cache);
         let Some(CenterView::Conflict(conflict)) = self
-            .tabs
-            .iter()
-            .find(|t| t.id == tab)
-            .and_then(Tab::view)
-            .map(|v| &v.center)
+            .tab_mut(tab)
+            .and_then(Tab::view_mut)
+            .map(|v| &mut v.center)
         else {
             return Task::none();
         };
@@ -5727,45 +5787,54 @@ impl App {
             || conflict
                 .highlight
                 .as_ref()
-                .is_some_and(|h| h.theme == theme)
+                .is_some_and(|h| h.theme == theme && h.ours.is_complete() && h.theirs.is_complete())
+            || conflict
+                .highlight_job
+                .as_ref()
+                .is_some_and(|j| j.theme == theme)
         {
             return Task::none();
         }
         let (ours, theirs) = crate::highlight::conflict_texts(text);
         let path = conflict.path.clone();
-        let cache = Arc::clone(&self.highlight_cache);
-        Task::perform(
-            blocking(move || {
-                let highlight = crate::conflict::ConflictHighlight {
-                    theme,
-                    ours: crate::highlight::cached(&cache, &path, &ours, theme),
-                    theirs: crate::highlight::cached(&cache, &path, &theirs, theme),
+        let job = crate::highlight::Job::new(theme);
+        let watch = job.watch();
+        conflict.highlight_job = Some(job);
+        let files = vec![(path.clone(), ours), (path.clone(), theirs)];
+        highlight_task(
+            cache,
+            theme,
+            watch,
+            move || Ok(files),
+            move |outcomes| {
+                let mut outcomes = outcomes.into_iter();
+                let (Some(ours), Some(theirs)) = (outcomes.next(), outcomes.next()) else {
+                    return Message::Noop;
                 };
-                Ok::<_, String>((path, highlight))
-            }),
-            move |result| match result {
-                Ok((path, highlight)) => Message::ConflictHighlighted {
+                Message::ConflictHighlighted {
                     tab,
-                    path,
-                    highlight,
-                },
-                Err(_) => Message::Noop,
+                    path: path.clone(),
+                    highlight: crate::conflict::ConflictHighlight {
+                        theme,
+                        ours,
+                        theirs,
+                    },
+                }
             },
         )
     }
 
     /// Highlights the blamed file of `tab` in the background (M11-09).
-    fn highlight_blame(&self, tab: TabId) -> Task<Message> {
+    fn highlight_blame(&mut self, tab: TabId) -> Task<Message> {
         let style = self.editor_style();
-        let Some(blame) = self
-            .tabs
-            .iter()
-            .find(|t| t.id == tab)
-            .and_then(Tab::view)
-            .and_then(|view| match &view.center {
-                CenterView::FileHistory(history) => history.blame.as_ref(),
-                _ => None,
-            })
+        let cache = Arc::clone(&self.highlight_cache);
+        let Some(blame) =
+            self.tab_mut(tab)
+                .and_then(Tab::view_mut)
+                .and_then(|view| match &mut view.center {
+                    CenterView::FileHistory(history) => history.blame.as_mut(),
+                    _ => None,
+                })
         else {
             return Task::none();
         };
@@ -5775,7 +5844,14 @@ impl App {
         };
         if !style.highlight
             || lines.binary
-            || blame.highlight.as_ref().is_some_and(|(t, _)| *t == theme)
+            || blame
+                .highlight
+                .as_ref()
+                .is_some_and(|(t, o)| *t == theme && o.is_complete())
+            || blame
+                .highlight_job
+                .as_ref()
+                .is_some_and(|j| j.theme == theme)
         {
             return Task::none();
         }
@@ -5787,40 +5863,41 @@ impl App {
             .join("\n");
         text.push('\n');
         let (path, rev) = (blame.path.clone(), blame.rev.clone());
-        let cache = Arc::clone(&self.highlight_cache);
-        Task::perform(
-            blocking(move || {
-                let outcome = crate::highlight::cached(&cache, &path, &text, theme);
-                Ok::<_, String>((path, rev, outcome))
-            }),
-            move |result| match result {
-                Ok((path, rev, outcome)) => Message::BlameHighlighted {
+        let job = crate::highlight::Job::new(theme);
+        let watch = job.watch();
+        blame.highlight_job = Some(job);
+        let files = vec![(path.clone(), text)];
+        highlight_task(
+            cache,
+            theme,
+            watch,
+            move || Ok(files),
+            move |outcomes| match outcomes.into_iter().next() {
+                Some(outcome) => Message::BlameHighlighted {
                     tab,
-                    path,
-                    rev,
+                    path: path.clone(),
+                    rev: rev.clone(),
                     theme,
                     outcome,
                 },
-                Err(_) => Message::Noop,
+                None => Message::Noop,
             },
         )
     }
 
     /// Highlights both sides of the diff open in `tab` in the background
-    /// (M11-09). Inline and Split diffs carry the whole file; for the Hunk
-    /// view the whole-file diff is loaded first, so multi-line comments and
-    /// strings are right on every line.
-    fn highlight_diff(&self, tab: TabId) -> Task<Message> {
-        let Some(view) = self.tabs.iter().find(|t| t.id == tab).and_then(Tab::view) else {
+    /// (M11-09), block by block (fix after M15). Inline and Split diffs
+    /// carry the whole file; for the Hunk view the whole-file diff is
+    /// loaded first, so multi-line comments and strings are right on every
+    /// line.
+    fn highlight_diff(&mut self, tab: TabId) -> Task<Message> {
+        let cache = Arc::clone(&self.highlight_cache);
+        let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
             return Task::none();
         };
-        let diff = match &view.center {
-            CenterView::Diff(diff) => diff.as_ref(),
-            CenterView::FileHistory(history) => match history.diff.as_ref() {
-                Some(diff) => diff,
-                None => return Task::none(),
-            },
-            _ => return Task::none(),
+        let backend = Arc::clone(&view.backend);
+        let Some(diff) = view.center.diff_mut() else {
+            return Task::none();
         };
         let theme = diff.style.code_theme;
         let Loadable::Ready(file) = &diff.diff else {
@@ -5829,19 +5906,28 @@ impl App {
         if !diff.style.highlight
             || file.binary
             || file.too_large
-            || diff.highlight.as_ref().is_some_and(|h| h.theme == theme)
+            || diff
+                .highlight
+                .as_ref()
+                .is_some_and(|h| h.theme == theme && h.old.is_complete() && h.new.is_complete())
+            || diff
+                .highlight_job
+                .as_ref()
+                .is_some_and(|j| j.theme == theme)
         {
             return Task::none();
         }
         let request = diff.request.clone();
         let generation = diff.generation;
-        let cache = Arc::clone(&self.highlight_cache);
-        let backend = Arc::clone(&view.backend);
         let loaded = diff.layout.has_blocks().then(|| file.clone());
         let path = request.path.clone();
         let old_path = file.old_path.clone().unwrap_or_else(|| path.clone());
-        Task::perform(
-            blocking(move || {
+        let job = crate::highlight::Job::new(theme);
+        let watch = job.watch();
+        diff.highlight_job = Some(job);
+        let load = {
+            let request = request.clone();
+            move || {
                 let full = match loaded {
                     Some(file) => file,
                     None => backend
@@ -5849,21 +5935,56 @@ impl App {
                         .map_err(|e| e.to_string())?,
                 };
                 let (old, new) = crate::highlight::diff_texts(&full);
-                let sides = crate::highlight::DiffSides {
-                    theme,
-                    old: crate::highlight::cached(&cache, &old_path, &old, theme),
-                    new: crate::highlight::cached(&cache, &path, &new, theme),
-                };
-                Ok::<_, String>((request, sides))
-            }),
+                Ok(vec![(old_path, old), (path, new)])
+            }
+        };
+        highlight_task(cache, theme, watch, load, move |outcomes| {
+            let mut outcomes = outcomes.into_iter();
+            let (Some(old), Some(new)) = (outcomes.next(), outcomes.next()) else {
+                return Message::Noop;
+            };
+            Message::DiffHighlighted {
+                tab,
+                request: request.clone(),
+                generation,
+                sides: Arc::new(crate::highlight::DiffSides { theme, old, new }),
+            }
+        })
+    }
+
+    /// Computes the changed characters of the diff open in `tab` in the
+    /// background (word diff, fix after M15).
+    fn word_diff(&self, tab: TabId) -> Task<Message> {
+        let Some(diff) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .and_then(Tab::view)
+            .and_then(|v| match &v.center {
+                CenterView::Diff(diff) => Some(diff.as_ref()),
+                CenterView::FileHistory(history) => history.diff.as_ref(),
+                _ => None,
+            })
+        else {
+            return Task::none();
+        };
+        let Loadable::Ready(file) = &diff.diff else {
+            return Task::none();
+        };
+        if file.binary || file.too_large || file.hunks.is_empty() {
+            return Task::none();
+        }
+        let file = file.clone();
+        let (request, generation) = (diff.request.clone(), diff.generation);
+        Task::perform(
+            blocking(move || Ok(Arc::new(crate::word_diff::of_diff(&file)))),
             move |result| match result {
-                Ok((request, sides)) => Message::DiffHighlighted {
+                Ok(emphasis) => Message::WordDiffComputed {
                     tab,
-                    request,
+                    request: request.clone(),
                     generation,
-                    sides: Arc::new(sides),
+                    emphasis,
                 },
-                // Highlighting is optional: without it the diff stays plain.
                 Err(_) => Message::Noop,
             },
         )
@@ -6484,12 +6605,14 @@ impl App {
                 path,
                 highlight,
             } => {
+                let current = self.editor_style().code_theme == highlight.theme;
                 if let Some(CenterView::Conflict(conflict)) = self
                     .tab_mut(tab)
                     .and_then(Tab::view_mut)
                     .map(|v| &mut v.center)
                 {
-                    if conflict.path == path {
+                    // Stale: another file, or a result for an older theme.
+                    if conflict.path == path && current {
                         conflict.highlight = Some(highlight);
                     }
                 }
@@ -6501,6 +6624,8 @@ impl App {
                 theme,
                 outcome,
             } => {
+                // A result for an older theme is stale.
+                let current = self.editor_style().code_theme == theme;
                 if let Some(blame) = self
                     .tab_mut(tab)
                     .and_then(Tab::view_mut)
@@ -6509,6 +6634,7 @@ impl App {
                         _ => None,
                     })
                     .filter(|b| b.path == path && b.rev == rev)
+                    .filter(|_| current)
                 {
                     blame.highlight = Some((theme, outcome));
                 }
@@ -6531,9 +6657,26 @@ impl App {
                 else {
                     return Task::none();
                 };
-                // A result for another file or an older load is stale.
-                if diff.request == request && diff.generation == generation {
+                // A result for another file, an older load or another
+                // theme is stale.
+                let current = diff.style.code_theme == sides.theme;
+                if diff.request == request && diff.generation == generation && current {
                     diff.highlight = Some(sides);
+                }
+            }
+            Message::WordDiffComputed {
+                tab,
+                request,
+                generation,
+                emphasis,
+            } => {
+                if let Some(diff) = self
+                    .tab_mut(tab)
+                    .and_then(Tab::view_mut)
+                    .and_then(|v| v.center.diff_mut())
+                    .filter(|d| d.request == request && d.generation == generation)
+                {
+                    diff.emphasis = Some(emphasis);
                 }
             }
             Message::EditorWordWrapToggled(on) => {
@@ -7138,13 +7281,33 @@ impl App {
                     page.tools = Some(result);
                 }
             }
-            Message::DiffToolChosen(choice) => {
-                self.settings.tools.diff_tool = choice;
+            Message::DiffToolChosen(pick) => return self.choose_tool(git_core::ToolKind::Diff, pick),
+            Message::MergeToolChosen(pick) => {
+                return self.choose_tool(git_core::ToolKind::Merge, pick)
+            }
+            Message::DiffToolCommandInput(command) => {
+                self.settings.tools.diff_tool = settings::ToolChoice::Command(command);
                 return self.save_settings();
             }
-            Message::MergeToolChosen(choice) => {
-                self.settings.tools.merge_tool = choice;
+            Message::MergeToolCommandInput(command) => {
+                self.settings.tools.merge_tool = settings::ToolChoice::Command(command);
                 return self.save_settings();
+            }
+            Message::DefineTool { merge } => {
+                self.modal = None;
+                let kind = if merge {
+                    git_core::ToolKind::Merge
+                } else {
+                    git_core::ToolKind::Diff
+                };
+                let open = self.open_preferences(settings::Category::ExternalTools);
+                if let Some(page) = &mut self.settings_page {
+                    *page.tool_custom_mut(kind) = true;
+                }
+                // After the page's own focus (the first field of General).
+                return open.chain(iced::widget::operation::focus(
+                    crate::ui::settings::tool_input(kind),
+                ));
             }
             Message::SettingsOpenedAt(category) => return self.open_preferences(category),
             Message::AvatarsToggled(on) => {
@@ -7236,13 +7399,18 @@ impl App {
                         page.flow = flow.as_ref().map(settings::FlowForm::new);
                     }
                 }
-                // The tool lists come from Git (needs a repository).
+                // The tool lists come from Git: in the open repository (its
+                // config may define tools), else in a neutral folder.
                 if category == settings::Category::ExternalTools {
                     let writer = self
                         .active_tab()
                         .and_then(Tab::view)
-                        .map(|v| Arc::clone(&v.writer));
-                    if let (Some(writer), Some(page)) = (writer, &mut self.settings_page) {
+                        .map(|v| Arc::clone(&v.writer))
+                        .unwrap_or_else(|| {
+                            Arc::new(git_core::CliBackend::new(std::env::temp_dir()))
+                                as Arc<dyn git_core::GitWriter>
+                        });
+                    if let Some(page) = &mut self.settings_page {
                         if page.tools.is_none() {
                             return Task::perform(
                                 blocking(move || {
@@ -9858,8 +10026,13 @@ impl App {
                                 scroll = scroll_by_id(diff.scroll_id.clone(), offset);
                             }
                         }
-                        // Plain first; colors when the background result arrives.
-                        return Task::batch([scroll, self.highlight_diff(tab)]);
+                        // Plain first; colors and the changed characters
+                        // when the background results arrive.
+                        return Task::batch([
+                            scroll,
+                            self.word_diff(tab),
+                            self.highlight_diff(tab),
+                        ]);
                     }
                 }
             }
@@ -12243,22 +12416,19 @@ fn run_tool(
     run(git).map_err(|e| ExternalToolError::Failed(e.to_string()))
 }
 
-/// No diff or merge tool: explain where to choose one.
+/// No diff or merge tool: "Define tool…" opens the command field.
 fn tool_missing_dialog(merge: bool) -> Modal {
-    let (title, kind, key) = if merge {
-        ("No merge tool", "merge", "merge.tool")
+    let (title, kind) = if merge {
+        ("No merge tool", "merge")
     } else {
-        ("No diff tool", "diff", "diff.tool")
+        ("No diff tool", "diff")
     };
     let mut modal = Modal::confirm(
         title,
-        format!(
-            "No external {kind} tool is configured. Choose one in Preferences → External \
-             tools, or set {key} in your Git configuration."
-        ),
-        "Open settings",
+        format!("No external {kind} tool is defined."),
+        "Define tool…",
         false,
-        Message::SettingsOpenedAt(settings::Category::ExternalTools),
+        Message::DefineTool { merge },
     );
     modal.default = Some(1);
     modal
@@ -12641,6 +12811,41 @@ fn same_repo(root: &std::path::Path, path: &std::path::Path) -> bool {
 }
 
 /// Runs blocking work (Git, file I/O) on tokio's blocking pool.
+/// Runs [`crate::highlight::run`] off the UI thread on the files `load`
+/// returns and emits a message (from `message`) after every block, so the
+/// lines done so far show at once (fix after M15). A failed `load` leaves
+/// the view plain: highlighting is optional.
+fn highlight_task(
+    cache: Arc<std::sync::Mutex<crate::highlight::Cache>>,
+    theme: crate::highlight::CodeTheme,
+    watch: crate::highlight::Watch,
+    load: impl FnOnce() -> Result<Vec<(String, String)>, String> + Send + 'static,
+    message: impl Fn(Vec<crate::highlight::Outcome>) -> Message + Send + 'static,
+) -> Task<Message> {
+    let stream = iced::stream::channel(
+        16,
+        async move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            use iced::futures::{SinkExt as _, StreamExt as _};
+
+            let (sender, mut results) = iced::futures::channel::mpsc::unbounded();
+            let work = tokio::task::spawn_blocking(move || {
+                let Ok(files) = load() else {
+                    return;
+                };
+                crate::highlight::run(&cache, files, theme, &watch, |outcomes| {
+                    let _ = sender.unbounded_send(outcomes);
+                });
+            });
+            // The sender is dropped when the job ends, which ends this loop.
+            while let Some(outcomes) = results.next().await {
+                let _ = output.send(message(outcomes)).await;
+            }
+            let _ = work.await;
+        },
+    );
+    Task::run(stream, |message| message)
+}
+
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -13503,9 +13708,10 @@ pub(crate) mod tests {
         let _ = app.update(checked(Shortcut::ExternalDiff, false));
         let modal = app.modal.take().unwrap();
         assert_eq!(modal.title, "No diff tool");
+        assert_eq!(modal.text, "No external diff tool is defined.");
         assert!(matches!(
             modal.default_action(),
-            Some(Message::SettingsOpenedAt(settings::Category::ExternalTools))
+            Some(Message::DefineTool { merge: false })
         ));
 
         app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
@@ -13576,15 +13782,222 @@ pub(crate) mod tests {
             app.settings_page.as_ref().and_then(|p| p.tools.as_ref()),
             Some(Ok(_))
         ));
-        let _ = app.update(Message::DiffToolChosen(settings::ToolChoice::Tool(
+        let _ = app.update(Message::DiffToolChosen(settings::ToolPick::Git(
             "vimdiff".into(),
         )));
-        let _ = app.update(Message::MergeToolChosen(settings::ToolChoice::None));
+        let _ = app.update(Message::MergeToolChosen(settings::ToolPick::None));
         assert_eq!(
             app.settings.tools.diff_tool,
             settings::ToolChoice::Tool("vimdiff".into())
         );
         assert_eq!(app.settings.tools.merge_tool, settings::ToolChoice::None);
+    }
+
+    /// Fix after M15: a preset fills the command field; editing it makes
+    /// it "Custom"; "Custom" from another choice opens an empty field and
+    /// changes the setting only once something is typed.
+    #[test]
+    fn tool_presets_fill_the_command_and_editing_makes_it_custom() {
+        use git_core::ToolKind;
+        use settings::{ToolChoice, ToolPick, ToolPreset};
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::ExternalTools));
+        let _ = app.update(Message::DiffToolChosen(ToolPick::Preset(
+            ToolPreset::VsCode,
+        )));
+        assert_eq!(
+            app.settings.tools.diff_tool,
+            ToolChoice::Command("code --wait --diff {local} {remote}".into())
+        );
+        let shown = |app: &App, kind| {
+            let page = app.settings_page.as_ref().unwrap();
+            let (choice, custom) = match kind {
+                ToolKind::Diff => (&app.settings.tools.diff_tool, page.diff_tool_custom),
+                ToolKind::Merge => (&app.settings.tools.merge_tool, page.merge_tool_custom),
+            };
+            ToolPick::of(choice, kind, custom)
+        };
+        assert_eq!(
+            shown(&app, ToolKind::Diff),
+            ToolPick::Preset(ToolPreset::VsCode)
+        );
+        let full =
+            r#""C:\Program Files\Microsoft VS Code\Code.exe" --wait --diff {local} {remote}"#;
+        let _ = app.update(Message::DiffToolCommandInput(full.into()));
+        assert_eq!(
+            app.settings.tools.diff_tool,
+            ToolChoice::Command(full.into())
+        );
+        assert_eq!(shown(&app, ToolKind::Diff), ToolPick::Custom);
+        // Typing a preset's exact text shows the preset again.
+        let meld = ToolPreset::Meld.template(ToolKind::Diff).unwrap();
+        let _ = app.update(Message::DiffToolCommandInput(meld.into()));
+        assert_eq!(
+            shown(&app, ToolKind::Diff),
+            ToolPick::Preset(ToolPreset::Meld)
+        );
+        // Merge: "Custom" from Git's config keeps the setting until typed.
+        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
+        let _ = app.update(Message::MergeToolChosen(ToolPick::Custom));
+        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
+        assert_eq!(shown(&app, ToolKind::Merge), ToolPick::Custom);
+        let _ = app.update(Message::MergeToolCommandInput("kdiff3 {merged}".into()));
+        assert_eq!(
+            app.settings.tools.merge_tool,
+            ToolChoice::Command("kdiff3 {merged}".into())
+        );
+        // The waiting message names the preset or the program.
+        let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+        app.settings.tools.diff_tool =
+            ToolChoice::Command(ToolPreset::Zed.template(ToolKind::Diff).unwrap().into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Waiting for Zed…");
+        // An empty command is no tool; an unclosed quote is an error.
+        app.settings.tools.diff_tool = ToolChoice::Command("  ".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(
+            app.modal.take().map(|m| m.title),
+            Some("No diff tool".into())
+        );
+        app.settings.tools.diff_tool = ToolChoice::Command("\"meld {local}".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert!(app.modal.is_none());
+        assert_eq!(
+            app.toasts.list.last().map(|t| t.title.as_str()),
+            Some("Diff tool failed")
+        );
+    }
+
+    /// Fix after M15: "Define tool…" opens Preferences → External tools
+    /// with the command field shown.
+    #[test]
+    fn define_tool_opens_external_tools_with_the_field() {
+        for merge in [false, true] {
+            let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+            let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+                git_core::MIN_GIT_VERSION,
+            )));
+            app.settings.tools.diff_tool = settings::ToolChoice::None;
+            app.settings.tools.merge_tool = settings::ToolChoice::None;
+            let _ = app.update(if merge {
+                Message::OpenMergeTool("c.txt".into())
+            } else {
+                Message::ExternalDiff
+            });
+            let modal = app.modal.take().unwrap();
+            assert_eq!(modal.buttons[1].label, "Define tool…");
+            let title = if merge {
+                "No merge tool"
+            } else {
+                "No diff tool"
+            };
+            assert_eq!(modal.title, title);
+            let _ = app.update(modal.default_action().unwrap());
+            let page = app.settings_page.as_ref().unwrap();
+            assert_eq!(page.category, settings::Category::ExternalTools);
+            assert_eq!(page.merge_tool_custom, merge);
+            assert_eq!(page.diff_tool_custom, !merge);
+            assert!(app.modal.is_none());
+        }
+    }
+
+    /// Fix after M15: a command template runs through `git difftool` /
+    /// `git mergetool` exactly as the background task does, with a fake
+    /// tool in a real repository: commit files get parent and commit,
+    /// staged and unstaged files the right sides; a merge tool that
+    /// closes without saving leaves the file conflicted and never waits.
+    #[test]
+    fn custom_tools_get_the_right_versions_and_never_hang() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        };
+        let commit = |text: &str, message: &str| {
+            std::fs::write(root.join("a.txt"), text).unwrap();
+            git(&["add", "a.txt"]);
+            git(&[
+                "-c",
+                "commit.gpgSign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ]);
+            git(&["rev-parse", "HEAD"])
+        };
+        git(&["init", "--quiet", "-b", "main"]);
+        let first = commit("one\n", "first");
+        let second = commit("two\n", "second");
+        // The fake tool: a script in a folder with a space, appending both
+        // sides to a log.
+        let tools = dir.path().join("my tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let log = dir
+            .path()
+            .join("calls.txt")
+            .to_string_lossy()
+            .replace('\\', "/");
+        std::fs::write(
+            tools.join("fake diff.sh"),
+            format!("cat \"$1\" \"$2\" | tr '\\n' ' ' >> '{log}'; echo >> '{log}'\n"),
+        )
+        .unwrap();
+        let script = tools
+            .join("fake diff.sh")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let template = format!("sh \"{script}\" {{local}} {{remote}}");
+        let tool = App::tool_argument(&settings::ToolChoice::Command(template)).unwrap();
+        let cli = git_core::CliBackend::new(&root);
+        let calls = || std::fs::read_to_string(dir.path().join("calls.txt")).unwrap_or_default();
+        let run = |target: &git_core::DiffTarget| {
+            run_tool(&cli, git_core::ToolKind::Diff, tool.is_explicit(), |git| {
+                git_core::run_difftool(git, target, &tool, "a.txt", None)
+            })
+        };
+        let target = git_core::DiffTarget::Commit {
+            id: second,
+            parent: Some(first),
+        };
+        assert_eq!(run(&target), Ok(()));
+        assert_eq!(calls(), "one two \n");
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
+        assert_eq!(run(&git_core::DiffTarget::Unstaged), Ok(()));
+        assert!(calls().ends_with("two three \n"), "{}", calls());
+        git(&["add", "a.txt"]);
+        std::fs::write(root.join("a.txt"), "four\n").unwrap();
+        assert_eq!(run(&git_core::DiffTarget::Staged), Ok(()));
+        assert!(calls().ends_with("two three \n"), "{}", calls());
+
+        // A conflict and a merge tool that closes without saving.
+        git(&["checkout", "--quiet", "-f", "-b", "side"]);
+        commit("side\n", "side");
+        git(&["checkout", "--quiet", "main"]);
+        commit("main\n", "main");
+        git(&["-c", "commit.gpgSign=false", "merge", "side"]);
+        let tool = App::tool_argument(&settings::ToolChoice::Command(
+            "sh -c \"exit 0\" {local} {remote} {base} {merged}".into(),
+        ))
+        .unwrap();
+        let start = std::time::Instant::now();
+        let result = run_tool(&cli, git_core::ToolKind::Merge, true, |git| {
+            git_core::run_mergetool(git, &tool, "a.txt", false)
+        });
+        assert!(matches!(result, Err(ExternalToolError::Failed(_))));
+        assert!(start.elapsed() < Duration::from_secs(20));
+        assert_eq!(git(&["diff", "--name-only", "--diff-filter=U"]), "a.txt");
     }
 
     #[test]
@@ -14472,6 +14885,131 @@ pub(crate) mod tests {
         app
     }
 
+    /// A Rust diff with paired changed lines (word diff, fix after M15):
+    /// an added `pub(crate) `, a renamed identifier and a rewritten line,
+    /// highlighted and with its word diff applied.
+    pub(crate) fn word_diff_app(mode: settings::DiffMode, theme: settings::ThemeChoice) -> App {
+        let mut app = staging_app(&["src/view.rs"], &[]);
+        app.settings.appearance.theme = theme;
+        let _ = app.update(Message::DiffModeChanged(mode));
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "src/view.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let old = "impl App {\n    fn view_mut(&mut self) -> Option<&mut RepoView> {\n        let count = self.tabs.len();\n        self.tabs.get_mut(count - 1)\n    }\n\n    // Closes every tab and keeps the history of the closed tabs, so that a closed tab can be opened again later from the menu of the tab bar.\n    fn close(&mut self) {\n        self.tabs.clear();\n    }\n}\n";
+        let new = "impl App {\n    pub(crate) fn view_mut(&mut self) -> Option<&mut RepoView> {\n        let total = self.tabs.len();\n        self.tabs.get_mut(total - 1)\n    }\n\n    // Closes every tab and drops the history of the closed tabs, so that a closed tab cannot be opened again later from the menu of the tab bar.\n    fn close(&mut self) {\n        drop(std::mem::take(&mut self.history));\n    }\n}\n";
+        let text = git_core::text_diff_with(old.as_bytes(), new.as_bytes(), mode.context());
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request,
+            context: mode.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: Some("src/view.rs".into()),
+                new_path: Some("src/view.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let result = highlight_result(&app, old, new);
+        let _ = app.update(result);
+        let result = word_diff_result(&app);
+        let _ = app.update(result);
+        app
+    }
+
+    /// The result of the background word diff of the open diff.
+    pub(crate) fn word_diff_result(app: &App) -> Message {
+        let diff = open_diff(app);
+        let Loadable::Ready(file) = &diff.diff else {
+            panic!("diff not loaded");
+        };
+        Message::WordDiffComputed {
+            tab: app.tabs[0].id,
+            request: diff.request.clone(),
+            generation: diff.generation,
+            emphasis: Arc::new(crate::word_diff::of_diff(file)),
+        }
+    }
+
+    #[test]
+    fn word_diff_arrives_for_the_current_load_only() {
+        use git_core::DiffLineKind;
+        use settings::{DiffMode, ThemeChoice};
+        for mode in [DiffMode::Hunk, DiffMode::Inline, DiffMode::Split] {
+            let mut app = word_diff_app(mode, ThemeChoice::Dark);
+            let diff = open_diff(&app);
+            let Loadable::Ready(file) = &diff.diff else {
+                panic!("diff not loaded");
+            };
+            let shown: Vec<(DiffLineKind, Vec<&str>)> = file
+                .hunks
+                .iter()
+                .flat_map(|h| &h.lines)
+                .filter(|l| l.kind != DiffLineKind::Context)
+                .map(|l| {
+                    let ranges = diff.emphasis_for(l);
+                    (
+                        l.kind,
+                        ranges.iter().map(|r| &l.content[r.clone()]).collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                shown,
+                [
+                    (DiffLineKind::Removed, vec![]),
+                    (DiffLineKind::Removed, vec!["count"]),
+                    (DiffLineKind::Removed, vec!["count"]),
+                    (DiffLineKind::Added, vec!["pub(crate) "]),
+                    (DiffLineKind::Added, vec!["total"]),
+                    (DiffLineKind::Added, vec!["total"]),
+                    (DiffLineKind::Removed, vec!["keeps", "can"]),
+                    (DiffLineKind::Added, vec!["drops", "cannot"]),
+                    (DiffLineKind::Removed, vec![]),
+                    (DiffLineKind::Added, vec![]),
+                ],
+                "{mode:?}"
+            );
+            // A reload drops it until the new result arrives; a result of
+            // the older load or of another file does not apply.
+            let stale = word_diff_result(&app);
+            let mut other = word_diff_result(&app);
+            let diff = open_diff(&app);
+            let reload = Message::DiffLoaded {
+                tab: app.tabs[0].id,
+                request: diff.request.clone(),
+                context: mode.context(),
+                result: match &diff.diff {
+                    Loadable::Ready(file) => Ok(file.clone()),
+                    _ => panic!("diff not loaded"),
+                },
+            };
+            let _ = app.update(reload);
+            assert!(open_diff(&app).emphasis.is_none());
+            let _ = app.update(stale);
+            assert!(open_diff(&app).emphasis.is_none(), "older load");
+            if let Message::WordDiffComputed {
+                request,
+                generation,
+                ..
+            } = &mut other
+            {
+                request.path = "b.rs".into();
+                *generation = open_diff(&app).generation;
+            }
+            let _ = app.update(other);
+            assert!(open_diff(&app).emphasis.is_none(), "other file");
+            let current = word_diff_result(&app);
+            let _ = app.update(current);
+            assert!(open_diff(&app).emphasis.is_some());
+        }
+    }
+
     /// The result of the background highlighting of the open diff with the
     /// whole `old` and `new` file.
     pub(crate) fn highlight_result(app: &App, old: &str, new: &str) -> Message {
@@ -14567,6 +15105,77 @@ pub(crate) mod tests {
         let current = highlighted(&app, CodeTheme::Dark);
         let _ = app.update(current);
         assert!(open_diff(&app).highlight.is_some());
+    }
+
+    /// Fix after M15: a file switch stops the running job, and late
+    /// (partial) results of the previous file never color the new one.
+    #[test]
+    fn switching_files_while_highlighting_never_shows_old_colors() {
+        use crate::highlight::CodeTheme;
+        let mut app = wide_diff_app(settings::DiffMode::Inline);
+        let watch = open_diff(&app)
+            .highlight_job
+            .as_ref()
+            .expect("highlighting runs after the load")
+            .watch();
+        let late = highlighted(&app, CodeTheme::Dark);
+        let request = DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "b.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        assert!(watch.cancelled(), "the old job stops");
+        let _ = app.update(late.clone());
+        assert!(open_diff(&app).highlight.is_none(), "while b.rs loads");
+        let new: String = (0..1_500).map(|i| format!("fn f{i}() {{}}\n")).collect();
+        let text = git_core::text_diff_with(b"", new.as_bytes(), git_core::DiffContext::Full);
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            context: settings::DiffMode::Inline.context(),
+            result: Ok(git_core::FileDiff {
+                old_path: None,
+                new_path: Some("b.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let _ = app.update(late);
+        assert!(open_diff(&app).highlight.is_none(), "after b.rs loaded");
+        // The first block of b.rs arrives: its lines are colored, the
+        // rest stays plain until the next block.
+        let mut job =
+            crate::highlight::Progressive::new("b.rs", Arc::from(new.as_str()), CodeTheme::Dark);
+        assert!(!job.step());
+        let generation = open_diff(&app).generation;
+        let partial = |new| Message::DiffHighlighted {
+            tab,
+            request: request.clone(),
+            generation,
+            sides: Arc::new(crate::highlight::DiffSides {
+                theme: CodeTheme::Dark,
+                old: crate::highlight::Outcome::Plain(crate::highlight::Plain::UnknownType),
+                new,
+            }),
+        };
+        let message = partial(job.outcome());
+        let _ = app.update(message);
+        let line = |app: &App, index: usize| {
+            let Loadable::Ready(file) = &open_diff(app).diff else {
+                panic!("diff not loaded");
+            };
+            file.hunks[0].lines[index].clone()
+        };
+        assert!(open_diff(&app).spans_for(&line(&app, 0)).is_some());
+        assert!(open_diff(&app).spans_for(&line(&app, 1_200)).is_none());
+        assert!(job.step());
+        let message = partial(job.outcome());
+        let _ = app.update(message);
+        assert!(open_diff(&app).spans_for(&line(&app, 1_200)).is_some());
     }
 
     #[test]

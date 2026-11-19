@@ -30,6 +30,10 @@ pub const ISSUES_URL: &str = "https://github.com/a-denisov-psb/gitloom/issues";
 /// processes, so it simply follows the product name.
 pub const ASKPASS_ENV: &str = "GITLOOM_ASKPASS";
 
+/// Name of the diff/merge tool a command template from the settings runs
+/// as (`git -c difftool.<name>.cmd=…` per call only, ADR-055).
+pub const CUSTOM_TOOL: &str = "gitloom-custom";
+
 /// Environment variable naming the editor mode when started as Git editor.
 pub const EDITOR_ENV: &str = "GITLOOM_EDITOR";
 

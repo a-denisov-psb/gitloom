@@ -13,9 +13,11 @@ publish = false
 git-core = { path = "../git-core" }
 git-graph = { path = "../git-graph" }
 iced = { version = "0.14.0", features = ["canvas", "advanced", "tokio", "svg", "image-without-codecs"] }
-# Syntax highlighting (ADR-047): pure Rust regex engine, no oniguruma.
-syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }
-two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+# Syntax highlighting (ADR-047): the oniguruma regex engine (bundled C
+# library, built by onig_sys) since the fix after M15; about 3x faster
+# than the pure Rust engine.
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-onig"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
 directories = "6.0"
 notify = "8.2"
 rfd = "0.17"

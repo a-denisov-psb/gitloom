@@ -314,6 +314,187 @@ pub enum ToolChoice {
     /// A tool by name, passed as `--tool=<name>`.
     Tool(String),
     None,
+    /// A command template with `{local}`, `{remote}` (and for merging
+    /// `{base}`, `{merged}`), run through Git (fix after M15, ADR-055).
+    Command(String),
+}
+
+/// Presets of the diff and merge tool command (fix after M15, ADR-055).
+/// Each template was checked against the tool's documentation or Git's own
+/// tool definitions; a preset only offers the modes it is documented for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolPreset {
+    VsCode,
+    VsCodium,
+    IntellijIdea,
+    Zed,
+    Meld,
+    WinMerge,
+    BeyondCompare,
+}
+
+impl ToolPreset {
+    pub const ALL: [Self; 7] = [
+        Self::VsCode,
+        Self::VsCodium,
+        Self::IntellijIdea,
+        Self::Zed,
+        Self::Meld,
+        Self::WinMerge,
+        Self::BeyondCompare,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::VsCode => "VS Code",
+            Self::VsCodium => "VSCodium",
+            Self::IntellijIdea => "IntelliJ IDEA",
+            Self::Zed => "Zed",
+            Self::Meld => "Meld",
+            Self::WinMerge => "WinMerge",
+            Self::BeyondCompare => "Beyond Compare",
+        }
+    }
+
+    /// The command template for `kind`; `None` when the tool has no
+    /// documented mode for it.
+    pub fn template(self, kind: git_core::ToolKind) -> Option<&'static str> {
+        use git_core::ToolKind::{Diff, Merge};
+        match (self, kind) {
+            // code.visualstudio.com/docs/sourcecontrol/merge-conflicts
+            (Self::VsCode, Diff) => Some("code --wait --diff {local} {remote}"),
+            (Self::VsCode, Merge) => Some("code --wait --merge {remote} {local} {base} {merged}"),
+            (Self::VsCodium, Diff) => Some("codium --wait --diff {local} {remote}"),
+            (Self::VsCodium, Merge) => {
+                Some("codium --wait --merge {remote} {local} {base} {merged}")
+            }
+            // JetBrains' mergetool tutorial; `idea diff` is not documented
+            // to wait, and Git removes the files when it returns.
+            (Self::IntellijIdea, Diff) => None,
+            (Self::IntellijIdea, Merge) => Some("idea merge {local} {remote} {base} {merged}"),
+            // zed.dev/docs/reference/cli; Zed has no merge mode.
+            (Self::Zed, Diff) => Some("zed --wait --diff {local} {remote}"),
+            (Self::Zed, Merge) => None,
+            // Git's own tool definitions (mergetools/meld, winmerge, bc).
+            (Self::Meld, Diff) => Some("meld {local} {remote}"),
+            (Self::Meld, Merge) => Some("meld --output={merged} {local} {base} {remote}"),
+            (Self::WinMerge, Diff) => Some("WinMergeU -u -e {local} {remote}"),
+            (Self::WinMerge, Merge) => {
+                Some("WinMergeU -u -e -dl Local -dr Remote {local} {remote} {merged}")
+            }
+            (Self::BeyondCompare, Diff) => Some("bcomp {local} {remote}"),
+            (Self::BeyondCompare, Merge) => {
+                Some("bcomp {local} {remote} {base} -mergeoutput={merged}")
+            }
+        }
+    }
+
+    /// Names of Git's built-in tools this preset covers (not listed again).
+    fn git_names(self) -> &'static [&'static str] {
+        match self {
+            Self::Meld => &["meld"],
+            Self::WinMerge => &["winmerge"],
+            Self::BeyondCompare => &["bc", "bc3", "bc4"],
+            Self::VsCode | Self::VsCodium | Self::IntellijIdea | Self::Zed => &[],
+        }
+    }
+
+    /// The preset whose `kind` template is `command` (trimmed).
+    pub fn of(command: &str, kind: git_core::ToolKind) -> Option<Self> {
+        let command = command.trim();
+        Self::ALL
+            .into_iter()
+            .find(|preset| preset.template(kind) == Some(command))
+    }
+}
+
+/// An entry of the diff or merge tool list (Preferences → External tools).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolPick {
+    GitConfig,
+    None,
+    Preset(ToolPreset),
+    /// The command field, keeping its text.
+    Custom,
+    /// A tool Git offers that no preset covers.
+    Git(String),
+}
+
+impl ToolPick {
+    /// The list in its order: "Use Git config", "None", the presets of
+    /// `kind`, "Custom", then the tools Git offers that no preset covers
+    /// (and a chosen Git tool that Git does not list any more).
+    pub fn list(kind: git_core::ToolKind, git_tools: &[String], current: &ToolChoice) -> Vec<Self> {
+        let mut list = vec![Self::GitConfig, Self::None];
+        list.extend(
+            ToolPreset::ALL
+                .into_iter()
+                .filter(|p| p.template(kind).is_some())
+                .map(Self::Preset),
+        );
+        list.push(Self::Custom);
+        let covered = |name: &str| {
+            ToolPreset::ALL
+                .iter()
+                .any(|p| p.git_names().contains(&name))
+        };
+        let mut names: Vec<String> = git_tools.to_vec();
+        if let ToolChoice::Tool(name) = current {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        list.extend(
+            names
+                .into_iter()
+                .filter(|name| name != git_core::CUSTOM_TOOL && !covered(name))
+                .map(Self::Git),
+        );
+        list
+    }
+
+    /// The entry `choice` shows as; `custom`: "Custom" was picked while
+    /// the command still matches a preset.
+    pub fn of(choice: &ToolChoice, kind: git_core::ToolKind, custom: bool) -> Self {
+        if custom {
+            return Self::Custom;
+        }
+        match choice {
+            ToolChoice::GitConfig => Self::GitConfig,
+            ToolChoice::None => Self::None,
+            ToolChoice::Tool(name) => Self::Git(name.clone()),
+            ToolChoice::Command(command) => {
+                ToolPreset::of(command, kind).map_or(Self::Custom, Self::Preset)
+            }
+        }
+    }
+
+    /// The label in the list; `configured` is Git's `diff.tool` /
+    /// `merge.tool`, if known.
+    pub fn label(&self, configured: Option<&str>) -> String {
+        match self {
+            Self::GitConfig => format!(
+                "Use Git config ({})",
+                configured.unwrap_or("not configured")
+            ),
+            Self::None => "None".to_owned(),
+            Self::Preset(preset) => preset.label().to_owned(),
+            Self::Custom => "Custom".to_owned(),
+            Self::Git(name) => format!("{name} (Git)"),
+        }
+    }
+}
+
+/// Program name of a command template for messages ("Waiting for …").
+pub fn tool_name(choice: &ToolChoice, kind: git_core::ToolKind) -> Option<String> {
+    match choice {
+        ToolChoice::Tool(name) => Some(name.clone()),
+        ToolChoice::Command(command) => Some(
+            ToolPreset::of(command, kind)
+                .map_or_else(|| editor_name(command), |p| p.label().to_owned()),
+        ),
+        ToolChoice::GitConfig | ToolChoice::None => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -329,6 +510,16 @@ pub struct ExternalTools {
     /// "Delete .orig files after merging" (`mergetool.keepBackup=false`,
     /// M10-08); off by default like GitKraken.
     pub delete_orig: bool,
+}
+
+impl ExternalTools {
+    /// The diff or merge tool setting.
+    pub fn choice_mut(&mut self, kind: git_core::ToolKind) -> &mut ToolChoice {
+        match kind {
+            git_core::ToolKind::Diff => &mut self.diff_tool,
+            git_core::ToolKind::Merge => &mut self.merge_tool,
+        }
+    }
 }
 
 /// Presets of the external editor (M8-07); a preset fills the editable
@@ -529,6 +720,11 @@ pub struct Page {
     /// "Custom" was picked for the editor while the template still matches
     /// a preset (M8-07).
     pub editor_custom: bool,
+    /// "Custom" was picked for the diff or merge tool while the command
+    /// still matches a preset, or "Define tool…" opened the field (fix
+    /// after M15).
+    pub diff_tool_custom: bool,
+    pub merge_tool_custom: bool,
     /// Repository the repository category's form was built for; the form
     /// follows the active tab (M8-01).
     pub repo: Option<(crate::app::TabId, std::path::PathBuf)>,
@@ -616,6 +812,14 @@ impl FlowForm {
 }
 
 impl Page {
+    /// "Custom" picked for the diff or merge tool.
+    pub fn tool_custom_mut(&mut self, kind: git_core::ToolKind) -> &mut bool {
+        match kind {
+            git_core::ToolKind::Diff => &mut self.diff_tool_custom,
+            git_core::ToolKind::Merge => &mut self.merge_tool_custom,
+        }
+    }
+
     pub fn new(settings: &Settings) -> Self {
         Self {
             category: Category::General,
@@ -628,6 +832,8 @@ impl Page {
             ssh_path: String::new(),
             ssh_replace: false,
             editor_custom: false,
+            diff_tool_custom: false,
+            merge_tool_custom: false,
             repo: None,
             default_branch: None,
             default_branch_input: String::new(),
@@ -958,7 +1164,8 @@ mod tests {
         settings.file_list.descending = true;
         settings.appearance.avatars = true;
         settings.tools.diff_tool = ToolChoice::Tool("meld".into());
-        settings.tools.merge_tool = ToolChoice::None;
+        settings.tools.merge_tool =
+            ToolChoice::Command("meld --output={merged} {local} {base} {remote}".into());
         settings.tools.terminal_command = "alacritty --working-directory {path}".into();
         settings.diff.view_mode = DiffMode::Split;
         settings.appearance.graph_columns.refs = 150.0;
@@ -990,6 +1197,59 @@ mod tests {
         assert_eq!(settings.diff.view_mode, DiffMode::Hunk);
         assert_eq!(settings.version, VERSION);
         assert!(to_json(&sample()).contains(r#""view_mode": "split""#));
+    }
+
+    /// Settings files before the fix after M15 read unchanged; the
+    /// command template is stored as `{"command": …}`.
+    #[test]
+    fn tool_choices_of_older_files_load_and_commands_round_trip() {
+        let text = r#"{
+            "version": 1,
+            "tools": { "diff_tool": { "tool": "meld" }, "merge_tool": "none" }
+        }"#;
+        let settings = parse(text).unwrap();
+        assert_eq!(settings.tools.diff_tool, ToolChoice::Tool("meld".into()));
+        assert_eq!(settings.tools.merge_tool, ToolChoice::None);
+        let json = to_json(&sample());
+        assert!(
+            json.contains(r#""command": "meld --output={merged} {local} {base} {remote}""#),
+            "{json}"
+        );
+        assert_eq!(parse(&json).unwrap().tools, sample().tools);
+    }
+
+    #[test]
+    fn tool_presets_cover_only_documented_modes() {
+        use git_core::ToolKind::{Diff, Merge};
+        for preset in ToolPreset::ALL {
+            for kind in [Diff, Merge] {
+                if let Some(template) = preset.template(kind) {
+                    assert_eq!(ToolPreset::of(template, kind), Some(preset));
+                    assert!(template.contains("{local}") && template.contains("{remote}"));
+                    if kind == Merge {
+                        assert!(template.contains("{merged}"), "{template}");
+                    }
+                }
+            }
+        }
+        assert_eq!(ToolPreset::Zed.template(Merge), None);
+        assert_eq!(ToolPreset::IntellijIdea.template(Diff), None);
+        // Git's own meld/winmerge/bc entries are covered by the presets.
+        let list = ToolPick::list(
+            Diff,
+            &["meld".into(), "bc3".into(), "vimdiff".into()],
+            &ToolChoice::None,
+        );
+        assert_eq!(list.last(), Some(&ToolPick::Git("vimdiff".into())));
+        assert!(!list.contains(&ToolPick::Git("meld".into())));
+        assert_eq!(
+            tool_name(
+                &ToolChoice::Command("/opt/kdiff3/bin/kdiff3 {local}".into()),
+                Diff
+            )
+            .as_deref(),
+            Some("kdiff3")
+        );
     }
 
     #[test]

@@ -3,22 +3,29 @@
 //! highlighted (so multi-line comments and strings are right on every
 //! line) and the result is mapped to diff lines by the views (M11-09).
 //!
-//! Highlighting is CPU work: callers run [`highlight`] in a background
-//! task and keep results in a [`Cache`] keyed by blob id and theme.
+//! Highlighting is CPU work: callers run it in a background task and keep
+//! complete results in a [`Cache`] keyed by blob id and theme. Files of any
+//! length are highlighted progressively (fix after M15, ADR-047): syntect
+//! parses from the top, so [`Progressive`] works in blocks of
+//! [`BLOCK_LINES`] lines and [`run`] hands out the lines done so far after
+//! every block; the rest stays plain until its block is done.
 
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Theme};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use two_face::theme::EmbeddedThemeName;
 
-/// Files larger than this stay plain.
-pub const MAX_BYTES: usize = 1024 * 1024;
-/// Files with more lines than this stay plain.
-pub const MAX_LINES: usize = 20_000;
+/// Files larger than this stay plain ("Too large for syntax highlighting").
+pub const MAX_BYTES: usize = 8 * 1024 * 1024;
+/// Lines longer than this (minified or generated data) stay plain; the
+/// parser continues on the next line with its state from before the line.
+pub const MAX_LINE_BYTES: usize = 5_000;
+/// Lines highlighted per block before the partial result is handed out.
+pub const BLOCK_LINES: usize = 1_000;
 
 /// The syntect theme family of a Gitloom theme (ADR-047): Dark uses
 /// "OneHalfDark", Light uses "GitHub". Gitloom keeps its own
@@ -54,10 +61,35 @@ pub struct Span {
     pub style: SpanStyle,
 }
 
-/// Spans of every line of a file.
+/// Spans of the lines of a file highlighted so far, in blocks of
+/// [`BLOCK_LINES`] lines (a partial result shares the finished blocks
+/// instead of copying them). Lines after the last block stay plain.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Highlighted {
-    pub lines: Vec<Vec<Span>>,
+    blocks: Vec<Arc<Vec<Vec<Span>>>>,
+    /// Every line of the file is done.
+    complete: bool,
+}
+
+impl Highlighted {
+    /// Spans of line `index` (0-based), `None` when it is not done yet.
+    pub fn line(&self, index: usize) -> Option<&[Span]> {
+        self.blocks
+            .get(index / BLOCK_LINES)?
+            .get(index % BLOCK_LINES)
+            .map(Vec::as_slice)
+    }
+
+    /// Lines done.
+    #[cfg(test)]
+    pub fn lines_done(&self) -> usize {
+        self.blocks.iter().map(|b| b.len()).sum()
+    }
+
+    /// Every line of the file is done (only complete results are cached).
+    pub fn is_complete(&self) -> bool {
+        self.complete
+    }
 }
 
 /// Why a file is shown without highlighting.
@@ -65,8 +97,8 @@ pub struct Highlighted {
 pub enum Plain {
     /// No syntax for the file type.
     UnknownType,
-    /// Over [`MAX_BYTES`] or [`MAX_LINES`]: the view says "Too large for
-    /// syntax highlighting".
+    /// Over [`MAX_BYTES`]: the view says "Too large for syntax
+    /// highlighting".
     TooLarge,
 }
 
@@ -75,6 +107,24 @@ pub enum Plain {
 pub enum Outcome {
     Highlighted(Arc<Highlighted>),
     Plain(Plain),
+}
+
+impl Outcome {
+    /// Spans of line `index` (0-based) when it is highlighted.
+    pub fn line(&self, index: usize) -> Option<&[Span]> {
+        match self {
+            Self::Highlighted(h) => h.line(index),
+            Self::Plain(_) => None,
+        }
+    }
+
+    /// Final: plain, or every line done.
+    pub fn is_complete(&self) -> bool {
+        match self {
+            Self::Highlighted(h) => h.is_complete(),
+            Self::Plain(_) => true,
+        }
+    }
 }
 
 pub(crate) fn syntaxes() -> &'static SyntaxSet {
@@ -107,44 +157,238 @@ pub(crate) fn syntax_for(path: &str, first_line: &str) -> Option<&'static Syntax
         .filter(|syntax| syntax.name != "Plain Text")
 }
 
-/// Highlights `content` of the file at `path` with `theme`.
-pub fn highlight(path: &str, content: &str, theme_id: CodeTheme) -> Outcome {
-    if content.len() > MAX_BYTES || content.lines().count() > MAX_LINES {
-        return Outcome::Plain(Plain::TooLarge);
-    }
-    let first_line = content.lines().next().unwrap_or("");
-    let Some(syntax) = syntax_for(path, first_line) else {
-        return Outcome::Plain(Plain::UnknownType);
-    };
-    let mut highlighter = HighlightLines::new(syntax, theme(theme_id));
-    let mut lines = Vec::new();
-    // The "newlines" syntax set expects every line with its terminator.
-    for line in syntect::util::LinesWithEndings::from(content) {
-        let Ok(ranges) = highlighter.highlight_line(line, syntaxes()) else {
-            // A grammar error: the rest of the file stays plain.
-            return Outcome::Plain(Plain::UnknownType);
+/// Highlights a file block by block: [`Progressive::step`] does the next
+/// [`BLOCK_LINES`] lines, [`Progressive::outcome`] is the result so far.
+pub struct Progressive {
+    text: Arc<str>,
+    /// Byte offset of the next line.
+    at: usize,
+    /// `None`: plain (the outcome is final).
+    highlighter: Option<HighlightLines<'static>>,
+    blocks: Vec<Arc<Vec<Vec<Span>>>>,
+    plain: Plain,
+}
+
+impl Progressive {
+    /// Starts highlighting `text` of the file at `path` with `theme_id`.
+    pub fn new(path: &str, text: Arc<str>, theme_id: CodeTheme) -> Self {
+        let mut job = Self {
+            text,
+            at: 0,
+            highlighter: None,
+            blocks: Vec::new(),
+            plain: Plain::UnknownType,
         };
-        let text_len = line.trim_end_matches(['\n', '\r']).len();
-        let mut start = 0;
-        let mut spans = Vec::new();
-        for (style, piece) in ranges {
-            let end = (start + piece.len()).min(text_len);
-            if end > start {
-                let color = style.foreground;
-                spans.push(Span {
-                    range: start..end,
-                    style: SpanStyle {
-                        color: [color.r, color.g, color.b, color.a],
-                        bold: style.font_style.contains(FontStyle::BOLD),
-                        italic: style.font_style.contains(FontStyle::ITALIC),
-                    },
-                });
-            }
-            start += piece.len();
+        if job.text.len() > MAX_BYTES {
+            job.plain = Plain::TooLarge;
+            return job;
         }
-        lines.push(spans);
+        let first_line = job.text.lines().next().unwrap_or("");
+        if let Some(syntax) = syntax_for(path, first_line) {
+            job.highlighter = Some(HighlightLines::new(syntax, theme(theme_id)));
+        }
+        job
     }
-    Outcome::Highlighted(Arc::new(Highlighted { lines }))
+
+    /// Every line is done (or the file stays plain).
+    pub fn done(&self) -> bool {
+        self.highlighter.is_none() || self.at >= self.text.len()
+    }
+
+    /// Highlights the next block; `true` when the file is done.
+    pub fn step(&mut self) -> bool {
+        let Some(highlighter) = self.highlighter.as_mut() else {
+            return true;
+        };
+        let rest = &self.text[self.at..];
+        let mut block = Vec::with_capacity(BLOCK_LINES);
+        let mut consumed = 0;
+        let mut failed = false;
+        // The "newlines" syntax set expects every line with its terminator.
+        for line in syntect::util::LinesWithEndings::from(rest).take(BLOCK_LINES) {
+            consumed += line.len();
+            let text_len = line.trim_end_matches(['\n', '\r']).len();
+            if failed || text_len > MAX_LINE_BYTES {
+                // Plain; the parser state from before this line carries on.
+                block.push(Vec::new());
+                continue;
+            }
+            match highlighter.highlight_line(line, syntaxes()) {
+                Ok(ranges) => block.push(spans_of(&ranges, text_len)),
+                Err(_) => {
+                    // A grammar error: the rest of the file stays plain.
+                    failed = true;
+                    block.push(Vec::new());
+                }
+            }
+        }
+        self.at += consumed;
+        if !block.is_empty() {
+            self.blocks.push(Arc::new(block));
+        }
+        if failed {
+            // Plain lines up to the end, then the job is done.
+            while self.at < self.text.len() {
+                let lines = syntect::util::LinesWithEndings::from(&self.text[self.at..])
+                    .take(BLOCK_LINES)
+                    .fold((0, 0), |(n, bytes), l| (n + 1, bytes + l.len()));
+                self.at += lines.1;
+                self.blocks.push(Arc::new(vec![Vec::new(); lines.0]));
+            }
+        }
+        self.done()
+    }
+
+    /// The result so far: the finished blocks, or why the file stays plain.
+    pub fn outcome(&self) -> Outcome {
+        if self.highlighter.is_none() {
+            return Outcome::Plain(self.plain);
+        }
+        Outcome::Highlighted(Arc::new(Highlighted {
+            blocks: self.blocks.clone(),
+            complete: self.done(),
+        }))
+    }
+}
+
+/// Spans of one line from syntect's ranges, cut at the line's text length.
+fn spans_of(ranges: &[(syntect::highlighting::Style, &str)], text_len: usize) -> Vec<Span> {
+    let mut start = 0;
+    let mut spans = Vec::new();
+    for (style, piece) in ranges {
+        let end = (start + piece.len()).min(text_len);
+        if end > start {
+            let color = style.foreground;
+            spans.push(Span {
+                range: start..end,
+                style: SpanStyle {
+                    color: [color.r, color.g, color.b, color.a],
+                    bold: style.font_style.contains(FontStyle::BOLD),
+                    italic: style.font_style.contains(FontStyle::ITALIC),
+                },
+            });
+        }
+        start += piece.len();
+    }
+    spans
+}
+
+/// Highlights `content` of the file at `path` with `theme` in one go.
+#[cfg(test)]
+pub fn highlight(path: &str, content: &str, theme_id: CodeTheme) -> Outcome {
+    let mut job = Progressive::new(path, Arc::from(content), theme_id);
+    while !job.step() {}
+    job.outcome()
+}
+
+/// A running highlighting job, kept by the view it highlights for. The job
+/// stops when every copy of its handle is gone: the view was replaced or
+/// moved on to other content or another theme.
+#[derive(Debug, Clone)]
+pub struct Job {
+    alive: Arc<()>,
+    pub theme: CodeTheme,
+}
+
+impl Job {
+    pub fn new(theme: CodeTheme) -> Self {
+        Self {
+            alive: Arc::new(()),
+            theme,
+        }
+    }
+
+    /// What the background task checks between lines.
+    pub fn watch(&self) -> Watch {
+        Watch(Arc::downgrade(&self.alive))
+    }
+}
+
+/// The background side of a [`Job`].
+#[derive(Debug, Clone)]
+pub struct Watch(Weak<()>);
+
+impl Watch {
+    pub fn cancelled(&self) -> bool {
+        self.0.strong_count() == 0
+    }
+}
+
+/// Highlights `files` (path and text) with `theme`: complete results from
+/// `cache`, the others block by block, each file on its own thread (top
+/// first in every file). `emit` gets the outcomes of all files after every
+/// block; the last call has every outcome complete. Nothing is emitted
+/// once `watch` is cancelled, and only complete results go into the cache.
+pub fn run(
+    cache: &std::sync::Mutex<Cache>,
+    files: Vec<(String, String)>,
+    theme: CodeTheme,
+    watch: &Watch,
+    mut emit: impl FnMut(Vec<Outcome>),
+) {
+    let mut ids = Vec::new();
+    let mut current = Vec::new();
+    let mut jobs = Vec::new();
+    for (index, (path, text)) in files.into_iter().enumerate() {
+        let id = content_id(&path, &text);
+        match cache.lock().ok().and_then(|c| c.get(&id, theme).cloned()) {
+            Some(outcome) => current.push(outcome),
+            None => {
+                // Not done yet: plain until the first block arrives.
+                current.push(Outcome::Highlighted(Arc::default()));
+                jobs.push((index, path, text));
+            }
+        }
+        ids.push(id);
+    }
+    if watch.cancelled() {
+        return;
+    }
+    if jobs.is_empty() {
+        emit(current);
+        return;
+    }
+    let mut fresh = vec![false; current.len()];
+    let finished = std::thread::scope(|scope| {
+        let (sender, blocks) = std::sync::mpsc::channel();
+        for (index, path, text) in jobs {
+            fresh[index] = true;
+            let sender = sender.clone();
+            // The parser state stays on its thread (oniguruma's is not Send).
+            scope.spawn(move || {
+                let mut job = Progressive::new(&path, Arc::from(text), theme);
+                loop {
+                    if watch.cancelled() {
+                        return;
+                    }
+                    let done = job.step();
+                    if sender.send((index, job.outcome())).is_err() || done {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        // Ends when every thread is done (or stopped).
+        for (index, outcome) in blocks {
+            if watch.cancelled() {
+                return false;
+            }
+            current[index] = outcome;
+            emit(current.clone());
+        }
+        !watch.cancelled()
+    });
+    if !finished {
+        return;
+    }
+    if let Ok(mut cache) = cache.lock() {
+        for ((id, outcome), fresh) in ids.iter().zip(current).zip(fresh) {
+            if fresh && outcome.is_complete() {
+                cache.insert(id, theme, outcome);
+            }
+        }
+    }
 }
 
 /// Recently highlighted files, keyed by blob id (or another id that
@@ -199,11 +443,8 @@ impl DiffSides {
                 (&self.new, line.new_line)
             }
         };
-        let Outcome::Highlighted(h) = side else {
-            return None;
-        };
         let index = usize::try_from(number?.checked_sub(1)?).ok()?;
-        h.lines.get(index).map(Vec::as_slice)
+        side.line(index)
     }
 
     /// The file was too large on a side (the view says so).
@@ -283,27 +524,56 @@ pub fn content_id(path: &str, text: &str) -> String {
     format!("{:016x}-{}", hasher.finish(), text.len())
 }
 
-/// Highlights `text` of `path`, from `cache` when it was done before.
-pub fn cached(
-    cache: &std::sync::Mutex<Cache>,
-    path: &str,
-    text: &str,
-    theme: CodeTheme,
-) -> Outcome {
-    let id = content_id(path, text);
-    if let Some(hit) = cache.lock().ok().and_then(|c| c.get(&id, theme).cloned()) {
-        return hit;
-    }
-    let outcome = highlight(path, text, theme);
-    if let Ok(mut cache) = cache.lock() {
-        cache.insert(&id, theme, outcome.clone());
-    }
-    outcome
-}
-
 /// `content` cut into styled pieces by `spans` (unstyled between them),
 /// with tabs expanded to `tab` columns as the views show them.
 pub fn segments(content: &str, spans: &[Span], tab: usize) -> Vec<(String, Option<SpanStyle>)> {
+    pieces(content, spans, &[], tab)
+        .into_iter()
+        .map(|piece| (piece.text, piece.style))
+        .collect()
+}
+
+/// A piece of a line as shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    pub text: String,
+    pub style: Option<SpanStyle>,
+    /// Inside a changed range of the word diff (fix after M15).
+    pub emphasis: bool,
+}
+
+/// `content` cut into pieces at the borders of `spans` and of the changed
+/// byte ranges `emphasis` (word diff), with tabs expanded to `tab` columns.
+/// Ranges outside the line or not on character borders are skipped.
+pub fn pieces(content: &str, spans: &[Span], emphasis: &[Range<usize>], tab: usize) -> Vec<Piece> {
+    let valid = |range: &Range<usize>| {
+        range.start < range.end
+            && range.end <= content.len()
+            && content.is_char_boundary(range.start)
+            && content.is_char_boundary(range.end)
+    };
+    // Styled ranges in order, without overlaps.
+    let mut styled: Vec<(Range<usize>, SpanStyle)> = Vec::new();
+    for span in spans {
+        let start = span
+            .range
+            .start
+            .max(styled.last().map_or(0, |(r, _)| r.end));
+        let range = start..span.range.end.min(content.len());
+        if valid(&range) {
+            styled.push((range, span.style));
+        }
+    }
+    let emphasis: Vec<&Range<usize>> = emphasis.iter().filter(|r| valid(r)).collect();
+    let mut borders: Vec<usize> = vec![0, content.len()];
+    for (range, _) in &styled {
+        borders.extend([range.start, range.end]);
+    }
+    for range in &emphasis {
+        borders.extend([range.start, range.end]);
+    }
+    borders.sort_unstable();
+    borders.dedup();
     let tab = tab.max(1);
     let mut column = 0;
     let mut expand = |piece: &str| {
@@ -320,23 +590,24 @@ pub fn segments(content: &str, spans: &[Span], tab: usize) -> Vec<(String, Optio
         }
         out
     };
-    let mut pieces = Vec::new();
-    let mut at = 0;
-    for span in spans {
-        let (start, end) = (span.range.start.max(at), span.range.end.min(content.len()));
-        if start >= end || !content.is_char_boundary(start) || !content.is_char_boundary(end) {
-            continue;
+    let mut out = Vec::new();
+    let mut next_style = 0;
+    for pair in borders.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        while styled.get(next_style).is_some_and(|(r, _)| r.end <= start) {
+            next_style += 1;
         }
-        if start > at {
-            pieces.push((expand(&content[at..start]), None));
-        }
-        pieces.push((expand(&content[start..end]), Some(span.style)));
-        at = end;
+        let style = styled
+            .get(next_style)
+            .filter(|(r, _)| r.start <= start)
+            .map(|(_, style)| *style);
+        out.push(Piece {
+            text: expand(&content[start..end]),
+            style,
+            emphasis: emphasis.iter().any(|r| r.start <= start && end <= r.end),
+        });
     }
-    if at < content.len() {
-        pieces.push((expand(&content[at..]), None));
-    }
-    pieces
+    out
 }
 
 /// The licenses of the bundled syntaxes and themes, as listed in the
@@ -365,7 +636,8 @@ mod tests {
     fn style_of(source: &str, h: &Highlighted, line: usize, text: &str) -> SpanStyle {
         let content = source.lines().nth(line).unwrap();
         let at = content.find(text).unwrap();
-        h.lines[line]
+        h.line(line)
+            .unwrap()
             .iter()
             .find(|s| s.range.contains(&at))
             .unwrap_or_else(|| panic!("no span at {at} in {content:?}"))
@@ -377,7 +649,8 @@ mod tests {
         let source = "fn main() {\n    // greet\n    let s = \"hi\";\n}\n";
         let outcome = highlight("src/main.rs", source, CodeTheme::Dark);
         let h = spans(&outcome);
-        assert_eq!(h.lines.len(), 4);
+        assert_eq!(h.lines_done(), 4);
+        assert!(h.is_complete());
         let keyword = style_of(source, h, 0, "fn");
         let comment = style_of(source, h, 1, "greet");
         let string = style_of(source, h, 2, "hi");
@@ -387,7 +660,8 @@ mod tests {
         assert_ne!(string.color, plain.color);
         assert_ne!(string.color, comment.color);
         // Spans stay inside the line text.
-        for (line, content) in h.lines.iter().zip(source.lines()) {
+        for (index, content) in source.lines().enumerate() {
+            let line = h.line(index).unwrap();
             assert!(line.iter().all(|s| s.range.end <= content.len()));
         }
     }
@@ -434,11 +708,6 @@ mod tests {
         assert_eq!(
             highlight("README", "hello\n", CodeTheme::Dark),
             Outcome::Plain(Plain::UnknownType)
-        );
-        let big = "x\n".repeat(MAX_LINES + 1);
-        assert_eq!(
-            highlight("a.rs", &big, CodeTheme::Dark),
-            Outcome::Plain(Plain::TooLarge)
         );
         let wide = "a".repeat(MAX_BYTES + 1);
         assert_eq!(
@@ -532,6 +801,41 @@ mod tests {
     }
 
     #[test]
+    fn pieces_split_at_emphasis_and_keep_syntax_colors() {
+        let style = SpanStyle {
+            color: [1, 2, 3, 255],
+            bold: false,
+            italic: false,
+        };
+        // "pub(crate) fn x" with ") fn" styled and "pub(crate) " emphasized.
+        let content = "pub(crate) fn x";
+        let spans = [Span {
+            range: 9..13,
+            style,
+        }];
+        let emphasized = [Range { start: 0, end: 11 }];
+        let pieces = pieces(content, &spans, &emphasized, 4);
+        let shown: Vec<(&str, bool, bool)> = pieces
+            .iter()
+            .map(|p| (p.text.as_str(), p.style.is_some(), p.emphasis))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("pub(crate", false, true),
+                (") ", true, true),
+                ("fn", true, false),
+                (" x", false, false),
+            ]
+        );
+        // Tabs expand across pieces; ranges off char borders are skipped.
+        let pieces = super::pieces("\tä\tb", &[], &[1..2, 3..5], 4);
+        let texts: Vec<&str> = pieces.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, ["    ä", "   b"]);
+        assert!(pieces[1].emphasis && !pieces[0].emphasis);
+    }
+
+    #[test]
     fn segments_expand_tabs_and_keep_gaps() {
         let style = SpanStyle {
             color: [1, 2, 3, 255],
@@ -552,15 +856,176 @@ mod tests {
         assert_eq!(segments("x", &bad, 4), [("x".to_owned(), None)]);
     }
 
+    /// The old one-shot algorithm (before the fix after M15): one
+    /// highlighter over the whole file, no line limit.
+    fn reference(path: &str, content: &str) -> Vec<Vec<Span>> {
+        let syntax = syntax_for(path, content.lines().next().unwrap_or("")).unwrap();
+        let mut highlighter = HighlightLines::new(syntax, theme(CodeTheme::Dark));
+        syntect::util::LinesWithEndings::from(content)
+            .map(|line| {
+                let ranges = highlighter.highlight_line(line, syntaxes()).unwrap();
+                spans_of(&ranges, line.trim_end_matches(['\n', '\r']).len())
+            })
+            .collect()
+    }
+
+    fn all_lines(h: &Highlighted) -> Vec<Vec<Span>> {
+        (0..h.lines_done())
+            .map(|i| h.line(i).unwrap().to_vec())
+            .collect()
+    }
+
+    /// A Rust file whose block comments and raw strings cross the block
+    /// borders (line 1000 is inside a comment, line 2000 inside a string).
+    fn crossing_blocks() -> String {
+        let mut source = String::new();
+        for i in 0..2_600 {
+            match i {
+                995 => source.push_str("/* a comment over the block border\n"),
+                1_004 => source.push_str("   end of comment */\n"),
+                1_998 => source.push_str("const S: &str = r#\"a raw string\n"),
+                2_003 => source.push_str("still the string\"#;\n"),
+                _ => source.push_str(&format!("fn f{i}() -> u32 {{ {i} }} // c\n")),
+            }
+        }
+        source
+    }
+
     #[test]
-    fn cached_highlights_once() {
+    fn progressive_result_equals_one_shot() {
+        let source = crossing_blocks();
+        let mut job = Progressive::new("a.rs", Arc::from(source.as_str()), CodeTheme::Dark);
+        let mut partials = Vec::new();
+        while !job.step() {
+            partials.push(job.outcome());
+        }
+        let Outcome::Highlighted(last) = job.outcome() else {
+            panic!("plain");
+        };
+        assert!(last.is_complete());
+        assert_eq!(all_lines(&last), reference("a.rs", &source));
+        // Partial results: whole blocks, top first, never complete, and
+        // each line already as in the final result.
+        assert_eq!(partials.len(), 2);
+        for (n, partial) in partials.iter().enumerate() {
+            let Outcome::Highlighted(h) = partial else {
+                panic!("plain");
+            };
+            assert!(!h.is_complete());
+            assert_eq!(h.lines_done(), (n + 1) * BLOCK_LINES);
+            assert!(h.line(h.lines_done()).is_none());
+            for i in 0..h.lines_done() {
+                assert_eq!(h.line(i), last.line(i));
+            }
+        }
+        // The comment and the string continue over the borders.
+        let comment = last.line(996).unwrap()[0].style;
+        assert!(last.line(1_000).unwrap().iter().all(|s| s.style == comment));
+        assert_ne!(last.line(1_010).unwrap()[0].style, comment);
+        let string = last.line(1_999).unwrap()[0].style;
+        assert!(last.line(2_000).unwrap().iter().all(|s| s.style == string));
+        assert_eq!(last.line(2_001).unwrap()[0].style, string);
+        assert_ne!(string, last.line(2_010).unwrap()[0].style);
+    }
+
+    #[test]
+    fn long_lines_stay_plain_and_the_next_line_is_right() {
+        let long = format!("let s = \"{}\";", "x".repeat(MAX_LINE_BYTES));
+        let source = format!("/* open\n{long}\nstill */ fn after() {{}}\nfn g() {{}}\n");
+        let outcome = highlight("a.rs", &source, CodeTheme::Dark);
+        let h = spans(&outcome);
+        assert_eq!(h.lines_done(), 4);
+        assert_eq!(h.line(1), Some(&[][..]));
+        // The parser state from before the long line continues: line 3
+        // still ends the comment opened on line 1.
+        let comment = style_of(&source, h, 0, "open");
+        assert_eq!(style_of(&source, h, 2, "still"), comment);
+        assert_ne!(style_of(&source, h, 2, "fn"), comment);
+        assert_ne!(style_of(&source, h, 3, "fn"), comment);
+        // Exactly the limit is still highlighted.
+        let at_limit = format!("// {}\n", "y".repeat(MAX_LINE_BYTES - 3));
+        let outcome = highlight("a.rs", &at_limit, CodeTheme::Dark);
+        assert!(!spans(&outcome).line(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn no_line_limit_but_a_size_limit() {
+        // More lines than the old limit of 20,000 (the 100,000-line file
+        // is measured in release: `perf_highlight_and_wrap`).
+        let many = "fn x() {}\n".repeat(30_000);
+        let outcome = highlight("a.rs", &many, CodeTheme::Dark);
+        let h = spans(&outcome);
+        assert_eq!(h.lines_done(), 30_000);
+        assert!(!h.line(29_999).unwrap().is_empty());
+        let huge = "x\n".repeat(MAX_BYTES / 2 + 1);
+        assert_eq!(
+            highlight("a.rs", &huge, CodeTheme::Dark),
+            Outcome::Plain(Plain::TooLarge)
+        );
+    }
+
+    #[test]
+    fn run_emits_rounds_and_caches_complete_results() {
         let cache = std::sync::Mutex::new(Cache::default());
-        let first = cached(&cache, "a.rs", "fn x() {}\n", CodeTheme::Dark);
-        assert_eq!(cache.lock().unwrap().len(), 1);
-        let second = cached(&cache, "a.rs", "fn x() {}\n", CodeTheme::Dark);
-        assert_eq!(first, second);
-        assert_eq!(cache.lock().unwrap().len(), 1);
+        let source = crossing_blocks();
+        let job = Job::new(CodeTheme::Dark);
+        let mut emitted = Vec::new();
+        let files = vec![
+            ("a.rs".to_owned(), source.clone()),
+            ("b.rs".to_owned(), "fn b() {}\n".to_owned()),
+        ];
+        run(&cache, files.clone(), CodeTheme::Dark, &job.watch(), |o| {
+            emitted.push(o)
+        });
+        // Three blocks of a.rs and one of b.rs, each handed out at once;
+        // a.rs top first.
+        assert_eq!(emitted.len(), 4);
+        let done_a: Vec<usize> = emitted
+            .iter()
+            .map(|o| match &o[0] {
+                Outcome::Highlighted(h) => h.lines_done(),
+                Outcome::Plain(_) => panic!("plain"),
+            })
+            .collect();
+        assert!(done_a.windows(2).all(|w| w[0] <= w[1]), "{done_a:?}");
+        let last = emitted.last().unwrap();
+        assert!(last.iter().all(Outcome::is_complete));
+        assert_eq!(cache.lock().unwrap().len(), 2);
+        // From the cache: one call, the same result.
+        let mut again = Vec::new();
+        run(&cache, files, CodeTheme::Dark, &job.watch(), |o| {
+            again.push(o)
+        });
+        assert_eq!(again, std::slice::from_ref(last));
         assert_ne!(content_id("a.rs", "x"), content_id("b.rs", "x"));
+    }
+
+    #[test]
+    fn a_cancelled_run_emits_nothing_stale_and_caches_nothing() {
+        let cache = std::sync::Mutex::new(Cache::default());
+        let mut job = Some(Job::new(CodeTheme::Dark));
+        let watch = job.as_ref().unwrap().watch();
+        let mut emitted = 0;
+        let files = vec![("a.rs".to_owned(), crossing_blocks())];
+        run(&cache, files.clone(), CodeTheme::Dark, &watch, |_| {
+            emitted += 1;
+            // The view moves on after the first block.
+            job = None;
+        });
+        assert!(job.is_none());
+        assert_eq!(emitted, 1);
+        assert_eq!(cache.lock().unwrap().len(), 0);
+        // A job dropped before it starts emits nothing at all; a clone of
+        // the handle keeps it alive.
+        let job = Job::new(CodeTheme::Dark);
+        let copy = job.clone();
+        let watch = job.watch();
+        drop(job);
+        assert!(!watch.cancelled());
+        drop(copy);
+        let mut any = false;
+        run(&cache, files, CodeTheme::Dark, &watch, |_| any = true);
+        assert!(!any);
     }
 
     /// The third-party notices include this file; regenerate it with

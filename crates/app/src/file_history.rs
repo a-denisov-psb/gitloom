@@ -26,6 +26,8 @@ pub struct BlameView {
     pub scroll: Scroll,
     /// Syntax highlighting of the blamed file (M11-09) and its theme.
     pub highlight: Option<(crate::highlight::CodeTheme, crate::highlight::Outcome)>,
+    /// The running highlighting job; replacing it stops the old one.
+    pub highlight_job: Option<crate::highlight::Job>,
 }
 
 impl BlameView {
@@ -36,9 +38,7 @@ impl BlameView {
         theme: crate::highlight::CodeTheme,
     ) -> Option<&[crate::highlight::Span]> {
         match &self.highlight {
-            Some((t, crate::highlight::Outcome::Highlighted(h))) if *t == theme => {
-                h.lines.get(index).map(Vec::as_slice)
-            }
+            Some((t, outcome)) if *t == theme => outcome.line(index),
             _ => None,
         }
     }
@@ -52,6 +52,7 @@ impl BlameView {
             scroll_id: iced::widget::Id::unique(),
             scroll: Scroll::default(),
             highlight: None,
+            highlight_job: None,
         }
     }
 }

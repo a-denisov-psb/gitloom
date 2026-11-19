@@ -1797,6 +1797,40 @@ mod tests {
         snapshot(&app, "preferences-templates");
     }
 
+    /// Preferences → External tools with the command field (fix after
+    /// M15): a preset for diffs, a custom merge command with a full path,
+    /// the tool list Git offers, and the empty field "Define tool…" opens.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_external_tools() {
+        use crate::settings::{ToolPick, ToolPreset};
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(
+            crate::settings::Category::ExternalTools,
+        ));
+        let info = git_core::ToolInfo {
+            configured: None,
+            available: vec!["meld".into(), "kdiff3".into(), "vimdiff".into()],
+        };
+        let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
+        let _ = app.update(Message::DiffToolChosen(ToolPick::Preset(
+            ToolPreset::VsCode,
+        )));
+        let _ = app.update(Message::MergeToolChosen(ToolPick::Custom));
+        let _ = app.update(Message::MergeToolCommandInput(
+            r#""C:\Program Files\WinMerge\WinMergeU.exe" -u -e {local} {remote} {merged}"#.into(),
+        ));
+        snapshot(&app, "preferences-external-tools");
+        // "Define tool…" for diffs with no tool: the empty field, focused.
+        let _ = app.update(Message::DiffToolChosen(ToolPick::None));
+        let _ = app.update(Message::DefineTool { merge: false });
+        snapshot_focused(
+            &app,
+            crate::ui::settings::tool_input(git_core::ToolKind::Diff),
+            "preferences-external-tools-define",
+        );
+    }
+
     /// Toolbar without labels (M10-08).
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
@@ -1928,6 +1962,28 @@ mod tests {
         }
         let app = crate::app::tests::rust_conflict_app();
         snapshot(&app, "highlight-conflict-dark");
+    }
+
+    /// Word diff (fix after M15): changed characters of paired lines in
+    /// Hunk, Inline and Split, Dark and Light, with syntax colors kept.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_word_diff() {
+        use crate::settings::{DiffMode, ThemeChoice};
+        for (choice, theme) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            for (mode, name) in [
+                (DiffMode::Hunk, "hunk"),
+                (DiffMode::Inline, "inline"),
+                (DiffMode::Split, "split"),
+            ] {
+                let mut app = crate::app::tests::word_diff_app(mode, choice);
+                snapshot(&app, &format!("word-diff-{name}-{theme}"));
+                if mode == DiffMode::Inline {
+                    let _ = app.update(Message::EditorWordWrapToggled(true));
+                    snapshot(&app, &format!("word-diff-{name}-wrapped-{theme}"));
+                }
+            }
+        }
     }
 
     /// Start screen like GitKraken's New Tab, both themes at 100 and 125 %.
@@ -2310,14 +2366,15 @@ mod tests {
             start.elapsed(),
             matches!(outcome, crate::highlight::Outcome::Highlighted(_))
         );
-        let two_mb = one_mb.repeat(2);
+        let too_large = one_mb.repeat(9);
         let start = Instant::now();
         let outcome =
-            crate::highlight::highlight("big.rs", &two_mb, crate::highlight::CodeTheme::Dark);
+            crate::highlight::highlight("big.rs", &too_large, crate::highlight::CodeTheme::Dark);
         eprintln!(
-            "PERF highlight 2 MB (plain): {:?} ({outcome:?})",
+            "PERF highlight 9 MB (plain): {:?} ({outcome:?})",
             start.elapsed()
         );
+        let two_mb = one_mb.repeat(2);
 
         // A wrapped 2 MB diff: every line changed.
         let mut app = crate::app::tests::staging_app(&["big.rs"], &[]);
@@ -2357,6 +2414,22 @@ mod tests {
             crate::app::tests::open_diff(&app).rows.len(),
             start.elapsed()
         );
+        // Word diff (fix after M15): every line is a changed pair; the
+        // background task clones the diff and pairs its lines.
+        let start = Instant::now();
+        let crate::repo_view::Loadable::Ready(file) = &crate::app::tests::open_diff(&app).diff
+        else {
+            panic!("diff not loaded");
+        };
+        let file = file.clone();
+        let cloned = start.elapsed();
+        let emphasis = crate::word_diff::of_diff(&file);
+        eprintln!(
+            "PERF word diff of the 2 MB diff (every line changed): {:?} (clone {cloned:?}, {} paired lines)",
+            start.elapsed(),
+            file.hunks.iter().flat_map(|h| &h.lines).filter(|l| !emphasis.ranges(l).is_empty()).count()
+        );
+        let _ = app.update(crate::app::tests::word_diff_result(&app));
         let rows = crate::app::tests::open_diff(&app).rows.len() as f32;
         let mut worst = std::time::Duration::ZERO;
         for step in 0..20 {
@@ -2373,6 +2446,139 @@ mod tests {
             worst = worst.max(start.elapsed());
         }
         eprintln!("PERF wrapped frame (view + layout), worst of 20 positions: {worst:?}");
+    }
+
+    /// Highlighting without a line limit (fix after M15): the first block
+    /// and the whole of `crates/app/src/app.rs` and of a 100,000-line Rust
+    /// file, and frames of the Inline diff of `app.rs` while the partial
+    /// results arrive. Run in release:
+    /// `cargo test -p gitloom --release perf_highlight_progressive -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "performance measurement"]
+    fn perf_highlight_progressive() {
+        use std::sync::Arc;
+        use std::time::Instant;
+        let theme = crate::highlight::CodeTheme::Dark;
+        let app_rs =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs")).unwrap();
+        let synthetic: String = (0..100_000)
+            .map(|i| match i % 4 {
+                0 => format!("/// Doc {i}.\n"),
+                1 => format!("fn f{i}(x: u32) -> u32 {{\n"),
+                2 => format!("    x + {i} // \"{i}\"\n"),
+                _ => "}\n".to_owned(),
+            })
+            .collect();
+        for (name, text) in [("app.rs", &app_rs), ("100k lines", &synthetic)] {
+            let lines = text.lines().count();
+            let cache = std::sync::Mutex::new(crate::highlight::Cache::default());
+            let job = crate::highlight::Job::new(theme);
+            let start = Instant::now();
+            let mut first = None;
+            let mut rounds = 0;
+            let files = vec![("a.rs".to_owned(), text.clone())];
+            crate::highlight::run(&cache, files, theme, &job.watch(), |_| {
+                first.get_or_insert(start.elapsed());
+                rounds += 1;
+            });
+            eprintln!(
+                "PERF highlight {name} ({lines} lines, {} KB): first block {:?}, complete {:?} ({rounds} blocks)",
+                text.len() / 1024,
+                first.unwrap(),
+                start.elapsed()
+            );
+        }
+
+        // Frames of the Inline diff of app.rs (every 10th line changed)
+        // while the partial results arrive, at several scroll positions.
+        let mut app = crate::app::tests::staging_app(&["app.rs"], &[]);
+        let _ = app.update(Message::DiffModeChanged(crate::settings::DiffMode::Inline));
+        let request = git_core::DiffRequest {
+            kind: git_core::DiffKind::Unstaged,
+            path: "app.rs".into(),
+            old_path: None,
+        };
+        let _ = app.update(Message::DiffOpened(request.clone()));
+        let new: String = app_rs
+            .lines()
+            .enumerate()
+            .map(|(i, l)| {
+                if i % 10 == 0 {
+                    format!("{l} // changed\n")
+                } else {
+                    format!("{l}\n")
+                }
+            })
+            .collect();
+        let text = git_core::text_diff_with(
+            app_rs.as_bytes(),
+            new.as_bytes(),
+            git_core::DiffContext::Full,
+        );
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::DiffLoaded {
+            tab,
+            request: request.clone(),
+            context: git_core::DiffContext::Full,
+            result: Ok(git_core::FileDiff {
+                old_path: Some("app.rs".into()),
+                new_path: Some("app.rs".into()),
+                binary: false,
+                too_large: false,
+                encoding: None,
+                hunks: text.hunks,
+            }),
+        });
+        let generation = crate::app::tests::open_diff(&app).generation;
+        let crate::repo_view::Loadable::Ready(file) = &crate::app::tests::open_diff(&app).diff
+        else {
+            panic!("diff not loaded");
+        };
+        let (old, new) = crate::highlight::diff_texts(file);
+        let mut partials = Vec::new();
+        let cache = std::sync::Mutex::new(crate::highlight::Cache::default());
+        let job = crate::highlight::Job::new(theme);
+        let files = vec![("app.rs".to_owned(), old), ("app.rs".to_owned(), new)];
+        let start = Instant::now();
+        let mut first = None;
+        crate::highlight::run(&cache, files, theme, &job.watch(), |o| {
+            first.get_or_insert(start.elapsed());
+            partials.push(o);
+        });
+        eprintln!(
+            "PERF highlight both sides of the app.rs diff: first block {:?}, complete {:?}",
+            first.unwrap(),
+            start.elapsed()
+        );
+        let rows = crate::app::tests::open_diff(&app).rows.len() as f32;
+        let row_height = crate::app::tests::open_diff(&app).style.line_height();
+        let mut worst = std::time::Duration::ZERO;
+        let mut worst_update = std::time::Duration::ZERO;
+        for (step, outcomes) in partials.into_iter().enumerate() {
+            let mut outcomes = outcomes.into_iter();
+            let (old, new) = (outcomes.next().unwrap(), outcomes.next().unwrap());
+            let start = Instant::now();
+            let _ = app.update(Message::DiffHighlighted {
+                tab,
+                request: request.clone(),
+                generation,
+                sides: Arc::new(crate::highlight::DiffSides { theme, old, new }),
+            });
+            worst_update = worst_update.max(start.elapsed());
+            let offset = (step % 7) as f32 / 6.0 * rows * row_height;
+            let _ = app.update(Message::DiffScrolled {
+                offset,
+                height: 800.0,
+                width: 1000.0,
+            });
+            let start = Instant::now();
+            let mut sim = simulator(&app);
+            let _ = sim.find("app.rs");
+            worst = worst.max(start.elapsed());
+        }
+        eprintln!(
+            "PERF partial result update, worst: {worst_update:?}; frame while partial results arrive (view + layout), worst: {worst:?}"
+        );
     }
 
     /// README screenshot (M11-15): a scripted fixture repository with

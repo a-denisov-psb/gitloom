@@ -36,7 +36,7 @@ The message cannot be edited when the commit is already on a remote ("Already pu
 
 ## Diffs
 
-Code is syntax highlighted (shown plain for a moment first); font, size, tabs, line numbers and word wrap are set in Preferences → Editor.
+Code is syntax highlighted (shown plain for a moment first; long files get their colors from the top down); font, size, tabs, line numbers and word wrap are set in Preferences → Editor. In changed lines the characters that differ from the line they replace have a stronger red or green background (for example only `pub(crate) ` when `fn x` became `pub(crate) fn x`); lines that have little in common are not marked.
 
 Clicking a file shows its diff in the center. The header has icons like GitKraken: **Blame**, **History**, the change arrows, the view toggle (**Hunk** / **Inline** / **Split**), **External** and **Close**; their tooltips name them and their shortcuts. Three views, switched in the header (or the palette, "Diff: … view"); the choice is remembered:
 
@@ -48,7 +48,7 @@ In Inline and Split the arrows in the header jump to the previous / next change,
 
 ![Diff view](../screenshots/m5-diff-light.png)
 
-**External** (or Ctrl+D) opens the diff in your diff tool, **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
+**External** (or Ctrl+D) opens the diff in your diff tool (without one: "No diff tool" with **Define tool…**, which opens Preferences → External tools at the command field), **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
 
 ## Staging
 

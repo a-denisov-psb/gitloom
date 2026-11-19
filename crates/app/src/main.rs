@@ -58,6 +58,7 @@ mod ui;
 mod ui_check;
 mod undo;
 mod update;
+mod word_diff;
 
 use std::path::PathBuf;
 

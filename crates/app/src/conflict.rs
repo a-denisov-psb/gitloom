@@ -22,6 +22,8 @@ pub struct ConflictView {
     pub edited: bool,
     /// Syntax highlighting of the ours and theirs files (M11-09).
     pub highlight: Option<ConflictHighlight>,
+    /// The running highlighting job; replacing it stops the old one.
+    pub highlight_job: Option<crate::highlight::Job>,
     /// Output lines that start an open conflict (`<<<<<<<`).
     markers: Vec<usize>,
     /// Index into `markers` of the conflict "n of N" (M12-04).
@@ -40,10 +42,7 @@ impl ConflictHighlight {
     /// Spans of line `index` of the ours (or theirs) file.
     pub fn spans(&self, ours: bool, index: usize) -> Option<&[crate::highlight::Span]> {
         let side = if ours { &self.ours } else { &self.theirs };
-        match side {
-            crate::highlight::Outcome::Highlighted(h) => h.lines.get(index).map(Vec::as_slice),
-            crate::highlight::Outcome::Plain(_) => None,
-        }
+        side.line(index)
     }
 }
 
@@ -58,6 +57,7 @@ impl ConflictView {
             output: text_editor::Content::new(),
             edited: false,
             highlight: None,
+            highlight_job: None,
             markers: Vec::new(),
             current: 0,
         }
@@ -117,6 +117,9 @@ impl ConflictView {
             Err(error) => Loadable::Failed(error),
         };
         self.picks = self.text().map(Picks::new).unwrap_or_default();
+        // Highlighting belongs to the content: it starts again.
+        self.highlight = None;
+        self.highlight_job = None;
         self.edited = false;
         self.current = 0;
         self.refresh_output();

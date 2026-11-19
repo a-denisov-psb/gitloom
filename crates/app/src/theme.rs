@@ -41,6 +41,10 @@ pub struct ThemePalette {
     /// Git flow layout colors (M13-02, ADR-048 token): production,
     /// hotfix, release, development, the four feature colors, unknown.
     pub flow_colors: [Color; 9],
+    /// Changed characters within an added or removed line (word diff, fix
+    /// after M15; ADR-048 tokens), drawn over the line's background.
+    pub diff_added_emphasis: Color,
+    pub diff_removed_emphasis: Color,
 }
 
 /// The themes (ADR-054: Dark and Light).
@@ -87,6 +91,8 @@ pub const DARK: ThemePalette = ThemePalette {
         hex(0xe5c07b),
         hex(0x8a93a3), // unknown: gray
     ],
+    diff_added_emphasis: Color::from_rgba(0.373, 0.722, 0.471, 0.36),
+    diff_removed_emphasis: Color::from_rgba(0.878, 0.424, 0.459, 0.36),
 };
 
 pub const LIGHT: ThemePalette = ThemePalette {
@@ -126,6 +132,8 @@ pub const LIGHT: ThemePalette = ThemePalette {
         hex(0xa86d0c),
         hex(0x6b7280), // unknown: gray
     ],
+    diff_added_emphasis: Color::from_rgba(0.180, 0.490, 0.196, 0.26),
+    diff_removed_emphasis: Color::from_rgba(0.776, 0.157, 0.157, 0.22),
 };
 
 /// Palette of the theme a style function is called with.
@@ -601,6 +609,23 @@ pub fn diff_line(
         } else {
             style
         }
+    }
+}
+
+/// Background of the changed characters of a `kind` line (word diff, fix
+/// after M15) in the theme of `code_theme`; none for context lines.
+pub fn diff_emphasis(
+    code_theme: crate::highlight::CodeTheme,
+    kind: git_core::DiffLineKind,
+) -> Option<Color> {
+    let p = match code_theme {
+        crate::highlight::CodeTheme::Dark => &DARK,
+        crate::highlight::CodeTheme::Light => &LIGHT,
+    };
+    match kind {
+        git_core::DiffLineKind::Added => Some(p.diff_added_emphasis),
+        git_core::DiffLineKind::Removed => Some(p.diff_removed_emphasis),
+        git_core::DiffLineKind::Context => None,
     }
 }
 

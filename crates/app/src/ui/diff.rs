@@ -890,7 +890,8 @@ fn diff_line<'a>(
 }
 
 /// The code of a diff line: highlighted when the result is there
-/// (M11-09), else plain.
+/// (M11-09), with the changed characters emphasized (word diff, fix after
+/// M15), else plain.
 fn line_text<'a>(
     diff: &DiffView,
     line: &DiffLine,
@@ -898,16 +899,22 @@ fn line_text<'a>(
     wrapped: Option<Wrapped>,
 ) -> Element<'a, Message> {
     let style = &diff.style;
-    match diff.spans_for(line) {
-        Some(spans) => {
-            let mut pieces = crate::highlight::segments(&line.content, spans, style.tab);
-            if line.missing_newline {
-                pieces.push((diff_hscroll::NO_NEWLINE.to_owned(), None));
-            }
-            rich_code(pieces, offset, style, wrapped)
-        }
-        None => code_text(shown_content(line, style), offset, style, wrapped),
+    let spans = diff.spans_for(line);
+    let emphasis = diff.emphasis_for(line);
+    if spans.is_none() && emphasis.is_empty() {
+        return code_text(shown_content(line, style), offset, style, wrapped);
     }
+    let mut pieces =
+        crate::highlight::pieces(&line.content, spans.unwrap_or(&[]), emphasis, style.tab);
+    if line.missing_newline {
+        pieces.push(crate::highlight::Piece {
+            text: diff_hscroll::NO_NEWLINE.to_owned(),
+            style: None,
+            emphasis: false,
+        });
+    }
+    let background = theme::diff_emphasis(style.code_theme, line.kind);
+    rich_code(pieces, background, offset, style, wrapped)
 }
 
 /// An iced text span of a highlighted piece.
@@ -937,16 +944,21 @@ pub fn code_span<'a>(
         })
 }
 
-/// Highlighted code text, placed like [`code_text`].
+/// Highlighted code text, placed like [`code_text`]; emphasized pieces
+/// get `background`.
 fn rich_code<'a>(
-    pieces: Vec<(String, Option<crate::highlight::SpanStyle>)>,
+    pieces: Vec<crate::highlight::Piece>,
+    background: Option<iced::Color>,
     offset: f32,
     style: &EditorStyle,
     wrapped: Option<Wrapped>,
 ) -> Element<'a, Message> {
     let spans: Vec<iced::widget::text::Span<'a>> = pieces
         .into_iter()
-        .map(|(text, piece)| code_span(text, piece, style))
+        .map(|piece| {
+            code_span(piece.text, piece.style, style)
+                .background_maybe(background.filter(|_| piece.emphasis))
+        })
         .collect();
     let rich = iced::widget::rich_text(spans)
         .font(style.font)
