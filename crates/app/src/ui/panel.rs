@@ -1344,7 +1344,7 @@ fn signature_badge<'a>(view: &RepoView, id: &str) -> Option<Element<'a, Message>
     };
     let badge = row![
         crate::icons::colored(icon, 12.0, move |t| {
-            style(t).color.unwrap_or(iced::Color::BLACK)
+            style(t).color.unwrap_or_else(|| theme::palette(t).text)
         }),
         text(signature.text()).size(12).style(style),
     ]

@@ -42,6 +42,7 @@ Details: `docs/ARCHITECTURE.md`.
 - The UI thread never performs Git or file I/O. Backend calls run via `Task::perform` + `tokio::task::spawn_blocking`.
 - Dependency direction: `app → git-core, git-graph`. `git-core` must not depend on iced. `git-graph` must not depend on gix or iced.
 - No `unwrap`, `expect`, `panic!` or `todo!` in non-test code. Return `git_core::Error`, show errors in the UI.
+- UI colors come only from `ThemePalette`.
 - No demo or fake data in the app. Features not yet implemented are shown disabled with the tooltip "Not available yet". `MockBackend` exists only for tests and the `mock` feature.
 - Layout and behavior follow GitKraken. Check `docs/UX-PARITY.md` before building UI. Every intentional deviation gets an entry there.
 - Everything in the repo is English: code, comments, docs, commit messages.
