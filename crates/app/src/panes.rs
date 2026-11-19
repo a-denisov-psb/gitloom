@@ -123,6 +123,15 @@ pub fn clamp_split(ratio: f32, total: f32, min_a: f32, min_b: f32) -> f32 {
     ratio.clamp(min_a / total, 1.0 - min_b / total)
 }
 
+/// Edges of a pane that border a divider (finding #48).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DividerEdges {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
+}
+
 pub struct Panes {
     pub state: pane_grid::State<PaneKind>,
     pub ratios: PaneRatios,
@@ -253,6 +262,30 @@ impl Panes {
         self.read_ratios();
     }
 
+    /// Edges of the pane `kind` that border a divider in the current
+    /// layout (finding #48).
+    pub fn divider_edges(&self, kind: PaneKind) -> DividerEdges {
+        let right = self.panel_visible && self.position == DetailsPanelPosition::Right;
+        let bottom = self.panel_visible && self.position == DetailsPanelPosition::Bottom;
+        match kind {
+            PaneKind::Sidebar => DividerEdges {
+                right: true,
+                ..DividerEdges::default()
+            },
+            PaneKind::Center => DividerEdges {
+                left: self.sidebar_visible,
+                right,
+                bottom,
+                top: false,
+            },
+            PaneKind::Panel => DividerEdges {
+                left: right || self.sidebar_visible,
+                top: bottom,
+                ..DividerEdges::default()
+            },
+        }
+    }
+
     /// The pane configuration for the visible panes and the position.
     pub fn configuration(&self) -> Configuration<PaneKind> {
         let pane = |kind| Box::new(Configuration::Pane(kind));
@@ -378,6 +411,48 @@ mod tests {
                 format!("({} {axis}{ratio:.2} {})", shape(a), shape(b))
             }
         }
+    }
+
+    /// Finding #48: the edges of each pane that border a divider.
+    #[test]
+    fn divider_edges_follow_the_layout() {
+        let edges = |l, r, t, b| DividerEdges {
+            left: l,
+            right: r,
+            top: t,
+            bottom: b,
+        };
+        let mut panes = Panes::new(PaneRatios::default());
+        let all = |p: &Panes| {
+            [PaneKind::Sidebar, PaneKind::Center, PaneKind::Panel].map(|k| p.divider_edges(k))
+        };
+        assert_eq!(
+            all(&panes),
+            [
+                edges(false, true, false, false),
+                edges(true, true, false, false),
+                edges(true, false, false, false),
+            ]
+        );
+        panes.set_position(DetailsPanelPosition::Bottom);
+        assert_eq!(
+            all(&panes),
+            [
+                edges(false, true, false, false),
+                edges(true, false, false, true),
+                edges(true, false, true, false),
+            ]
+        );
+        panes.toggle_sidebar();
+        assert_eq!(
+            all(&panes)[1..],
+            [
+                edges(false, false, false, true),
+                edges(false, false, true, false)
+            ]
+        );
+        panes.toggle_panel();
+        assert_eq!(all(&panes)[1], DividerEdges::default());
     }
 
     #[test]

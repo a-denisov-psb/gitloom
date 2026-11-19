@@ -4047,4 +4047,470 @@ mod tests {
             );
         }
     }
+
+    // ---- Finding #48: pane dividers and the scrollbars next to them ----
+
+    /// Scroll state of one scrollable: its bounds, its content and the
+    /// scroll offset.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct Scrolled {
+        bounds: iced::Rectangle,
+        content: iced::Rectangle,
+        offset: iced::Vector,
+    }
+
+    impl Scrolled {
+        fn overflow(&self) -> iced::Size {
+            iced::Size::new(
+                (self.content.width - self.bounds.width).max(0.0),
+                (self.content.height - self.bounds.height).max(0.0),
+            )
+        }
+    }
+
+    /// All scrollables of the simulated view, in tree order.
+    fn scrolled(sim: &mut Simulator<'_, Message>) -> Vec<Scrolled> {
+        use iced_test::selector::Candidate;
+        let mut out = Vec::new();
+        let _ = sim.find(|candidate: Candidate<'_>| -> Option<()> {
+            if let Candidate::Scrollable {
+                bounds,
+                content_bounds,
+                translation,
+                ..
+            } = candidate
+            {
+                out.push(Scrolled {
+                    bounds,
+                    content: content_bounds,
+                    offset: translation,
+                });
+            }
+            None
+        });
+        out
+    }
+
+    /// Bounds of the pane `kind` in the simulated view.
+    fn pane_bounds(
+        sim: &mut Simulator<'_, Message>,
+        kind: crate::panes::PaneKind,
+    ) -> iced::Rectangle {
+        use iced_test::selector::Candidate;
+        let id = crate::ui::pane_id(kind);
+        sim.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Container {
+                id: Some(found),
+                bounds,
+                ..
+            } if *found == id => Some(bounds),
+            _ => None,
+        })
+        .unwrap_or_else(|e| panic!("no pane {kind:?}: {e}"))
+    }
+
+    /// Moves the cursor along `path` with the left button pressed at the
+    /// first point and released at the last one.
+    fn press_along(sim: &mut Simulator<'_, Message>, path: &[iced::Point]) {
+        use iced::mouse::{Button, Event as Mouse};
+        use iced::Event;
+        for (i, &position) in path.iter().enumerate() {
+            sim.point_at(position);
+            let mut events = vec![Event::Mouse(Mouse::CursorMoved { position })];
+            if i == 0 {
+                events.push(Event::Mouse(Mouse::ButtonPressed(Button::Left)));
+            }
+            if i + 1 == path.len() {
+                events.push(Event::Mouse(Mouse::ButtonReleased(Button::Left)));
+            }
+            let _ = sim.simulate(events);
+        }
+    }
+
+    /// A drag from `start`: up, down, sideways and back, ending `end`
+    /// away from the start.
+    fn divider_path(start: iced::Point, end: iced::Vector) -> Vec<iced::Point> {
+        [
+            iced::Vector::new(0.0, 0.0),
+            iced::Vector::new(1.0, 1.0),
+            iced::Vector::new(40.0, -150.0),
+            iced::Vector::new(-40.0, 150.0),
+            iced::Vector::new(90.0, 60.0),
+            iced::Vector::new(-90.0, -60.0),
+            end,
+        ]
+        .into_iter()
+        .map(|d| start + d)
+        .collect()
+    }
+
+    /// Scrolls every scrollable with overflow a third of the way with the
+    /// wheel; returns the states afterwards.
+    fn scroll_all(sim: &mut Simulator<'_, Message>) -> Vec<Scrolled> {
+        use iced::mouse::{Event as Mouse, ScrollDelta};
+        use iced::Event;
+        for s in scrolled(sim) {
+            let overflow = s.overflow();
+            if overflow.width < 1.0 && overflow.height < 1.0 {
+                continue;
+            }
+            let at = s.bounds.center();
+            sim.point_at(at);
+            let _ = sim.simulate(vec![
+                Event::Mouse(Mouse::CursorMoved { position: at }),
+                Event::Mouse(Mouse::WheelScrolled {
+                    delta: ScrollDelta::Pixels {
+                        x: -overflow.width / 3.0,
+                        y: -overflow.height / 3.0,
+                    },
+                }),
+                // Ends the wheel transaction of the scrollable.
+                Event::Mouse(Mouse::ButtonReleased(iced::mouse::Button::Left)),
+            ]);
+        }
+        scrolled(sim)
+    }
+
+    /// Graph of 400 commits, 60 local branches, 60 unstaged and 60 staged
+    /// files (WIP selected) and a message column wider than the graph, so
+    /// the branch tree, the graph (both ways) and the staging lists scroll.
+    fn divider_app(position: crate::panes::DetailsPanelPosition) -> App {
+        let ids: Vec<String> = (0..400).map(|i| format!("c{i:03}")).collect();
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut app = ready_app(&ids);
+        let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
+            git_core::MIN_GIT_VERSION,
+        )));
+        let change = |path: String| git_core::FileChange {
+            path,
+            kind: git_core::ChangeKind::Modified,
+            old_path: None,
+        };
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = view
+            .snapshot
+            .with_working_tree(git_core::WorkingTree {
+                unstaged: (0..60).map(|i| change(format!("src/u{i:02}.rs"))).collect(),
+                staged: (0..60).map(|i| change(format!("src/s{i:02}.rs"))).collect(),
+            })
+            .unwrap();
+        for i in 0..60 {
+            snapshot.refs.push(git_core::Reference {
+                name: format!("feature/branch-{i:02}"),
+                kind: git_core::RefKind::LocalBranch,
+                target: "c000".into(),
+                is_head: false,
+                upstream: None,
+                ahead_behind: None,
+            });
+        }
+        view.snapshot = std::sync::Arc::new(snapshot);
+        app.settings
+            .appearance
+            .graph_columns
+            .set(crate::graph_columns::ColumnId::Message, 1600.0);
+        app.panes.set_position(position);
+        let _ = app.update(Message::WindowResized(iced::Size::new(SIZE.0, SIZE.1)));
+        let _ = app.update(Message::WipSelected);
+        app
+    }
+
+    /// Finding #48: a drag on a pane divider (or the staging splitter)
+    /// starting at `start` leaves every scroll position alone and resizes;
+    /// `resized` checks the app after the drag's messages.
+    fn assert_divider_drag(
+        name: &str,
+        app: &App,
+        start: iced::Point,
+        end: iced::Vector,
+        resized: impl Fn(&App) -> bool,
+    ) {
+        let mut sim = simulator(app);
+        let before = scroll_all(&mut sim);
+        press_along(&mut sim, &divider_path(start, end));
+        let after = scrolled(&mut sim);
+        let messages: Vec<Message> = sim.into_messages().collect();
+        assert_eq!(before.len(), after.len(), "{name}");
+        for (b, a) in before.iter().zip(&after) {
+            assert_eq!(
+                b.offset, a.offset,
+                "{name}: the scrollable at {:?} moved",
+                b.bounds
+            );
+        }
+        let mut app = clone_layout(app);
+        let mut any = false;
+        for message in messages {
+            if matches!(
+                message,
+                Message::PaneResized(_)
+                    | Message::StagingSplitStart
+                    | Message::StagingSplitDragged { .. }
+                    | Message::StagingSplitEnd
+            ) {
+                any = true;
+                let _ = app.update(message);
+            }
+        }
+        assert!(any, "{name}: no resize from {start:?}");
+        assert!(resized(&app), "{name}: not resized as expected");
+    }
+
+    /// A fresh app with the panes of `app` (ratios, position) for replaying
+    /// resize messages.
+    fn clone_layout(app: &App) -> App {
+        let mut copy = divider_app(app.panes.position);
+        copy.panes.set_ratios(app.panes.ratios);
+        copy
+    }
+
+    /// Finding #48: a press on the scrollbar of `pane`'s scrollable at
+    /// `point` (thumb or track, right next to a divider) still scrolls.
+    fn assert_scrollbar_works(
+        name: &str,
+        app: &App,
+        at: impl Fn(&Scrolled) -> iced::Point,
+        pick: impl Fn(&Scrolled) -> bool,
+        delta: iced::Vector,
+    ) {
+        let mut sim = simulator(app);
+        let before = scroll_all(&mut sim);
+        let index = before
+            .iter()
+            .position(&pick)
+            .unwrap_or_else(|| panic!("{name}: no such scrollable in {before:?}"));
+        let start = at(&before[index]);
+        press_along(&mut sim, &[start, start + delta]);
+        let after = scrolled(&mut sim);
+        assert_ne!(
+            before[index].offset, after[index].offset,
+            "{name}: the scrollbar at {start:?} did not scroll"
+        );
+    }
+
+    /// Finding #48: dragging any divider keeps the scroll positions of the
+    /// branch tree, the graph (both ways), the diff and the staging lists;
+    /// the panes resize. Before the fix the press also grabbed the
+    /// scrollbar under the divider's grab area. Layout only.
+    #[test]
+    fn dividers_leave_neighbouring_scrollbars_alone() {
+        use crate::panes::{DetailsPanelPosition, PaneKind};
+        use iced::{Point, Vector};
+        let reach = crate::layout::DIVIDER_REACH;
+        // Right: Sidebar | Graph | Panel.
+        let app = divider_app(DetailsPanelPosition::Right);
+        let ratios = app.panes.ratios;
+        let mut sim = simulator(&app);
+        let sidebar = pane_bounds(&mut sim, PaneKind::Sidebar);
+        let center = pane_bounds(&mut sim, PaneKind::Center);
+        let all = scrolled(&mut sim);
+        drop(sim);
+        assert!(
+            all.iter().filter(|s| s.overflow().height > 0.0).count() >= 4,
+            "tree, graph and both lists scroll: {all:?}"
+        );
+        assert!(all.iter().any(|s| s.overflow().width > 0.0), "{all:?}");
+        let mid = sidebar.center_y();
+        let hbar = center.y + center.height - 5.0;
+        for (name, start) in [
+            (
+                "sidebar edge",
+                Point::new(sidebar.x + sidebar.width - 1.0, mid),
+            ),
+            (
+                "sidebar edge, outer",
+                Point::new(sidebar.x + sidebar.width - reach + 0.5, mid),
+            ),
+            (
+                "graph left edge at the hbar",
+                Point::new(center.x + 1.0, hbar),
+            ),
+        ] {
+            assert_divider_drag(name, &app, start, Vector::new(25.0, 20.0), |a| {
+                a.panes.ratios.sidebar > ratios.sidebar
+            });
+        }
+        for (name, start) in [
+            (
+                "graph right edge",
+                Point::new(center.x + center.width - 1.0, mid),
+            ),
+            (
+                "graph right edge, outer",
+                Point::new(center.x + center.width - reach + 0.5, mid),
+            ),
+            (
+                "graph right edge at the hbar",
+                Point::new(center.x + center.width - 1.0, hbar),
+            ),
+            (
+                "panel left edge",
+                Point::new(center.x + center.width + 2.0, mid),
+            ),
+        ] {
+            assert_divider_drag(name, &app, start, Vector::new(-25.0, 20.0), |a| {
+                a.panes.ratios.center < ratios.center
+            });
+        }
+        // Next to the dividers the scrollbars still work: the thumb and
+        // the track of the branch tree and the graph.
+        let right_of = |pane: iced::Rectangle| {
+            move |s: &Scrolled| {
+                s.overflow().height > 0.0
+                    && (s.bounds.x + s.bounds.width - (pane.x + pane.width)).abs() < 1.0
+            }
+        };
+        let thumb = |s: &Scrolled| {
+            let share = s.bounds.height / s.content.height;
+            Point::new(
+                s.bounds.x + s.bounds.width - 6.0,
+                s.bounds.y + (s.offset.y + s.bounds.height / 2.0) * share,
+            )
+        };
+        let track = |s: &Scrolled| {
+            Point::new(
+                s.bounds.x + s.bounds.width - 6.0,
+                s.bounds.y + s.bounds.height - 4.0,
+            )
+        };
+        for pane in [sidebar, center] {
+            assert_scrollbar_works("thumb", &app, thumb, right_of(pane), Vector::new(0.0, 60.0));
+            assert_scrollbar_works("track", &app, track, right_of(pane), Vector::new(0.0, 0.0));
+        }
+        let hbar_of = |s: &Scrolled| s.overflow().width > 0.0;
+        assert_scrollbar_works(
+            "graph hbar near the left divider",
+            &app,
+            |s| Point::new(s.bounds.x + 6.0, s.bounds.center_y()),
+            hbar_of,
+            Vector::new(0.0, 0.0),
+        );
+
+        // Bottom: Sidebar | (Graph / Panel), the staging splitter.
+        let app = divider_app(DetailsPanelPosition::Bottom);
+        let ratios = app.panes.ratios;
+        let mut sim = simulator(&app);
+        let center = pane_bounds(&mut sim, PaneKind::Center);
+        let panel = pane_bounds(&mut sim, PaneKind::Panel);
+        let all = scrolled(&mut sim);
+        drop(sim);
+        let hbar = all
+            .iter()
+            .find(|s| s.overflow().width > 0.0)
+            .copied()
+            .expect("graph hbar");
+        let bottom = center.y + center.height - 1.0;
+        for (name, start) in [
+            (
+                "graph bottom edge at the hbar",
+                Point::new(hbar.bounds.center_x(), bottom),
+            ),
+            (
+                "graph bottom edge at the vertical bar",
+                Point::new(center.x + center.width - 5.0, bottom),
+            ),
+            (
+                "graph bottom edge, outer",
+                Point::new(
+                    hbar.bounds.center_x(),
+                    center.y + center.height - reach + 0.5,
+                ),
+            ),
+            (
+                "panel top edge",
+                Point::new(panel.center_x(), panel.y + 1.0),
+            ),
+        ] {
+            assert_divider_drag(name, &app, start, Vector::new(15.0, -30.0), |a| {
+                a.panes.ratios.bottom < ratios.bottom
+            });
+        }
+        assert_divider_drag(
+            "sidebar edge (bottom)",
+            &app,
+            Point::new(center.x - 2.0, panel.center_y()),
+            Vector::new(25.0, 0.0),
+            |a| a.panes.ratios.sidebar > ratios.sidebar,
+        );
+        assert_scrollbar_works(
+            "graph hbar above the divider",
+            &app,
+            |s| Point::new(s.bounds.x + s.bounds.width - 20.0, s.bounds.y + 4.0),
+            hbar_of,
+            Vector::new(0.0, 0.0),
+        );
+        // The staging splitter between the lists and the message, with
+        // room to move.
+        let mut app = app;
+        app.panes.set_ratios(crate::panes::PaneRatios {
+            bottom: 0.3,
+            ..app.panes.ratios
+        });
+        let mut sim = simulator(&app);
+        let label = sim
+            .find("Commit Message")
+            .map(|t| iced_test::selector::Bounded::bounds(&t))
+            .expect("label");
+        drop(sim);
+        let handle = Point::new(
+            panel.center_x() - 100.0,
+            label.y - crate::ui::split_handle::HEIGHT / 2.0,
+        );
+        let staging = app.panes.ratios.staging;
+        assert_divider_drag(
+            "staging splitter",
+            &app,
+            handle,
+            Vector::new(0.0, 30.0),
+            |a| a.panes.ratios.staging > staging,
+        );
+    }
+
+    /// Finding #48 for the diff: its horizontal bar at the bottom of the
+    /// center and its vertical bar at the right keep their positions.
+    /// Layout only.
+    #[test]
+    fn dividers_leave_the_diff_scrollbars_alone() {
+        use crate::panes::{DetailsPanelPosition, PaneKind};
+        use iced::{Point, Vector};
+        for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
+            let mut app = crate::app::tests::wide_diff_app(crate::settings::DiffMode::Inline);
+            app.panes.set_position(position);
+            let _ = app.update(Message::WindowResized(iced::Size::new(SIZE.0, SIZE.1)));
+            let ratios = app.panes.ratios;
+            let mut sim = simulator(&app);
+            let center = pane_bounds(&mut sim, PaneKind::Center);
+            let all = scrolled(&mut sim);
+            drop(sim);
+            let hbar = all
+                .iter()
+                .find(|s| s.overflow().width > 0.0)
+                .copied()
+                .unwrap_or_else(|| panic!("{position:?}: diff hbar in {all:?}"));
+            let start = match position {
+                DetailsPanelPosition::Right => {
+                    Point::new(center.x + center.width - 1.0, center.center_y())
+                }
+                DetailsPanelPosition::Bottom => {
+                    Point::new(hbar.bounds.center_x(), center.y + center.height - 1.0)
+                }
+            };
+            let name = format!("diff {position:?}");
+            let mut sim = simulator(&app);
+            let before = scroll_all(&mut sim);
+            press_along(&mut sim, &divider_path(start, Vector::new(-20.0, -20.0)));
+            let after = scrolled(&mut sim);
+            let messages: Vec<Message> = sim.into_messages().collect();
+            assert_eq!(before, after, "{name}");
+            let mut resized = false;
+            for message in messages {
+                if let Message::PaneResized(_) = message {
+                    let _ = app.update(message);
+                    resized = true;
+                }
+            }
+            assert!(resized, "{name}");
+            assert_ne!(app.panes.ratios, ratios, "{name}");
+        }
+    }
 }

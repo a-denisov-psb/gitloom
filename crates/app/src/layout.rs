@@ -32,6 +32,12 @@ pub const RIGHT_PANEL_MIN_HEIGHT: f32 = crate::ui::panel::STAGING_RIGHT_MIN + HI
 const HINT_LINES: f32 = 2.0 * EXTRA_LINE_HEIGHT;
 /// Gap between panes (the pane grid's spacing).
 pub const PANE_SPACING: f32 = 1.0;
+/// Extra grab room of a pane divider (the pane grid's resize leeway): the
+/// grab area is `PANE_SPACING + DIVIDER_LEEWAY` wide, centered on the gap.
+pub const DIVIDER_LEEWAY: f32 = 6.0;
+/// How far the grab area of a divider reaches into the panes on both
+/// sides (finding #48).
+pub const DIVIDER_REACH: f32 = DIVIDER_LEEWAY / 2.0;
 /// Everything above and below the panes: tab bar, toolbar, status bar and
 /// the gaps between them (measured, see the `chrome_height_is_measured`
 /// UI check).
