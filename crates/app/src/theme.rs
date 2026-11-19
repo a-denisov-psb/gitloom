@@ -104,7 +104,8 @@ pub const LIGHT: ThemePalette = ThemePalette {
     bg_panel: hex(0xf4f5f7),
     bg_inset: hex(0xeceef1),
     bg_chrome: hex(0xe8eaee),
-    bg_hover: hex(0xe3e7ee),
+    // Visible on `bg_inset` as well (finding #47).
+    bg_hover: hex(0xdde2ea),
     bg_selected: hex(0xcfe0f5),
     border: hex(0xd0d4db),
     text: hex(0x1f2328),
@@ -940,6 +941,29 @@ mod tests {
                 let fill = start_button_on_background(p, status);
                 let ratio = contrast(p.text, fill);
                 assert!(ratio >= 4.5, "{name} {status:?}: {ratio:.2}");
+            }
+        }
+    }
+
+    /// Finding #47: rows in a file frame (`bg_inset`): text stays readable
+    /// on the frame, a hovered and a selected row, and hover and selection
+    /// stand out from the frame at least as much as hover does on the
+    /// panel.
+    #[test]
+    fn file_frame_rows_stay_readable() {
+        for (name, p) in [("dark", &DARK), ("light", &LIGHT)] {
+            for (fg_name, fg, bg_name, bg) in [
+                ("text", p.text, "inset", p.bg_inset),
+                ("muted", p.text_muted, "inset", p.bg_inset),
+                ("text", p.text, "hover", p.bg_hover),
+                ("text", p.text, "selected", p.bg_selected),
+            ] {
+                let ratio = contrast(fg, bg);
+                assert!(ratio >= 4.5, "{name}: {fg_name} on {bg_name} {ratio:.2}");
+            }
+            for (bg_name, bg) in [("hover", p.bg_hover), ("selected", p.bg_selected)] {
+                let ratio = contrast(bg, p.bg_inset);
+                assert!(ratio >= 1.1, "{name}: {bg_name} on inset {ratio:.3}");
             }
         }
     }

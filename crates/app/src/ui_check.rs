@@ -2585,6 +2585,9 @@ mod tests {
                 DetailsPanelPosition::Bottom => "Commit Message",
             };
             let label = bounds_in(&app, size, summary_label);
+            let mut sim = Simulator::with_size(settings(), size, app.view());
+            let lists = scrolled(&mut sim);
+            drop(sim);
             for (header, second) in [
                 ("Unstaged Files (4)", "a2.txt"),
                 ("Staged Files (3)", "s2.txt"),
@@ -2592,6 +2595,26 @@ mod tests {
                 let header = bounds_in(&app, size, header);
                 let row = bounds_in(&app, size, second);
                 assert!(row.y > header.y, "{position:?}");
+                // Finding #47: the frame shows both rows completely, with
+                // the frame's padding below them.
+                let list = lists
+                    .iter()
+                    .find(|l| l.bounds.contains(row.center()))
+                    .unwrap_or_else(|| {
+                        panic!("{position:?}: no list around {second} {row:?} in {lists:?}")
+                    });
+                assert!(
+                    list.bounds.height
+                        >= 2.0 * crate::ui::panel::FILE_ROW_HEIGHT
+                            + crate::ui::panel::FILE_FRAME_CHROME
+                            - 2.0
+                            - 0.5,
+                    "{position:?}: {second}'s list is {list:?}"
+                );
+                assert!(
+                    row.y + row.height <= list.bounds.y + list.bounds.height,
+                    "{position:?}: {second} {row:?} cut off in {list:?}"
+                );
                 let limit = match position {
                     // At the bottom the lists end above the message.
                     DetailsPanelPosition::Bottom => label.y,
@@ -4648,6 +4671,77 @@ mod tests {
             }
             assert!(resized, "{name}");
             assert_ne!(app.panes.ratios, ratios, "{name}");
+        }
+    }
+
+    /// Renders `app` with the cursor at `cursor` (hover states).
+    fn snapshot_at(app: &App, name: &str, size: (f32, f32), cursor: iced::Point) -> PathBuf {
+        let path = fresh_path(name);
+        let mut sim = Simulator::with_size(settings(), size, app.view());
+        sim.point_at(cursor);
+        let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: cursor,
+        })]);
+        let snap = sim.snapshot(&app.theme()).unwrap();
+        assert!(snap.matches_image(&path).unwrap());
+        path
+    }
+
+    /// Finding #47: the Unstaged and Staged lists in the frame of the
+    /// commit details' file list, at the right and at the bottom; empty,
+    /// a few and many files; a selected row and a hovered one; Dark and
+    /// Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_staging_frames() {
+        use crate::panes::DetailsPanelPosition;
+        let names = |prefix: &str, n: usize| -> Vec<String> {
+            (0..n).map(|i| format!("src/{prefix}{i:02}.rs")).collect()
+        };
+        for (choice, theme) in [
+            (crate::settings::ThemeChoice::Dark, "dark"),
+            (crate::settings::ThemeChoice::Light, "light"),
+        ] {
+            for (position, place) in [
+                (DetailsPanelPosition::Right, "right"),
+                (DetailsPanelPosition::Bottom, "bottom"),
+            ] {
+                for (amount, unstaged, staged) in [("empty", 0, 0), ("few", 3, 2), ("many", 40, 30)]
+                {
+                    let unstaged = names("u", unstaged);
+                    let staged = names("s", staged);
+                    let u: Vec<&str> = unstaged.iter().map(String::as_str).collect();
+                    let st: Vec<&str> = staged.iter().map(String::as_str).collect();
+                    let mut app = crate::app::tests::staging_app(&u, &st);
+                    app.settings.appearance.theme = choice;
+                    app.panes.set_position(position);
+                    let _ = app.update(Message::WindowResized(iced::Size::new(SIZE.0, SIZE.1)));
+                    let _ = app.update(Message::WipSelected);
+                    if let Some(first) = app.tabs[0]
+                        .view()
+                        .unwrap()
+                        .snapshot
+                        .working_tree
+                        .unstaged
+                        .first()
+                        .cloned()
+                    {
+                        let _ = app.update(Message::DiffOpened(crate::repo_view::diff_request(
+                            &first, false,
+                        )));
+                    }
+                    let name = format!("staging-frame-{place}-{amount}-{theme}");
+                    // Hover the first staged row, if any.
+                    let cursor = st
+                        .first()
+                        .map(|label| {
+                            let b = bounds_in(&app, SIZE, label);
+                            iced::Point::new(b.x + b.width / 2.0, b.center_y())
+                        })
+                        .unwrap_or(iced::Point::ORIGIN);
+                    snapshot_at(&app, &name, SIZE, cursor);
+                }
+            }
         }
     }
 }
