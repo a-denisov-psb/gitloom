@@ -1392,7 +1392,36 @@ mod tests {
         let _ = app.update(Message::ThemeSelected(def.id.clone()));
         let _ = app.update(Message::ThemeEditOpened);
         let min = crate::layout::window_min();
-        snapshot_sized(&app, "themes-editor-min-size", (min.width, min.height));
+        let size = (min.width, min.height);
+        snapshot_sized(&app, "themes-editor-min-size", size);
+        // Regression: the emphasis background of the long added line
+        // reached past the preview frame. The diff rows end where the
+        // panel sample ends (both fill the frame); the "Hovered row"
+        // background ends 8 px (panel padding) before that. The frame
+        // padding right of the diff rows must show only the frame
+        // background.
+        let path = snapshot_scaled_sized(&app, "themes-editor-min-size-clip", 1.0, size);
+        let pixmap = resvg::tiny_skia::Pixmap::load_png(&path).unwrap();
+        let pixel = |x: f32, y: f32| pixmap.pixel(x as u32, y as u32).unwrap();
+        let hovered = bounds_in(&app, size, "Hovered row");
+        let graph = bounds_in(&app, size, "Add the settings page");
+        let panel = bounds_in(&app, size, "Panel text");
+        let hover_y = hovered.center_y();
+        let hover_color = pixel(hovered.x - 3.0, hover_y);
+        let mut hover_right = hovered.x + hovered.width + 1.0;
+        while pixel(hover_right + 1.0, hover_y) == hover_color {
+            hover_right += 1.0;
+        }
+        let rows_right = hover_right + 1.0 + 8.0;
+        let frame = pixel(rows_right + 4.0, graph.center_y());
+        let mut y = graph.y + graph.height;
+        while y < panel.y - 20.0 {
+            for x in 1..9 {
+                let x = rows_right + x as f32;
+                assert_eq!(pixel(x, y), frame, "diff drawn outside at ({x}, {y})");
+            }
+            y += 1.0;
+        }
         app.set_theme_files(Vec::new());
     }
 

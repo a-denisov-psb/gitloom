@@ -181,7 +181,10 @@ fn diff_sample<'a>(editor: &Editor) -> Element<'a, Message> {
                     DiffLineKind::Removed => "-",
                     DiffLineKind::Context => " ",
                 };
-                container(
+                // `container::clip` only narrows the viewport, which the
+                // span backgrounds of `rich_text` ignore; `shift` clips
+                // with a layer, so the emphasis stays inside the frame.
+                container(crate::ui::shift::shift(
                     row![
                         text(marker)
                             .font(style.font)
@@ -192,11 +195,11 @@ fn diff_sample<'a>(editor: &Editor) -> Element<'a, Message> {
                             .size(12)
                             .wrapping(text::Wrapping::None),
                     ]
-                    .spacing(6),
-                )
-                .padding([1, 6])
+                    .spacing(6)
+                    .padding([1, 6]),
+                    0.0,
+                ))
                 .width(Fill)
-                .clip(true)
                 .style(theme::diff_line(kind, false))
                 .into()
             }),
