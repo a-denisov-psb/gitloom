@@ -87,7 +87,7 @@ Acceptance: unit tests: every old id maps to its new id in all three settings fi
 
 Note (done): `themes::canonical_id` holds the alias table (including `dark` and `classic-dark`); `ThemeChoice::parse` and a `deserialize_with` on `system_dark` / `system_light` read through it, so the app and the askpass window share it. Dusk still uses the old Dark palette and the OneHalfDark syntax until M18-03 and M18-02. Messages that set an id at runtime (Preferences, palette) only offer registry ids and do not go through the table.
 
-### [ ] M18-02 Embedded syntax themes Dusk and Studio Dark
+### [x] M18-02 Embedded syntax themes Dusk and Studio Dark
 
 - `highlight::CodeTheme` can hold one of our embedded themes besides a two-face theme (`Copy`, hashable, part of the cache key and of every job); the two `.tmTheme` files live in `crates/app/assets/` and are loaded with syntect at start-up; a broken embedded file is a test failure, never a runtime panic.
 - Studio Dark and Dusk as described in the decision table (scope translation of the VS Code themes; Ayu scope structure with the Zed hex values). Both names appear in the editor's syntax list and are valid `syntax` values in theme files (ADR-059 note); the two-face names stay valid.
@@ -96,6 +96,8 @@ Note (done): `themes::canonical_id` holds the alias table (including `dark` and 
 Acceptance: unit tests: both themes load; sampled rule colors match the tables of the decision table (keyword, control keyword, type, function, variable, constant, string, number, comment for each); `themes::syntax_contrast` passes for both on their palettes (a rule that fails is lightened or darkened and the change is noted in ADR-060); highlighting a small C# file (usings, class, attribute, property, string, number, doc comment) gives distinct colors for keyword, control keyword, type, string, number and comment; the cache distinguishes the two themes and a two-face theme; the editor's syntax list contains both names; a theme file with `"syntax": "Dusk"` round-trips.
 
 Note for the implementation: the C# file of the maintainer's comparison screenshots is the reference case. Differences caused by missing semantic highlighting are expected and go into the user guide, not into extra rules.
+
+Note (done): Studio Dark is paired with its syntax theme here; Dusk keeps OneHalfDark until its palette changes in M18-03. Four extra Studio Dark rules cover scopes the Sublime grammars name differently from VS Code's (function calls, C# built-in types and `var`, attributes, `using`); Dusk gives keywords and control keywords the same color like Ayu Mirage, so the C# test checks a separate control keyword color for Studio Dark only. syntect needs its `plist-load` feature (new crate `plist`, pinned to 1.10.3). Details in the ADR-060 notes.
 
 ### [ ] M18-03 Palettes: Dusk replaces Dark, Studio Dark, renames
 
