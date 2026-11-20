@@ -99,13 +99,15 @@ Note for the implementation: the C# file of the maintainer's comparison screensh
 
 Note (done): Studio Dark is paired with its syntax theme here; Dusk keeps OneHalfDark until its palette changes in M18-03. Four extra Studio Dark rules cover scopes the Sublime grammars name differently from VS Code's (function calls, C# built-in types and `var`, attributes, `using`); Dusk gives keywords and control keywords the same color like Ayu Mirage, so the C# test checks a separate control keyword color for Studio Dark only. syntect needs its `plist-load` feature (new crate `plist`, pinned to 1.10.3). Details in the ADR-060 notes.
 
-### [ ] M18-03 Palettes: Dusk replaces Dark, Studio Dark, renames
+### [x] M18-03 Palettes: Dusk replaces Dark, Studio Dark, renames
 
 - Dusk: the palette of the decision table replaces the Dark palette and the old Dark constants (the OneHalfDark pairing is dropped as a pairing); lanes, Git flow colors and secondary colors as decided, adjusted until the existing contrast tests pass. Light is unchanged.
 - Studio Dark: today's Dark+ palette, new name, id and syntax. Midnight, Studio Light, Sepia and Daylight: palettes and syntax pairings unchanged, new names and ids.
 - Tests and snapshots that name the old default (`dark`) use Dusk; the M16 rule "Dark looks as before" no longer applies to Dark, only to Light.
 
 Acceptance: contrast tests pass for all ten themes; a snapshot of Dusk (window with graph, diff, Preferences → Appearance) replaces the old Dark snapshot; the Light snapshot is unchanged; the snapshots of Studio Dark, Midnight, Studio Light, Sepia and Daylight differ from the old ones only in names and, for Studio Dark, in syntax colors; the check for hard-coded colors outside the allow list stays green.
+
+Note (done): `theme::DARK` holds Dusk and `CodeTheme::DARK` is the Dusk syntax theme. Contrast corrections: muted text `#b9b9b8` (4.5:1 on the chrome `#464a52`), hover `#464a53` (stands out on the inset), selected `#51545b` (4.6:1 text); diff word emphasis 20 / 26 % like Monokai. The light accent with light text cannot reach 4.5:1 at the start buttons' 35 / 45 %: instead of darkening the accent, the start button caps its accent alpha per palette at the highest value that keeps 4.5:1 (Dusk: 29 % on hover and press; the other themes keep 25 / 35 / 45 %, checked by the contrast test). The ui_check snapshots are written to `target/ui-snapshots/` and not stored; `theme-dusk-*` and `theme-list-dusk` replace the Dark ones, checked by eye.
 
 ### [ ] M18-04 Themes as a sub-page of Appearance
 

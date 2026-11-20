@@ -10,7 +10,7 @@
 //!   "format": 1,
 //!   "name": "My theme",
 //!   "base": "dark",
-//!   "syntax": "OneHalfDark",
+//!   "syntax": "Dusk",
 //!   "colors": { "background": "#1f232b", "surface": "#252a33", "chrome": "#181b21",
 //!               "text": "#d5d9e0", "text_muted": "#8a93a3", "accent": "#4f9dde",
 //!               "border": "#343a46", "success": "#5fb878", "warning": "#e5c07b",

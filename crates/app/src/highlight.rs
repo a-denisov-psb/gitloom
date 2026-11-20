@@ -86,8 +86,8 @@ impl OwnTheme {
 }
 
 impl CodeTheme {
-    /// The pairing of the built-in Dusk theme.
-    pub const DARK: Self = Self::Embedded(EmbeddedThemeName::OneHalfDark);
+    /// The pairing of the built-in Dusk theme (ADR-060).
+    pub const DARK: Self = Self::Own(OwnTheme::Dusk);
     /// The pairing of the built-in Light theme.
     pub const LIGHT: Self = Self::Embedded(EmbeddedThemeName::Github);
 
@@ -975,16 +975,18 @@ mod tests {
         cache.insert("blob1", monokai, outcome.clone());
         assert_eq!(cache.get("blob1", monokai), Some(&outcome));
         assert!(cache.get("blob2", CodeTheme::DARK).is_none());
-        // Gitloom's own themes have their own entries too (ADR-060).
-        let dusk = CodeTheme::Own(OwnTheme::Dusk);
+        // Gitloom's own themes have their own entries too (ADR-060);
+        // Dusk is the default dark pairing.
+        assert_eq!(CodeTheme::DARK, CodeTheme::Own(OwnTheme::Dusk));
         let studio = CodeTheme::Own(OwnTheme::StudioDark);
-        cache.insert("blob1", dusk, outcome.clone());
+        let one_half = CodeTheme::Embedded(EmbeddedThemeName::OneHalfDark);
         assert!(cache.get("blob1", studio).is_none());
-        assert_eq!(cache.get("blob1", dusk), Some(&outcome));
+        assert!(cache.get("blob1", one_half).is_none());
         cache.insert("blob1", studio, outcome.clone());
+        assert_eq!(cache.get("blob1", studio), Some(&outcome));
         // The same key again does not grow the cache.
         cache.insert("blob1", CodeTheme::DARK, outcome.clone());
-        assert_eq!(cache.len(), 4);
+        assert_eq!(cache.len(), 3);
         // The oldest entries go first.
         for i in 0..Cache::CAPACITY {
             cache.insert(&format!("b{i}"), CodeTheme::DARK, outcome.clone());
@@ -1407,9 +1409,9 @@ mod tests {
 
     #[test]
     fn code_themes_by_name() {
-        assert_eq!(CodeTheme::named("OneHalfDark"), Some(CodeTheme::DARK));
+        assert_eq!(CodeTheme::named("Dusk"), Some(CodeTheme::DARK));
         assert_eq!(CodeTheme::named("GitHub"), Some(CodeTheme::LIGHT));
-        assert_eq!(CodeTheme::DARK.name(), "OneHalfDark");
+        assert_eq!(CodeTheme::DARK.name(), "Dusk");
         assert_eq!(CodeTheme::named("No Such Theme"), None);
         // Other syntax themes color the same file differently.
         let source = "fn main() { let x = 1; }\n";
@@ -1444,7 +1446,11 @@ mod tests {
             assert_eq!(CodeTheme::Own(own).name(), own.name());
         }
         // The two-face names stay valid.
-        assert_eq!(CodeTheme::named("OneHalfDark"), Some(CodeTheme::DARK));
+        assert_eq!(
+            CodeTheme::named("OneHalfDark"),
+            Some(CodeTheme::Embedded(EmbeddedThemeName::OneHalfDark))
+        );
+        assert_eq!(CodeTheme::named("Dusk"), Some(CodeTheme::DARK));
         assert!(CodeTheme::names().contains(&"Studio Dark"));
         assert!(CodeTheme::names().contains(&"GitHub"));
     }
