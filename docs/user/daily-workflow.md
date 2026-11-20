@@ -50,6 +50,8 @@ Clicking a file shows its diff in the center. The header has icons like GitKrake
 
 In Inline and Split the arrows in the header jump to the previous / next change, and opening a file shows its first change. A minimap right of the scrollbar marks removed (red) and added (green) lines, in Split on the left and right half, and shows the visible part; click or drag in it to jump there, the mouse wheel scrolls. Old and new line numbers, + and − markers and colors are the same in all views. Binary and very large files get a short explanation instead. In partial (blobless) clones, missing file contents are fetched through Git when a diff needs them.
 
+Switching to another tab (or to a new tab's start screen) closes the diff, the blame and the file history of the tab you leave, like **Close**: coming back shows the graph. Staged lines stay staged. A conflict view with picks or edits that are not saved yet stays open.
+
 ![Diff view](../screenshots/m5-diff-light.png)
 
 **External** (or Ctrl+D) opens the diff in your diff tool (without one: "No diff tool" with **Define tool…**, which opens Preferences → External tools at the command field), **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).

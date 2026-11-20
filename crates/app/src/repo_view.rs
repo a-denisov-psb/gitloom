@@ -685,6 +685,22 @@ pub enum CenterView {
 }
 
 impl RepoView {
+    /// Leaving the tab (M18-06): a view that replaces the graph returns to
+    /// it like the Close button of its header: diff, blame and file
+    /// history. The conflict view closes too unless it holds unsaved
+    /// resolution work (ADR-044); the interactive rebase panel is a
+    /// running operation and stays. View state only, no undo entry.
+    pub fn leave(&mut self) {
+        let close = match &self.center {
+            CenterView::Graph | CenterView::Rebase(_) => false,
+            CenterView::Diff(_) | CenterView::FileHistory(_) => true,
+            CenterView::Conflict(view) => !view.has_unsaved_work(),
+        };
+        if close {
+            self.center = CenterView::Graph;
+        }
+    }
+
     /// Applies new editor settings to the diff shown in the center (M11-06).
     pub fn restyle(&mut self, style: crate::editor_style::EditorStyle) {
         if let Some(diff) = self.center.diff_mut() {

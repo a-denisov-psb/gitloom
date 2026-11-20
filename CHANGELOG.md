@@ -75,6 +75,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Changed
 
+- Switching tabs closes the diff, blame and file history of the tab you leave, so coming back shows the graph (a conflict view with unsaved picks or edits stays open).
 - The Unstaged and Staged file lists sit in the same framed area as the file list of the commit details, with the panel at the right and at the bottom.
 - Commit details: the panel no longer scrolls as a whole. The file list has its own framed, scrolling area, the message box is at most a fifth of the panel height, the hash is left-aligned and the edit button moved from the box into the header row (shown while the pointer is over the header or the message). In Tree mode "Expand all" / "Collapse all" is one toggle in the first row of the list that follows the state of the folders.
 - The right panel is called the details panel in menus, tooltips and the palette ("Toggle details panel", Ctrl+K as before).
