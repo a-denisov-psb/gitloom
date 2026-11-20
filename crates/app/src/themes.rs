@@ -599,6 +599,35 @@ mod tests {
         assert_eq!(resolve("").id, DARK_ID);
     }
 
+    /// ADR-060: Dusk carries the main colors of the M18 decision table
+    /// (muted text lightened for the contrast checks) and its own syntax
+    /// theme; Studio Dark keeps the Dark+ UI colors.
+    #[test]
+    fn dusk_and_studio_dark_colors() {
+        let dusk = get("dusk").expect("dusk");
+        let main = dusk.palette.main_colors();
+        let want = MainColors {
+            background: hex(0x242835),
+            surface: hex(0x353944),
+            chrome: hex(0x464a52),
+            text: hex(0xcccac2),
+            text_muted: hex(0xb9b9b8),
+            accent: hex(0x72cffe),
+            border: hex(0x53565d),
+            success: hex(0xd5fe80),
+            warning: hex(0xfecf72),
+            danger: hex(0xf18779),
+        };
+        assert_eq!(main, want);
+        assert_eq!(dusk.syntax, CodeTheme::Own(OwnTheme::Dusk));
+        assert_eq!(dusk.palette.lanes[0], hex(0x72cffe));
+        assert_eq!(dusk.palette.flow.production, hex(0xd5fe80));
+        let studio = get("studio-dark").expect("studio-dark");
+        assert_eq!(studio.palette.bg_graph, hex(0x1e1e1e));
+        assert_eq!(studio.palette.bg_panel, hex(0x252526));
+        assert_eq!(studio.syntax, CodeTheme::Own(OwnTheme::StudioDark));
+    }
+
     /// ADR-060: old ids read as the new ones; current and unknown ids stay.
     #[test]
     fn old_ids_map_to_new_ids() {
@@ -648,7 +677,7 @@ mod tests {
     /// flow colors, status colors, and its syntax theme.
     #[test]
     fn every_theme_passes_the_contrast_checks() {
-        use crate::theme::{contrast, mix};
+        use crate::theme::contrast;
         for def in builtins() {
             let p = &*def.palette;
             let id = &def.id;
@@ -673,11 +702,28 @@ mod tests {
                 let ratio = contrast(p.text_muted, bg);
                 assert!(ratio >= 4.5, "{id}: muted text on {bg_name} {ratio:.2}");
             }
-            // Start buttons (M15-07): the accent at 25 / 35 / 45 %.
-            for alpha in [0.25, 0.35, 0.45] {
-                let fill = mix(p.bg_graph, p.accent, alpha);
+            // Start buttons (M15-07): the accent at 25 / 35 / 45 %, capped
+            // for light accents (ADR-060).
+            for status in [
+                iced::widget::button::Status::Active,
+                iced::widget::button::Status::Hovered,
+                iced::widget::button::Status::Pressed,
+            ] {
+                let fill = crate::theme::start_button_on_background(p, status);
                 let ratio = contrast(p.text, fill);
-                assert!(ratio >= 4.5, "{id}: start button {alpha} {ratio:.2}");
+                assert!(ratio >= 4.5, "{id}: start button {status:?} {ratio:.2}");
+            }
+            // Only Dusk needs the cap; the others keep their alphas.
+            if def.id != DARK_ID {
+                let alpha = crate::theme::mix(p.bg_graph, p.accent, 0.45);
+                assert_eq!(
+                    crate::theme::start_button_on_background(
+                        p,
+                        iced::widget::button::Status::Pressed
+                    ),
+                    alpha,
+                    "{id}"
+                );
             }
             // Rows in file frames stand out (finding #47).
             for (bg_name, bg) in [("hover", p.bg_hover), ("selected", p.bg_selected)] {

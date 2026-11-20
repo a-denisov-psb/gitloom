@@ -146,44 +146,55 @@ pub enum ThemeKind {
     Light,
 }
 
+/// Dusk, the default dark theme (ADR-060): main colors of Ayu Mirage as
+/// the Zed editor shows it. Secondary colors as `derive` makes them,
+/// except hover and selected (closer to the model) and the muted text,
+/// lightened from `#9a9a98` for 4.5:1 on the chrome.
 pub const DARK: ThemePalette = ThemePalette {
-    bg_graph: hex(0x1f232b),
-    bg_panel: hex(0x252a33),
-    bg_inset: hex(0x1f232b),
-    bg_chrome: hex(0x181b21),
-    bg_hover: hex(0x2d333e),
-    bg_selected: hex(0x2e4058),
-    border: hex(0x343a46),
-    text: hex(0xd5d9e0),
-    text_muted: hex(0x8a93a3),
-    accent: hex(0x4f9dde),
-    success: hex(0x5fb878),
-    warning: hex(0xe5c07b),
-    danger: hex(0xe06c75),
-    node_text: Color::WHITE,
+    bg_graph: hex(0x242835),
+    bg_panel: hex(0x353944),
+    // `derive`: halfway between surface and chrome.
+    bg_inset: hex(0x3e424b),
+    bg_chrome: hex(0x464a52),
+    // #43464f in the model; lightened to stand out on the inset (#47).
+    bg_hover: hex(0x464a53),
+    // #53565d in the model; darkened for 4.5:1 text.
+    bg_selected: hex(0x51545b),
+    border: hex(0x53565d),
+    text: hex(0xcccac2),
+    text_muted: hex(0xb9b9b8),
+    accent: hex(0x72cffe),
+    success: hex(0xd5fe80),
+    warning: hex(0xfecf72),
+    danger: hex(0xf18779),
+    // The lanes are light: black initials read better.
+    node_text: Color::BLACK,
     lanes: [
-        hex(0x4f9dde),
-        hex(0xe06c75),
-        hex(0x5fb878),
-        hex(0xe5c07b),
-        hex(0xc678dd),
-        hex(0x56b6c2),
-        hex(0xd19a66),
-        hex(0x98c379),
+        hex(0x72cffe),
+        hex(0xf18779),
+        hex(0xd5fe80),
+        hex(0xfecf72),
+        hex(0xdebffe),
+        hex(0x95e5cb),
+        hex(0xfead66),
+        hex(0x5bcde5),
     ],
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
-    header_band: hex(0x252a33),
+    header_band: hex(0x353944),
     flow: FlowColors {
-        production: hex(0x5fb878),  // green
-        hotfix: hex(0x56b6c2),      // cyan
-        release: hex(0x4f9dde),     // blue
-        development: hex(0xc678dd), // violet
-        unknown: hex(0x8a93a3),     // gray
-        // Pink, red, orange, yellow.
-        features: FeatureColors::four([hex(0xe86fb0), hex(0xe06c75), hex(0xd19a66), hex(0xe5c07b)]),
+        production: hex(0xd5fe80),  // green
+        hotfix: hex(0xf18779),      // red
+        release: hex(0xfecf72),     // yellow
+        development: hex(0x72cffe), // blue
+        unknown: hex(0x7b7d7f),     // gray
+        // Orange, violet, mint, cyan.
+        features: FeatureColors::four([hex(0xfead66), hex(0xdebffe), hex(0x95e5cb), hex(0x5bcde5)]),
     },
-    diff_added_emphasis: Color::from_rgba(0.373, 0.722, 0.471, 0.36),
-    diff_removed_emphasis: Color::from_rgba(0.878, 0.424, 0.459, 0.36),
+    // Success and danger at 20 / 26 % (not `derive`'s 36 %): the bright
+    // green and red would hide the syntax colors of changed words, as in
+    // Monokai.
+    diff_added_emphasis: Color::from_rgba(0.835, 0.996, 0.502, 0.2),
+    diff_removed_emphasis: Color::from_rgba(0.945, 0.529, 0.475, 0.26),
 };
 
 pub const LIGHT: ThemePalette = ThemePalette {
@@ -509,16 +520,35 @@ fn start_button_alpha(status: button::Status) -> f32 {
     }
 }
 
+/// Alpha of the accent on a start screen button for `p`: 25 / 35 / 45 %,
+/// but never so much that the text drops below 4.5:1 on the fill (a light
+/// accent with light text, like Dusk's, ADR-060); not below 10 %.
+fn start_button_alpha_for(p: &ThemePalette, status: button::Status) -> f32 {
+    let wanted = start_button_alpha(status);
+    let readable = |alpha: f32| contrast(p.text, mix(p.bg_graph, p.accent, alpha)) >= 4.5;
+    if readable(wanted) {
+        return wanted;
+    }
+    // Steps of 1 %, from the wanted alpha down.
+    let top = (wanted * 100.0).round() as u8;
+    (10..top)
+        .rev()
+        .map(|percent| f32::from(percent) / 100.0)
+        .find(|alpha| readable(*alpha))
+        .unwrap_or(0.1)
+}
+
 /// Fill of a start screen button (M15-07, calmer than the solid accent of
-/// M11-12): the accent at 25 / 35 / 45 % alpha.
+/// M11-12): the accent at 25 / 35 / 45 % alpha (see
+/// [`start_button_alpha_for`]).
 pub fn start_button_fill(p: &ThemePalette, status: button::Status) -> Color {
-    p.accent.scale_alpha(start_button_alpha(status))
+    p.accent.scale_alpha(start_button_alpha_for(p, status))
 }
 
 /// The fill as it looks on the start screen's background (for contrast).
 #[cfg(test)]
-fn start_button_on_background(p: &ThemePalette, status: button::Status) -> Color {
-    mix(p.bg_graph, p.accent, start_button_alpha(status))
+pub fn start_button_on_background(p: &ThemePalette, status: button::Status) -> Color {
+    mix(p.bg_graph, p.accent, start_button_alpha_for(p, status))
 }
 
 /// Large start screen buttons "Open a repo", "Clone a repo", "Start a
@@ -1120,6 +1150,20 @@ mod tests {
                 assert!(ratio >= 4.5, "{name} {status:?}: {ratio:.2}");
             }
         }
+    }
+
+    /// ADR-060: a light accent with light text (Dusk) is capped below the
+    /// wanted alpha so the text stays readable; other palettes keep 25 /
+    /// 35 / 45 %, and the fill never gets weaker than when idle.
+    #[test]
+    fn start_button_alpha_is_capped_for_light_accents() {
+        use button::Status::{Active, Hovered, Pressed};
+        assert_eq!(start_button_alpha_for(&LIGHT, Pressed), 0.45);
+        let alphas = [Active, Hovered, Pressed].map(|s| start_button_alpha_for(&DARK, s));
+        assert_eq!(alphas[0], 0.25, "idle as before");
+        assert!(alphas[1] < 0.35 && alphas[1] > 0.25, "{alphas:?}");
+        assert_eq!(alphas[1], alphas[2], "capped at the same alpha");
+        assert!(contrast(DARK.text, start_button_on_background(&DARK, Pressed)) >= 4.5);
     }
 
     /// Finding #47: rows in a file frame (`bg_inset`): text stays readable
