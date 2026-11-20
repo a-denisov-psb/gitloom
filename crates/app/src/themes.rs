@@ -15,7 +15,7 @@ use crate::theme::{
 };
 
 /// Id of the default dark theme (also the fallback for unknown ids).
-pub const DARK_ID: &str = "dark";
+pub const DARK_ID: &str = "dusk";
 /// Id of the default light theme.
 pub const LIGHT_ID: &str = "light";
 
@@ -57,26 +57,19 @@ impl ThemeDef {
 // adjusted where Gitloom's contrast checks need it; Warm Dark and Warm
 // Light are own values (warm neutrals, terracotta accent). Secondary colors are derived from the main colors.
 
-/// The built-in themes in list order.
+/// The built-in themes in list order: the dark group, then the light
+/// group (ADR-060).
 fn builtins() -> Vec<Arc<ThemeDef>> {
     [
-        ThemeDef::builtin(DARK_ID, "Dark", ThemeKind::Dark, DARK, CodeTheme::DARK),
-        ThemeDef::builtin(LIGHT_ID, "Light", ThemeKind::Light, LIGHT, CodeTheme::LIGHT),
+        ThemeDef::builtin(DARK_ID, "Dusk", ThemeKind::Dark, DARK, CodeTheme::DARK),
         // Syntax pairings: the closest embedded theme that passes the
         // contrast checks (ADR-058).
         ThemeDef::builtin(
-            "dark-plus",
-            "Dark+",
+            "studio-dark",
+            "Studio Dark",
             ThemeKind::Dark,
-            dark_plus(),
+            studio_dark(),
             CodeTheme(EmbeddedThemeName::Nord),
-        ),
-        ThemeDef::builtin(
-            "light-plus",
-            "Light+",
-            ThemeKind::Light,
-            light_plus(),
-            CodeTheme(EmbeddedThemeName::MonokaiExtendedLight),
         ),
         ThemeDef::builtin(
             "monokai",
@@ -86,25 +79,11 @@ fn builtins() -> Vec<Arc<ThemeDef>> {
             CodeTheme(EmbeddedThemeName::MonokaiExtended),
         ),
         ThemeDef::builtin(
-            "github-dark",
-            "GitHub Dark",
+            "midnight",
+            "Midnight",
             ThemeKind::Dark,
-            github_dark(),
+            midnight(),
             CodeTheme(EmbeddedThemeName::ColdarkDark),
-        ),
-        ThemeDef::builtin(
-            "github-light",
-            "GitHub Light",
-            ThemeKind::Light,
-            github_light(),
-            CodeTheme(EmbeddedThemeName::Github),
-        ),
-        ThemeDef::builtin(
-            "solarized-light",
-            "Solarized Light",
-            ThemeKind::Light,
-            solarized_light(),
-            CodeTheme(EmbeddedThemeName::Github),
         ),
         ThemeDef::builtin(
             "warm-dark",
@@ -112,6 +91,28 @@ fn builtins() -> Vec<Arc<ThemeDef>> {
             ThemeKind::Dark,
             warm_dark(),
             CodeTheme(EmbeddedThemeName::GruvboxDark),
+        ),
+        ThemeDef::builtin(LIGHT_ID, "Light", ThemeKind::Light, LIGHT, CodeTheme::LIGHT),
+        ThemeDef::builtin(
+            "studio-light",
+            "Studio Light",
+            ThemeKind::Light,
+            studio_light(),
+            CodeTheme(EmbeddedThemeName::MonokaiExtendedLight),
+        ),
+        ThemeDef::builtin(
+            "sepia",
+            "Sepia",
+            ThemeKind::Light,
+            sepia(),
+            CodeTheme(EmbeddedThemeName::Github),
+        ),
+        ThemeDef::builtin(
+            "daylight",
+            "Daylight",
+            ThemeKind::Light,
+            daylight(),
+            CodeTheme(EmbeddedThemeName::Github),
         ),
         ThemeDef::builtin(
             "warm-light",
@@ -126,8 +127,29 @@ fn builtins() -> Vec<Arc<ThemeDef>> {
     .collect()
 }
 
-/// Dark+.
-fn dark_plus() -> ThemePalette {
+/// Ids of themes that were renamed or removed, with the id they read as
+/// (ADR-054, ADR-060). Only the new ids are written.
+const ALIASES: [(&str, &str); 7] = [
+    ("dark", DARK_ID),
+    ("classic-dark", DARK_ID),
+    ("dark-plus", "studio-dark"),
+    ("github-dark", "midnight"),
+    ("light-plus", "studio-light"),
+    ("solarized-light", "sepia"),
+    ("github-light", "daylight"),
+];
+
+/// The current id for a stored theme id: old ids map to their new id,
+/// every other id is returned as it is.
+pub fn canonical_id(id: &str) -> &str {
+    ALIASES
+        .iter()
+        .find(|(old, _)| *old == id)
+        .map_or(id, |(_, new)| new)
+}
+
+/// Studio Dark (the Dark+ UI colors of VS Code).
+fn studio_dark() -> ThemePalette {
     let main = MainColors {
         background: hex(0x1e1e1e),
         surface: hex(0x252526),
@@ -161,8 +183,8 @@ fn dark_plus() -> ThemePalette {
     ThemePalette::derive(main, ThemeKind::Dark).with_graph(lanes, flow)
 }
 
-/// Light+.
-fn light_plus() -> ThemePalette {
+/// Studio Light (the Light+ UI colors of VS Code).
+fn studio_light() -> ThemePalette {
     let main = MainColors {
         background: hex(0xffffff),
         surface: hex(0xf3f3f3),
@@ -237,8 +259,8 @@ fn monokai() -> ThemePalette {
     }
 }
 
-/// GitHub Dark.
-fn github_dark() -> ThemePalette {
+/// Midnight (GitHub Primer dark colors).
+fn midnight() -> ThemePalette {
     let main = MainColors {
         background: hex(0x0d1117),
         surface: hex(0x161b22),
@@ -272,8 +294,8 @@ fn github_dark() -> ThemePalette {
     ThemePalette::derive(main, ThemeKind::Dark).with_graph(lanes, flow)
 }
 
-/// GitHub Light.
-fn github_light() -> ThemePalette {
+/// Daylight (GitHub Primer light colors).
+fn daylight() -> ThemePalette {
     let main = MainColors {
         background: hex(0xffffff),
         surface: hex(0xf6f8fa),
@@ -307,8 +329,8 @@ fn github_light() -> ThemePalette {
     ThemePalette::derive(main, ThemeKind::Light).with_graph(lanes, flow)
 }
 
-/// Solarized Light.
-fn solarized_light() -> ThemePalette {
+/// Sepia (Solarized light colors).
+fn sepia() -> ThemePalette {
     let main = MainColors {
         background: hex(0xfdf6e3),
         surface: hex(0xeee8d5),
@@ -445,7 +467,7 @@ pub fn get(id: &str) -> Option<Arc<ThemeDef>> {
     read(|r| r.themes.iter().find(|t| t.id == id).cloned())
 }
 
-/// The theme with `id`, Dark when there is none.
+/// The theme with `id`, Dusk when there is none.
 #[cfg(test)]
 pub fn resolve(id: &str) -> Arc<ThemeDef> {
     get(id).unwrap_or_else(|| default_of(ThemeKind::Dark))
@@ -559,8 +581,8 @@ mod tests {
 
     #[test]
     fn lookup_by_id() {
-        let dark = get(DARK_ID).expect("dark");
-        assert_eq!(dark.name, "Dark");
+        let dark = get(DARK_ID).expect("dusk");
+        assert_eq!(dark.name, "Dusk");
         assert_eq!(dark.base, ThemeKind::Dark);
         assert_eq!(*dark.palette, DARK);
         let light = get(LIGHT_ID).expect("light");
@@ -570,11 +592,32 @@ mod tests {
     }
 
     #[test]
-    fn unknown_ids_mean_dark() {
+    fn unknown_ids_mean_dusk() {
         assert!(get("no-such-theme").is_none());
         assert!(palette_of("no-such-theme").is_none());
         assert_eq!(resolve("no-such-theme").id, DARK_ID);
         assert_eq!(resolve("").id, DARK_ID);
+    }
+
+    /// ADR-060: old ids read as the new ones; current and unknown ids stay.
+    #[test]
+    fn old_ids_map_to_new_ids() {
+        for (old, new) in [
+            ("dark", "dusk"),
+            ("classic-dark", "dusk"),
+            ("dark-plus", "studio-dark"),
+            ("github-dark", "midnight"),
+            ("light-plus", "studio-light"),
+            ("solarized-light", "sepia"),
+            ("github-light", "daylight"),
+        ] {
+            assert_eq!(canonical_id(old), new, "{old}");
+            assert!(get(new).is_some(), "{new}");
+            assert!(get(old).is_none(), "{old} is no id any more");
+        }
+        for id in ["dusk", "light", "monokai", "user:dark", "no-such-theme", ""] {
+            assert_eq!(canonical_id(id), id);
+        }
     }
 
     #[test]
@@ -688,18 +731,27 @@ mod tests {
 
     #[test]
     fn builtins_have_their_ids_names_and_bases() {
+        // List order (ADR-060): the dark group, then the light group.
         let expected = [
-            ("dark", "Dark", ThemeKind::Dark),
-            ("light", "Light", ThemeKind::Light),
-            ("dark-plus", "Dark+", ThemeKind::Dark),
-            ("light-plus", "Light+", ThemeKind::Light),
+            ("dusk", "Dusk", ThemeKind::Dark),
+            ("studio-dark", "Studio Dark", ThemeKind::Dark),
             ("monokai", "Monokai", ThemeKind::Dark),
-            ("github-dark", "GitHub Dark", ThemeKind::Dark),
-            ("github-light", "GitHub Light", ThemeKind::Light),
-            ("solarized-light", "Solarized Light", ThemeKind::Light),
+            ("midnight", "Midnight", ThemeKind::Dark),
             ("warm-dark", "Warm Dark", ThemeKind::Dark),
+            ("light", "Light", ThemeKind::Light),
+            ("studio-light", "Studio Light", ThemeKind::Light),
+            ("sepia", "Sepia", ThemeKind::Light),
+            ("daylight", "Daylight", ThemeKind::Light),
             ("warm-light", "Warm Light", ThemeKind::Light),
         ];
+        let order: Vec<String> = builtins().iter().map(|t| t.id.clone()).collect();
+        assert_eq!(
+            order,
+            expected
+                .iter()
+                .map(|(id, _, _)| id.to_string())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(builtins().len(), expected.len(), "ten built-ins");
         for (id, name, base) in expected {
             let def = get(id).unwrap_or_else(|| panic!("{id} missing"));
@@ -735,10 +787,10 @@ mod tests {
             2
         );
         // Built-in ids cannot be taken over.
-        set_user_themes(vec![user("user:a", "A2"), user("dark", "Fake")]);
+        set_user_themes(vec![user("user:a", "A2"), user("dusk", "Fake")]);
         assert_eq!(get("user:a").map(|t| t.name.clone()), Some("A2".into()));
         assert!(get("user:b").is_none());
-        assert_eq!(get("dark").map(|t| t.name.clone()), Some("Dark".into()));
+        assert_eq!(get("dusk").map(|t| t.name.clone()), Some("Dusk".into()));
         assert!(weak.upgrade().is_none(), "old palette freed");
         set_user_themes(Vec::new());
         assert!(get("user:a").is_none());

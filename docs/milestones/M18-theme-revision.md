@@ -74,7 +74,7 @@ Open: none (Gitloom extension, no GitKraken item). For the maintainer's check: D
 
 ## Tasks
 
-### [ ] M18-01 Names, ids and settings migration
+### [x] M18-01 Names, ids and settings migration
 
 - Rename the built-ins and their ids as in the decision table; set the list order; `themes::default_of(Dark)`, the default id constant, the fallback note ("Theme '<id>' not found, using Dusk") and the System defaults point to `dusk`.
 - Alias table for old ids when reading `appearance.theme`, `appearance.system_dark`, `appearance.system_light`; only new ids are written; the askpass window reads through the same code.
@@ -82,6 +82,8 @@ Open: none (Gitloom extension, no GitKraken item). For the maintainer's check: D
 - User theme files of base dark take missing `lanes`, `flow` and `syntax` from Dusk (`theme_file`).
 
 Acceptance: unit tests: every old id maps to its new id in all three settings fields and is written back as the new id; `classic-dark` ends at `dusk`; an unknown id falls back to Dusk with the note; askpass reads an old settings file; the list order of the two groups; a user theme file of base dark without `lanes`, `flow` and `syntax` loads with Dusk's values. A search (`rg`) for the old names in string literals of `crates/*/src` finds nothing in user-visible text.
+
+Note (done): `themes::canonical_id` holds the alias table (including `dark` and `classic-dark`); `ThemeChoice::parse` and a `deserialize_with` on `system_dark` / `system_light` read through it, so the app and the askpass window share it. Dusk still uses the old Dark palette and the OneHalfDark syntax until M18-03 and M18-02. Messages that set an id at runtime (Preferences, palette) only offer registry ids and do not go through the table.
 
 ### [ ] M18-02 Embedded syntax themes Dusk and Studio Dark
 

@@ -205,7 +205,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot_focused(
                 &app,
@@ -269,7 +269,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             // 200 %: half the logical size at the same pixel size.
             for (zoom, size) in [(100, SIZE), (200, (SIZE.0 / 2.0, SIZE.1 / 2.0))] {
@@ -301,7 +301,7 @@ mod tests {
             let choice = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let mut flow = crate::app::tests::flow_app();
             flow.settings.appearance.theme = choice.clone();
@@ -483,7 +483,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("tree-order-head-top-{theme}"));
         }
@@ -498,7 +498,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("tree-order-head-in-folder-{theme}"));
         }
@@ -633,7 +633,7 @@ mod tests {
     fn ui_check_diff_minimap() {
         use crate::settings::{DiffMode, ThemeChoice};
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for mode in [DiffMode::Inline, DiffMode::Split] {
@@ -651,7 +651,7 @@ mod tests {
     fn ui_check_diff_header_icons() {
         use crate::settings::{DiffMode, ThemeChoice};
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for mode in DiffMode::ALL {
@@ -690,7 +690,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("inline-diff-{theme}"));
         }
@@ -707,7 +707,7 @@ mod tests {
             let choice = if light {
                 ThemeChoice::theme("light")
             } else {
-                ThemeChoice::theme("dark")
+                ThemeChoice::theme("dusk")
             };
             app.settings.appearance.theme = choice.clone();
             added.settings.appearance.theme = choice.clone();
@@ -741,7 +741,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("file-history-split-{theme}"));
         }
@@ -799,7 +799,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let _ = app.update(Message::SettingsOpenedAt(
                 crate::settings::Category::Gitflow,
@@ -816,7 +816,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("gitflow-section-{theme}"));
             // M15-04: the hovered feature row with its finish flag.
@@ -857,7 +857,7 @@ mod tests {
             let choice = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let mut app = stash_app();
             app.settings.appearance.theme = choice.clone();
@@ -887,7 +887,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let view = app.tabs[0].view_mut().unwrap();
             let mut repo = (*view.snapshot).clone();
@@ -971,7 +971,7 @@ mod tests {
     fn ui_check_operation_state() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = crate::app::tests::app_in_state(git_core::RepoState::Merging {
@@ -1026,7 +1026,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let tab = app.tabs[0].id;
             let list = [
@@ -1069,7 +1069,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let view = app.tabs[0].view_mut().unwrap();
             let mut repo = (*view.snapshot).clone();
@@ -1110,7 +1110,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             for (kind, name, toggle) in [
                 (LocalBranch, "main", false),
@@ -1153,7 +1153,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let _ = app.update(crate::app::tests::checked(Shortcut::CommandPalette, false));
             let _ = app.update(Message::PaletteQuery("toggle".into()));
@@ -1173,7 +1173,7 @@ mod tests {
             let choice = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let mut app = crate::app::tests::staging_app(&[], &[]);
             app.settings.appearance.theme = choice.clone();
@@ -1207,7 +1207,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             for (on, name) in [(false, "default"), (true, "flow")] {
                 let view = app.tabs[0].view_mut().unwrap();
@@ -1241,7 +1241,7 @@ mod tests {
         }
         let has = |app: &App, label: &str| simulator(app).find(label).is_ok();
         assert!(!has(&app, "When the system is dark"));
-        for id in ["dark", "light"] {
+        for id in ["dusk", "light"] {
             app.settings.appearance.theme = ThemeChoice::theme(id);
             snapshot(&app, &format!("theme-list-{id}"));
         }
@@ -1262,7 +1262,7 @@ mod tests {
         let _ = app.update(Message::SystemTheme(iced::theme::Mode::Light));
         snapshot(&app, "theme-list-system-light");
         app.settings.appearance.theme = ThemeChoice::theme("gone");
-        assert!(has(&app, "Theme 'gone' not found, using Dark."));
+        assert!(has(&app, "Theme 'gone' not found, using Dusk."));
         snapshot(&app, "theme-list-unknown");
     }
 
@@ -1292,12 +1292,12 @@ mod tests {
             },
         ]);
         let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Themes));
-        for id in ["dark", "light"] {
+        for id in ["dusk", "light"] {
             app.settings.appearance.theme = ThemeChoice::theme(id);
             let _ = app.update(Message::ThemeSelected("user:Night shift".into()));
             snapshot(&app, &format!("theme-files-{id}"));
         }
-        let _ = app.update(Message::ThemeSelected("dark".into()));
+        let _ = app.update(Message::ThemeSelected("dusk".into()));
         snapshot(&app, "theme-files-builtin-selected");
         app.set_theme_files(Vec::new());
     }
@@ -1321,7 +1321,7 @@ mod tests {
             }
             .into_def(format!("user:{} copy", def.name))
         };
-        for id in ["dark", "light"] {
+        for id in ["dusk", "light"] {
             let mut app = crate::app::tests::ready_app(&["c", "b", "a"]);
             let def = copy(id);
             app.set_theme_files(vec![Entry::Theme(def.clone())]);
@@ -1339,7 +1339,7 @@ mod tests {
         }
         // One feature color: every feature lane has it.
         let (_repo, flow) = crate::snapshot::flow_tests::classic_snapshot();
-        let mut def = copy("dark");
+        let mut def = copy("dusk");
         let mut palette = *def.palette;
         palette.flow.features =
             crate::theme::FeatureColors::new(&[iced::Color::from_rgb8(0xff, 0x8c, 0x00)]).unwrap();
@@ -1365,7 +1365,7 @@ mod tests {
         use crate::settings::ThemeChoice;
         use crate::theme_editor::{Edit, Field};
         use crate::theme_file::{Entry, ThemeData};
-        for id in ["dark", "light"] {
+        for id in ["dusk", "light"] {
             let base = crate::themes::get(id).unwrap();
             let def = ThemeData {
                 name: "Unreadable".into(),
@@ -1424,7 +1424,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             for percent in [100_u32, 110, 125, 150] {
                 let scale = percent as f32 / 100.0;
@@ -1445,7 +1445,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             for (left, summary) in [
                 (69, "Fix".to_owned()),
@@ -1757,7 +1757,7 @@ mod tests {
             })
             .collect();
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = details_app(&[
@@ -1973,7 +1973,7 @@ mod tests {
             assert!(snap.matches_image(&path).unwrap());
         };
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = details_app(&[
@@ -2036,7 +2036,7 @@ mod tests {
     fn ui_check_change_author() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = details_app(&[
@@ -2164,7 +2164,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("time-markers-{theme}"));
         }
@@ -2236,7 +2236,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             for (id, name) in [("c3", "one-line"), ("c2", "long")] {
                 let _ = app.update(Message::CommitSelected(id.into()));
@@ -2353,7 +2353,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             let _ = app.update(Message::SettingsOpenedAt(
                 crate::settings::Category::Templates,
@@ -2376,7 +2376,7 @@ mod tests {
     fn ui_check_repository_editor() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = ready_app(&["c"]);
@@ -2415,7 +2415,7 @@ mod tests {
         let mut app = crate::app::tests::graph_app();
         let _ = app.update(Message::CommitSelected("s".into()));
         for (choice, name) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             app.settings.appearance.theme = choice.clone();
@@ -2460,7 +2460,7 @@ mod tests {
     fn ui_check_highlighting() {
         use crate::settings::{DiffMode, ThemeChoice};
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for (mode, name) in [
@@ -2483,7 +2483,7 @@ mod tests {
     fn ui_check_word_diff() {
         use crate::settings::{DiffMode, ThemeChoice};
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for (mode, name) in [
@@ -2507,7 +2507,7 @@ mod tests {
     fn ui_check_start_screen() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = start_app();
@@ -3620,7 +3620,7 @@ mod tests {
         )));
         let _ = app.update(Message::WindowResized(iced::Size::new(1600.0, 900.0)));
         let _ = app.update(Message::WipSelected);
-        app.settings.appearance.theme = crate::settings::ThemeChoice::theme("dark");
+        app.settings.appearance.theme = crate::settings::ThemeChoice::theme("dusk");
         snapshot_scaled_sized(&app, "readme-main-dark", 1.0, (1600.0, 900.0));
     }
 
@@ -3738,7 +3738,7 @@ mod tests {
     fn ui_check_prompt_button() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for (staged, name) in [(&["s.txt"][..], "staged"), (&[][..], "none")] {
@@ -3832,7 +3832,7 @@ mod tests {
     fn ui_check_status_bar_toggles() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for (left, right, name) in [
@@ -3876,7 +3876,7 @@ mod tests {
             .unwrap();
         for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
             let mut app = crate::app::tests::godot_diff_app(
-                crate::settings::ThemeChoice::theme("dark"),
+                crate::settings::ThemeChoice::theme("dusk"),
                 Some(longest),
             );
             app.panes.set_position(position);
@@ -3910,7 +3910,7 @@ mod tests {
     fn ui_check_language_mode() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = crate::app::tests::godot_diff_app(choice.clone(), Some("INI"));
@@ -3933,7 +3933,7 @@ mod tests {
             .iter()
             .max_by_key(|name| name.chars().count())
             .unwrap();
-        let mut app = crate::app::tests::godot_diff_app(ThemeChoice::theme("dark"), Some(longest));
+        let mut app = crate::app::tests::godot_diff_app(ThemeChoice::theme("dusk"), Some(longest));
         let _ = app.update(Message::WindowResized(min));
         snapshot_sized(&app, "language-minimum-longest", (min.width, min.height));
     }
@@ -3947,7 +3947,7 @@ mod tests {
         use crate::panes::DetailsPanelPosition;
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             for position in [DetailsPanelPosition::Right, DetailsPanelPosition::Bottom] {
@@ -3975,7 +3975,7 @@ mod tests {
         use crate::panes::DetailsPanelPosition;
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let bottom = |app: &mut App| {
@@ -4089,7 +4089,7 @@ mod tests {
         use crate::settings::ThemeChoice;
         use crate::toast::{Toast, ToastKind};
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = crate::app::tests::graph_app();
@@ -4181,7 +4181,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("left-panel-scrollbar-{name}"));
         }
@@ -4254,7 +4254,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             for (zoom, size) in [(100, SIZE), (200, (SIZE.0 / 2.0, SIZE.1 / 2.0))] {
                 snapshot_sized(&app, &format!("graph-lines-{theme}-{zoom}"), size);
@@ -4273,7 +4273,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             app.settings.appearance.graph_columns = crate::graph_columns::ColumnWidths {
                 refs: 120.0,
@@ -4300,7 +4300,7 @@ mod tests {
                 app.settings.appearance.theme = if light {
                     crate::settings::ThemeChoice::theme("light")
                 } else {
-                    crate::settings::ThemeChoice::theme("dark")
+                    crate::settings::ThemeChoice::theme("dusk")
                 };
                 if fixture == "flow" {
                     let view = app.tabs[0].view_mut().unwrap();
@@ -4332,7 +4332,7 @@ mod tests {
     fn ui_check_graph_scrolling() {
         use crate::settings::ThemeChoice;
         for (choice, theme) in [
-            (ThemeChoice::theme("dark"), "dark"),
+            (ThemeChoice::theme("dusk"), "dark"),
             (ThemeChoice::theme("light"), "light"),
         ] {
             let mut app = crate::app::tests::graph_app();
@@ -4383,7 +4383,7 @@ mod tests {
             let choice = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             app.settings.appearance.theme = choice.clone();
             start.settings.appearance.theme = choice.clone();
@@ -4420,7 +4420,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("identities-{theme}"));
         }
@@ -4439,7 +4439,7 @@ mod tests {
             let choice = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             app.settings.appearance.theme = choice.clone();
             none.settings.appearance.theme = choice.clone();
@@ -4472,7 +4472,7 @@ mod tests {
             app.settings.appearance.theme = if light {
                 crate::settings::ThemeChoice::theme("light")
             } else {
-                crate::settings::ThemeChoice::theme("dark")
+                crate::settings::ThemeChoice::theme("dusk")
             };
             snapshot(&app, &format!("ssh-key-{theme}"));
         }
@@ -5029,7 +5029,7 @@ mod tests {
             (0..n).map(|i| format!("src/{prefix}{i:02}.rs")).collect()
         };
         for (choice, theme) in [
-            (crate::settings::ThemeChoice::theme("dark"), "dark"),
+            (crate::settings::ThemeChoice::theme("dusk"), "dark"),
             (crate::settings::ThemeChoice::theme("light"), "light"),
         ] {
             for (position, place) in [

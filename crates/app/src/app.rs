@@ -3174,7 +3174,7 @@ impl App {
     }
 
     /// Note for Preferences → Appearance when a chosen or mapped theme id
-    /// is unknown (ADR-044): "Theme '<id>' not found, using Dark".
+    /// is unknown (ADR-044): "Theme '<id>' not found, using Dusk".
     pub fn theme_note(&self) -> Option<String> {
         use crate::theme::ThemeKind;
         let appearance = &self.settings.appearance;
@@ -7706,7 +7706,7 @@ impl App {
                         || self.settings.appearance.system_dark == def.id
                         || self.settings.appearance.system_light == def.id;
                     let fallback = if used {
-                        " It is in use: Gitloom falls back to Dark or Light until you choose another theme."
+                        " It is in use: Gitloom falls back to Dusk or Light until you choose another theme."
                     } else {
                         ""
                     };
@@ -14940,20 +14940,20 @@ pub(crate) mod tests {
         // System with mapped ids (both built-ins here; the lists offer the
         // themes of each base).
         let _ = app.update(Message::SystemThemeMapped(ThemeKind::Dark, "light".into()));
-        let _ = app.update(Message::SystemThemeMapped(ThemeKind::Light, "dark".into()));
+        let _ = app.update(Message::SystemThemeMapped(ThemeKind::Light, "dusk".into()));
         assert_eq!(app.settings.appearance.system_dark, "light");
-        assert_eq!(app.settings.appearance.system_light, "dark");
+        assert_eq!(app.settings.appearance.system_light, "dusk");
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::System));
         for (mode, want) in [
             (iced::theme::Mode::None, "light"),
             (iced::theme::Mode::Dark, "light"),
-            (iced::theme::Mode::Light, "dark"),
+            (iced::theme::Mode::Light, "dusk"),
         ] {
             let _ = app.update(Message::SystemTheme(mode));
             assert_eq!(app.active_theme().id, want, "{mode:?}");
         }
 
-        // Unknown ids: Dark (or Light for the light slot) with a note.
+        // Unknown ids: Dusk (or Light for the light slot) with a note.
         let _ = app.update(Message::SystemThemeMapped(ThemeKind::Light, "gone".into()));
         assert_eq!(
             app.active_theme().id,
@@ -14967,13 +14967,13 @@ pub(crate) mod tests {
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme(
             "missing",
         )));
-        assert_eq!(app.active_theme().id, "dark");
+        assert_eq!(app.active_theme().id, "dusk");
         assert_eq!(
             app.theme_note().as_deref(),
-            Some("Theme 'missing' not found, using Dark")
+            Some("Theme 'missing' not found, using Dusk")
         );
         // Choosing a known theme clears the note.
-        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("dark")));
+        let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme("dusk")));
         assert_eq!(app.theme_note(), None);
     }
 
@@ -14995,7 +14995,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::ThemeChosen(settings::ThemeChoice::theme(
             "user:Mine",
         )));
-        assert_eq!(app.active_theme().id, "dark", "not loaded yet");
+        assert_eq!(app.active_theme().id, "dusk", "not loaded yet");
         let _ = app.update(Message::UserThemesLoaded(vec![
             crate::theme_file::Entry::Theme(def),
             crate::theme_file::Entry::Invalid {
@@ -15007,10 +15007,10 @@ pub(crate) mod tests {
         assert_eq!(app.theme_note(), None);
         assert_eq!(app.theme_files.len(), 2);
         app.set_theme_files(Vec::new());
-        assert_eq!(app.active_theme().id, "dark");
+        assert_eq!(app.active_theme().id, "dusk");
         assert_eq!(
             app.theme_note().as_deref(),
-            Some("Theme 'user:Mine' not found, using Dark")
+            Some("Theme 'user:Mine' not found, using Dusk")
         );
     }
 
@@ -15090,10 +15090,10 @@ pub(crate) mod tests {
         let _ = app.update(Message::ThemeDelete { confirmed: true });
         run_theme_op(&mut app).unwrap();
         assert!(!themes.join("Paper.json").exists());
-        assert_eq!(app.active_theme().id, "dark");
+        assert_eq!(app.active_theme().id, "dusk");
         assert_eq!(
             app.theme_note().as_deref(),
-            Some("Theme 'user:Paper' not found, using Dark")
+            Some("Theme 'user:Paper' not found, using Dusk")
         );
         app.set_theme_files(Vec::new());
     }
@@ -15107,9 +15107,9 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("themes").join("Dark copy.json");
+        let file = dir.path().join("themes").join("Dusk copy.json");
         let mut app = themes_app(dir.path());
-        let _ = app.update(Message::ThemeSelected("dark".into()));
+        let _ = app.update(Message::ThemeSelected("dusk".into()));
         let _ = app.update(Message::ThemeNew);
         run_theme_op(&mut app).unwrap();
         let editor = |app: &App| {
@@ -15118,11 +15118,11 @@ pub(crate) mod tests {
                 .and_then(|p| p.theme_editor.clone())
                 .expect("editor open")
         };
-        assert_eq!(editor(&app).id, "user:Dark copy");
+        assert_eq!(editor(&app).id, "user:Dusk copy");
         // Save and use: the theme is chosen and saved.
         let _ = app.update(Message::ThemeEditorSave { use_it: true });
         run_theme_op(&mut app).unwrap();
-        assert_eq!(app.active_theme().id, "user:Dark copy");
+        assert_eq!(app.active_theme().id, "user:Dusk copy");
         // An invalid value is marked and not applied.
         let _ = app.update(Message::ThemeEdit(Edit::Hex(Field::Accent, "#12".into())));
         assert!(editor(&app).invalid(Field::Accent));
@@ -15685,9 +15685,9 @@ pub(crate) mod tests {
             };
             diff.spans_for(&file.hunks[0].lines[0]).map(<[_]>::len)
         };
-        let plain = godot_diff_app(settings::ThemeChoice::theme("dark"), None);
+        let plain = godot_diff_app(settings::ThemeChoice::theme("dusk"), None);
         assert_eq!(line(&plain), None);
-        let ini = godot_diff_app(settings::ThemeChoice::theme("dark"), Some("INI"));
+        let ini = godot_diff_app(settings::ThemeChoice::theme("dusk"), Some("INI"));
         assert!(line(&ini).is_some_and(|n| n > 0));
         let item = crate::ui::statusbar::language_item(&ini).unwrap();
         assert_eq!(item.label, "INI");
@@ -16244,7 +16244,7 @@ pub(crate) mod tests {
         use git_core::DiffLineKind;
         use settings::{DiffMode, ThemeChoice};
         for mode in [DiffMode::Hunk, DiffMode::Inline, DiffMode::Split] {
-            let mut app = word_diff_app(mode, ThemeChoice::theme("dark"));
+            let mut app = word_diff_app(mode, ThemeChoice::theme("dusk"));
             let diff = open_diff(&app);
             let Loadable::Ready(file) = &diff.diff else {
                 panic!("diff not loaded");
