@@ -130,7 +130,7 @@ Acceptance: docs reviewed against the implemented behavior; checklist 7q matches
 
 Note (done): user guide (themes, settings, coming from GitKraken), UX-PARITY, CHANGELOG, checklist 7o/7p/7q, ARCHITECTURE and the ADR-060 notes updated; the notices were regenerated in M18-02. 7q also checks the capped start buttons of Dusk (M18-03). The closing steps ("After M18") follow M18-06 (planning update 14).
 
-### [ ] M18-06 Tab switch closes center views
+### [x] M18-06 Tab switch closes center views
 
 - When the active repository tab changes (click, keyboard shortcut, command palette, switch to the start screen), the tab that is left returns its center view to the graph if that view replaces the graph: diff (hunk, inline, split), blame and file history. It behaves exactly like the Close button in the diff header, including what happens to the file selection in the right panel. Returning to a tab always shows the graph.
 - All ways of changing the active tab go through one place (no per-path special cases).
@@ -138,6 +138,8 @@ Note (done): user guide (themes, settings, coming from GitKraken), UX-PARITY, CH
 - Closing a view is view state only, not a write action: no undo entry (ADR-043). Staged hunks and lines live in the index and are unaffected.
 
 Acceptance: app tests: open a diff in tab A, switch to tab B and back: the graph is shown and the diff is closed; the same for inline, split, blame and file history; switching to the start screen and back; two tabs that each have an open view are both closed when left; a line staged before the switch is still staged afterwards; the conflict view behaves as decided (test matches the documented outcome). Docs: UX-PARITY row "Diff" gets "switching tabs closes it (Gitloom decision; GitKraken behavior to be checked)"; the user doc that describes the diff view; `docs/RELEASE-CHECKLIST.md` section 7q gets one item (open a diff, switch tab and back, the graph is shown; same for blame and file history); CHANGELOG `[Unreleased]`; implementation note in ADR-060 (no new ADR); `docs/HANDOVER.md` GitKraken verification list: "Does GitKraken close the diff when switching tabs?".
+
+Note (done): `App::set_active` is the one place (click, Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1…9 and their palette entries, a new tab's start screen, opening a repository that already has a tab, session restore); closing a tab only corrects the index. `RepoView::leave` closes diff and file history (blame is its mode) like Close, keeping the file selection as Close does. Conflict view outcome: it closes unless picks or a hand edit are not written yet (`ConflictView::has_unsaved_work`), then it stays open. The interactive rebase panel is not in the list and stays (a running operation with the user's todo edits).
 
 ## ADR-060 (to append to docs/DECISIONS.md)
 

@@ -38,7 +38,7 @@ Status values: `done`, `M<n>` (planned milestone), `—` (not planned).
 | Commit details author block | Avatar, "authored <date>", co-authors, parent links | done (M14-02): committer line when it differs, co-author avatars from trailers, parents select and scroll |
 | Commit details file list | Own scrolling frame, "Expand all" / "Collapse all" toggle | done (finding #42): the panel does not scroll, the frame does; sort, Path/Tree and View all files stored globally (M14-03) |
 | Graph time markers | Relative date pills at the right of the graph rows | done (M14-06): where the relative date changes, refreshed every minute |
-| Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); inline and split M7 (ADR-038) |
+| Diff | Replaces the graph in the center; close returns to graph | done (M1, hunk view); inline and split M7 (ADR-038); switching tabs closes it (Gitloom decision; GitKraken behavior to be checked), like blame and file history (M18-06) |
 | Status bar | Bottom line | done |
 | Resizable panes | All splits draggable | done |
 

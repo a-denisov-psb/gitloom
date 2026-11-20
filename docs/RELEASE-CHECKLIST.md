@@ -266,6 +266,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Edit a theme without saving, then try each way out (Close, Esc, "← Appearance", another sidebar page, closing Preferences): each asks "Discard changes?" and Cancel keeps the edits.
 - [ ] The start screen buttons with Dusk: text readable on idle, hover and press.
 - [ ] No old product name (Dark+, Light+, GitHub Dark, GitHub Light, Solarized) anywhere in the UI: Preferences, palette, tooltips, notes.
+- [ ] Open a diff in one repository tab, switch to another tab (click, Ctrl+Tab, a new tab's start screen) and back: the graph is shown and the diff is closed; the same for blame and file history. A line staged before the switch is still staged. A conflict view with unsaved picks stays open.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
@@ -290,3 +291,4 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] Fix after M15 (#44): is the pin per repository or global in GitKraken? (Gitloom: global.)
 - [ ] Fix after M15 (#44): does GitKraken show the grey splitter between the file lists and the commit message when the panel is on the right? (Gitloom: only at the bottom.)
 - [ ] Fix after M15 (#45): what is GitKraken's minimum window size? (Gitloom: about 1000×670 at 100 % zoom.)
+- [ ] M18-06 (#52): does GitKraken close the diff when switching tabs? (Gitloom: yes, also blame and file history; a conflict view with unsaved work stays.)
