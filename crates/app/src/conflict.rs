@@ -67,6 +67,12 @@ impl ConflictView {
         }
     }
 
+    /// Picks or a hand edit that are not written to the file yet: closing
+    /// the view would lose them (M18-06, ADR-044).
+    pub fn has_unsaved_work(&self) -> bool {
+        self.edited || self.picks.hunks.iter().any(|h| !h.is_open())
+    }
+
     pub fn with_headers(mut self, headers: (String, String)) -> Self {
         self.headers = headers;
         self

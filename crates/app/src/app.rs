@@ -2853,7 +2853,7 @@ impl App {
             for path in paths {
                 tasks.push(self.open_in_new_tab(path));
             }
-            self.active = active.min(self.tabs.len().saturating_sub(1));
+            self.set_active(active.min(self.tabs.len().saturating_sub(1)));
         }
         for path in std::mem::take(&mut self.pending_paths) {
             tasks.push(self.open_path(path));
@@ -3229,8 +3229,22 @@ impl App {
             state,
             generation: 0,
         });
-        self.active = self.tabs.len() - 1;
+        self.set_active(self.tabs.len() - 1);
         id
+    }
+
+    /// Makes tab `index` the active one. Every change of the active tab
+    /// goes through here (M18-06): the tab that is left closes its diff,
+    /// blame or file history ([`RepoView::leave`]), so returning to it
+    /// shows the graph. Closing a tab only corrects the index.
+    fn set_active(&mut self, index: usize) {
+        if index == self.active || index >= self.tabs.len() {
+            return;
+        }
+        if let Some(view) = self.tabs.get_mut(self.active).and_then(Tab::view_mut) {
+            view.leave();
+        }
+        self.active = index;
     }
 
     fn open_in_new_tab(&mut self, path: PathBuf) -> Task<Message> {
@@ -3246,7 +3260,7 @@ impl App {
             TabState::Loading { path: p } | TabState::Failed { path: p, .. } => p == &path,
             TabState::Start => false,
         }) {
-            self.active = index;
+            self.set_active(index);
             return Task::none();
         }
         match self.active_tab() {
@@ -3265,6 +3279,8 @@ impl App {
             if let TabState::Loading { path } | TabState::Failed { path, .. } = &tab.state {
                 self.restored_languages.remove(path);
             }
+            // Index correction only: the tab that was left is gone or
+            // stays active (M18-06).
             if self.active > index || self.active >= self.tabs.len() {
                 self.active = self.active.saturating_sub(1);
             }
@@ -3369,13 +3385,11 @@ impl App {
                     self.close_tab(id);
                 }
             }
-            Shortcut::NextTab => self.active = (self.active + 1) % count.max(1),
-            Shortcut::PreviousTab => self.active = (self.active + count.max(1) - 1) % count.max(1),
-            Shortcut::SwitchTab(index) => {
-                if index < count {
-                    self.active = index;
-                }
+            Shortcut::NextTab => self.set_active((self.active + 1) % count.max(1)),
+            Shortcut::PreviousTab => {
+                self.set_active((self.active + count.max(1) - 1) % count.max(1));
             }
+            Shortcut::SwitchTab(index) => self.set_active(index),
             Shortcut::OpenRepository => return self.update(Message::OpenRepository),
             Shortcut::Refresh => return self.update(Message::Refresh),
             Shortcut::ToggleSidebar => self.panes.toggle_sidebar(),
@@ -6994,7 +7008,7 @@ impl App {
         match message {
             Message::TabSelected(id) => {
                 if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
-                    self.active = index;
+                    self.set_active(index);
                 }
             }
             Message::TabClosed(id) => self.close_tab(id),
@@ -10510,7 +10524,7 @@ impl App {
                 // exactly instead of `open_path`'s subfolder rule.
                 let target = root.join(path);
                 if let Some(index) = self.tabs.iter().position(|t| t.path() == Some(&target)) {
-                    self.active = index;
+                    self.set_active(index);
                     return Task::none();
                 }
                 return self.open_in_new_tab(target);
@@ -12095,7 +12109,7 @@ impl App {
                         let existing_id = self.tabs[existing].id;
                         self.close_tab(id);
                         if let Some(index) = self.tabs.iter().position(|t| t.id == existing_id) {
-                            self.active = index;
+                            self.set_active(index);
                         }
                         return Task::none();
                     }
@@ -16938,6 +16952,131 @@ pub(crate) mod tests {
         ))));
         let _ = app.update(Message::TabSelected(id));
         id
+    }
+
+    /// M18-06: leaving a tab closes its diff (every mode), blame and file
+    /// history; returning shows the graph. Every way of switching (click,
+    /// shortcuts, the start screen) does it; staged changes, undo and the
+    /// interactive rebase panel stay; the conflict view stays only with
+    /// unsaved resolution work.
+    #[test]
+    fn switching_tabs_closes_center_views() {
+        use crate::settings::DiffMode;
+        let center = |app: &App, index: usize| -> &'static str {
+            match &app.tabs[index].view().unwrap().center {
+                CenterView::Graph => "graph",
+                CenterView::Diff(_) => "diff",
+                CenterView::Conflict(_) => "conflict",
+                CenterView::Rebase(_) => "rebase",
+                CenterView::FileHistory(_) => "history",
+            }
+        };
+        for mode in DiffMode::ALL {
+            let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
+            app.settings.diff.view_mode = mode;
+            let first = app.tabs[0].id;
+            let staged_before = app.tabs[0]
+                .view()
+                .unwrap()
+                .snapshot
+                .working_tree
+                .staged
+                .clone();
+            let undo_before = app.tabs[0].view().unwrap().undo.len();
+            assert_eq!(center(&app, 0), "diff");
+            second_repo_tab(&mut app, false);
+            assert_eq!(center(&app, 0), "graph", "{mode:?}: closed when left");
+            let _ = app.update(Message::TabSelected(first));
+            assert_eq!(center(&app, 0), "graph", "{mode:?}: graph on return");
+            // View state only: the index and the undo list are untouched.
+            let view = app.tabs[0].view().unwrap();
+            assert_eq!(view.snapshot.working_tree.staged, staged_before);
+            assert_eq!(view.undo.len(), undo_before);
+        }
+
+        // Blame and file history (blame is a mode of the history view).
+        let mut app = ready_app(&["c"]);
+        let first = app.tabs[0].id;
+        let second = second_repo_tab(&mut app, false);
+        let _ = app.update(Message::TabSelected(first));
+        for open in [
+            Message::FileHistoryOpened {
+                path: "a".into(),
+                start: None,
+            },
+            Message::FileBlameOpened {
+                path: "a".into(),
+                start: None,
+                rev: None,
+            },
+        ] {
+            let _ = app.update(open);
+            assert_eq!(center(&app, 0), "history");
+            let _ = app.update(Message::TabSelected(second));
+            let _ = app.update(Message::TabSelected(first));
+            assert_eq!(center(&app, 0), "graph");
+        }
+
+        // Both tabs with an open view: each closes when left; the keyboard
+        // and the start screen (a new tab) switch the same way.
+        let open_diff = |app: &mut App| {
+            let _ = app.update(Message::DiffOpened(DiffRequest {
+                kind: git_core::DiffKind::Staged,
+                path: "f".into(),
+                old_path: None,
+            }));
+        };
+        open_diff(&mut app);
+        let _ = app.shortcut(Shortcut::NextTab);
+        assert_eq!(app.active, 1);
+        assert_eq!(center(&app, 0), "graph");
+        open_diff(&mut app);
+        let _ = app.shortcut(Shortcut::PreviousTab);
+        assert_eq!(center(&app, 1), "graph");
+        open_diff(&mut app);
+        let _ = app.shortcut(Shortcut::SwitchTab(1));
+        assert_eq!(center(&app, 0), "graph");
+        open_diff(&mut app);
+        let _ = app.update(Message::TabOpened);
+        assert!(matches!(app.tabs[app.active].state, TabState::Start));
+        assert_eq!(center(&app, 1), "graph", "the start screen leaves it too");
+        // Selecting the active tab again changes nothing.
+        let _ = app.update(Message::TabSelected(second));
+        open_diff(&mut app);
+        let _ = app.update(Message::TabSelected(second));
+        assert_eq!(center(&app, 1), "diff");
+
+        // The conflict view: closes without unsaved work, stays with it.
+        for (edited, want) in [(false, "graph"), (true, "conflict")] {
+            let mut conflict =
+                crate::conflict::ConflictView::new("f".into(), ("ours".into(), "theirs".into()));
+            conflict.edited = edited;
+            app.tabs[1].view_mut().unwrap().center = CenterView::Conflict(Box::new(conflict));
+            let _ = app.update(Message::TabSelected(first));
+            assert_eq!(center(&app, 1), want, "edited: {edited}");
+            let _ = app.update(Message::TabSelected(second));
+        }
+    }
+
+    /// M18-06: picks that are not written yet count as unsaved work.
+    #[test]
+    fn conflict_picks_are_unsaved_work() {
+        // Git's markers at `git_core`'s parse size (31).
+        let marker = |c: &str| c.repeat(31);
+        let merged = format!(
+            "a\n{} ours\nb\n{}\nc\n{} theirs\n",
+            marker("<"),
+            marker("="),
+            marker(">")
+        );
+        let text = git_core::ConflictText::parse(&merged).expect("a conflict");
+        assert_eq!(text.hunks().count(), 1);
+        let mut view =
+            crate::conflict::ConflictView::new("f".into(), ("ours".into(), "theirs".into()));
+        view.picks = git_core::Picks::new(&text);
+        assert!(!view.has_unsaved_work(), "nothing picked");
+        view.picks.toggle_hunk(0, git_core::Side::Ours);
+        assert!(view.has_unsaved_work());
     }
 
     #[test]
