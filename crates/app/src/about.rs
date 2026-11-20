@@ -121,6 +121,12 @@ mod tests {
         assert!(all
             .iter()
             .any(|c| c.name == "Lucide icons" && c.license == "ISC"));
+        // Sources of the theme palettes and syntax themes (ADR-058, ADR-060).
+        assert!(all.iter().any(|c| c.name.starts_with("Theme palettes")
+            && ["VS Code", "GitHub Primer", "Solarized", "Ayu"]
+                .iter()
+                .all(|source| c.name.contains(source))
+            && c.license == "MIT"));
         // Our own crates are not third-party.
         assert!(!all
             .iter()
@@ -128,6 +134,26 @@ mod tests {
         assert!(all
             .iter()
             .all(|c| !c.version.is_empty() && !c.license.is_empty()));
+    }
+
+    /// ADR-060: the shipped notices carry the theme sources with their
+    /// licenses, including the sources of the syntax themes Studio Dark
+    /// and Dusk.
+    #[test]
+    fn notices_name_the_theme_sources() {
+        let notices = include_str!("../../../THIRD-PARTY-LICENSES.md");
+        let palettes = include_str!("../../../scripts/third-party/theme-palettes.md");
+        assert!(notices.contains(palettes.trim()), "regenerate the notices");
+        for needle in [
+            "dark_plus.json",
+            "studio-dark.tmTheme",
+            "dusk.tmTheme",
+            "https://github.com/dempfi/ayu",
+            "Copyright (c) 2016 Ike Kurghinyan",
+            "Copyright (c) 2015 - present Microsoft Corporation",
+        ] {
+            assert!(palettes.contains(needle), "{needle}");
+        }
     }
 
     #[test]

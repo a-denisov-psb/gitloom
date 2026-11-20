@@ -7,7 +7,7 @@
 
 use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 
-use crate::highlight::CodeTheme;
+use crate::highlight::{CodeTheme, OwnTheme};
 use two_face::theme::EmbeddedThemeName;
 
 use crate::theme::{
@@ -69,28 +69,28 @@ fn builtins() -> Vec<Arc<ThemeDef>> {
             "Studio Dark",
             ThemeKind::Dark,
             studio_dark(),
-            CodeTheme(EmbeddedThemeName::Nord),
+            CodeTheme::Own(OwnTheme::StudioDark),
         ),
         ThemeDef::builtin(
             "monokai",
             "Monokai",
             ThemeKind::Dark,
             monokai(),
-            CodeTheme(EmbeddedThemeName::MonokaiExtended),
+            CodeTheme::Embedded(EmbeddedThemeName::MonokaiExtended),
         ),
         ThemeDef::builtin(
             "midnight",
             "Midnight",
             ThemeKind::Dark,
             midnight(),
-            CodeTheme(EmbeddedThemeName::ColdarkDark),
+            CodeTheme::Embedded(EmbeddedThemeName::ColdarkDark),
         ),
         ThemeDef::builtin(
             "warm-dark",
             "Warm Dark",
             ThemeKind::Dark,
             warm_dark(),
-            CodeTheme(EmbeddedThemeName::GruvboxDark),
+            CodeTheme::Embedded(EmbeddedThemeName::GruvboxDark),
         ),
         ThemeDef::builtin(LIGHT_ID, "Light", ThemeKind::Light, LIGHT, CodeTheme::LIGHT),
         ThemeDef::builtin(
@@ -98,28 +98,28 @@ fn builtins() -> Vec<Arc<ThemeDef>> {
             "Studio Light",
             ThemeKind::Light,
             studio_light(),
-            CodeTheme(EmbeddedThemeName::MonokaiExtendedLight),
+            CodeTheme::Embedded(EmbeddedThemeName::MonokaiExtendedLight),
         ),
         ThemeDef::builtin(
             "sepia",
             "Sepia",
             ThemeKind::Light,
             sepia(),
-            CodeTheme(EmbeddedThemeName::Github),
+            CodeTheme::Embedded(EmbeddedThemeName::Github),
         ),
         ThemeDef::builtin(
             "daylight",
             "Daylight",
             ThemeKind::Light,
             daylight(),
-            CodeTheme(EmbeddedThemeName::Github),
+            CodeTheme::Embedded(EmbeddedThemeName::Github),
         ),
         ThemeDef::builtin(
             "warm-light",
             "Warm Light",
             ThemeKind::Light,
             warm_light(),
-            CodeTheme(EmbeddedThemeName::GruvboxLight),
+            CodeTheme::Embedded(EmbeddedThemeName::GruvboxLight),
         ),
     ]
     .into_iter()

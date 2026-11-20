@@ -1536,6 +1536,8 @@ impl App {
                     let themes = settings_path.map(|p| {
                         crate::theme_file::load_dir(&p.with_file_name(crate::theme_file::DIR))
                     });
+                    // Gitloom's own syntax themes (ADR-060).
+                    crate::highlight::preload_own_themes();
                     Ok((settings, themes, session::load(&path)))
                 }),
                 |loaded| loaded,

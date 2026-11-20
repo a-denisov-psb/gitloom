@@ -27,36 +27,103 @@ pub const MAX_LINE_BYTES: usize = 5_000;
 /// Lines highlighted per block before the partial result is handed out.
 pub const BLOCK_LINES: usize = 1_000;
 
-/// The embedded `two-face` theme a Gitloom theme takes its syntax colors
-/// from (ADR-047, ADR-058): Dark uses "OneHalfDark", Light "GitHub".
-/// Gitloom keeps its own backgrounds; only the text color and style come
-/// from the theme. Part of the cache key and of every job.
+/// The syntax theme a Gitloom theme takes its syntax colors from (ADR-047,
+/// ADR-058, ADR-060): one of the `two-face` set or one of Gitloom's own
+/// (`assets/*.tmTheme`). Gitloom keeps its own backgrounds; only the text
+/// color and style come from the theme. Part of the cache key and of every
+/// job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CodeTheme(pub EmbeddedThemeName);
+pub enum CodeTheme {
+    /// A theme of the `two-face` set.
+    Embedded(EmbeddedThemeName),
+    /// One of Gitloom's own syntax themes.
+    Own(OwnTheme),
+}
+
+/// Gitloom's own syntax themes (ADR-060), embedded as `.tmTheme` files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OwnTheme {
+    /// Rule structure of Ayu Mirage, colors as the Zed editor shows it.
+    Dusk,
+    /// Translated from VS Code's Dark+ (`dark_vs.json`, `dark_plus.json`).
+    StudioDark,
+}
+
+impl OwnTheme {
+    pub const ALL: [Self; 2] = [Self::Dusk, Self::StudioDark];
+
+    /// Name in the editor's syntax list and in theme files.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dusk => "Dusk",
+            Self::StudioDark => "Studio Dark",
+        }
+    }
+
+    /// The `.tmTheme` file.
+    fn source(self) -> &'static str {
+        match self {
+            Self::Dusk => include_str!("../assets/dusk.tmTheme"),
+            Self::StudioDark => include_str!("../assets/studio-dark.tmTheme"),
+        }
+    }
+
+    /// The `two-face` theme used when the embedded file cannot be read
+    /// (a test failure, never a panic).
+    fn fallback(self) -> EmbeddedThemeName {
+        match self {
+            Self::Dusk => EmbeddedThemeName::OneHalfDark,
+            Self::StudioDark => EmbeddedThemeName::Nord,
+        }
+    }
+
+    /// Parses the embedded file.
+    pub(crate) fn load(self) -> Result<Theme, String> {
+        let mut reader = std::io::Cursor::new(self.source().as_bytes());
+        syntect::highlighting::ThemeSet::load_from_reader(&mut reader)
+            .map_err(|e| format!("{}: {e}", self.name()))
+    }
+}
 
 impl CodeTheme {
-    /// The pairing of the built-in Dark theme.
-    pub const DARK: Self = Self(EmbeddedThemeName::OneHalfDark);
+    /// The pairing of the built-in Dusk theme.
+    pub const DARK: Self = Self::Embedded(EmbeddedThemeName::OneHalfDark);
     /// The pairing of the built-in Light theme.
-    pub const LIGHT: Self = Self(EmbeddedThemeName::Github);
+    pub const LIGHT: Self = Self::Embedded(EmbeddedThemeName::Github);
 
-    fn embedded(self) -> EmbeddedThemeName {
-        self.0
-    }
-
-    /// The name of the theme in the set (stored in theme files, M17).
-    #[allow(dead_code)] // Used by theme files (M17).
+    /// The name of the theme (the editor's syntax list, theme files).
     pub fn name(self) -> &'static str {
-        self.0.as_name()
+        match self {
+            Self::Embedded(name) => name.as_name(),
+            Self::Own(own) => own.name(),
+        }
     }
 
-    /// The embedded theme called `name`.
-    #[allow(dead_code)] // Used by theme files (M17).
+    /// The theme called `name`: Gitloom's own first, then `two-face`.
     pub fn named(name: &str) -> Option<Self> {
-        two_face::theme::EmbeddedLazyThemeSet::theme_names()
-            .iter()
-            .find(|t| t.as_name() == name)
-            .map(|t| Self(*t))
+        OwnTheme::ALL
+            .into_iter()
+            .find(|own| own.name() == name)
+            .map(Self::Own)
+            .or_else(|| {
+                two_face::theme::EmbeddedLazyThemeSet::theme_names()
+                    .iter()
+                    .find(|t| t.as_name() == name)
+                    .map(|t| Self::Embedded(*t))
+            })
+    }
+
+    /// Every theme name: Gitloom's own and the `two-face` set.
+    pub fn names() -> Vec<&'static str> {
+        OwnTheme::ALL
+            .into_iter()
+            .map(OwnTheme::name)
+            .chain(
+                two_face::theme::EmbeddedLazyThemeSet::theme_names()
+                    .iter()
+                    .map(|t| t.as_name()),
+            )
+            .collect()
     }
 }
 
@@ -149,8 +216,37 @@ pub(crate) fn syntaxes() -> &'static SyntaxSet {
 
 pub(crate) fn theme(theme: CodeTheme) -> &'static Theme {
     static SET: OnceLock<two_face::theme::EmbeddedLazyThemeSet> = OnceLock::new();
-    SET.get_or_init(two_face::theme::extra)
-        .get(theme.embedded())
+    static OWN: OnceLock<Vec<(OwnTheme, Option<Theme>)>> = OnceLock::new();
+    let set = || SET.get_or_init(two_face::theme::extra);
+    match theme {
+        CodeTheme::Embedded(name) => set().get(name),
+        CodeTheme::Own(own) => {
+            let loaded = OWN.get_or_init(load_own);
+            loaded
+                .iter()
+                .find(|(o, _)| *o == own)
+                .and_then(|(_, theme)| theme.as_ref())
+                .unwrap_or_else(|| set().get(own.fallback()))
+        }
+    }
+}
+
+/// Reads Gitloom's own syntax themes once (at start-up, see
+/// [`preload_own_themes`]); a file that cannot be read is replaced by its
+/// fallback (the tests make sure both files load).
+fn load_own() -> Vec<(OwnTheme, Option<Theme>)> {
+    OwnTheme::ALL
+        .into_iter()
+        .map(|own| (own, own.load().ok()))
+        .collect()
+}
+
+/// Loads Gitloom's own syntax themes; called by the start-up task so the
+/// first highlighting job does not parse them.
+pub fn preload_own_themes() {
+    for own in OwnTheme::ALL {
+        let _ = theme(CodeTheme::Own(own));
+    }
 }
 
 /// Name of the syntax without highlighting; as a language override it
@@ -874,14 +970,21 @@ mod tests {
         assert_eq!(cache.get("blob1", CodeTheme::DARK), Some(&outcome));
         assert!(cache.get("blob1", CodeTheme::LIGHT).is_none());
         // Every syntax theme has its own entries (ADR-058).
-        let monokai = CodeTheme(EmbeddedThemeName::MonokaiExtended);
+        let monokai = CodeTheme::Embedded(EmbeddedThemeName::MonokaiExtended);
         assert!(cache.get("blob1", monokai).is_none());
         cache.insert("blob1", monokai, outcome.clone());
         assert_eq!(cache.get("blob1", monokai), Some(&outcome));
         assert!(cache.get("blob2", CodeTheme::DARK).is_none());
+        // Gitloom's own themes have their own entries too (ADR-060).
+        let dusk = CodeTheme::Own(OwnTheme::Dusk);
+        let studio = CodeTheme::Own(OwnTheme::StudioDark);
+        cache.insert("blob1", dusk, outcome.clone());
+        assert!(cache.get("blob1", studio).is_none());
+        assert_eq!(cache.get("blob1", dusk), Some(&outcome));
+        cache.insert("blob1", studio, outcome.clone());
         // The same key again does not grow the cache.
         cache.insert("blob1", CodeTheme::DARK, outcome.clone());
-        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.len(), 4);
         // The oldest entries go first.
         for i in 0..Cache::CAPACITY {
             cache.insert(&format!("b{i}"), CodeTheme::DARK, outcome.clone());
@@ -1310,10 +1413,209 @@ mod tests {
         assert_eq!(CodeTheme::named("No Such Theme"), None);
         // Other syntax themes color the same file differently.
         let source = "fn main() { let x = 1; }\n";
-        let monokai = CodeTheme(EmbeddedThemeName::MonokaiExtended);
+        let monokai = CodeTheme::Embedded(EmbeddedThemeName::MonokaiExtended);
         assert_ne!(
             highlight("a.rs", source, CodeTheme::DARK),
             highlight("a.rs", source, monokai)
         );
+    }
+
+    /// The color of `scopes` (a space-separated scope stack) in `theme`.
+    fn color_of(theme: CodeTheme, scopes: &str) -> String {
+        use syntect::highlighting::Highlighter;
+        let stack: Vec<syntect::parsing::Scope> = scopes
+            .split_whitespace()
+            .map(|s| syntect::parsing::Scope::new(s).unwrap())
+            .collect();
+        let c = Highlighter::new(super::theme(theme))
+            .style_for_stack(&stack)
+            .foreground;
+        format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+    }
+
+    /// ADR-060: both embedded files load and keep their names.
+    #[test]
+    fn own_syntax_themes_load() {
+        for own in OwnTheme::ALL {
+            let theme = own.load().unwrap_or_else(|e| panic!("{e}"));
+            assert_eq!(theme.name.as_deref(), Some(own.name()));
+            assert!(theme.scopes.len() > 40, "{}", own.name());
+            assert_eq!(CodeTheme::named(own.name()), Some(CodeTheme::Own(own)));
+            assert_eq!(CodeTheme::Own(own).name(), own.name());
+        }
+        // The two-face names stay valid.
+        assert_eq!(CodeTheme::named("OneHalfDark"), Some(CodeTheme::DARK));
+        assert!(CodeTheme::names().contains(&"Studio Dark"));
+        assert!(CodeTheme::names().contains(&"GitHub"));
+    }
+
+    /// ADR-060: sampled rule colors match the decision table of M18.
+    #[test]
+    fn own_syntax_theme_colors() {
+        const KEYWORD: &str = "source.cs storage.modifier.access.cs";
+        const CONTROL: &str = "source.cs keyword.control.flow.return.cs";
+        const TYPE: &str = "source.cs meta.class.cs entity.name.class.cs";
+        const FUNCTION: &str = "source.cs meta.method.cs entity.name.function.cs";
+        const VARIABLE: &str = "source.cs variable.other.cs";
+        const CONSTANT: &str = "source.cs variable.other.constant.cs";
+        const STRING: &str = "source.cs string.quoted.double.cs";
+        const NUMBER: &str = "source.cs constant.numeric.integer.decimal.cs";
+        const COMMENT: &str = "source.cs comment.line.double-slash.cs";
+        let cases = [
+            (
+                OwnTheme::StudioDark,
+                [
+                    (KEYWORD, "#569cd6"),
+                    (CONTROL, "#c586c0"),
+                    (TYPE, "#4ec9b0"),
+                    (FUNCTION, "#dcdcaa"),
+                    (VARIABLE, "#9cdcfe"),
+                    (CONSTANT, "#4fc1ff"),
+                    (STRING, "#ce9178"),
+                    (NUMBER, "#b5cea8"),
+                    (COMMENT, "#6a9955"),
+                ],
+            ),
+            (
+                OwnTheme::Dusk,
+                [
+                    (KEYWORD, "#ffad65"),
+                    (CONTROL, "#ffad65"),
+                    (TYPE, "#73cfff"),
+                    (FUNCTION, "#ffd173"),
+                    (VARIABLE, "#cccac2"),
+                    (CONSTANT, "#dfbfff"),
+                    (STRING, "#d4fe7f"),
+                    (NUMBER, "#dfbfff"),
+                    (COMMENT, "#5c6773"),
+                ],
+            ),
+        ];
+        for (own, samples) in cases {
+            for (scopes, want) in samples {
+                assert_eq!(
+                    color_of(CodeTheme::Own(own), scopes),
+                    want,
+                    "{own:?} {scopes}"
+                );
+            }
+        }
+        // C# specifics of the Sublime grammar (ADR-060 notes).
+        let studio = CodeTheme::Own(OwnTheme::StudioDark);
+        for (scopes, want) in [
+            ("source.cs keyword.control.import.cs", "#c586c0"),
+            ("source.cs storage.type.cs", "#569cd6"),
+            ("source.cs meta.class.cs storage.type.class.cs", "#569cd6"),
+            ("source.cs support.type.cs", "#4ec9b0"),
+            (
+                "source.cs meta.annotation.cs variable.annotation.cs",
+                "#4ec9b0",
+            ),
+            (
+                "source.cs meta.function-call.cs variable.function.cs",
+                "#dcdcaa",
+            ),
+            (
+                "source.cs string.quoted.double.cs constant.character.escape.cs",
+                "#d7ba7d",
+            ),
+        ] {
+            assert_eq!(color_of(studio, scopes), want, "{scopes}");
+        }
+        let dusk = CodeTheme::Own(OwnTheme::Dusk);
+        for (scopes, want) in [
+            ("source.cs keyword.control.import.cs", "#ffad65"),
+            ("source.cs storage.type.cs", "#73cfff"),
+            ("source.cs storage.type.variable.cs", "#ffad65"),
+            (
+                "source.cs meta.annotation.cs variable.annotation.cs",
+                "#72cffe",
+            ),
+            (
+                "source.cs meta.property.cs variable.other.member.cs",
+                "#72cffe",
+            ),
+            (
+                "source.cs meta.method.parameters.cs variable.parameter.cs",
+                "#dfbfff",
+            ),
+            ("source.cs keyword.operator.cs", "#f29e74"),
+            ("source.cs comment.block.documentation.cs", "#9b9b99"),
+            (
+                "source.cs string.quoted.double.cs constant.character.escape.cs",
+                "#9b9b99",
+            ),
+            ("source.cs punctuation.terminator.statement.cs", "#b4b3ae"),
+        ] {
+            assert_eq!(color_of(dusk, scopes), want, "{scopes}");
+        }
+    }
+
+    /// ADR-060: a small C# file gets distinct colors for keyword, control
+    /// keyword (Studio Dark; Dusk colors both like Ayu Mirage), type,
+    /// string, number and comment.
+    #[test]
+    fn own_syntax_themes_color_csharp() {
+        const SOURCE: &str = "using System;\n\n/// <summary>A customer.</summary>\n[Serializable]\npublic class Customer\n{\n    public string Name { get; set; } = \"unknown\";\n    public int Count() {\n        // Count.\n        if (Name == null) return 42;\n        return 1;\n    }\n}\n";
+        for own in OwnTheme::ALL {
+            let theme = CodeTheme::Own(own);
+            let outcome = highlight("Customer.cs", SOURCE, theme);
+            let color = |line: usize, token: &str| -> [u8; 4] {
+                let text = SOURCE.lines().nth(line).unwrap();
+                let at = text.find(token).unwrap();
+                outcome
+                    .line(line)
+                    .unwrap()
+                    .iter()
+                    .find(|s| s.range.contains(&at))
+                    .map(|s| s.style.color)
+                    .unwrap_or_else(|| panic!("{own:?}: no span for {token}"))
+            };
+            let keyword = color(4, "public");
+            let control = color(9, "if");
+            let kinds = [
+                ("keyword", keyword),
+                ("type", color(4, "Customer")),
+                ("string", color(6, "unknown")),
+                ("number", color(9, "42")),
+                ("comment", color(8, "Count.")),
+            ];
+            for (i, (a, ca)) in kinds.iter().enumerate() {
+                for (b, cb) in &kinds[i + 1..] {
+                    assert_ne!(ca, cb, "{own:?}: {a} and {b}");
+                }
+            }
+            match own {
+                OwnTheme::StudioDark => {
+                    for (name, c) in &kinds {
+                        assert_ne!(control, *c, "{own:?}: control keyword and {name}");
+                    }
+                    assert_eq!(color(0, "using"), control, "using like VS Code");
+                }
+                OwnTheme::Dusk => assert_eq!(control, keyword),
+            }
+            // The doc comment differs from a plain comment in Dusk.
+            if own == OwnTheme::Dusk {
+                assert_ne!(color(2, "A customer"), color(8, "Count."));
+            }
+        }
+    }
+
+    /// ADR-060: both pass the syntax contrast checks of ADR-058 on the
+    /// background of their theme (Dusk: `#242835`).
+    #[test]
+    fn own_syntax_themes_pass_the_contrast_checks() {
+        for (own, background) in [
+            (OwnTheme::Dusk, iced::Color::from_rgb8(0x24, 0x28, 0x35)),
+            (
+                OwnTheme::StudioDark,
+                iced::Color::from_rgb8(0x1e, 0x1e, 0x1e),
+            ),
+        ] {
+            let (foreground, worst) =
+                crate::themes::syntax_contrast(CodeTheme::Own(own), background);
+            assert!(foreground >= 4.5, "{own:?}: foreground {foreground:.2}");
+            assert!(worst >= 3.0, "{own:?}: token {worst:.2}");
+        }
     }
 }
