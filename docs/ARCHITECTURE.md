@@ -155,6 +155,8 @@ Each visible row draws its own segments into a canvas cell of the row height: up
 
 User themes _(M17, ADR-059)_: `app::theme_file` reads, validates and writes the JSON files of `themes/` next to `settings.json` (`load_dir` in the startup task, file actions as `theme_file::Op` through `apply` in background tasks); `themes::set_user_themes` replaces the `user:` entries. `app::theme_editor` is the pure editor state in `settings::Page`; `ui::theme_preview` draws the preview inside `iced::widget::themer` with the registry's preview entry (`themes::PREVIEW_ID`), which `App::update` keeps in step with the edited theme.
 
+Theme revision _(M18, ADR-060)_: `themes::canonical_id` maps old theme ids to their new ids when `settings.json` is read (app and askpass). `highlight::CodeTheme` is either a `two-face` theme or one of Gitloom's own syntax themes (`OwnTheme`: Dusk, Studio Dark), embedded as `.tmTheme` files in `crates/app/assets/` and parsed once by syntect (`highlight::preload_own_themes` in the startup task). The theme list and editor are `settings::Category::Themes`, a sub-page of Appearance: `Category::sidebar` and `Category::parent` drive the sidebar highlight, the "← Appearance" link and Esc.
+
 ## Graph list virtualization _(M1)_
 
 - Fixed row height (30 px).

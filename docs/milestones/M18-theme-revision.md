@@ -119,7 +119,7 @@ Acceptance: app tests: "Manage themes…" shows the list; back returns to Appear
 
 Note (done): `Category::Themes` stays as the sub-page's state but is no longer in the sidebar; `Category::sidebar` highlights Appearance for it and `Category::parent` drives the "← Appearance" link above the title and Esc. Esc goes editor → list → Appearance → closed and asks "Discard changes?" on unsaved edits (before, Esc closed Preferences without asking). Leaving the sub-page closes a saved editor. "Opening Preferences shows Appearance itself" is read as "never the sub-page": Preferences open on General as before (GitKraken opens on its first page too); reopening after the sub-page shows General, not Themes. The "Manage themes…" button sits under the theme list. Checked by hand in the ui_check snapshots `themes-sub-page`, `themes-appearance-button` and `themes-editor-min-size` (window minimum size: all controls usable; a long preview diff line already ran over the preview frame before M18).
 
-### [ ] M18-05 Documentation and close
+### [x] M18-05 Documentation and close
 
 - New ADR-060 (text below) in `docs/DECISIONS.md`; implementation notes after the work (contrast corrections, mapping choices).
 - `docs/user/themes.md` and `docs/user/settings.md`: new names, the path Preferences → Appearance → Manage themes, the limit about semantic highlighting; the "Theme editor" and "Themes" rows of `docs/UX-PARITY.md` updated; CHANGELOG `[Unreleased]`: the paragraphs about the ten themes and the theme editor are corrected in place (new names, new path), plus a line for the Studio Dark and Dusk syntax themes.
@@ -127,6 +127,8 @@ Note (done): `Category::Themes` stays as the sub-page's state but is no longer i
 - Third-party notices regenerated; `./scripts/check.sh` green.
 
 Acceptance: docs reviewed against the implemented behavior; checklist 7q matches the acceptance list.
+
+Note (done): user guide (themes, settings, coming from GitKraken), UX-PARITY, CHANGELOG, checklist 7o/7p/7q, ARCHITECTURE and the ADR-060 notes updated; the notices were regenerated in M18-02. 7q also checks the capped start buttons of Dusk (M18-03). The closing steps ("After M18") follow M18-06 (planning update 14).
 
 ### [ ] M18-06 Tab switch closes center views
 

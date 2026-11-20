@@ -1,10 +1,26 @@
 # Themes
 
-Gitloom has ten built-in color themes (Preferences → Appearance, see [Settings](settings.md)). You can also make your own: copy any theme, change its colors and use it like a built-in one.
+Gitloom has ten built-in color themes (Preferences → Appearance, see [Settings](settings.md)):
+
+| Dark | Light |
+|---|---|
+| Dusk (default) | Light (default) |
+| Studio Dark | Studio Light |
+| Monokai | Sepia |
+| Midnight | Daylight |
+| Warm Dark | Warm Light |
+
+Each brings its graph, Git flow and syntax colors. Dusk and Studio Dark use syntax themes of their own (also named Dusk and Studio Dark). You can also make your own theme: copy any theme, change its colors and use it like a built-in one.
+
+Themes renamed in version 1.0 keep working from older settings: Dark is now Dusk, Dark+ Studio Dark, GitHub Dark Midnight, Light+ Studio Light, Solarized Light Sepia and GitHub Light Daylight. Gitloom writes the new names the next time it saves the settings.
+
+### Syntax colors
+
+Gitloom colors code by its grammar. Editors such as VS Code or Zed also color by meaning when a language server runs (semantic highlighting), so a few tokens can look different there, for example C# property and class names used in code. Gitloom has no language server; this is expected.
 
 ## Make a theme
 
-1. Open **Preferences → Themes** (or "Edit themes…" under the theme list in Appearance, or "Edit themes…" in the command palette).
+1. Open **Preferences → Appearance → Manage themes…** (or "Edit themes…" in the command palette). The theme list opens in place of Appearance; **← Appearance** above the title or Esc goes back.
 2. Select the theme to start from and click **New theme**. Gitloom saves a copy named "<name> copy" and opens it in the editor.
 3. Change the name, choose whether it is a **Dark** or **Light** theme (this decides which System list offers it), and change the colors.
 4. Click **Save**, or **Save and use** to switch to it at once.
@@ -25,7 +41,7 @@ Built-in themes are read only (lock icon): **New theme** copies them, **Export�
 - Click a swatch for sliders (red, green, blue, and transparency where it applies).
 - **Derive the other colors from the main colors** recomputes the More colors from the main colors. It never changes lanes, Git flow colors or the syntax theme. After you change a main color a hint offers it.
 - The initials on graph nodes are black or white, whichever reads better on the lane colors.
-- **Revert** goes back to the saved theme. Closing the editor (or Preferences) with changes asks "Discard changes?".
+- **Revert** goes back to the saved theme. Leaving the editor with changes asks "Discard changes?": **Close**, Esc, **← Appearance**, another Preferences page or closing Preferences.
 
 ## Preview and warnings
 
@@ -41,7 +57,7 @@ Checked: text on background, surface, chrome, hover and selected (4.5:1); muted 
 - **Import…** copies a theme file into your themes folder after checking it. If a file of that name exists, choose **Replace** or **Keep both** (the import gets a numbered name). A file that is not a valid theme is not imported; Gitloom says why.
 - **Open folder** opens the themes folder: `~/.config/gitloom/themes/` (Linux), `~/Library/Application Support/Gitloom/themes/` (macOS), `%APPDATA%\Gitloom\config\themes\` (Windows).
 - A file in the folder that cannot be read stays untouched and is listed as "<file> (invalid: <reason>)".
-- If the theme you use (or one chosen for System) is deleted or broken, Gitloom uses Dark (or Light for the light System slot) and Preferences → Appearance says which theme was not found.
+- If the theme you use (or one chosen for System) is deleted or broken, Gitloom uses Dusk (or Light for the light System slot) and Preferences → Appearance says which theme was not found.
 
 Themes are settings, not undo steps: the way back is **Revert**, **Delete…** or choosing another theme.
 
@@ -54,12 +70,12 @@ One JSON file per theme; the file name (without `.json`) identifies it.
 | `format` | no | `1` |
 | `name` | yes | Name in the lists |
 | `base` | yes | `"dark"` or `"light"` |
-| `syntax` | no | An embedded syntax theme, e.g. `"OneHalfDark"`, `"GitHub"`, `"Nord"`, `"gruvbox-dark"` |
+| `syntax` | no | An embedded syntax theme, e.g. `"Dusk"`, `"Studio Dark"`, `"OneHalfDark"`, `"GitHub"`, `"gruvbox-dark"` |
 | `colors` | yes | `background`, `surface`, `chrome`, `text`, `text_muted`, `accent`, `border`, `success`, `warning`, `danger` (required); `inset`, `hover`, `selected`, `header_band`, `backdrop`, `diff_added_emphasis`, `diff_removed_emphasis` (optional) |
 | `lanes` | no | Eight colors |
 | `flow` | no | `production`, `hotfix`, `release`, `development`, `unknown`, `features` (one to four colors) |
 
-Colors are `#RRGGBB` or `#RRGGBBAA`. Missing optional colors are derived from the main colors; missing `lanes`, `flow` and `syntax` come from the built-in Dark or Light theme of the same base. Unknown keys are ignored. The editor always writes every key.
+Colors are `#RRGGBB` or `#RRGGBBAA`. Missing optional colors are derived from the main colors; missing `lanes`, `flow` and `syntax` come from the built-in Dusk or Light theme of the same base. Unknown keys are ignored. The editor always writes every key.
 
 A minimal file written by hand:
 
