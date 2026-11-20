@@ -681,6 +681,18 @@ mod tests {
         assert_eq!(data.syntax, CodeTheme::LIGHT);
     }
 
+    /// ADR-060: a file of base dark takes missing lanes, Git flow colors
+    /// and syntax theme from Dusk.
+    #[test]
+    fn dark_file_takes_the_gaps_from_dusk() {
+        let data = parse(&MINIMAL.replace("\"light\"", "\"dark\"")).unwrap();
+        assert_eq!(data.base, ThemeKind::Dark);
+        let dusk = crate::themes::get("dusk").expect("dusk");
+        assert_eq!(data.palette.lanes, dusk.palette.lanes);
+        assert_eq!(data.palette.flow, dusk.palette.flow);
+        assert_eq!(data.syntax, dusk.syntax);
+    }
+
     #[test]
     fn complete_file_round_trips() {
         // A complete file: every color in bytes.

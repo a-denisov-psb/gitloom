@@ -311,15 +311,43 @@ mod tests {
         }
         appearance.theme = ThemeChoice::System;
         appearance.system_light = "light".into();
-        appearance.system_dark = "dark".into();
+        appearance.system_dark = "dusk".into();
         let light = theme_for(Some(&appearance), iced::theme::Mode::Light);
         assert_eq!(name(light).as_deref(), Some("light"));
         let dark = theme_for(Some(&appearance), iced::theme::Mode::Dark);
-        assert_eq!(name(dark).as_deref(), Some("dark"));
+        assert_eq!(name(dark).as_deref(), Some("dusk"));
         assert_eq!(theme_for(Some(&appearance), iced::theme::Mode::None), None);
         appearance.theme = ThemeChoice::theme("no-such-theme");
         assert_eq!(theme_for(Some(&appearance), iced::theme::Mode::Dark), None);
         // No settings file.
         assert_eq!(theme_for(None, iced::theme::Mode::Light), None);
+    }
+
+    /// ADR-060: the prompt reads an old settings file through the same
+    /// alias table as the app.
+    #[test]
+    fn prompt_reads_old_theme_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::settings::FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"{"appearance": {"theme": "dark-plus", "system_dark": "github-dark", "system_light": "solarized-light"}}"#,
+        )
+        .unwrap();
+        let mut appearance = crate::settings::load(&path, None).settings.appearance;
+        let name = |theme: Option<iced::Theme>| theme.map(|t| t.to_string());
+        assert_eq!(
+            name(theme_for(Some(&appearance), iced::theme::Mode::Dark)).as_deref(),
+            Some("studio-dark")
+        );
+        appearance.theme = crate::settings::ThemeChoice::System;
+        assert_eq!(
+            name(theme_for(Some(&appearance), iced::theme::Mode::Dark)).as_deref(),
+            Some("midnight")
+        );
+        assert_eq!(
+            name(theme_for(Some(&appearance), iced::theme::Mode::Light)).as_deref(),
+            Some("sepia")
+        );
     }
 }

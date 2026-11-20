@@ -260,7 +260,7 @@ impl Default for General {
 }
 
 /// `appearance.theme` (ADR-058): a theme id or "system". Stored as one
-/// string; the removed "classic-dark" is read as "dark" (ADR-054).
+/// string; old ids are read as their new id (ADR-054, ADR-060).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThemeChoice {
     /// A theme id of the registry (`crate::themes`); may be unknown.
@@ -289,8 +289,7 @@ impl ThemeChoice {
     pub fn parse(value: &str) -> Self {
         match value {
             Self::SYSTEM => Self::System,
-            "classic-dark" => Self::theme(crate::themes::DARK_ID),
-            id => Self::theme(id),
+            id => Self::theme(crate::themes::canonical_id(id)),
         }
     }
 }
@@ -314,6 +313,13 @@ impl<'de> Deserialize<'de> for ThemeChoice {
     }
 }
 
+/// Reads a theme id of `system_dark` / `system_light` through the alias
+/// table of old ids (ADR-060).
+fn theme_id<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    Ok(crate::themes::canonical_id(&value).to_owned())
+}
+
 fn default_system_dark() -> String {
     crate::themes::DARK_ID.to_owned()
 }
@@ -328,7 +334,9 @@ pub struct Appearance {
     pub theme: ThemeChoice,
     /// Theme ids System uses when the operating system reports dark (or
     /// nothing) and light (ADR-058).
+    #[serde(deserialize_with = "theme_id")]
     pub system_dark: String,
+    #[serde(deserialize_with = "theme_id")]
     pub system_light: String,
     /// Window scale in percent (70–200).
     pub zoom_percent: u32,
@@ -1134,32 +1142,56 @@ mod tests {
     }
 
     #[test]
-    fn classic_dark_loads_as_dark() {
-        // The theme was removed (ADR-054); saved settings open in Dark.
+    fn classic_dark_loads_as_dusk() {
+        // The theme was removed (ADR-054); saved settings open in Dusk
+        // (ADR-060).
         let parsed = parse(r#"{"appearance": {"theme": "classic-dark"}}"#).unwrap();
-        assert_eq!(parsed.appearance.theme, ThemeChoice::theme("dark"));
+        assert_eq!(parsed.appearance.theme, ThemeChoice::theme("dusk"));
         let json = to_json(&parsed);
-        assert!(json.contains("\"dark\""), "{json}");
+        assert!(json.contains("\"dusk\""), "{json}");
         assert!(!json.contains("classic-dark"), "{json}");
     }
 
-    /// ADR-058: values written before M16 read as before.
+    /// ADR-058, ADR-060: values written before M18 still load; old ids
+    /// read as their new id in all three fields and are written back as
+    /// the new id.
     #[test]
     fn old_theme_values_still_load() {
-        for (stored, want) in [
-            ("dark", ThemeChoice::theme("dark")),
-            ("light", ThemeChoice::theme("light")),
-            ("system", ThemeChoice::System),
-            ("classic-dark", ThemeChoice::theme("dark")),
-        ] {
-            let text = format!(r#"{{"appearance": {{"theme": "{stored}"}}}}"#);
+        let renames = [
+            ("dark", "dusk"),
+            ("classic-dark", "dusk"),
+            ("dark-plus", "studio-dark"),
+            ("github-dark", "midnight"),
+            ("light-plus", "studio-light"),
+            ("solarized-light", "sepia"),
+            ("github-light", "daylight"),
+            ("light", "light"),
+            ("warm-dark", "warm-dark"),
+        ];
+        for (stored, want) in renames {
+            let text = format!(
+                r#"{{"appearance": {{"theme": "{stored}", "system_dark": "{stored}", "system_light": "{stored}"}}}}"#
+            );
             let parsed = parse(&text).unwrap();
-            assert_eq!(parsed.appearance.theme, want, "{stored}");
-            // The System mapping starts with Dark and Light.
-            assert_eq!(parsed.appearance.system_dark, "dark");
-            assert_eq!(parsed.appearance.system_light, "light");
+            assert_eq!(
+                parsed.appearance.theme,
+                ThemeChoice::theme(want),
+                "{stored}"
+            );
+            assert_eq!(parsed.appearance.system_dark, want, "{stored}");
+            assert_eq!(parsed.appearance.system_light, want, "{stored}");
+            let json = to_json(&parsed);
+            assert_eq!(json.matches(&format!("\"{want}\"")).count(), 3, "{json}");
+            if stored != want {
+                assert!(!json.contains(&format!("\"{stored}\"")), "{json}");
+            }
         }
-        // An unknown id is kept (the app falls back to Dark with a note).
+        let parsed = parse(r#"{"appearance": {"theme": "system"}}"#).unwrap();
+        assert_eq!(parsed.appearance.theme, ThemeChoice::System);
+        // The System mapping starts with Dusk and Light.
+        assert_eq!(parsed.appearance.system_dark, "dusk");
+        assert_eq!(parsed.appearance.system_light, "light");
+        // An unknown id is kept (the app falls back to Dusk with a note).
         let parsed = parse(r#"{"appearance": {"theme": "no-such-theme"}}"#).unwrap();
         assert_eq!(parsed.appearance.theme, ThemeChoice::theme("no-such-theme"));
     }
@@ -1169,7 +1201,7 @@ mod tests {
         let mut settings = Settings::default();
         settings.appearance.theme = ThemeChoice::System;
         settings.appearance.system_dark = "monokai".into();
-        settings.appearance.system_light = "solarized-light".into();
+        settings.appearance.system_light = "sepia".into();
         let json = to_json(&settings);
         assert!(json.contains(r#""theme": "system""#), "{json}");
         assert_eq!(parse(&json).unwrap(), settings);
@@ -1362,7 +1394,7 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.version, VERSION);
         assert_eq!(settings.general.auto_fetch_minutes, 5);
-        assert_eq!(settings.appearance.theme, ThemeChoice::theme("dark"));
+        assert_eq!(settings.appearance.theme, ThemeChoice::theme("dusk"));
         assert_eq!(settings.appearance.zoom_percent, 100);
         assert!(!settings.appearance.avatars, "avatars are opt-in");
         assert_eq!(settings.tools.diff_tool, ToolChoice::GitConfig);
