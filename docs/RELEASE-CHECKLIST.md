@@ -230,19 +230,19 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 
 ## 7o. Themes (M16) (Windows required, Linux checked in CI)
 
-- [ ] Preferences → Appearance lists Dark themes (Dark, Dark+, Monokai, GitHub Dark, Warm Dark) and Light themes (Light, Light+, GitHub Light, Solarized Light, Warm Light) side by side with a color strip each, then System; the current one has a check mark.
+- [ ] Preferences → Appearance lists Dark themes (Dusk, Studio Dark, Monokai, Midnight, Warm Dark) and Light themes (Light, Studio Light, Sepia, Daylight, Warm Light) side by side with a color strip each, then System; the current one has a check mark.
 - [ ] Choose each of the ten themes and look at: the window, the graph with and without the Gitflow layout (lane and Git flow colors, ref pills, time markers), a diff in Hunk, Inline and Split (added and removed lines, changed-character emphasis), blame and file history, the conflict view, a dialog, a context menu, a toast, the start screen (New Tab) and Preferences. Text and icons are readable everywhere; nothing keeps the old theme's colors.
 - [ ] Syntax colors are readable in each theme (open a `.rs`, `.py` or `.json` diff).
-- [ ] Dark and Light look exactly as before M16.
+- [ ] Light looks exactly as before M16 (Dusk replaced Dark in M18, see 7q).
 - [ ] "Set: Theme ›" in the command palette lists the same ten names and System, marks the current one and applies a choice at once.
 - [ ] Choose System: the lists "When the system is dark" and "When the system is light" appear and offer only dark or only light themes. Pick e.g. Monokai and Warm Light, then switch the Windows color mode (Settings → Personalization → Colors) while Gitloom runs: the window follows within a moment.
-- [ ] Old `settings.json` values still work: `"theme": "light"`, `"system"` and `"classic-dark"` (opens in Dark).
-- [ ] An unknown id (`"theme": "no-such-theme"` in `settings.json`, then start Gitloom): Dark is used and Preferences → Appearance says "Theme 'no-such-theme' not found, using Dark."
+- [ ] Old `settings.json` values still work: `"theme": "light"`, `"system"` and `"classic-dark"` (opens in Dusk).
+- [ ] An unknown id (`"theme": "no-such-theme"` in `settings.json`, then start Gitloom): Dusk is used and Preferences → Appearance says "Theme 'no-such-theme' not found, using Dusk."
 - [ ] The askpass window (e.g. an HTTPS push that asks for a password) uses the chosen theme; with System it follows the Windows mode and the mapped themes.
 
 ## 7p. Theme editor (M17) (Windows required, Linux checked in CI)
 
-- [ ] Preferences → Themes lists the ten built-in themes with a lock icon and "My themes"; "Edit themes…" in Appearance and in the command palette open it.
+- [ ] Preferences → Appearance → **Manage themes…** lists the ten built-in themes with a lock icon and "My themes"; "Edit themes…" in the command palette opens it too.
 - [ ] Select a built-in and click **New theme**: "<name> copy" appears under My themes and opens in the editor; Rename… and Delete… stay disabled for built-ins with the reason as tooltip.
 - [ ] Edit each color group: a main color (type a hex value, then use the sliders of its swatch), a More color, a lane, a Git flow color, add and remove feature colors (one to four; with one, "All feature branches use this color"), change the syntax theme. An invalid hex value is marked red and not applied.
 - [ ] The preview follows every edit while the editor controls and the rest of the window keep the active theme; contrast warnings appear below it.
@@ -252,9 +252,20 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] **Export…** the theme, delete it (Delete… asks), then **Import…** the exported file (or import it on a second machine): it comes back. Import it twice: Replace and Keep both work.
 - [ ] A hand-written minimal file (see `docs/user/themes.md`) in the themes folder loads after a restart and derives the rest.
 - [ ] A broken file in the folder (e.g. `{"name": 1}`) is listed with its reason and the app starts normally.
-- [ ] Delete the theme in use: the window falls back to Dark and Appearance names the missing theme.
+- [ ] Delete the theme in use: the window falls back to Dusk and Appearance names the missing theme.
 - [ ] System with a user theme in the dark or light slot follows the Windows mode.
 - [ ] Make a theme whose text equals the background: the preview is unreadable, the warnings list it, Preferences stay readable, and saving still works; choose another theme afterwards.
+
+## 7q. Theme revision (M18) (Windows required)
+
+- [ ] Open the same C# file in Gitloom with Dusk and in Zed with Ayu Mirage side by side: keywords, types, strings, numbers, comments, the current line and the panels have matching colors (tokens colored by Zed's language server may differ, see `docs/user/themes.md`).
+- [ ] The same C# file in Gitloom with Studio Dark and in VS Code with Dark+ (Default Dark+): keywords (blue), `using`/`if`/`return` (purple), types (teal), functions (yellow), strings, numbers and comments match; panels and current line look alike.
+- [ ] Every built-in shows its new name in Preferences → Appearance and in "Set: Theme ›": Dusk, Studio Dark, Monokai, Midnight, Warm Dark, Light, Studio Light, Sepia, Daylight, Warm Light, in this order.
+- [ ] With Gitloom closed, set `"theme"` in `settings.json` to each old id in turn (`dark`, `dark-plus`, `github-dark`, `light-plus`, `solarized-light`, `github-light`, `classic-dark`; also once in `system_dark` / `system_light` with `"theme": "system"`): Gitloom opens in the renamed theme, and after changing any setting the file holds the new id.
+- [ ] Preferences has no "Themes" entry in the sidebar; Appearance → **Manage themes…** opens the theme list in the same window with "← Appearance"; the link and Esc go back to Appearance, Esc on Appearance closes Preferences; Esc in the theme editor goes back to the list.
+- [ ] Edit a theme without saving, then try each way out (Close, Esc, "← Appearance", another sidebar page, closing Preferences): each asks "Discard changes?" and Cancel keeps the edits.
+- [ ] The start screen buttons with Dusk: text readable on idle, hover and press.
+- [ ] No old product name (Dark+, Light+, GitHub Dark, GitHub Light, Solarized) anywhere in the UI: Preferences, palette, tooltips, notes.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
