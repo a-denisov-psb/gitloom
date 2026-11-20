@@ -367,11 +367,12 @@ pub fn hex_for(field: Field, text: &str) -> Option<Color> {
     parse_hex(text)
 }
 
-/// Names of the embedded syntax themes for the Syntax list.
+/// Names of the embedded syntax themes for the Syntax list: Gitloom's own
+/// (ADR-060) and the `two-face` set.
 pub fn syntax_names() -> Vec<String> {
-    let mut names: Vec<String> = two_face::theme::EmbeddedLazyThemeSet::theme_names()
-        .iter()
-        .map(|t| t.as_name().to_owned())
+    let mut names: Vec<String> = crate::highlight::CodeTheme::names()
+        .into_iter()
+        .map(str::to_owned)
         .collect();
     names.sort_by_key(|n| n.to_lowercase());
     names
@@ -544,6 +545,10 @@ mod tests {
         e.update(Edit::Picker(Field::Text));
         assert_eq!(e.picker, None);
         assert!(syntax_names().contains(&"OneHalfDark".to_owned()));
+        // Gitloom's own syntax themes are listed too (ADR-060).
+        for name in ["Dusk", "Studio Dark"] {
+            assert!(syntax_names().contains(&name.to_owned()), "{name}");
+        }
     }
 
     /// M17-04: every warning rule at its threshold.

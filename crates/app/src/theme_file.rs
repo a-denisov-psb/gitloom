@@ -681,6 +681,30 @@ mod tests {
         assert_eq!(data.syntax, CodeTheme::LIGHT);
     }
 
+    /// ADR-060: Gitloom's own syntax themes are valid `syntax` values and
+    /// round-trip by name.
+    #[test]
+    fn own_syntax_names_round_trip() {
+        use crate::highlight::OwnTheme;
+        for (name, own) in [
+            ("Dusk", OwnTheme::Dusk),
+            ("Studio Dark", OwnTheme::StudioDark),
+        ] {
+            let text = MINIMAL.replace("\"base\"", &format!("\"syntax\": \"{name}\", \"base\""));
+            let data = parse(&text).unwrap();
+            assert_eq!(data.syntax, CodeTheme::Own(own));
+            let saved = to_json(&data);
+            assert!(
+                saved.contains(&format!("\"syntax\": \"{name}\"")),
+                "{saved}"
+            );
+            // Derived colors are rounded to bytes on the first save.
+            let once = parse(&saved).unwrap();
+            assert_eq!(once.syntax, CodeTheme::Own(own));
+            assert_eq!(to_json(&once), saved);
+        }
+    }
+
     /// ADR-060: a file of base dark takes missing lanes, Git flow colors
     /// and syntax theme from Dusk.
     #[test]
