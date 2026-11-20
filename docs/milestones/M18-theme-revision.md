@@ -109,13 +109,15 @@ Acceptance: contrast tests pass for all ten themes; a snapshot of Dusk (window w
 
 Note (done): `theme::DARK` holds Dusk and `CodeTheme::DARK` is the Dusk syntax theme. Contrast corrections: muted text `#b9b9b8` (4.5:1 on the chrome `#464a52`), hover `#464a53` (stands out on the inset), selected `#51545b` (4.6:1 text); diff word emphasis 20 / 26 % like Monokai. The light accent with light text cannot reach 4.5:1 at the start buttons' 35 / 45 %: instead of darkening the accent, the start button caps its accent alpha per palette at the highest value that keeps 4.5:1 (Dusk: 29 % on hover and press; the other themes keep 25 / 35 / 45 %, checked by the contrast test). The ui_check snapshots are written to `target/ui-snapshots/` and not stored; `theme-dusk-*` and `theme-list-dusk` replace the Dark ones, checked by eye.
 
-### [ ] M18-04 Themes as a sub-page of Appearance
+### [x] M18-04 Themes as a sub-page of Appearance
 
 - Remove the category "Themes" from the Preferences sidebar. Appearance → Theme gets the button "Manage themes…" that opens the existing list and editor as a sub-page in the same window, with the header "← Appearance" (or "Appearance › Themes"); Esc goes up one level.
 - The sub-page is not remembered; opening Preferences shows Appearance. The unsaved-changes dialog covers every way out (back, Esc, closing Preferences, another category).
 - Palette action "Edit themes…" and the settings search result "Edit themes" open Preferences on the sub-page; the editor, the file actions and the preview do not change.
 
 Acceptance: app tests: "Manage themes…" shows the list; back returns to Appearance; Esc returns one level and closes Preferences from Appearance as before; an edited, unsaved theme asks "Discard changes?" on back, Esc and closing; the palette action opens the sub-page from a closed Preferences window; the sidebar has no "Themes" entry; reopening Preferences shows Appearance. Layout check at the minimum window size: the editor with preview stays usable (no clipped controls).
+
+Note (done): `Category::Themes` stays as the sub-page's state but is no longer in the sidebar; `Category::sidebar` highlights Appearance for it and `Category::parent` drives the "← Appearance" link above the title and Esc. Esc goes editor → list → Appearance → closed and asks "Discard changes?" on unsaved edits (before, Esc closed Preferences without asking). Leaving the sub-page closes a saved editor. "Opening Preferences shows Appearance itself" is read as "never the sub-page": Preferences open on General as before (GitKraken opens on its first page too); reopening after the sub-page shows General, not Themes. The "Manage themes…" button sits under the theme list. Checked by hand in the ui_check snapshots `themes-sub-page`, `themes-appearance-button` and `themes-editor-min-size` (window minimum size: all controls usable; a long preview diff line already ran over the preview frame before M18).
 
 ### [ ] M18-05 Documentation and close
 
