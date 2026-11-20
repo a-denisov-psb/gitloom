@@ -2,7 +2,7 @@
 
 Target version: **1.0.0** (no release of its own, ADR-042)
 
-Runs on `develop` after M17. Requested by the maintainer (2026-11-20), findings #50 and #51. Last milestone before the final check.
+Runs on `develop` after M17. Requested by the maintainer (2026-11-20), findings #50 and #51; planning update 14 adds finding #52 as M18-06. Last milestone before the final check.
 
 ## Goal
 
@@ -58,6 +58,7 @@ Open: none (Gitloom extension, no GitKraken item). For the maintainer's check: D
 - [ ] Studio Dark and Dusk highlight with their own syntax themes in the diff, blame, file history and the conflict view; both pass the contrast checks.
 - [ ] The category "Themes" is gone; "Manage themes…" opens the same list and editor inside Appearance with a way back; unsaved edits are protected on every way out.
 - [ ] No product or brand name of another theme in UI, user guide, CHANGELOG and UX-PARITY.
+- [ ] Switching the active tab closes diff, blame and file history of the tab that is left; returning shows the graph (M18-06).
 - [ ] User guide, UX-PARITY, release checklist (section 7q), third-party notices, ADR-060 and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
@@ -69,6 +70,7 @@ Open: none (Gitloom extension, no GitKraken item). For the maintainer's check: D
 | M18-03 | Palettes: Dusk replaces Dark, Studio Dark, renames | M18-01, M18-02 |
 | M18-04 | Themes as a sub-page of Appearance | M17-05 |
 | M18-05 | Documentation and close | M18-01 … M18-04 |
+| M18-06 | Tab switch closes center views (planning update 14, finding #52) | M18-05 (order only) |
 
 ---
 
@@ -120,6 +122,15 @@ Acceptance: app tests: "Manage themes…" shows the list; back returns to Appear
 
 Acceptance: docs reviewed against the implemented behavior; checklist 7q matches the acceptance list.
 
+### [ ] M18-06 Tab switch closes center views
+
+- When the active repository tab changes (click, keyboard shortcut, command palette, switch to the start screen), the tab that is left returns its center view to the graph if that view replaces the graph: diff (hunk, inline, split), blame and file history. It behaves exactly like the Close button in the diff header, including what happens to the file selection in the right panel. Returning to a tab always shows the graph.
+- All ways of changing the active tab go through one place (no per-path special cases).
+- The conflict view is checked first: if closing it would lose unsaved resolution work, it stays open (ADR-044, no data loss) and the exception is documented in the task note; otherwise it closes like the other views.
+- Closing a view is view state only, not a write action: no undo entry (ADR-043). Staged hunks and lines live in the index and are unaffected.
+
+Acceptance: app tests: open a diff in tab A, switch to tab B and back: the graph is shown and the diff is closed; the same for inline, split, blame and file history; switching to the start screen and back; two tabs that each have an open view are both closed when left; a line staged before the switch is still staged afterwards; the conflict view behaves as decided (test matches the documented outcome). Docs: UX-PARITY row "Diff" gets "switching tabs closes it (Gitloom decision; GitKraken behavior to be checked)"; the user doc that describes the diff view; `docs/RELEASE-CHECKLIST.md` section 7q gets one item (open a diff, switch tab and back, the graph is shown; same for blame and file history); CHANGELOG `[Unreleased]`; implementation note in ADR-060 (no new ADR); `docs/HANDOVER.md` GitKraken verification list: "Does GitKraken close the diff when switching tabs?".
+
 ## ADR-060 (to append to docs/DECISIONS.md)
 
 ## ADR-060 Theme set revision and themes under Appearance
@@ -136,7 +147,7 @@ Acceptance: docs reviewed against the implemented behavior; checklist 7q matches
 
 ## After M18
 
-All planned milestones are done. Do not ask for planning. Instead:
+These closing steps follow M18-06 (planning update 14), not M18-05. All planned milestones are done. Do not ask for planning. Instead:
 
 1. `docs/ROADMAP.md`: M18 done; "Current milestone" → "Final check and release 1.0.0 (M6-13, M6-15; ADR-042)" with the checklist sections 7 … 7q.
 2. `docs/HANDOVER.md`: current state; the maintainer to-do "Final check before 1.0.0" lists all checklist sections 7 … 7q and the open GitKraken verification items.
