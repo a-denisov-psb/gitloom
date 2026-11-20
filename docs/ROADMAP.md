@@ -141,7 +141,7 @@ Own themes: duplicate any theme, edit main, secondary, lane and Git flow colors 
 
 ### M18 – Theme revision (planned)
 
-Dusk (colors of Ayu Mirage as Zed shows it) replaces Dark and becomes the default dark theme; Studio Dark keeps the Dark+ UI colors and gets a real Dark+ syntax look from an embedded syntax theme of its own; themes renamed without product names (Midnight, Studio Light, Sepia, Daylight) with migration of old ids in `settings.json`; themes move from their own Preferences category to a sub-page of Appearance ("Manage themes…"). Details: [`milestones/M18-theme-revision.md`](milestones/M18-theme-revision.md).
+Dusk (colors of Ayu Mirage as Zed shows it) replaces Dark and becomes the default dark theme; Studio Dark keeps the Dark+ UI colors and gets a real Dark+ syntax look from an embedded syntax theme of its own; themes renamed without product names (Midnight, Studio Light, Sepia, Daylight) with migration of old ids in `settings.json`; themes move from their own Preferences category to a sub-page of Appearance ("Manage themes…"). Planning update 14 (finding #52, M18-06): switching the active tab closes diff, blame and file history of the tab that is left, so returning shows the graph. Six tasks (M18-01 … M18-06). Details: [`milestones/M18-theme-revision.md`](milestones/M18-theme-revision.md).
 
 ## Non-goals
 
