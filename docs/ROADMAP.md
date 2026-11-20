@@ -2,9 +2,9 @@
 
 ## Current milestone
 
-**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7p); 1.0.0 is released from `develop` when the maintainer asks.
+**M18 Theme revision** → [`milestones/M18-theme-revision.md`](milestones/M18-theme-revision.md). After M18: final check and release 1.0.0 (M6-13, M6-15; ADR-042): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7q); 1.0.0 is released from `develop` when the maintainer asks.
 
-Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M17 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
+Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M18 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
 ## Vision
 
@@ -34,6 +34,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M15 | 1.0.0 | Polish before 1.0.0 | Done |
 | M16 | 1.0.0 | Theme system | Done |
 | M17 | 1.0.0 | Theme editor | Done |
+| M18 | 1.0.0 | Theme revision | Planned |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -137,6 +138,10 @@ Ten built-in themes instead of Dark and Light (Dark, Light, Dark+, Light+, Monok
 ### M17 – Theme editor (done)
 
 Own themes: duplicate any theme, edit main, secondary, lane and Git flow colors and the syntax theme in Preferences → Themes, check them in a preview that cannot make the settings unreadable, save them as JSON files, import and export. Details: [`milestones/M17-theme-editor.md`](milestones/M17-theme-editor.md).
+
+### M18 – Theme revision (planned)
+
+Dusk (colors of Ayu Mirage as Zed shows it) replaces Dark and becomes the default dark theme; Studio Dark keeps the Dark+ UI colors and gets a real Dark+ syntax look from an embedded syntax theme of its own; themes renamed without product names (Midnight, Studio Light, Sepia, Daylight) with migration of old ids in `settings.json`; themes move from their own Preferences category to a sub-page of Appearance ("Manage themes…"). Details: [`milestones/M18-theme-revision.md`](milestones/M18-theme-revision.md).
 
 ## Non-goals
 

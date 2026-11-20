@@ -670,6 +670,7 @@ Consequences: small discipline costs now; no behavior change for local repositor
 ## ADR-058 Theme registry and built-in themes
 
 - Status: accepted (M16 plan, 2026-11-19)
+  - Superseded in part by ADR-060 (theme set, names and ids; themes as a sub-page of Appearance).
 - Context: ADR-027 offered Dark and Light with one runtime palette. ADR-054 removed Classic Dark, a graph look built from style tokens, and kept two themes. The maintainer now wants a choice of color themes and, in M17, themes of their own, without bringing the graph style tokens back.
 - Decision:
   - A theme is data: id, name, base (Dark or Light), `ThemePalette` and the name of an embedded syntect theme, kept in a registry. Themes are colors only. The style tokens removed by ADR-054 stay removed; the token `header_band` and future color tokens belong to the palette (ADR-048).
@@ -692,6 +693,7 @@ Consequences: small discipline costs now; no behavior change for local repositor
 ## ADR-059 Theme files and the theme editor
 
 - Status: accepted (M17 plan, 2026-11-19)
+  - Superseded in part by ADR-060 (theme set, names and ids; themes as a sub-page of Appearance).
 - Context: With the registry of ADR-058 users can choose among ten themes. They also want their own and want to share them without a build or a plugin system.
 - Decision:
   - One JSON file per user theme in `themes/` inside the config directory (`~/.config/gitloom/themes/`, `~/Library/Application Support/Gitloom/themes/`, `%APPDATA%\Gitloom\config\themes\`). The id is `user:<file stem>`.
@@ -707,3 +709,15 @@ Consequences: small discipline costs now; no behavior change for local repositor
   - Themes category (M17-02): file actions are `theme_file::Op` values run by `theme_file::apply` in a background task, which reads the folder again; the result names the theme to select, a rename (settings that name the old id follow: `theme`, `system_dark`, `system_light`) and an import collision (dialog Cancel / Keep both / Replace). Deleting a theme that is in use keeps its id in the settings, so Preferences → Appearance shows the fallback note until another theme is chosen. Export writes the complete file of the selected theme (built-ins too). Rename… and Delete… stay visible but disabled for built-ins.
   - Editor (M17-03): `theme_editor::Editor` (pure) holds the saved and the edited `ThemeData`, the typed hex texts (an invalid one is kept and marked, the color stays) and the open picker; the picker is RGB(A) sliders, no new dependency. Derive copies only inset, hover, selected, header band, backdrop and the emphasis colors from `ThemePalette::derive`; after a main color changed a hint offers it. Lane edits recompute the node text. Save writes through `theme_file::Op::Save`; the registry entry is replaced, so the window repaints when the active theme was saved.
   - Preview (M17-04): `ui::theme_preview` draws static sample content (graph rows with ref pills and lane and Git flow colors, hover and selected rows, a diff with emphasis and syntax colors, panel, buttons, text and status colors) inside `iced::widget::themer` with the iced theme of the registry's preview entry (`themes::PREVIEW_ID`, never listed); the App replaces that entry after each update that changed the edited theme and clears it when the editor closes. `theme_editor::warnings` implements the warning rules; they are listed under the preview and never block saving.
+
+## ADR-060 Theme set revision and themes under Appearance
+
+- Status: accepted (M18 plan, 2026-11-20)
+- Context: ADR-058 introduced ten built-in themes with names of other products (Dark+, Light+, GitHub Dark, GitHub Light, Solarized Light). Dark and Dark+ were close to each other, and the Dark+ syntax pairing (Nord) was weak because `two-face` no longer ships a Visual Studio Dark+ theme. ADR-059 put the theme list and editor in a category of their own although themes are a cosmetic setting.
+- Decision:
+  - The set becomes Dusk, Studio Dark, Monokai, Midnight, Warm Dark (dark) and Light, Studio Light, Sepia, Daylight, Warm Light (light). Dusk replaces Dark and is the default dark theme; its colors follow the Ayu Mirage theme as the Zed editor shows it. Studio Dark keeps the UI colors of Dark+; Midnight, Studio Light, Sepia and Daylight are renames. Theme names carry no other product's name; provenance is kept in the notices.
+  - Ids change with the names (`dusk`, `studio-dark`, `midnight`, `studio-light`, `sepia`, `daylight`). Old ids are read through an alias table in `settings.json` and never written again.
+  - Two syntax themes of our own (`.tmTheme`, embedded): Studio Dark (translated from the VS Code Dark+ themes, MIT) and Dusk (Ayu scope structure, Zed hex values). Custom syntax token colors by users stay out of scope. Semantic highlighting is not available; grammar scopes only.
+  - Themes are a sub-page of Preferences → Appearance ("Manage themes…") in the same window; the category "Themes" is removed. Palette action and settings search open the sub-page directly.
+- Why: fewer near-duplicates, no brand names, a real Dark+ syntax look, and a settings sidebar that keeps cosmetic options in one place without a second modal.
+- Consequences: ids and names in `settings.json` need the alias table for good; ADR-058's list of themes and ADR-059's "Themes category" are superseded in these points; the hex sources and licenses of the new syntax themes belong in the notices.
