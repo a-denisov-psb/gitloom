@@ -719,16 +719,17 @@ pub enum Category {
     Editor,
     /// Git flow of the active tab's repository (M7-07).
     Gitflow,
-    /// The theme list and its files (M17-02, ADR-059).
+    /// The theme list, its files and the editor (M17-02, ADR-059): a
+    /// sub-page of Appearance ("Manage themes…", ADR-060), not in the
+    /// sidebar.
     Themes,
 }
 
 impl Category {
     /// Categories that apply everywhere, at the top of the list.
-    pub const GLOBAL: [Self; 8] = [
+    pub const GLOBAL: [Self; 7] = [
         Self::General,
         Self::Appearance,
-        Self::Themes,
         Self::Editor,
         Self::Identities,
         Self::Signing,
@@ -745,6 +746,24 @@ impl Category {
         Self::RepoEditor,
         Self::Gitflow,
     ];
+
+    /// The sidebar entry that is highlighted for the category: sub-pages
+    /// highlight their parent (Themes → Appearance, ADR-060).
+    pub fn sidebar(self) -> Self {
+        match self {
+            Self::Themes => Self::Appearance,
+            other => other,
+        }
+    }
+
+    /// The category one level up (Esc and the back button), `None` for
+    /// the categories of the sidebar.
+    pub fn parent(self) -> Option<Self> {
+        match self {
+            Self::Themes => Some(Self::Appearance),
+            _ => None,
+        }
+    }
 
     /// The category belongs to the repository group.
     pub fn is_repository(self) -> bool {
@@ -774,7 +793,7 @@ impl Category {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Page {
     pub category: Category,
-    /// Theme selected in Preferences → Themes (`None`: the active one).
+    /// Theme selected in Preferences → Appearance → Manage themes (`None`: the active one).
     pub theme_selected: Option<String>,
     /// The theme editor, while a user theme is edited (M17-03).
     pub theme_editor: Option<crate::theme_editor::Editor>,

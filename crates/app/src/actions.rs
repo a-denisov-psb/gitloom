@@ -93,7 +93,7 @@ pub enum ActionId {
     About,
     /// Opens Preferences → Identities (M8-03).
     ManageIdentities,
-    /// Opens Preferences → Themes (M17-02).
+    /// Opens Preferences → Appearance → Manage themes (M17-02).
     EditThemes,
     /// "Copy commit message prompt…" (M10-07).
     CopyCommitPrompt,

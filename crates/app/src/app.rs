@@ -582,7 +582,7 @@ pub enum Message {
     SettingsLoaded(settings::Loaded),
     /// The theme files of the config directory (ADR-059).
     UserThemesLoaded(Vec<crate::theme_file::Entry>),
-    /// Preferences → Themes (M17-02): select, New theme (a copy of the
+    /// Preferences → Appearance → Manage themes (M17-02): select, New theme (a copy of the
     /// selected one), Rename…, Delete…, Import…, Export…, Open folder.
     ThemeSelected(String),
     ThemeNew,
@@ -3129,7 +3129,7 @@ impl App {
         )
     }
 
-    /// The theme selected in Preferences → Themes: the page's choice, else
+    /// The theme selected in Preferences → Appearance → Manage themes: the page's choice, else
     /// the active theme.
     pub fn selected_theme(&self) -> std::sync::Arc<crate::themes::ThemeDef> {
         self.settings_page
@@ -3659,6 +3659,26 @@ impl App {
         }
     }
 
+    /// Esc in Preferences goes up one level (ADR-060): the theme editor
+    /// back to the theme list, the theme list back to Appearance, any
+    /// other category closes Preferences; unsaved theme edits ask
+    /// "Discard changes?" first. False when Preferences are not open.
+    fn settings_escape(&mut self) -> bool {
+        let Some(page) = &self.settings_page else {
+            return false;
+        };
+        let up = if page.theme_editor.is_some() {
+            Message::ThemeEditorClose
+        } else if let Some(parent) = page.category.parent() {
+            Message::SettingsCategory(parent)
+        } else {
+            Message::SettingsClosed
+        };
+        // None of these starts background work.
+        let _ = self.update(up);
+        true
+    }
+
     fn close_topmost_overlay(&mut self) -> bool {
         std::mem::take(&mut self.about)
             || self.modal.take().is_some()
@@ -3670,7 +3690,7 @@ impl App {
             || self.prompt_dialog.take().is_some()
             || self.close_message_modal()
             || self.init_dialog.take_if(|d| !d.running).is_some()
-            || self.settings_page.take().is_some()
+            || self.settings_escape()
             || self
                 .active_view_mut()
                 .is_some_and(|v| v.drag.take().is_some())
@@ -8148,6 +8168,11 @@ impl App {
                 }
                 if let Some(page) = &mut self.settings_page {
                     page.category = category;
+                    // Leaving the theme sub-page closes the (saved) editor;
+                    // it is not remembered (ADR-060).
+                    if category != settings::Category::Themes {
+                        page.theme_editor = None;
+                    }
                     if category.is_repository() {
                         page.repo = repo;
                     }
@@ -15026,7 +15051,7 @@ pub(crate) mod tests {
         result
     }
 
-    /// An app with a config folder in `dir` and Preferences → Themes open.
+    /// An app with a config folder in `dir` and Preferences → Appearance → Manage themes open.
     fn themes_app(dir: &std::path::Path) -> App {
         let mut app = ready_app(&["c"]);
         app.settings_path = Some(dir.join(settings::FILE_NAME));
@@ -15159,6 +15184,90 @@ pub(crate) mod tests {
             .settings_page
             .as_ref()
             .is_some_and(|p| p.theme_editor.is_none()));
+        app.set_theme_files(Vec::new());
+    }
+
+    /// ADR-060: the theme list and editor are a sub-page of Appearance:
+    /// "Manage themes…" opens it, back and Esc go up one level, unsaved
+    /// edits ask on every way out, the sidebar has no "Themes" entry and
+    /// reopening Preferences does not restore the sub-page.
+    #[test]
+    fn themes_are_a_sub_page_of_appearance() {
+        use crate::theme_editor::Edit;
+        use settings::Category;
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = themes_app(dir.path());
+        let category = |app: &App| app.settings_page.as_ref().map(|p| p.category);
+        let editor_open = |app: &App| {
+            app.settings_page
+                .as_ref()
+                .is_some_and(|p| p.theme_editor.is_some())
+        };
+        assert!(!Category::GLOBAL.contains(&Category::Themes));
+        assert_eq!(Category::Themes.sidebar(), Category::Appearance);
+        assert_eq!(Category::Themes.parent(), Some(Category::Appearance));
+        assert_eq!(
+            crate::ui::settings::back_label(Category::Appearance),
+            "← Appearance"
+        );
+
+        // Appearance → Manage themes… → back.
+        let _ = app.update(Message::SettingsCategory(Category::Appearance));
+        let _ = app.update(Message::SettingsCategory(Category::Themes));
+        assert_eq!(category(&app), Some(Category::Themes));
+        let _ = app.update(Message::SettingsCategory(Category::Appearance));
+        assert_eq!(category(&app), Some(Category::Appearance));
+        // Esc: the list goes back to Appearance, Appearance closes.
+        let _ = app.update(Message::SettingsCategory(Category::Themes));
+        let _ = app.update(Message::EscapeCaptured);
+        assert_eq!(category(&app), Some(Category::Appearance));
+        let _ = app.update(Message::EscapeCaptured);
+        assert_eq!(category(&app), None, "Esc on Appearance closes as before");
+
+        // The palette action opens the sub-page from a closed window.
+        let _ = app.shortcut(Shortcut::EditThemes);
+        assert_eq!(category(&app), Some(Category::Themes));
+
+        // The editor: Esc goes back to the list, then to Appearance.
+        let _ = app.update(Message::ThemeNew);
+        run_theme_op(&mut app).unwrap();
+        assert!(editor_open(&app));
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(!editor_open(&app));
+        assert_eq!(category(&app), Some(Category::Themes));
+
+        // Unsaved edits ask on back, Esc, closing and another category.
+        let _ = app.update(Message::ThemeSelected("user:Dusk copy".into()));
+        let _ = app.update(Message::ThemeEditOpened);
+        assert!(editor_open(&app));
+        let _ = app.update(Message::ThemeEdit(Edit::Name("Night".into())));
+        for leave in [
+            Message::SettingsCategory(Category::Appearance),
+            Message::EscapeCaptured,
+            Message::SettingsClosed,
+            Message::SettingsCategory(Category::Editor),
+        ] {
+            let _ = app.update(leave);
+            let modal = app.modal.take().expect("Discard changes?");
+            assert_eq!(modal.title, "Discard changes?");
+            assert_eq!(category(&app), Some(Category::Themes), "still there");
+            assert!(editor_open(&app));
+        }
+        // Discarding on the back button goes to Appearance.
+        let _ = app.update(Message::SettingsCategory(Category::Appearance));
+        let modal = app.modal.take().expect("Discard changes?");
+        let _ = app.update(modal.action(1).expect("discard"));
+        assert_eq!(category(&app), Some(Category::Appearance));
+        assert!(!editor_open(&app));
+
+        // The sub-page is not remembered.
+        let _ = app.update(Message::SettingsCategory(Category::Themes));
+        let _ = app.update(Message::SettingsClosed);
+        let _ = app.update(Message::SettingsOpened);
+        assert_eq!(category(&app), Some(Category::General));
         app.set_theme_files(Vec::new());
     }
 

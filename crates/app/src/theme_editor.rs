@@ -1,4 +1,4 @@
-//! State of the theme editor in Preferences → Themes (M17-03, ADR-059):
+//! State of the theme editor in Preferences → Appearance → Manage themes (M17-03, ADR-059):
 //! the edited theme, the typed hex values and the open color picker. Pure:
 //! the App saves through `theme_file::Op::Save`.
 

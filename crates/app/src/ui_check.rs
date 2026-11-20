@@ -1266,7 +1266,7 @@ mod tests {
         snapshot(&app, "theme-list-unknown");
     }
 
-    /// Preferences → Themes (M17-02): built-ins with lock icons, a user
+    /// Preferences → Appearance → Manage themes (M17-02): built-ins with lock icons, a user
     /// theme, an invalid file with its reason; Dark and Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
@@ -1350,6 +1350,49 @@ mod tests {
         let view = app.tabs[0].view_mut().unwrap();
         view.snapshot = std::sync::Arc::new(flow.with_flow_layout(true).unwrap());
         snapshot_sized(&app, "theme-one-feature-color", (1200.0, 520.0));
+        app.set_theme_files(Vec::new());
+    }
+
+    /// ADR-060: Appearance → "Manage themes…" opens the theme list as a
+    /// sub-page with "← Appearance"; no "Themes" entry in the sidebar; the
+    /// editor with its preview at the minimum window size.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_themes_sub_page() {
+        let _lock = crate::themes::TEST_USER_THEMES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        use crate::settings::Category;
+        use crate::theme_file::{Entry, ThemeData};
+        let mut app = crate::app::tests::ready_app(&["c", "b", "a"]);
+        let dusk = crate::themes::get("dusk").unwrap();
+        let def = ThemeData {
+            name: "Dusk copy".into(),
+            ..ThemeData::of(&dusk)
+        }
+        .into_def("user:Dusk copy".into());
+        app.set_theme_files(vec![Entry::Theme(def.clone())]);
+        let _ = app.update(Message::SettingsOpenedAt(Category::Appearance));
+        let has = |app: &App, label: &str| simulator(app).find(label).is_ok();
+        assert!(!has(&app, "Themes"), "no sidebar entry");
+        click(&mut app, crate::ui::settings::MANAGE_THEMES);
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(Category::Themes)
+        );
+        assert!(has(&app, "← Appearance"));
+        snapshot(&app, "themes-sub-page");
+        click(&mut app, "← Appearance");
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(Category::Appearance)
+        );
+        snapshot(&app, "themes-appearance-button");
+        let _ = app.update(Message::SettingsCategory(Category::Themes));
+        let _ = app.update(Message::ThemeSelected(def.id.clone()));
+        let _ = app.update(Message::ThemeEditOpened);
+        let min = crate::layout::window_min();
+        snapshot_sized(&app, "themes-editor-min-size", (min.width, min.height));
         app.set_theme_files(Vec::new());
     }
 
