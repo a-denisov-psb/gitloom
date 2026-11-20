@@ -21,7 +21,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
             .on_press_maybe(enabled.then_some(Message::SettingsCategory(category)))
             .padding([6, 12])
             .width(Fill)
-            .style(theme::list_item(category == page.category));
+            .style(theme::list_item(category == page.category.sidebar()));
         if enabled {
             button.into()
         } else {
@@ -94,7 +94,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     let body = row![
         container(categories).height(Fill).style(theme::chrome),
         crate::ui::vscroll(
-            column![text(category_title(app, page.category)).size(16), form]
+            column![category_heading(app, page.category), form]
                 .spacing(16)
                 .padding(20)
                 .max_width(640)
@@ -111,6 +111,9 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
         .style(theme::graph)
         .into()
 }
+
+/// Button in Appearance → Theme that opens the theme list (ADR-060).
+pub const MANAGE_THEMES: &str = "Manage themes…";
 
 /// Why the repository categories are disabled on the start screen.
 pub const NO_REPOSITORY: &str = "Open a repository first";
@@ -147,6 +150,33 @@ pub fn repository_label(repo: Option<&str>) -> String {
 }
 
 /// Title of the form; Gitflow names the repository it applies to.
+/// Text of the "back" link of a sub-page (ADR-060).
+pub fn back_label(parent: Category) -> String {
+    format!("← {}", parent.title())
+}
+
+/// Title of the form; a sub-page shows "← <parent>" above its title
+/// (ADR-060: Appearance → Manage themes).
+fn category_heading<'a>(app: &App, category: Category) -> Element<'a, Message> {
+    let title = text(category_title(app, category)).size(16);
+    match category.parent() {
+        Some(parent) => column![
+            crate::ui::panel::with_tooltip_text(
+                button(text(back_label(parent)).size(13))
+                    .on_press(Message::SettingsCategory(parent))
+                    .padding([2, 0])
+                    .style(button::text)
+                    .into(),
+                "Back (Esc)".to_owned(),
+            ),
+            title,
+        ]
+        .spacing(6)
+        .into(),
+        None => title.into(),
+    }
+}
+
 fn category_title(app: &App, category: Category) -> String {
     match (category, app.active_repo_name()) {
         (Category::Gitflow, Some(name)) => format!("Gitflow · {name}"),
@@ -1559,7 +1589,7 @@ fn theme_editor(editor: &crate::theme_editor::Editor) -> Element<'_, Message> {
     .into()
 }
 
-/// Preferences → Themes (M17-02, ADR-059): built-in themes (read only,
+/// Preferences → Appearance → Manage themes (M17-02, ADR-059): built-in themes (read only,
 /// lock icon) and "My themes" with the invalid files and their reason;
 /// the file actions below act on the selected theme.
 fn themes_page(app: &App) -> Element<'_, Message> {
@@ -1688,15 +1718,16 @@ fn appearance(app: &App) -> Element<'_, Message> {
         }
     };
     let theme_field = field("Theme", theme_choice(app), system_note);
-    // Own themes are made in Preferences → Themes (M17-02).
+    // Own themes: the theme list and editor open as a sub-page (M17-02,
+    // ADR-060).
     let theme_field: Element<'_, Message> = column![
         theme_field,
-        button(text("Edit themes…").size(12))
+        button(text(MANAGE_THEMES))
             .on_press(Message::SettingsCategory(Category::Themes))
-            .padding([2, 0])
-            .style(button::text),
+            .padding([5, 12])
+            .style(button::secondary),
     ]
-    .spacing(2)
+    .spacing(8)
     .into();
     // An unknown chosen or mapped id is named (ADR-044, ADR-058).
     let theme_field: Element<'_, Message> = match app.theme_note() {
