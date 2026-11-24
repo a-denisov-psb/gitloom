@@ -60,14 +60,14 @@ Open: none. For the maintainer's check: checklist section 7r.
 
 ## Milestone acceptance
 
-- [ ] "Open in external editor" on a file of a commit opens that commit's version, also for a commit on a branch that is not checked out and for a file that is not in the working tree (finding #53); the editor shows a read-only copy and an info toast names it.
-- [ ] For a file that exists in the working tree with other content, a commit older than HEAD opens the old content, not the current one.
-- [ ] HEAD with an unchanged file opens the real file; HEAD with a modified file opens a copy.
-- [ ] A file deleted in a commit opens its version before the deletion; a file history entry opens the version of that entry, also after a rename.
-- [ ] The Unstaged and Staged lists still open the working tree file.
-- [ ] No program that Gitloom starts can fail without a visible message: editor, terminal, file manager, links, theme folder, crash report folder, "Open file location" (toasts with plain text).
-- [ ] Every disabled menu entry in the audited menus has a reason tooltip; refused and failed actions found by the audit show a toast or a reason (list in the M19-03 note).
-- [ ] ADR-061 and the ADR-044 amendment are in `docs/DECISIONS.md`; user guide, undo list ("Cannot be undone"), UX-PARITY, release checklist (section 7r) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] "Open in external editor" on a file of a commit opens that commit's version, also for a commit on a branch that is not checked out and for a file that is not in the working tree (finding #53); the editor shows a read-only copy and an info toast names it.
+- [x] For a file that exists in the working tree with other content, a commit older than HEAD opens the old content, not the current one.
+- [x] HEAD with an unchanged file opens the real file; HEAD with a modified file opens a copy.
+- [x] A file deleted in a commit opens its version before the deletion; a file history entry opens the version of that entry, also after a rename.
+- [x] The Unstaged and Staged lists still open the working tree file.
+- [x] No program that Gitloom starts can fail without a visible message: editor, terminal, file manager, links, theme folder, crash report folder, "Open file location" (toasts with plain text).
+- [x] Every disabled menu entry in the audited menus has a reason tooltip; refused and failed actions found by the audit show a toast or a reason (list in the M19-03 note).
+- [x] ADR-061 and the ADR-044 amendment are in `docs/DECISIONS.md`; user guide, undo list ("Cannot be undone"), UX-PARITY, release checklist (section 7r) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
@@ -122,7 +122,7 @@ Note: all launches (editor, commit file, terminal, file manager, "Open file loca
 
 Acceptance: app tests: a failing launch for each of the six paths (the program does not exist) shows an Error toast and leaves the status bar empty; Alt+E, the toolbar button and the palette without an editor show the warning toast with a button that opens Preferences on External tools; two identical toasts show one; the converted refusals from the audit show a toast (a test per group, not per line); the menu test above is green. The task note lists the classification of every `self.status` site.
 
-### [ ] M19-04 Documentation and close
+### [x] M19-04 Documentation and close
 
 - `docs/DECISIONS.md`: implementation notes for ADR-061 and the ADR-044 amendment (copy folder, cleanup, rules found in the audit, toast kinds in use).
 - `docs/user/daily-workflow.md` or `docs/user/settings.md` (where the external editor is explained): files of a commit open as read-only copies, where they are, the HEAD exception, deleted files; `docs/user/troubleshooting.md`: "Nothing happens when I open a file" is now a message, and what each message means. `docs/user/undo.md` → "Cannot be undone": a row for opening a file of a commit in the external editor (nothing in your repository changes; the copy is deleted after a day).
