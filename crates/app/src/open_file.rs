@@ -165,6 +165,9 @@ mod tests {
                 base,
             };
             repo.git(&["init", "--quiet", "-b", "main"]);
+            // The checkout filters follow the repository, not the runner's
+            // global config (Windows runners set `core.autocrlf=true`).
+            repo.git(&["config", "core.autocrlf", "false"]);
             repo
         }
 
