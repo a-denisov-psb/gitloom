@@ -136,6 +136,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - 2026-11-19 planning update 12: M16 theme system and M17 theme editor before 1.0.0, ADR-058, ADR-059 (ADR-054 limit to two themes superseded, ADR-027 amended).
 - 2026-11-20 planning updates 13 and 14: M18 theme revision (findings #50, #51) and M18-06 tab switch closes center views (finding #52), ADR-060 (ADR-058 and ADR-059 superseded in part).
 - 2026-11-24 planning update 15: M19 history files and visible failures (findings #53, #54), ADR-061, ADR-044 amended.
+- 2026-11-24 planning update 16: fix for finding #55 (files of a stash in the external editor), ADR-061 note.
 
 Add new agreed-but-not-yet-applied changes here.
 
