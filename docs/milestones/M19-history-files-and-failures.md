@@ -82,7 +82,9 @@ Open: none. For the maintainer's check: checklist section 7r.
 
 ## Tasks
 
-### [ ] M19-01 Snapshot engine
+### [x] M19-01 Snapshot engine
+
+Note: `git_core::file_at_commit` uses `git ls-tree` (literal pathspec, no object needed: submodules and folders are told apart) plus `cat-file --filters`; `commit_id` resolves the first parent. App module `history_copy` (base folder name `identity::VIEW_DIR`); copies of a deleted file are keyed by the parent's id, whose content they hold. The cleanup also removes emptied folders.
 
 - git-core: a function that reads a file at a commit through the backend (`git cat-file --filters <rev>:<path>`, like `blob_for_worktree` does for the working tree), result "not in this commit" distinct from an error; no size limit (not the diff limit); runs off the UI thread.
 - App side (no process start in this module, ADR-053): a pure function that builds the copy path `<temp>/gitloom-view/<commit 12>/<repo path>` and rejects unsafe paths (`..`, absolute paths, drive prefixes, empty parts; on Windows reserved names and forbidden characters) with a readable reason; a function that writes the copy (create folders, reuse identical content, rewrite otherwise, set read-only); a cleanup function (delete copies older than a given age, ignore errors, clear the read-only flag first). The base folder comes from one place so tests can point it elsewhere.

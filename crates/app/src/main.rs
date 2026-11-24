@@ -26,6 +26,7 @@ mod format;
 mod fuzzy;
 mod graph_columns;
 mod highlight;
+mod history_copy;
 mod icons;
 mod launch;
 mod layout;

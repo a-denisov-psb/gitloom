@@ -15,6 +15,7 @@ mod discard;
 mod editor;
 pub mod explain;
 mod external_tools;
+mod file_at;
 mod file_history;
 pub mod flow;
 pub mod flow_finish;
@@ -71,6 +72,7 @@ pub use external_tools::{
     set_flow_layout, set_repository_editor, tool_info, tool_shell_command, DiffTarget, ToolInfo,
     ToolKind, ToolSelection, CUSTOM_TOOL,
 };
+pub use file_at::{commit_id, file_at_commit, CommitFile};
 pub use file_history::{file_history, parse_log, tracked_files, FileHistoryEntry};
 pub use flow::{FlowBranch, FlowConfig, FlowKind};
 pub use git_identity::{

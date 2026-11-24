@@ -1580,7 +1580,27 @@ impl App {
             ),
             None => Task::none(),
         };
-        (app, Task::batch([task, detect, system_theme, crashes]))
+        // Read-only copies of commit files older than a day (M19-01, ADR-061);
+        // best effort, off the UI thread, never waits for the first frame.
+        let copies = match app.session_path {
+            Some(_) => Task::perform(
+                blocking(|| {
+                    let base = crate::history_copy::base_dir();
+                    let now = std::time::SystemTime::now();
+                    Ok(crate::history_copy::clean(
+                        &base,
+                        crate::history_copy::MAX_AGE,
+                        now,
+                    ))
+                }),
+                |_| Message::Noop,
+            ),
+            None => Task::none(),
+        };
+        (
+            app,
+            Task::batch([task, detect, system_theme, crashes, copies]),
+        )
     }
 
     /// Why write actions are blocked, if they are (unknown counts as blocked).
