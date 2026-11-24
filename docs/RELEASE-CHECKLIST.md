@@ -268,6 +268,21 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] No old product name (Dark+, Light+, GitHub Dark, GitHub Light, Solarized) anywhere in the UI: Preferences, palette, tooltips, notes.
 - [ ] Open a diff in one repository tab, switch to another tab (click, Ctrl+Tab, a new tab's start screen) and back: the graph is shown and the diff is closed; the same for blame and file history. A line staged before the switch is still staged. A conflict view with unsaved picks stays open.
 
+## 7r. History files and visible failures (M19) (Windows required)
+
+- [ ] Two branches that are not merged, one adds `README.md`: check out the other one, click the commit of the first, "Open in external editor" on `README.md`: the editor opens a read-only copy with the commit's content; the info toast names it.
+- [ ] A file that exists today with other content: click an old commit that changed it, open it in the editor: the old content shows, not the current one.
+- [ ] Click the HEAD commit and open an unchanged file: the real file opens and can be edited. Change that file without saving to the index and open it from HEAD again: the committed version opens as a read-only copy.
+- [ ] A commit that deleted a file: the entry is enabled and opens the version before the deletion.
+- [ ] File history: select an older entry and open it in the editor: that version opens; for a renamed file the name of that time.
+- [ ] A file with CRLF line endings (Windows, `core.autocrlf=true`): the copy has the same line endings as your working tree file.
+- [ ] The Unstaged and Staged lists still open the working tree file.
+- [ ] The copies are in `%TEMP%\gitloom-view\<commit>\…`; after a restart, copies older than a day are gone.
+- [ ] No external editor set: Alt+E, the toolbar button and the palette show "No external editor set" with "Open Preferences"; the file menu entries are disabled with the reason.
+- [ ] A custom editor command with a program that does not exist: "Could not start the editor" with the reason; nothing fails silently. The same for a custom terminal command that does not exist.
+- [ ] "Open file location" on a file of a commit that is not in the working tree: a toast says so and the nearest folder opens.
+- [ ] Disabled menu entries (for example in a file menu, a branch menu) show a reason as tooltip.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

@@ -32,6 +32,7 @@ Nothing is undone if the repository changed in the meantime (for example HEAD or
 |---|---|
 | Push, deleting or renaming a branch or tag on a remote (also in a bulk delete) | The remote is shared: others may already have fetched the change. Push the old state again if needed. |
 | Fetch (also the fetch part of a pull) | It only updates the remote-tracking branches to what the remote has; your work is not touched. Undoing it would hide the remote's real state. Fetch, pull and push clear the redo list. |
+| Opening a file of a commit in the external editor | Nothing in your repository changes: Gitloom writes a read-only copy to the temp folder (`gitloom-view`) and deletes it after a day. |
 | Clone and "Start a local repo" | They create a new folder; delete it yourself if you no longer need it. |
 | Settings in the Preferences and the Git config (identity, SSH key, Gitflow, signing, commit template, default branch name, external editor, prune, long paths, "Trust this repository…" (`safe.directory`) and others) | They are settings, not changes to your work: change them back in the Preferences. |
 | Layout and view: panel sizes, the details panel position (right or bottom), the staging splitter, zoom, the language chosen for a file | They are settings of the window, not changes to your work: the same button, drag or shortcut changes them back (for the language: "Auto Detect" in the status bar list). |

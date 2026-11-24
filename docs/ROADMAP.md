@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M19 – History files and visible failures (planning update 15)** → [`milestones/M19-history-files-and-failures.md`](milestones/M19-history-files-and-failures.md). After it: **final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7r); 1.0.0 is released from `develop` when the maintainer asks.
+**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7r); 1.0.0 is released from `develop` when the maintainer asks.
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M19 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -35,7 +35,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M16 | 1.0.0 | Theme system | Done |
 | M17 | 1.0.0 | Theme editor | Done |
 | M18 | 1.0.0 | Theme revision | Done |
-| M19 | 1.0.0 | History files and visible failures | Planned |
+| M19 | 1.0.0 | History files and visible failures | Done |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -144,7 +144,7 @@ Own themes: duplicate any theme, edit main, secondary, lane and Git flow colors 
 
 Dusk (colors of Ayu Mirage as Zed shows it) replaces Dark and becomes the default dark theme; Studio Dark keeps the Dark+ UI colors and gets a real Dark+ syntax look from an embedded syntax theme of its own; themes renamed without product names (Midnight, Studio Light, Sepia, Daylight) with migration of old ids in `settings.json`; themes move from their own Preferences category to a sub-page of Appearance ("Manage themes…"). Planning update 14 (finding #52, M18-06): switching the active tab closes diff, blame and file history of the tab that is left, so returning shows the graph. Six tasks (M18-01 … M18-06). Details: [`milestones/M18-theme-revision.md`](milestones/M18-theme-revision.md).
 
-### M19 – History files and visible failures (planned)
+### M19 – History files and visible failures (done)
 
 Files of a commit and entries of the file history open in the external editor in the state of that commit (a read-only copy in the temp folder; the real file when the commit is HEAD and the file is unchanged), also for commits on branches that are not checked out. Every action that cannot run or fails says so and why (tooltip before, toast after; ADR-044 amendment), starting with the programs Gitloom launches, plus an audit of silent refusals. Planning update 15 (findings #53 and #54), ADR-061. Four tasks (M19-01 … M19-04). Details: [`milestones/M19-history-files-and-failures.md`](milestones/M19-history-files-and-failures.md).
 
