@@ -988,6 +988,9 @@ pub enum Message {
     FileContextMenu {
         file: git_core::FileChange,
         area: FileArea,
+        /// The stash part the file is listed in, for a file of a stash
+        /// (finding #55); `None` otherwise.
+        stash: Option<git_core::StashPart>,
         position: iced::Point,
     },
     Stage(git_core::FileChange),
@@ -8736,6 +8739,7 @@ impl App {
                                     commit: e.id.clone(),
                                     path: e.path.clone(),
                                     deleted: e.status == "D",
+                                    stash: None,
                                 })
                             }
                             _ => None,
@@ -8816,6 +8820,7 @@ impl App {
             Message::FileContextMenu {
                 file,
                 area,
+                stash,
                 position,
             } => {
                 let writable = self.write_block().is_none();
@@ -8847,6 +8852,7 @@ impl App {
                                 commit: commit.clone(),
                                 path: file.path.clone(),
                                 deleted,
+                                stash,
                             }),
                         view.is_some_and(|v| v.submodules.iter().any(|s| s.path == file.path)),
                     ),
@@ -17984,6 +17990,7 @@ pub(crate) mod tests {
             let _ = app.update(Message::FileContextMenu {
                 file,
                 area: FileArea::Commit,
+                stash: None,
                 position: iced::Point::ORIGIN,
             });
             editor_entry_of(app)
@@ -17995,6 +18002,7 @@ pub(crate) mod tests {
             commit: "c".into(),
             path: "src/a.rs".into(),
             deleted: false,
+            stash: None,
         };
         assert!(
             matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
@@ -18023,6 +18031,57 @@ pub(crate) mod tests {
         // Without an editor the existing reason wins.
         let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
         let (enabled, hint, _) = open(&mut app, file("src/a.rs"));
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
+    }
+
+    /// Finding #55: a file of a stash carries its part from the click to
+    /// the editor entry; enabled with an editor, disabled with the known
+    /// reason without one; the submodule rule is unchanged.
+    #[test]
+    fn stash_files_carry_their_part() {
+        use git_core::StashPart;
+        let mut app = stash_app();
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        app.tabs[0].view_mut().unwrap().selection = Some(Selection::Commit("s1".into()));
+        let open = |app: &mut App, file: git_core::FileChange, part: StashPart| {
+            let _ = app.update(Message::FileContextMenu {
+                file,
+                area: FileArea::Commit,
+                stash: Some(part),
+                position: iced::Point::ORIGIN,
+            });
+            editor_entry_of(app)
+        };
+        for part in [StashPart::Untracked, StashPart::Staged, StashPart::Unstaged] {
+            let (enabled, hint, message) = open(&mut app, file("asdf"), part);
+            assert!(enabled && hint.is_none(), "{part:?}");
+            let expected = crate::open_file::CommitFileRef {
+                commit: "s1".into(),
+                path: "asdf".into(),
+                deleted: false,
+                stash: Some(part),
+            };
+            assert!(
+                matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
+                "{message:?}"
+            );
+        }
+        let mut deleted = file("gone");
+        deleted.kind = git_core::ChangeKind::Deleted;
+        let (enabled, _, message) = open(&mut app, deleted, StashPart::Staged);
+        assert!(enabled);
+        assert!(matches!(&message, Some(Message::OpenCommitFile(f))
+            if f.deleted && f.stash == Some(StashPart::Staged)));
+        app.tabs[0].view_mut().unwrap().submodules = vec![submodule(
+            "libs/sub",
+            git_core::submodule::SubmoduleState::Current,
+        )];
+        let (enabled, hint, _) = open(&mut app, file("libs/sub"), StashPart::Unstaged);
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some(crate::open_file::SUBMODULE));
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
+        let (enabled, hint, _) = open(&mut app, file("asdf"), StashPart::Untracked);
         assert!(!enabled);
         assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
     }
@@ -18240,6 +18299,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Unstaged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let (enabled, hint, _) = editor_entry_of(&app);
@@ -18260,6 +18320,7 @@ pub(crate) mod tests {
             let _ = app.update(Message::FileContextMenu {
                 file: file("src/a.rs"),
                 area,
+                stash: None,
                 position: iced::Point::ORIGIN,
             });
             let (enabled, hint, message) = editor_entry_of(&app);
@@ -18274,6 +18335,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("src/a.rs"),
             area: FileArea::Commit,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let (enabled, hint, _) = editor_entry_of(&app);
@@ -18289,6 +18351,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: deleted,
             area: FileArea::Staged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let (enabled, hint, _) = editor_entry_of(&app);
@@ -18644,11 +18707,13 @@ pub(crate) mod tests {
             Message::FileContextMenu {
                 file: file.clone(),
                 area: FileArea::Unstaged,
+                stash: None,
                 position: at,
             },
             Message::FileContextMenu {
                 file,
                 area: FileArea::Staged,
+                stash: None,
                 position: at,
             },
             Message::PullMenu(at),
@@ -19167,6 +19232,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Unstaged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.clone().unwrap();
@@ -19946,6 +20012,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file,
             area: FileArea::Unstaged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         assert_eq!(
@@ -20229,6 +20296,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file,
             area: FileArea::Staged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         assert_eq!(
@@ -22151,6 +22219,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Unstaged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.clone().unwrap();
@@ -22194,6 +22263,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("src/dir with space/a.rs"),
             area: FileArea::Staged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.clone().unwrap();
@@ -22245,6 +22315,7 @@ pub(crate) mod tests {
             let _ = app.update(Message::FileContextMenu {
                 file: change,
                 area: FileArea::Commit,
+                stash: None,
                 position: iced::Point::ORIGIN,
             });
             let menu = app.context_menu.take().unwrap();
@@ -22283,6 +22354,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Staged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.take().unwrap();
@@ -22306,6 +22378,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Commit,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.take().unwrap();
@@ -22314,6 +22387,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Commit,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.take().unwrap();
@@ -22938,6 +23012,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: file("src/main.rs"),
             area: FileArea::Commit,
+            stash: None,
             position: iced::Point::new(10.0, 20.0),
         });
         assert!(app.context_menu.is_some());
@@ -23185,6 +23260,7 @@ pub(crate) mod tests {
             commit: "c".into(),
             path: "f.txt".into(),
             deleted: true,
+            stash: None,
         };
         assert!(
             matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
@@ -23221,6 +23297,7 @@ pub(crate) mod tests {
             commit: "b".into(),
             path: "old.txt".into(),
             deleted: false,
+            stash: None,
         };
         assert!(
             matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
@@ -23253,6 +23330,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::FileContextMenu {
             file: untracked,
             area: FileArea::Unstaged,
+            stash: None,
             position: iced::Point::ORIGIN,
         });
         let menu = app.context_menu.as_ref().unwrap();
@@ -24041,6 +24119,7 @@ pub(crate) mod tests {
                         Message::FileContextMenu {
                             file: change,
                             area,
+                            stash: None,
                             position: at,
                         },
                     ));

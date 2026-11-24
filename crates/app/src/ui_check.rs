@@ -2685,6 +2685,7 @@ mod tests {
                 old_path: None,
             },
             area: crate::app::FileArea::Staged,
+            stash: None,
             position: iced::Point::new(1100.0, 200.0),
         });
         snapshot(&app, "file-menu-staged");
@@ -2849,6 +2850,7 @@ mod tests {
     }
 
     /// Finding #45: at the window minimum (100 % zoom) nothing of the
+    /// staging area is cut off in either stash: None,
     /// staging area is cut off in either position: both lists show their
     /// header and two rows, the commit message its fields, the Commit
     /// button and a hint stay inside the panel. Layout only.

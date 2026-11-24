@@ -29,7 +29,37 @@ pub fn base_dir() -> PathBuf {
 /// root) of commit `commit` lives under `base`. Refuses paths that would
 /// leave `base` or that this system cannot write, with a readable reason.
 pub fn copy_path(base: &Path, commit: &str, repo_path: &str) -> Result<PathBuf, String> {
-    copy_path_for(base, commit, repo_path, cfg!(windows))
+    copy_path_in(base, commit, None, repo_path)
+}
+
+/// [`copy_path`] with an optional folder between the commit id and the
+/// file (a stash part: `staged`, `unstaged`, `untracked`), so a file in
+/// several parts of one stash gets one copy per part (finding #55).
+pub fn copy_path_in(
+    base: &Path,
+    commit: &str,
+    folder: Option<&str>,
+    repo_path: &str,
+) -> Result<PathBuf, String> {
+    let mut path = copy_path_for(base, commit, repo_path, cfg!(windows))?;
+    if let Some(folder) = folder {
+        if let Some(reason) = part_problem(folder, cfg!(windows)) {
+            return Err(format!("\"{folder}\" cannot be a folder: {reason}"));
+        }
+        let rel = path
+            .strip_prefix(base)
+            .map_err(|e| e.to_string())?
+            .to_path_buf();
+        let mut parts = rel.components();
+        let mut nested = base.to_path_buf();
+        if let Some(id) = parts.next() {
+            nested.push(id);
+        }
+        nested.push(folder);
+        nested.extend(parts);
+        path = nested;
+    }
+    Ok(path)
 }
 
 /// [`copy_path`] with the Windows name rules on or off (testable on every
@@ -235,6 +265,21 @@ mod tests {
         assert_eq!(path.file_name().unwrap(), "Makefile");
         let short = copy_path_for(base, "ABCDEF1", "a.txt", false).unwrap();
         assert_eq!(short, base.join("abcdef1").join("a.txt"));
+    }
+
+    #[test]
+    fn a_part_folder_sits_between_id_and_path() {
+        let base = Path::new("/tmp/gitloom-view");
+        let path = copy_path_in(base, ID, Some("untracked"), "src/a.rs").unwrap();
+        assert_eq!(
+            path,
+            base.join("0123456789ab")
+                .join("untracked")
+                .join("src")
+                .join("a.rs")
+        );
+        assert!(copy_path_in(base, ID, Some(".."), "a").is_err());
+        assert!(copy_path_in(base, ID, Some("x"), "../a").is_err());
     }
 
     #[test]

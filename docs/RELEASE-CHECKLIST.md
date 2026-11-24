@@ -282,6 +282,8 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] A custom editor command with a program that does not exist: "Could not start the editor" with the reason; nothing fails silently. The same for a custom terminal command that does not exist.
 - [ ] "Open file location" on a file of a commit that is not in the working tree: a toast says so and the nearest folder opens.
 - [ ] Disabled menu entries (for example in a file menu, a branch menu) show a reason as tooltip.
+- [ ] Stash with a new file: create a new file, stash it (untracked files included), select the stash in the graph and open the file under "Untracked" with "Open in external editor": a read-only copy with the file's content opens, the toast says "as of stash <hash>" with the hash shown in the details header.
+- [ ] Stash with a modified file that was staged and then changed again: the file shows in Staged and in Unstaged; each opens its own version (index and working tree). A file deleted in the stash opens as it was before.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
