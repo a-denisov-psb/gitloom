@@ -926,13 +926,12 @@ pub fn file(facts: FileFacts<'_>) -> Vec<MenuEntry> {
         },
     ));
     entries.push(editor);
-    // A file deleted in a commit is not in the working tree; others are
-    // checked when the entry runs (no file I/O on the UI thread).
-    let location_reason = (area == FileArea::Commit && file.kind == ChangeKind::Deleted)
-        .then_some(crate::app::NOT_IN_WORKTREE);
+    // Checked when the entry runs (no file I/O on the UI thread): a file
+    // that is not in the working tree shows its nearest folder with a
+    // notice (M19-02).
     entries.push(item_with_hint(
         "Open file location",
-        location_reason,
+        None,
         Message::OpenFileLocation(path),
     ));
     entries.extend([
@@ -1670,10 +1669,9 @@ mod tests {
             message_of(&deleted, "File blame"),
             Some(Message::FileBlameOpened { rev: Some(r), .. }) if r == "c1"
         ));
-        assert_eq!(
-            hint_of(&deleted, "Open file location"),
-            Some(crate::app::NOT_IN_WORKTREE)
-        );
+        // Not in the working tree: still enabled, the nearest folder opens
+        // with a notice (M19-02).
+        assert_eq!(hint_of(&deleted, "Open file location"), None);
         // Deleted in the working copy: blame the committed version.
         let gone = file_menu(&deleted_file, FileArea::Unstaged, true, true);
         assert!(matches!(

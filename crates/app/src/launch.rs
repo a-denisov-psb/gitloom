@@ -198,6 +198,99 @@ pub fn terminal(
         })
 }
 
+/// What a launch starts (M19-03, ADR-044 amendment); names the toast when
+/// it fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Terminal and Link are reported from M19-03 on.
+#[allow(dead_code)]
+pub enum Launched {
+    Editor,
+    Terminal,
+    FileManager,
+    Link,
+}
+
+impl Launched {
+    /// Title of the error toast when the program does not start.
+    pub fn failure_title(self) -> &'static str {
+        match self {
+            Self::Editor => "Could not start the editor",
+            Self::Terminal => "Could not start the terminal",
+            Self::FileManager => "Could not start the file manager",
+            Self::Link => "Could not open the link",
+        }
+    }
+
+    /// The way forward after a failed start, if the user can change it.
+    pub fn way_forward(self) -> Option<&'static str> {
+        match self {
+            Self::Editor | Self::Terminal => {
+                Some("Check the command in Preferences → External tools.")
+            }
+            Self::FileManager | Self::Link => None,
+        }
+    }
+}
+
+/// Title and text of a toast.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub title: String,
+    pub text: String,
+}
+
+impl Notice {
+    pub fn new(title: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            text: text.into(),
+        }
+    }
+}
+
+/// Why a launch did not happen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchError {
+    /// Refused before anything started (warning toast).
+    Refused(Notice),
+    /// Preparing failed, e.g. writing a copy (error toast with a plain
+    /// text, the raw error as details).
+    Failed {
+        title: String,
+        text: String,
+        error: String,
+    },
+    /// The program did not start (error toast named by [`Launched`]).
+    Start(String),
+}
+
+/// Result of a launch task: started, with an optional info notice.
+pub type LaunchResult = Result<Option<Notice>, LaunchError>;
+
+/// Plain-language reason for an error of [`spawn`] or of building a
+/// launch; texts that are already plain are kept.
+pub fn plain_start_error(raw: &str) -> String {
+    if !raw.starts_with("Could not start ") {
+        return raw.to_owned();
+    }
+    let lower = raw.to_lowercase();
+    if lower.contains("os error 2)")
+        || lower.contains("os error 3)")
+        || lower.contains("no such file")
+        || lower.contains("cannot find")
+    {
+        "The program was not found.".into()
+    } else if lower.contains("os error 13)")
+        || lower.contains("os error 5)")
+        || lower.contains("permission denied")
+        || lower.contains("access is denied")
+    {
+        "The program may not be run (permission denied).".into()
+    } else {
+        "The system could not start the program.".into()
+    }
+}
+
 /// Why no editor can be opened: none is set.
 pub const NO_EDITOR: &str = "Set an external editor in Preferences → External tools";
 

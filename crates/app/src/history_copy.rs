@@ -6,9 +6,6 @@
 //! starts no process (ADR-053). All functions do file I/O: call them off
 //! the UI thread.
 
-// The entry points use this module from M19-02 on.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};

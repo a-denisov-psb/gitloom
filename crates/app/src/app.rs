@@ -632,6 +632,12 @@ pub enum Message {
     /// Opens the active repository (`None`) or one of its files (path
     /// relative to the root) in the external editor (M8-08).
     OpenInEditor(Option<String>),
+    /// Opens a file of a commit in the state of that commit (M19-02,
+    /// ADR-061): the real file for an unchanged file of HEAD, otherwise a
+    /// read-only copy.
+    OpenCommitFile(crate::open_file::CommitFileRef),
+    /// A launch task finished (M19-03): failures and notices become toasts.
+    LaunchFinished(crate::launch::Launched, crate::launch::LaunchResult),
     /// Preferences → External tools → External editor (M8-07).
     EditorPresetChosen(settings::EditorPreset),
     EditorCommandInput(String),
@@ -6657,6 +6663,41 @@ impl App {
         Ok(Some((template, target)))
     }
 
+    /// Opens a file of a commit in the external editor (M19-02, ADR-061):
+    /// what opens is decided in the background task.
+    fn open_commit_file(&mut self, file: crate::open_file::CommitFileRef) -> Task<Message> {
+        let template = self.editor_command();
+        if template.is_empty() {
+            return self.notify(no_editor_toast());
+        }
+        let Some(view) = self.active_tab().and_then(Tab::view) else {
+            return Task::none();
+        };
+        let git = view.writer.clone();
+        let root = view.backend.path().to_path_buf();
+        launch_task(crate::launch::Launched::Editor, move || {
+            use crate::launch::LaunchError;
+            let base = crate::history_copy::base_dir();
+            let opened = crate::open_file::resolve(git.as_ref(), &root, &base, &file)
+                .map_err(|problem| problem.into_launch_error(&file.path))?;
+            let launch = crate::launch::editor(
+                crate::launch::Platform::current(),
+                &crate::launch::SystemLookup,
+                &template,
+                opened.path(),
+            )
+            .map_err(LaunchError::Start)?;
+            crate::launch::spawn(&launch).map_err(LaunchError::Start)?;
+            Ok(match opened {
+                crate::open_file::Opened::Real(_) => None,
+                crate::open_file::Opened::Copy { text, .. } => Some(crate::launch::Notice::new(
+                    crate::open_file::COPY_TITLE,
+                    text,
+                )),
+            })
+        })
+    }
+
     /// Writes saved identity `index` to the repository config of `tab`
     /// (M8-04); not undoable, the status bar confirms it.
     fn use_identity(&mut self, tab: TabId, index: usize) -> Task<Message> {
@@ -8048,6 +8089,12 @@ impl App {
                     |result| Message::StatusText(result.err().unwrap_or_default()),
                 );
             }
+            Message::OpenCommitFile(file) => return self.open_commit_file(file),
+            Message::LaunchFinished(what, result) => {
+                if let Some(toast) = launch_toast(what, result) {
+                    return self.notify(toast);
+                }
+            }
             Message::TerminalCommandInput(command) => {
                 self.settings.tools.terminal_command = command;
                 return self.save_settings();
@@ -8586,14 +8633,23 @@ impl App {
                         if matches!(&h.entries, Loadable::Ready(e)
                             if e.get(index).is_some_and(|e| e.status == "D")))
                 });
-                // The file as it is in the working tree (the history's path).
-                let history_path =
-                    self.active_tab()
-                        .and_then(Tab::view)
-                        .and_then(|view| match &view.center {
-                            CenterView::FileHistory(h) => Some(h.path.clone()),
+                // The file as it is in the entry's commit, under its path
+                // there (M19-02); a deletion entry opens the parent's version.
+                let entry_file = self.active_tab().and_then(Tab::view).and_then(|view| {
+                    match &view.center {
+                        CenterView::FileHistory(h) => match &h.entries {
+                            Loadable::Ready(entries) => {
+                                entries.get(index).map(|e| crate::open_file::CommitFileRef {
+                                    commit: e.id.clone(),
+                                    path: e.path.clone(),
+                                    deleted: e.status == "D",
+                                })
+                            }
                             _ => None,
-                        });
+                        },
+                        _ => None,
+                    }
+                });
                 self.context_menu = Some(ContextMenu::new(
                     position,
                     vec![
@@ -8605,11 +8661,7 @@ impl App {
                             hint: deletion.then(|| "The file is deleted in this commit".to_owned()),
                         },
                         MenuEntry::item("Show in graph", Message::FileHistoryShowInGraph),
-                        editor_entry(
-                            &self.editor_command(),
-                            history_path.as_deref().unwrap_or_default(),
-                            false,
-                        ),
+                        commit_editor_entry(&self.editor_command(), entry_file, false),
                     ],
                 ));
                 return self.file_history_select(|h| h.select(index));
@@ -8686,6 +8738,24 @@ impl App {
                         .into_owned(),
                     None => file.path.clone(),
                 };
+                let deleted = file.kind == git_core::ChangeKind::Deleted;
+                // Files of a commit open in the state of that commit (M19-02).
+                let editor = match area {
+                    FileArea::Commit => commit_editor_entry(
+                        &self.editor_command(),
+                        commit
+                            .as_ref()
+                            .map(|commit| crate::open_file::CommitFileRef {
+                                commit: commit.clone(),
+                                path: file.path.clone(),
+                                deleted,
+                            }),
+                        view.is_some_and(|v| v.submodules.iter().any(|s| s.path == file.path)),
+                    ),
+                    FileArea::Unstaged | FileArea::Staged => {
+                        editor_entry(&self.editor_command(), &file.path, deleted)
+                    }
+                };
                 let entries = crate::menus::file(crate::menus::FileFacts {
                     file: &file,
                     area,
@@ -8693,11 +8763,7 @@ impl App {
                     commit: commit.as_deref(),
                     parent: parent.as_deref(),
                     diff_tool: self.settings.tools.diff_tool != settings::ToolChoice::None,
-                    editor: editor_entry(
-                        &self.editor_command(),
-                        &file.path,
-                        file.kind == git_core::ChangeKind::Deleted,
-                    ),
+                    editor,
                     copy_path,
                 });
                 self.context_menu = Some(ContextMenu::new(position, entries));
@@ -10462,16 +10528,9 @@ impl App {
                     .and_then(Tab::path)
                     .map(|p| p.to_path_buf())
                 {
-                    return Task::perform(
-                        blocking(move || {
-                            crate::launch::spawn(&crate::launch::reveal_file(
-                                crate::launch::Platform::current(),
-                                &crate::launch::repo_file_path(&root, &path),
-                                &|p| p.exists(),
-                            ))
-                        }),
-                        |result| Message::StatusText(result.err().unwrap_or_default()),
-                    );
+                    return launch_task(crate::launch::Launched::FileManager, move || {
+                        reveal_repo_file(&root, &path)
+                    });
                 }
             }
             Message::SaveDue(seq) => {
@@ -13530,6 +13589,130 @@ pub fn editor_entry(editor_command: &str, path: &str, deleted: bool) -> MenuEntr
         hint: reason,
     }
 }
+
+/// "Open in external editor" for a file of a commit (M19-02, ADR-061):
+/// `None` when no single commit is selected. Whether the file exists or
+/// changed is decided when it runs, never here (no file I/O on the UI
+/// thread).
+pub fn commit_editor_entry(
+    editor_command: &str,
+    file: Option<crate::open_file::CommitFileRef>,
+    submodule: bool,
+) -> MenuEntry {
+    let reason = if editor_command.trim().is_empty() {
+        Some(crate::launch::NO_EDITOR)
+    } else if file.is_none() {
+        Some("Select one commit")
+    } else if submodule {
+        Some(crate::open_file::SUBMODULE)
+    } else {
+        None
+    };
+    let message = match file {
+        Some(file) => Message::OpenCommitFile(file),
+        None => Message::Noop,
+    };
+    MenuEntry::Item {
+        label: "Open in external editor".into(),
+        shortcut: None,
+        enabled: reason.is_none(),
+        message: Box::new(message),
+        hint: reason.map(str::to_owned),
+    }
+}
+
+/// Title of the warning when no external editor is set (M19-03).
+pub const NO_EDITOR_TITLE: &str = "No external editor set";
+
+/// Warning toast for an editor action without an editor (M19-03), with
+/// the way forward.
+pub fn no_editor_toast() -> crate::toast::Toast {
+    crate::toast::Toast::new(
+        crate::toast::ToastKind::Warning,
+        NO_EDITOR_TITLE,
+        format!("{}.", crate::launch::NO_EDITOR),
+    )
+    .with_action(
+        "Open Preferences",
+        Message::SettingsOpenedAt(settings::Category::ExternalTools),
+    )
+}
+
+/// Runs `work` (a launch) off the UI thread and reports it as
+/// [`Message::LaunchFinished`] (M19-03).
+pub fn launch_task(
+    what: crate::launch::Launched,
+    work: impl FnOnce() -> crate::launch::LaunchResult + Send + 'static,
+) -> Task<Message> {
+    Task::perform(blocking(move || Ok(work())), move |result| {
+        Message::LaunchFinished(
+            what,
+            result.unwrap_or_else(|error| Err(crate::launch::LaunchError::Start(error))),
+        )
+    })
+}
+
+/// The toast for the result of a launch (M19-03, ADR-044 amendment):
+/// notices as info, refusals as warnings, failures as errors with the raw
+/// error under "Details". A plain start shows nothing.
+pub fn launch_toast(
+    what: crate::launch::Launched,
+    result: crate::launch::LaunchResult,
+) -> Option<crate::toast::Toast> {
+    use crate::launch::LaunchError;
+    use crate::toast::{Toast, ToastKind};
+    match result {
+        Ok(None) => None,
+        Ok(Some(notice)) => Some(Toast::new(ToastKind::Info, notice.title, notice.text)),
+        Err(LaunchError::Refused(notice)) => {
+            Some(Toast::new(ToastKind::Warning, notice.title, notice.text))
+        }
+        Err(LaunchError::Failed { title, text, error }) => {
+            Some(Toast::error_with(title, text, error))
+        }
+        Err(LaunchError::Start(error)) => {
+            let mut text = crate::launch::plain_start_error(&error);
+            if let Some(next) = what.way_forward() {
+                text = format!("{text} {next}");
+            }
+            let toast = Toast::error_with(what.failure_title(), text, error);
+            Some(match what.way_forward() {
+                Some(_) => toast.with_action(
+                    "Open Preferences",
+                    Message::SettingsOpenedAt(settings::Category::ExternalTools),
+                ),
+                None => toast,
+            })
+        }
+    }
+}
+
+/// Reveals `path` (relative to `root`) in the file manager; a file that
+/// is not in the working tree reveals its nearest folder with a notice
+/// (M19-02).
+fn reveal_repo_file(root: &std::path::Path, path: &str) -> crate::launch::LaunchResult {
+    let target = crate::launch::repo_file_path(root, path);
+    let missing = !target.exists();
+    crate::launch::spawn(&crate::launch::reveal_file(
+        crate::launch::Platform::current(),
+        &target,
+        &|p| p.exists(),
+    ))
+    .map_err(crate::launch::LaunchError::Start)?;
+    Ok(missing.then(|| missing_file_notice(path)))
+}
+
+/// Notice for "Open file location" on a file that is not in the working
+/// tree (M19-02).
+pub fn missing_file_notice(path: &str) -> crate::launch::Notice {
+    crate::launch::Notice::new(
+        NOT_IN_WORKTREE_TITLE,
+        format!("{path} is not in the working tree. Showing its folder."),
+    )
+}
+
+/// Title of the notice of [`reveal_repo_file`] for a missing file.
+pub const NOT_IN_WORKTREE_TITLE: &str = "Not in the working tree";
 
 /// Why Commit, Amend and Continue are disabled without a Git identity.
 pub const NO_IDENTITY: &str = "Choose an identity first";
@@ -17629,6 +17812,133 @@ pub(crate) mod tests {
             .unwrap()
     }
 
+    /// M19-02: the Commit area opens the file of the selected commit; a
+    /// deleted file stays enabled (the parent's version), a submodule is
+    /// refused with its reason; nothing touches the disk.
+    #[test]
+    fn commit_files_open_in_the_state_of_their_commit() {
+        let mut app = staging_app(&[], &[]);
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        app.tabs[0].view_mut().unwrap().selection = Some(Selection::Commit("c".into()));
+        let open = |app: &mut App, file: git_core::FileChange| {
+            let _ = app.update(Message::FileContextMenu {
+                file,
+                area: FileArea::Commit,
+                position: iced::Point::ORIGIN,
+            });
+            editor_entry_of(app)
+        };
+        // The repository path does not exist: the menu does not check files.
+        let (enabled, hint, message) = open(&mut app, file("src/a.rs"));
+        assert!(enabled && hint.is_none());
+        let expected = crate::open_file::CommitFileRef {
+            commit: "c".into(),
+            path: "src/a.rs".into(),
+            deleted: false,
+        };
+        assert!(
+            matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
+            "{message:?}"
+        );
+        let mut deleted = file("gone.txt");
+        deleted.kind = git_core::ChangeKind::Deleted;
+        let (enabled, _, message) = open(&mut app, deleted.clone());
+        assert!(enabled);
+        assert!(
+            matches!(&message, Some(Message::OpenCommitFile(f)) if f.deleted && f.path == "gone.txt"),
+            "{message:?}"
+        );
+        // "Open file location" stays enabled for it (nearest folder, notice).
+        let menu = app.context_menu.as_ref().unwrap();
+        assert!(menu.entries.iter().any(|e| matches!(e,
+            MenuEntry::Item { label, enabled: true, .. } if label == "Open file location")));
+        // A submodule has no content.
+        app.tabs[0].view_mut().unwrap().submodules = vec![submodule(
+            "libs/sub",
+            git_core::submodule::SubmoduleState::Current,
+        )];
+        let (enabled, hint, _) = open(&mut app, file("libs/sub"));
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some(crate::open_file::SUBMODULE));
+        // Without an editor the existing reason wins.
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
+        let (enabled, hint, _) = open(&mut app, file("src/a.rs"));
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
+    }
+
+    /// M19-02/M19-03: launch results become toasts of the right kind.
+    #[test]
+    fn launch_results_become_toasts() {
+        use crate::launch::{LaunchError, Launched, Notice};
+        use crate::toast::ToastKind;
+        assert!(launch_toast(Launched::Editor, Ok(None)).is_none());
+        let copy = launch_toast(
+            Launched::Editor,
+            Ok(Some(Notice::new(
+                crate::open_file::COPY_TITLE,
+                "a.txt as of abc1234.",
+            ))),
+        )
+        .unwrap();
+        assert_eq!(
+            (copy.kind, copy.title.as_str()),
+            (ToastKind::Info, "Opened a read-only copy")
+        );
+        let refused = launch_toast(
+            Launched::Editor,
+            Err(LaunchError::Refused(Notice::new(
+                "Could not open a.txt",
+                "The file is not in commit abc1234",
+            ))),
+        )
+        .unwrap();
+        assert_eq!(refused.kind, ToastKind::Warning);
+        let failed = launch_toast(
+            Launched::Editor,
+            Err(LaunchError::Start(
+                "Could not start nope: No such file or directory (os error 2)".into(),
+            )),
+        )
+        .unwrap();
+        assert_eq!(failed.kind, ToastKind::Error);
+        assert_eq!(failed.title, "Could not start the editor");
+        assert_eq!(
+            failed.text,
+            "The program was not found. Check the command in Preferences → External tools."
+        );
+        assert!(failed.details.as_deref().unwrap().contains("os error 2"));
+        assert!(matches!(
+            failed.action.as_ref().map(|(_, m)| &**m),
+            Some(Message::SettingsOpenedAt(settings::Category::ExternalTools))
+        ));
+        let link = launch_toast(
+            Launched::Link,
+            Err(LaunchError::Start("Could not start x: boom".into())),
+        )
+        .unwrap();
+        assert_eq!(link.title, "Could not open the link");
+        assert!(link.action.is_none());
+        let notice = missing_file_notice("docs/a.md");
+        assert_eq!(
+            notice.text,
+            "docs/a.md is not in the working tree. Showing its folder."
+        );
+    }
+
+    /// The notice of a file of a commit reaches the toast list.
+    #[test]
+    fn launch_finished_pushes_the_toast() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::LaunchFinished(
+            crate::launch::Launched::FileManager,
+            Ok(Some(missing_file_notice("a.txt"))),
+        ));
+        assert_eq!(app.toasts.list.len(), 1);
+        assert_eq!(app.toasts.list[0].title, NOT_IN_WORKTREE_TITLE);
+        assert!(app.status.is_empty());
+    }
+
     #[test]
     fn editor_entry_points() {
         let mut app = staging_app(&["a"], &["gone"]);
@@ -17661,7 +17971,8 @@ pub(crate) mod tests {
             app.editor_request(None),
             Ok(Some(("code {path}".to_owned(), root.clone())))
         );
-        for area in [FileArea::Unstaged, FileArea::Staged, FileArea::Commit] {
+        // Unstaged and Staged open the working tree file.
+        for area in [FileArea::Unstaged, FileArea::Staged] {
             let _ = app.update(Message::FileContextMenu {
                 file: file("src/a.rs"),
                 area,
@@ -17674,6 +17985,16 @@ pub(crate) mod tests {
                 "{message:?}"
             );
         }
+        // A file of a commit needs one selected commit (M19-02).
+        app.tabs[0].view_mut().unwrap().selection = None;
+        let _ = app.update(Message::FileContextMenu {
+            file: file("src/a.rs"),
+            area: FileArea::Commit,
+            position: iced::Point::ORIGIN,
+        });
+        let (enabled, hint, _) = editor_entry_of(&app);
+        assert!(!enabled);
+        assert_eq!(hint.as_deref(), Some("Select one commit"));
         assert_eq!(
             app.editor_request(Some("src/a.rs")).unwrap().unwrap().1,
             root.join("src").join("a.rs")
@@ -22551,10 +22872,55 @@ pub(crate) mod tests {
         let menu = app.context_menu.as_ref().unwrap();
         assert!(menu.entries.iter().any(|e| matches!(e,
             MenuEntry::Item { label, enabled: false, .. } if label == "Blame at this commit")));
-        // The history's file opens in the external editor (M8-08).
+        // The entry's version opens in the external editor (M19-02); a
+        // deletion entry opens the parent's version.
         let (enabled, hint, message) = editor_entry_of(&app);
         assert!(!enabled && hint.as_deref() == Some(crate::launch::NO_EDITOR));
-        assert!(matches!(message, Some(Message::OpenInEditor(Some(p))) if p == "f.txt"));
+        let expected = crate::open_file::CommitFileRef {
+            commit: "c".into(),
+            path: "f.txt".into(),
+            deleted: true,
+        };
+        assert!(
+            matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
+            "{message:?}"
+        );
+    }
+
+    /// M19-02: a file history entry opens its own commit under its own
+    /// path (a rename), not the history's current path.
+    #[test]
+    fn history_entry_opens_its_own_version() {
+        let mut app = ready_app(&["c", "b"]);
+        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        let _ = app.update(Message::FileHistoryOpened {
+            path: "new.txt".into(),
+            start: None,
+        });
+        let tab = app.tabs[0].id;
+        let mut old = file_entry("b", "old.txt");
+        old.status = "A".into();
+        let _ = app.update(Message::FileHistoryLoaded {
+            tab,
+            path: "new.txt".into(),
+            start: "HEAD".into(),
+            result: Ok(vec![file_entry("c", "new.txt"), old]),
+        });
+        let _ = app.update(Message::FileHistoryEntryMenu {
+            index: 1,
+            position: iced::Point::ORIGIN,
+        });
+        let (enabled, hint, message) = editor_entry_of(&app);
+        assert!(enabled && hint.is_none());
+        let expected = crate::open_file::CommitFileRef {
+            commit: "b".into(),
+            path: "old.txt".into(),
+            deleted: false,
+        };
+        assert!(
+            matches!(&message, Some(Message::OpenCommitFile(f)) if *f == expected),
+            "{message:?}"
+        );
     }
 
     #[test]

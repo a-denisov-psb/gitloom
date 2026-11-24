@@ -33,6 +33,7 @@ mod layout;
 mod menus;
 mod message_modal;
 mod nav;
+mod open_file;
 mod operation;
 mod overlay;
 mod palette;
