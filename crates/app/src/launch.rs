@@ -276,6 +276,8 @@ pub fn plain_start_error(raw: &str) -> String {
         || lower.contains("os error 3)")
         || lower.contains("no such file")
         || lower.contains("cannot find")
+        // Rust on Windows when the program is not on `PATH`.
+        || lower.contains("program not found")
     {
         "The program was not found.".into()
     } else if lower.contains("os error 13)")
@@ -535,6 +537,33 @@ pub fn spawn(launch: &Launch) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn start_errors_get_a_plain_reason() {
+        for raw in [
+            "Could not start x: No such file or directory (os error 2)",
+            "Could not start x: program not found",
+            "Could not start x: The system cannot find the file specified. (os error 2)",
+        ] {
+            assert_eq!(
+                plain_start_error(raw),
+                "The program was not found.",
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            plain_start_error("Could not start x: Permission denied (os error 13)"),
+            "The program may not be run (permission denied)."
+        );
+        assert_eq!(
+            plain_start_error("Could not start x: boom"),
+            "The system could not start the program."
+        );
+        assert_eq!(
+            plain_start_error("The editor command is empty"),
+            "The editor command is empty"
+        );
+    }
+
     use super::*;
 
     #[test]
