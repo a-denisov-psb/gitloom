@@ -22,6 +22,9 @@ pub struct CommitFileRef {
     pub path: String,
     /// Deleted in `commit`: the version of the first parent opens.
     pub deleted: bool,
+    /// The part of a stash the file is listed in, when `commit` is a stash
+    /// (finding #55): it decides which version opens.
+    pub stash: Option<git_core::StashPart>,
 }
 
 /// What opens.
@@ -81,6 +84,75 @@ fn short(id: &str) -> &str {
     &id[..id.len().min(7)]
 }
 
+/// Reads `path` at `rev` for a copy; `missing` is the refusal when the
+/// file is not there.
+fn read_content(
+    git: &dyn GitWriter,
+    rev: &str,
+    path: &str,
+    missing: impl FnOnce() -> String,
+) -> Result<Vec<u8>, Problem> {
+    match git_core::file_at_commit(git, rev, path) {
+        Ok(CommitFile::Content(bytes)) => Ok(bytes),
+        Ok(CommitFile::Missing) => Err(Problem::Refused(missing())),
+        Ok(CommitFile::Folder) => Err(Problem::Refused("A folder has no file content".into())),
+        Ok(CommitFile::Submodule) => Err(Problem::Refused(SUBMODULE.into())),
+        Err(error) => Err(read_failed(error)),
+    }
+}
+
+/// Writes the copy and builds the notice.
+fn copy(path: PathBuf, bytes: &[u8], text: String) -> Result<Opened, Problem> {
+    crate::history_copy::write_copy(&path, bytes).map_err(|error| Problem::Failed {
+        text: WRITE_FAILED.into(),
+        error,
+    })?;
+    Ok(Opened::Copy { path, text })
+}
+
+/// A file of a stash (finding #55): the right side of the diff the user
+/// sees, always a copy under `<stash id>/<part>/`. Messages name the stash
+/// and its own short id, never "commit" or a parent's id.
+fn resolve_stash(
+    git: &dyn GitWriter,
+    base: &Path,
+    file: &CommitFileRef,
+    part: git_core::StashPart,
+) -> Result<Opened, Problem> {
+    use git_core::StashPart;
+    let sha = short(&file.commit);
+    let (rev, folder) = match part {
+        StashPart::Untracked => (format!("{}^3", file.commit), "untracked"),
+        StashPart::Staged if file.deleted => (format!("{}^1", file.commit), "staged"),
+        StashPart::Unstaged if file.deleted => (format!("{}^1", file.commit), "unstaged"),
+        StashPart::Staged => (format!("{}^2", file.commit), "staged"),
+        StashPart::Unstaged => (file.commit.clone(), "unstaged"),
+    };
+    let not_in_stash = || format!("The file is not in stash {sha}");
+    let Some(id) = git_core::commit_id(git, &rev).map_err(read_failed)? else {
+        return Err(Problem::Refused(if file.deleted {
+            format!("Stash {sha} has no base commit")
+        } else {
+            not_in_stash()
+        }));
+    };
+    let bytes = read_content(git, &id, &file.path, not_in_stash)?;
+    let path = crate::history_copy::copy_path_in(base, &file.commit, Some(folder), &file.path)
+        .map_err(Problem::Refused)?;
+    let text = if file.deleted {
+        format!(
+            "{} as it was before stash {sha} deleted it. Changes are not saved to the repository.",
+            file.path
+        )
+    } else {
+        format!(
+            "{} as of stash {sha}. Changes are not saved to the repository.",
+            file.path
+        )
+    };
+    copy(path, &bytes, text)
+}
+
 /// Resolves `file` to the path the editor gets. Copies go under `base`.
 pub fn resolve(
     git: &dyn GitWriter,
@@ -88,6 +160,9 @@ pub fn resolve(
     base: &Path,
     file: &CommitFileRef,
 ) -> Result<Opened, Problem> {
+    if let Some(part) = file.stash {
+        return resolve_stash(git, base, file, part);
+    }
     let sha = short(&file.commit);
     let id = if file.deleted {
         git_core::commit_id(git, &format!("{}^1", file.commit))
@@ -96,20 +171,9 @@ pub fn resolve(
     } else {
         file.commit.clone()
     };
-    let bytes = match git_core::file_at_commit(git, &id, &file.path) {
-        Ok(CommitFile::Content(bytes)) => bytes,
-        Ok(CommitFile::Missing) => {
-            return Err(Problem::Refused(format!(
-                "The file is not in commit {}",
-                short(&id)
-            )))
-        }
-        Ok(CommitFile::Folder) => {
-            return Err(Problem::Refused("A folder has no file content".into()))
-        }
-        Ok(CommitFile::Submodule) => return Err(Problem::Refused(SUBMODULE.into())),
-        Err(error) => return Err(read_failed(error)),
-    };
+    let bytes = read_content(git, &id, &file.path, || {
+        format!("The file is not in commit {}", short(&id))
+    })?;
     if !file.deleted {
         let head = git_core::head_commit(git).map_err(read_failed)?;
         if head.as_deref() == Some(id.as_str()) {
@@ -120,10 +184,6 @@ pub fn resolve(
         }
     }
     let path = crate::history_copy::copy_path(base, &id, &file.path).map_err(Problem::Refused)?;
-    crate::history_copy::write_copy(&path, &bytes).map_err(|error| Problem::Failed {
-        text: WRITE_FAILED.into(),
-        error,
-    })?;
     let text = if file.deleted {
         format!(
             "{} as it was before {sha} deleted it. Changes are not saved to the repository.",
@@ -135,7 +195,7 @@ pub fn resolve(
             file.path
         )
     };
-    Ok(Opened::Copy { path, text })
+    copy(path, &bytes, text)
 }
 
 #[cfg(test)]
@@ -209,6 +269,7 @@ mod tests {
                     commit: commit.into(),
                     path: path.into(),
                     deleted,
+                    stash: None,
                 },
             )
         }
@@ -331,6 +392,181 @@ mod tests {
                 &root[..7]
             )))
         );
+    }
+
+    impl Repo {
+        fn open_stash(
+            &self,
+            stash: &str,
+            path: &str,
+            part: git_core::StashPart,
+            deleted: bool,
+        ) -> Result<Opened, Problem> {
+            resolve(
+                &self.cli,
+                &self.root,
+                &self.base,
+                &CommitFileRef {
+                    commit: stash.into(),
+                    path: path.into(),
+                    deleted,
+                    stash: Some(part),
+                },
+            )
+        }
+
+        /// Stashes everything (untracked files too); returns the stash id.
+        fn stash(&self) -> String {
+            self.git(&["stash", "push", "--quiet", "--include-untracked"]);
+            self.git(&["rev-parse", "stash@{0}"])
+        }
+    }
+
+    /// Finding #55: texts of stash files name the stash and its own short
+    /// id, never "commit" and never a parent's id.
+    fn assert_stash_text(repo: &Repo, text: &str, stash: &str) {
+        assert!(text.contains(&format!("stash {}", &stash[..7])), "{text}");
+        assert!(!text.to_lowercase().contains("commit"), "{text}");
+        for parent in ["^1", "^2", "^3"] {
+            if let Ok(id) = std::process::Command::new("git")
+                .args([
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{stash}{parent}"),
+                ])
+                .current_dir(&repo.root)
+                .output()
+            {
+                let id = String::from_utf8_lossy(&id.stdout).trim().to_owned();
+                if id.len() >= 7 {
+                    assert!(!text.contains(&id[..7]), "{text} names {parent}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn untracked_file_of_a_stash_opens_from_the_third_parent() {
+        use git_core::StashPart;
+        let repo = Repo::new();
+        repo.commit("a.txt", "a\n");
+        repo.write("asdf", "new file\n");
+        let stash = repo.stash();
+        assert!(!repo.root.join("asdf").exists());
+        let (path, text) = copy_of(repo.open_stash(&stash, "asdf", StashPart::Untracked, false));
+        assert_eq!(
+            path,
+            repo.base.join(&stash[..12]).join("untracked").join("asdf")
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new file\n");
+        assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
+        assert_eq!(
+            text,
+            format!(
+                "asdf as of stash {}. Changes are not saved to the repository.",
+                &stash[..7]
+            )
+        );
+        assert_stash_text(&repo, &text, &stash);
+    }
+
+    #[test]
+    fn staged_and_unstaged_parts_open_their_own_versions() {
+        use git_core::StashPart;
+        let repo = Repo::new();
+        repo.commit("a.txt", "1\n");
+        repo.write("a.txt", "2\n");
+        repo.git(&["add", "a.txt"]);
+        repo.write("a.txt", "3\n");
+        let stash = repo.stash();
+        let (staged, staged_text) =
+            copy_of(repo.open_stash(&stash, "a.txt", StashPart::Staged, false));
+        let (unstaged, unstaged_text) =
+            copy_of(repo.open_stash(&stash, "a.txt", StashPart::Unstaged, false));
+        assert_ne!(staged, unstaged);
+        assert!(staged.ends_with("staged/a.txt") || staged.ends_with("staged\\a.txt"));
+        assert_eq!(std::fs::read_to_string(&staged).unwrap(), "2\n");
+        assert_eq!(std::fs::read_to_string(&unstaged).unwrap(), "3\n");
+        assert_stash_text(&repo, &staged_text, &stash);
+        assert_stash_text(&repo, &unstaged_text, &stash);
+    }
+
+    #[test]
+    fn only_unstaged_or_only_staged_changes() {
+        use git_core::StashPart;
+        let repo = Repo::new();
+        repo.commit("a.txt", "1\n");
+        repo.write("a.txt", "worktree\n");
+        let stash = repo.stash();
+        let (path, _) = copy_of(repo.open_stash(&stash, "a.txt", StashPart::Unstaged, false));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "worktree\n");
+
+        repo.write("a.txt", "index\n");
+        repo.git(&["add", "a.txt"]);
+        let stash = repo.stash();
+        let (path, _) = copy_of(repo.open_stash(&stash, "a.txt", StashPart::Staged, false));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "index\n");
+    }
+
+    #[test]
+    fn deleted_files_of_a_stash_open_the_base_version() {
+        use git_core::StashPart;
+        let repo = Repo::new();
+        repo.commit("gone.txt", "unstaged base\n");
+        repo.commit("rm.txt", "staged base\n");
+        std::fs::remove_file(repo.root.join("gone.txt")).unwrap();
+        repo.git(&["rm", "--quiet", "rm.txt"]);
+        let stash = repo.stash();
+        for (path, part, content) in [
+            ("gone.txt", StashPart::Unstaged, "unstaged base\n"),
+            ("rm.txt", StashPart::Staged, "staged base\n"),
+        ] {
+            let (copy, text) = copy_of(repo.open_stash(&stash, path, part, true));
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), content);
+            assert!(copy.starts_with(repo.base.join(&stash[..12])));
+            assert_eq!(
+                text,
+                format!(
+                    "{path} as it was before stash {} deleted it. Changes are not saved to the repository.",
+                    &stash[..7]
+                )
+            );
+            assert_stash_text(&repo, &text, &stash);
+        }
+    }
+
+    #[test]
+    fn a_stash_file_is_never_the_real_file() {
+        use git_core::StashPart;
+        let repo = Repo::new();
+        repo.commit("a.txt", "1\n");
+        repo.write("a.txt", "2\n");
+        let stash = repo.stash();
+        // The working tree gets the stashed content again.
+        repo.write("a.txt", "2\n");
+        copy_of(repo.open_stash(&stash, "a.txt", StashPart::Unstaged, false));
+        // The base is HEAD and equals the working tree.
+        repo.write("a.txt", "1\n");
+        copy_of(repo.open_stash(&stash, "a.txt", StashPart::Unstaged, true));
+    }
+
+    #[test]
+    fn refusals_name_the_stash() {
+        use git_core::StashPart;
+        let repo = Repo::new();
+        repo.commit("a.txt", "1\n");
+        repo.write("a.txt", "2\n");
+        let stash = repo.stash();
+        for part in [StashPart::Staged, StashPart::Unstaged, StashPart::Untracked] {
+            match repo.open_stash(&stash, "missing.txt", part, false) {
+                Err(Problem::Refused(text)) => {
+                    assert_eq!(text, format!("The file is not in stash {}", &stash[..7]));
+                    assert_stash_text(&repo, &text, &stash);
+                }
+                other => panic!("{part:?}: {other:?}"),
+            }
+        }
     }
 
     #[test]

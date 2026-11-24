@@ -1504,6 +1504,11 @@ fn file_row_labeled<'a>(
         CenterView::Graph | CenterView::Rebase(_) | CenterView::FileHistory(_) => false,
     };
 
+    // A file of a stash keeps its part for the editor (finding #55).
+    let stash = match &request.kind {
+        DiffKind::Stash { part, .. } => Some(*part),
+        _ => None,
+    };
     let area = match &request.kind {
         DiffKind::Staged => FileArea::Staged,
         DiffKind::Unstaged | DiffKind::Untracked => FileArea::Unstaged,
@@ -1561,6 +1566,7 @@ fn file_row_labeled<'a>(
     context_area(content, move |position| Message::FileContextMenu {
         file: file.clone(),
         area,
+        stash,
         position,
     })
 }
