@@ -105,7 +105,7 @@ pub struct Launch {
 }
 
 impl Launch {
-    fn new(program: &str, args: Vec<String>, dir: &Path) -> Self {
+    pub(crate) fn new(program: &str, args: Vec<String>, dir: &Path) -> Self {
         Self {
             program: program.to_owned(),
             args,
@@ -193,16 +193,12 @@ pub fn terminal(
             new_console,
             ..Launch::new(&program, args, dir)
         })
-        .ok_or_else(|| {
-            "No terminal found. Set a terminal command in Preferences → External tools.".to_owned()
-        })
+        .ok_or_else(|| NO_TERMINAL.to_owned())
 }
 
 /// What a launch starts (M19-03, ADR-044 amendment); names the toast when
 /// it fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Terminal and Link are reported from M19-03 on.
-#[allow(dead_code)]
 pub enum Launched {
     Editor,
     Terminal,
@@ -253,6 +249,8 @@ impl Notice {
 pub enum LaunchError {
     /// Refused before anything started (warning toast).
     Refused(Notice),
+    /// A setting is missing (warning toast with "Open Preferences").
+    Setup(Notice),
     /// Preparing failed, e.g. writing a copy (error toast with a plain
     /// text, the raw error as details).
     Failed {
@@ -290,6 +288,10 @@ pub fn plain_start_error(raw: &str) -> String {
         "The system could not start the program.".into()
     }
 }
+
+/// Why no terminal can be opened: none is set and none was found.
+pub const NO_TERMINAL: &str =
+    "No terminal found. Set a terminal command in Preferences → External tools.";
 
 /// Why no editor can be opened: none is set.
 pub const NO_EDITOR: &str = "Set an external editor in Preferences → External tools";

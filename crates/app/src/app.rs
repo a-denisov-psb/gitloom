@@ -1626,7 +1626,7 @@ impl App {
             .and_then(|v| v.state_block(action))
         {
             Some(reason) => {
-                self.status = reason;
+                self.refuse(NOT_POSSIBLE, reason);
                 true
             }
             None => false,
@@ -1693,7 +1693,7 @@ impl App {
 
     fn start_write(&mut self, tab: TabId, label: String, op: WriteOp) -> Task<Message> {
         if let Some(reason) = self.write_block() {
-            self.status = reason;
+            self.refuse(NOT_POSSIBLE, reason);
             return Task::none();
         }
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
@@ -1732,7 +1732,7 @@ impl App {
     pub fn run_network(&mut self, tab: TabId, request: NetworkRequest) -> Task<Message> {
         if let Some(reason) = self.write_block() {
             if !request.background {
-                self.status = reason;
+                self.refuse(NOT_POSSIBLE, reason);
             }
             return Task::none();
         }
@@ -1784,7 +1784,7 @@ impl App {
     /// Opens the inline new-branch input (see [`Message::NewBranchStart`]).
     fn start_new_branch(&mut self, at: Option<String>) -> Task<Message> {
         if let Some(reason) = self.write_block() {
-            self.status = reason;
+            self.refuse(NOT_POSSIBLE, reason);
             return Task::none();
         }
         let Some(view) = self.active_view_mut() else {
@@ -1794,7 +1794,7 @@ impl App {
         let at = at.or_else(|| view.selected_commit().map(str::to_owned));
         let (start, row) = match at {
             Some(id) if snapshot.is_stash(&id) => {
-                self.status = "Branches cannot start at a stash".into();
+                self.refuse(NOT_POSSIBLE, "Branches cannot start at a stash");
                 return Task::none();
             }
             Some(id) => (id.clone(), Some(id)),
@@ -1803,7 +1803,10 @@ impl App {
                 Some(head) if snapshot.has_wip => (head.to_owned(), None),
                 Some(head) => (head.to_owned(), Some(head.to_owned())),
                 None => {
-                    self.status = "Create the first commit before creating branches".into();
+                    self.refuse(
+                        NOT_POSSIBLE,
+                        "Create the first commit before creating branches",
+                    );
                     return Task::none();
                 }
             },
@@ -1824,7 +1827,7 @@ impl App {
     /// instead, so the action never ends without a way to name the branch.
     fn create_branch_at_ref(&mut self, target: String, label: String) -> Task<Message> {
         if let Some(reason) = self.write_block() {
-            self.status = reason;
+            self.refuse(NOT_POSSIBLE, reason);
             return Task::none();
         }
         let Some(tab) = self.active_tab().map(|t| t.id) else {
@@ -2856,7 +2859,7 @@ impl App {
         let session::Loaded { session, notice } = loaded;
         self.session_loaded = true;
         if let Some(notice) = notice {
-            self.status = notice;
+            self.refuse("Could not restore the session", notice);
         }
         self.pull_mode = session.pull_mode.into();
         self.panes.set_ratios(session.panes);
@@ -3393,15 +3396,16 @@ impl App {
         let count = self.tabs.len();
         match shortcut {
             Shortcut::CopyCommitPrompt => return self.update(Message::CopyPromptRequested),
-            Shortcut::EditCommitMessage => {
-                if self.action_block(shortcut).is_none() {
-                    return self.update(Message::CommitModalOpen);
+            Shortcut::EditCommitMessage | Shortcut::SelectLanguage => {
+                // A refused shortcut says why (M19-03).
+                if let Some(reason) = self.action_block(shortcut) {
+                    self.refuse(NOT_POSSIBLE, reason);
+                    return Task::none();
                 }
-            }
-            Shortcut::SelectLanguage => {
-                if self.action_block(shortcut).is_none() {
-                    return self.open_palette(palette::Mode::Language);
-                }
+                return match shortcut {
+                    Shortcut::EditCommitMessage => self.update(Message::CommitModalOpen),
+                    _ => self.open_palette(palette::Mode::Language),
+                };
             }
             Shortcut::NewTab => {
                 self.add_tab(TabState::Start);
@@ -3882,7 +3886,7 @@ impl App {
             return Task::none();
         };
         if let Some(reason) = diff.line_staging_block() {
-            self.status = reason.into();
+            self.refuse(NOT_POSSIBLE, reason);
             return Task::none();
         }
         let (Some(staged), Loadable::Ready(file)) = (diff.staged(), &diff.diff) else {
@@ -3927,7 +3931,7 @@ impl App {
             return Task::none();
         };
         if let Some(reason) = commit_blocker(view, stage_all) {
-            self.status = reason;
+            self.refuse("Cannot commit", reason);
             return Task::none();
         }
         let message = view.commit_message();
@@ -4307,7 +4311,7 @@ impl App {
     /// `confirmed` (M9-02).
     fn undo_redo_in(&mut self, tab: TabId, undo: bool, confirmed: bool) -> Task<Message> {
         if let Some(reason) = self.write_block() {
-            self.status = reason;
+            self.refuse(NOT_POSSIBLE, reason);
             return Task::none();
         }
         let Some(view) = self.tab_mut(tab).and_then(Tab::view_mut) else {
@@ -4333,7 +4337,7 @@ impl App {
         let stack = if undo { &view.undo } else { &view.redo };
         if stack.last().is_some_and(UndoAction::moves_head) {
             if let Some(reason) = view.state_block(Guarded::MoveHead) {
-                self.status = reason;
+                self.refuse(NOT_POSSIBLE, reason);
                 return Task::none();
             }
         }
@@ -4968,7 +4972,7 @@ impl App {
         if let Some(reason) = crate::repo_view::author_change_block(&view.snapshot, &ids)
             .or_else(|| self.write_block())
         {
-            self.status = reason;
+            self.refuse("Cannot change the author", reason);
             return Task::none();
         }
         let choices = author_choices(&view.snapshot.identity, &self.settings.identities.list);
@@ -5714,6 +5718,16 @@ impl App {
 
     /// Runs the selected palette entry (disabled entries do nothing).
     fn run_palette(&mut self) -> Task<Message> {
+        // A disabled entry says why instead of doing nothing (M19-03).
+        let refused = self
+            .palette
+            .as_ref()
+            .and_then(Palette::selected_entry)
+            .and_then(|e| e.disabled.clone().map(|reason| (e.target.clone(), reason)));
+        if let Some((target, reason)) = refused {
+            self.palette = None;
+            return self.refuse_action(&target, reason);
+        }
         let Some(target) = self.palette.as_ref().and_then(Palette::chosen) else {
             return Task::none();
         };
@@ -5788,6 +5802,7 @@ impl App {
         let (path, rev, cancel) = (blame.path.clone(), blame.rev.clone(), blame.cancel.clone());
         history.mode = crate::file_history::HistoryMode::Blame;
         history.blame = Some(blame);
+        let (failed_path, failed_rev) = (path.clone(), rev.clone());
         Task::perform(
             blocking(move || {
                 let result = git_core::blame(writer.as_ref(), &path, rev.as_deref(), &cancel)
@@ -5801,7 +5816,13 @@ impl App {
                     rev,
                     result,
                 },
-                Err(error) => Message::StatusText(error),
+                // A crashed task shows in the blame view like a Git error (M19-03).
+                Err(error) => Message::BlameLoaded {
+                    tab,
+                    path: failed_path,
+                    rev: failed_rev,
+                    result: Err(error),
+                },
             },
         )
     }
@@ -5869,7 +5890,7 @@ impl App {
             return Task::none();
         };
         let Some(request) = view.center.diff_mut().map(|d| d.request.clone()) else {
-            self.status = "Open the diff of a file first".to_owned();
+            self.refuse(NOT_POSSIBLE, "Open the diff of a file first");
             return Task::none();
         };
         let target = match &request.kind {
@@ -5883,7 +5904,10 @@ impl App {
             git_core::DiffKind::Unstaged => git_core::DiffTarget::Unstaged,
             git_core::DiffKind::Staged => git_core::DiffTarget::Staged,
             git_core::DiffKind::Untracked | git_core::DiffKind::Stash { .. } => {
-                self.status = "The external diff tool is not available for this file".to_owned();
+                self.refuse(
+                    NOT_POSSIBLE,
+                    "The external diff tool is not available for this file",
+                );
                 return Task::none();
             }
         };
@@ -6663,6 +6687,56 @@ impl App {
         Ok(Some((template, target)))
     }
 
+    /// A context menu whose disabled entries all say why (M19-03, ADR-044
+    /// amendment): an entry without a reason gets the reason why Git
+    /// cannot write, if that is what blocks it.
+    fn menu(&self, position: iced::Point, mut entries: Vec<MenuEntry>) -> ContextMenu {
+        if let Some(reason) = self.write_block() {
+            explain_disabled(&mut entries, &reason);
+        }
+        // Entries that an operation in progress blocks (reset, stash apply).
+        let operation = self
+            .active_tab()
+            .and_then(Tab::view)
+            .and_then(|v| v.snapshot.state.operation().map(str::to_owned));
+        if let Some(operation) = operation {
+            explain_disabled(
+                &mut entries,
+                &format!("Not possible while a {operation} is in progress"),
+            );
+        }
+        ContextMenu::new(position, entries)
+    }
+
+    /// Shows a refusal (M19-03): a warning toast with a plain title and
+    /// the reason; it stays until closed, so no timer is needed.
+    fn refuse(&mut self, title: &str, reason: impl Into<String>) {
+        self.toasts.push(crate::toast::Toast::new(
+            crate::toast::ToastKind::Warning,
+            title,
+            reason,
+        ));
+    }
+
+    /// A palette entry that cannot run (M19-03): the editor action gets
+    /// "No external editor set" with the way to the setting, the others
+    /// their reason.
+    fn refuse_action(&mut self, target: &palette::Target, reason: String) -> Task<Message> {
+        if matches!(target, palette::Target::Action(Shortcut::OpenEditor))
+            && self.editor_command().is_empty()
+        {
+            return self.notify(no_editor_toast());
+        }
+        self.refuse(NOT_POSSIBLE, reason);
+        Task::none()
+    }
+
+    /// Shows a failure (M19-03): an error toast that stays until closed.
+    fn fail(&mut self, title: &str, text: impl Into<String>, details: impl Into<String>) {
+        self.toasts
+            .push(crate::toast::Toast::error_with(title, text, details));
+    }
+
     /// Opens a file of a commit in the external editor (M19-02, ADR-061):
     /// what opens is decided in the background task.
     fn open_commit_file(&mut self, file: crate::open_file::CommitFileRef) -> Task<Message> {
@@ -6750,7 +6824,7 @@ impl App {
         let (status, task) = match key {
             Some(key) => {
                 if let Err(error) = git_core::ssh::ssh_command(&key) {
-                    self.status = error.to_string();
+                    self.refuse("Cannot use this SSH key", error.to_string());
                     return Task::none();
                 }
                 let file = key.file_name().map_or_else(
@@ -7134,7 +7208,7 @@ impl App {
                         },
                     });
                 }
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::GraphColumnShown(column, shown) => {
                 use crate::graph_columns::ColumnId;
@@ -7415,7 +7489,7 @@ impl App {
                             }
                         })
                         .collect();
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::IdentityChosen(choice) => {
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
@@ -7560,16 +7634,15 @@ impl App {
                 let Some(file) = self.crash_notice.as_ref().map(|c| c.path.clone()) else {
                     return Task::none();
                 };
-                return Task::perform(
-                    blocking(move || {
-                        crate::launch::spawn(&crate::launch::reveal_file(
-                            crate::launch::Platform::current(),
-                            &file,
-                            &|p| p.exists(),
-                        ))
-                    }),
-                    |result| Message::StatusText(result.err().unwrap_or_default()),
-                );
+                return launch_task(crate::launch::Launched::FileManager, move || {
+                    crate::launch::spawn(&crate::launch::reveal_file(
+                        crate::launch::Platform::current(),
+                        &file,
+                        &|p| p.exists(),
+                    ))
+                    .map(|()| None)
+                    .map_err(crate::launch::LaunchError::Start)
+                });
             }
             Message::CrashReportCopy => {
                 if let Some(crash) = &self.crash_notice {
@@ -7614,7 +7687,11 @@ impl App {
             }
             Message::RepoEditorWritten(result) => {
                 if let Err(error) = result {
-                    self.status = format!("Could not change the repository's editor: {error}");
+                    self.fail(
+                        "Could not change the repository's editor",
+                        "Git could not write the repository config.",
+                        error,
+                    );
                 }
                 if let Some((tab, _)) = self.active_repo_path() {
                     return self.refresh(tab);
@@ -7666,7 +7743,11 @@ impl App {
                         page.long_paths = Some(value.unwrap_or(false));
                     }
                 }
-                Err(error) => self.status = format!("Could not change core.longpaths: {error}"),
+                Err(error) => self.fail(
+                    "Could not change core.longpaths",
+                    "Git could not write the global config.",
+                    error,
+                ),
             },
             Message::UpdatesToggled(on) => {
                 self.settings.general.check_updates = on;
@@ -7701,15 +7782,14 @@ impl App {
                 }
             }
             Message::OpenLink(target) => {
-                return Task::perform(
-                    blocking(move || {
-                        crate::launch::spawn(&crate::launch::open_target(
-                            crate::launch::Platform::current(),
-                            &target,
-                        ))
-                    }),
-                    |result| Message::StatusText(result.err().unwrap_or_default()),
-                );
+                return launch_task(crate::launch::Launched::Link, move || {
+                    crate::launch::spawn(&crate::launch::open_target(
+                        crate::launch::Platform::current(),
+                        &target,
+                    ))
+                    .map(|()| None)
+                    .map_err(crate::launch::LaunchError::Start)
+                });
             }
             Message::ThemeSelected(id) => {
                 if let Some(page) = self.settings_page.as_mut() {
@@ -7881,16 +7961,19 @@ impl App {
                 let Some(dir) = self.theme_dir() else {
                     return Task::none();
                 };
-                return Task::perform(
-                    blocking(move || {
-                        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-                        crate::launch::spawn(&crate::launch::file_manager(
-                            crate::launch::Platform::current(),
-                            &dir,
-                        ))
-                    }),
-                    |result| Message::StatusText(result.err().unwrap_or_default()),
-                );
+                return launch_task(crate::launch::Launched::FileManager, move || {
+                    std::fs::create_dir_all(&dir).map_err(|e| crate::launch::LaunchError::Failed {
+                        title: "Could not open the theme folder".into(),
+                        text: "The folder could not be created.".into(),
+                        error: format!("{}: {e}", dir.display()),
+                    })?;
+                    crate::launch::spawn(&crate::launch::file_manager(
+                        crate::launch::Platform::current(),
+                        &dir,
+                    ))
+                    .map(|()| None)
+                    .map_err(crate::launch::LaunchError::Start)
+                });
             }
             Message::ThemeFilesChanged(Ok(change)) => {
                 self.set_theme_files(change.entries);
@@ -7983,7 +8066,7 @@ impl App {
                     write,
                 } = loaded;
                 if let Some(notice) = notice {
-                    self.status = notice;
+                    self.refuse("Could not read the settings", notice);
                 }
                 let zoom = self.settings.appearance.zoom_percent;
                 self.settings = settings;
@@ -8023,27 +8106,28 @@ impl App {
                     return Task::none();
                 };
                 let template = self.settings.tools.terminal_command.clone();
-                return Task::perform(
-                    blocking(move || {
-                        let launch = crate::launch::terminal(
-                            crate::launch::Platform::current(),
-                            &crate::launch::SystemLookup,
-                            &template,
-                            &root,
-                        )?;
-                        crate::launch::spawn(&launch).map_err(|e| {
-                            format!(
-                                "{e}. Check the terminal command in Preferences → External tools."
-                            )
-                        })
-                    }),
-                    |result| {
-                        Message::StatusText(match result {
-                            Ok(()) => String::new(),
-                            Err(error) => format!("Could not open a terminal: {error}"),
-                        })
-                    },
-                );
+                return launch_task(crate::launch::Launched::Terminal, move || {
+                    use crate::launch::LaunchError;
+                    let launch = crate::launch::terminal(
+                        crate::launch::Platform::current(),
+                        &crate::launch::SystemLookup,
+                        &template,
+                        &root,
+                    )
+                    .map_err(|error| {
+                        if error == crate::launch::NO_TERMINAL {
+                            LaunchError::Setup(crate::launch::Notice::new(
+                                NO_TERMINAL_TITLE,
+                                error,
+                            ))
+                        } else {
+                            LaunchError::Start(error)
+                        }
+                    })?;
+                    crate::launch::spawn(&launch)
+                        .map(|()| None)
+                        .map_err(LaunchError::Start)
+                });
             }
             Message::OpenFileManager => {
                 let Some(root) = self
@@ -8053,41 +8137,42 @@ impl App {
                 else {
                     return Task::none();
                 };
-                return Task::perform(
-                    blocking(move || {
-                        crate::launch::spawn(&crate::launch::file_manager(
-                            crate::launch::Platform::current(),
-                            &root,
-                        ))
-                    }),
-                    |result| Message::StatusText(result.err().unwrap_or_default()),
-                );
+                return launch_task(crate::launch::Launched::FileManager, move || {
+                    crate::launch::spawn(&crate::launch::file_manager(
+                        crate::launch::Platform::current(),
+                        &root,
+                    ))
+                    .map(|()| None)
+                    .map_err(crate::launch::LaunchError::Start)
+                });
             }
             Message::OpenInEditor(file) => {
                 let (template, target) = match self.editor_request(file.as_deref()) {
                     Ok(Some(request)) => request,
                     Ok(None) => return Task::none(),
-                    Err(reason) => {
-                        self.status = reason;
-                        return Task::none();
-                    }
+                    // Alt+E, the toolbar and the palette without an editor
+                    // (M19-03): a warning with the way to the setting.
+                    Err(_) => return self.notify(no_editor_toast()),
                 };
-                return Task::perform(
-                    blocking(move || {
-                        if !target.exists() {
-                            return Err(NOT_IN_WORKTREE.to_owned());
-                        }
-                        let launch = crate::launch::editor(
-                            crate::launch::Platform::current(),
-                            &crate::launch::SystemLookup,
-                            &template,
-                            &target,
-                        )?;
-                        crate::launch::spawn(&launch)
-                            .map_err(|e| format!("Could not start the editor: {e}"))
-                    }),
-                    |result| Message::StatusText(result.err().unwrap_or_default()),
-                );
+                return launch_task(crate::launch::Launched::Editor, move || {
+                    use crate::launch::LaunchError;
+                    if !target.exists() {
+                        return Err(LaunchError::Refused(crate::launch::Notice::new(
+                            "Could not open the file",
+                            NOT_IN_WORKTREE,
+                        )));
+                    }
+                    let launch = crate::launch::editor(
+                        crate::launch::Platform::current(),
+                        &crate::launch::SystemLookup,
+                        &template,
+                        &target,
+                    )
+                    .map_err(LaunchError::Start)?;
+                    crate::launch::spawn(&launch)
+                        .map(|()| None)
+                        .map_err(LaunchError::Start)
+                });
             }
             Message::OpenCommitFile(file) => return self.open_commit_file(file),
             Message::LaunchFinished(what, result) => {
@@ -8368,7 +8453,11 @@ impl App {
             }
             Message::SettingsSaved(result) => {
                 if let Err(error) = result {
-                    self.status = format!("Could not save the settings: {error}");
+                    self.fail(
+                        "Could not save the settings",
+                        "Your changes apply until the app closes.",
+                        error,
+                    );
                 }
             }
             Message::EscapeCaptured => {
@@ -8494,7 +8583,11 @@ impl App {
                     // A hidden selection moves to the WIP row (apply_snapshot).
                     Ok(snapshot) => view.apply_snapshot(snapshot),
                     Err(error) => {
-                        self.status = format!("Could not filter the graph: {error}");
+                        self.fail(
+                            "Could not filter the graph",
+                            "Git could not read the history.",
+                            error,
+                        );
                         return Task::none();
                     }
                 }
@@ -8650,7 +8743,7 @@ impl App {
                         _ => None,
                     }
                 });
-                self.context_menu = Some(ContextMenu::new(
+                self.context_menu = Some(self.menu(
                     position,
                     vec![
                         MenuEntry::Item {
@@ -8678,10 +8771,11 @@ impl App {
                 };
                 view.center = CenterView::Graph;
                 if !view.snapshot.index.contains_key(&id) {
-                    self.status = format!(
+                    let reason = format!(
                         "Commit {} is not in the graph (hidden branch or truncated history)",
                         &id[..id.len().min(7)]
                     );
+                    self.refuse("Not in the graph", reason);
                     return Task::none();
                 }
                 select_multi(view, &id, false, false);
@@ -8705,7 +8799,11 @@ impl App {
                         ),
                         Err(error) => {
                             palette.set_entries(Vec::new());
-                            self.status = format!("Could not list the files: {error}");
+                            self.fail(
+                                "Could not list the files",
+                                "Git could not read the files of the repository.",
+                                error,
+                            );
                         }
                     }
                 }
@@ -8766,7 +8864,7 @@ impl App {
                     editor,
                     copy_path,
                 });
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::FileBlameOpened { path, start, rev } => {
                 let open = self.update(Message::FileHistoryOpened {
@@ -9079,7 +9177,10 @@ impl App {
                     // error dialog (M6-18).
                     Err(error) if git_core::missing_remote(&error).is_some() => {
                         let name = git_core::missing_remote(&error).unwrap_or_default();
-                        self.status = format!("Remote {name} no longer exists");
+                        self.refuse(
+                            "Remote not found",
+                            format!("Remote {name} no longer exists; the list was reloaded."),
+                        );
                         if let Some(view) = self.tab_mut(tab).and_then(|t| t.view()) {
                             view.backend.reload();
                         }
@@ -9095,8 +9196,8 @@ impl App {
                     }
                     Err(error) if background.is_some() => {
                         if background == Some(true) {
-                            let reason = error.lines().last().unwrap_or_default();
-                            self.status = format!("{label} failed: {reason}");
+                            let reason = error.lines().last().unwrap_or_default().to_owned();
+                            self.fail(&format!("{label} failed"), reason, error.clone());
                         }
                     }
                     Err(error) => {
@@ -9218,7 +9319,7 @@ impl App {
                         message: Box::new(Message::Pull(Some(mode))),
                     });
                 }
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::Pull(mode) => {
                 if let Some(mode) = mode {
@@ -9320,6 +9421,7 @@ impl App {
                             // Also on HEAD itself: Mixed and Hard clear
                             // the index (and conflicts) there (M9-04).
                             resettable: clean && snapshot.head.target().is_some(),
+                            operation: snapshot.state.operation().map(str::to_owned),
                         }
                     })
                     .unwrap_or_default();
@@ -9337,7 +9439,7 @@ impl App {
                     let block = crate::repo_view::author_change_block(&view.snapshot, &ids);
                     Some(crate::menus::AuthorChange { ids, block })
                 });
-                self.context_menu = Some(ContextMenu::new(
+                self.context_menu = Some(self.menu(
                     position,
                     crate::menus::commit(&id, &message, writable, facts, &head, author),
                 ));
@@ -9369,7 +9471,7 @@ impl App {
                         && branches
                             .iter()
                             .all(|(k, n)| view.ref_filter.is_hidden(n, *k));
-                    self.context_menu = Some(ContextMenu::new(
+                    self.context_menu = Some(self.menu(
                         position,
                         crate::menus::bulk(&plan, !branches.is_empty(), all_hidden, writable),
                     ));
@@ -9474,7 +9576,7 @@ impl App {
                         }));
                     }
                 }
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::RenameStart(old) => {
                 if let Some(view) = self.active_view_mut() {
@@ -9624,7 +9726,7 @@ impl App {
                                 branches.iter().any(hidden),
                             )
                         });
-                self.context_menu = Some(ContextMenu::new(
+                self.context_menu = Some(self.menu(
                     position,
                     crate::menus::remote(
                         &name,
@@ -9975,7 +10077,7 @@ impl App {
                         .and_then(|v| v.center.diff_mut())
                         .and_then(|d| d.line_staging_block());
                     if let Some(reason) = reason {
-                        self.status = reason.into();
+                        self.refuse(NOT_POSSIBLE, reason);
                         return Task::none();
                     }
                 }
@@ -10103,7 +10205,7 @@ impl App {
             },
             Message::FlowLayoutSet(on) => {
                 if let Some(reason) = self.action_block(Shortcut::ToggleFlowLayout) {
-                    self.status = reason;
+                    self.refuse(NOT_POSSIBLE, reason);
                     return Task::none();
                 }
                 let Some(tab) = self.active_tab().map(|t| t.id) else {
@@ -10243,7 +10345,7 @@ impl App {
                     ));
                 }
                 Ok(false) => return self.undo_redo_in(tab, true, true),
-                Err(error) => self.status = format!("Undo failed: {error}"),
+                Err(error) => self.fail("Undo failed", "Git could not check the stash.", error),
             },
             Message::StashUndoConfirmed(tab) => return self.undo_redo_in(tab, true, true),
             Message::StashDrop(id) => {
@@ -10279,7 +10381,7 @@ impl App {
                     .active_tab()
                     .and_then(Tab::view)
                     .is_some_and(|v| v.state_block(Guarded::Stash).is_none());
-                self.context_menu = Some(ContextMenu::new(
+                self.context_menu = Some(self.menu(
                     position,
                     crate::menus::stash(&id, writable, restorable),
                 ));
@@ -10403,7 +10505,7 @@ impl App {
                 }
                 entries.push(MenuEntry::Separator);
                 entries.push(MenuEntry::item("Other…", Message::EditAuthorOther));
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::EditAuthorChosen(author) => {
                 if let Some(modal) = self.message_modal.as_mut().filter(|m| m.editable()) {
@@ -10540,7 +10642,11 @@ impl App {
             }
             Message::Saved(Ok(())) => {}
             Message::Saved(Err(error)) => {
-                self.status = format!("Could not save the session: {error}");
+                self.fail(
+                    "Could not save the session",
+                    "Open tabs may not be restored at the next start.",
+                    error,
+                );
             }
             Message::OpenRecent(path) => return self.open_path(path),
             Message::SubmodulesLoaded { tab, head, result } => {
@@ -10548,7 +10654,7 @@ impl App {
             }
             Message::SubmoduleContextMenu { path, position } => {
                 let writable = self.write_block().is_none();
-                self.context_menu = Some(ContextMenu::new(
+                self.context_menu = Some(self.menu(
                     position,
                     crate::menus::submodule(&path, writable),
                 ));
@@ -10559,7 +10665,7 @@ impl App {
                     .and_then(Tab::view)
                     .is_some_and(|v| !v.submodules.is_empty());
                 let writable = self.write_block().is_none() && any;
-                self.context_menu = Some(ContextMenu::new(
+                self.context_menu = Some(self.menu(
                     position,
                     crate::menus::submodules_header(writable),
                 ));
@@ -10803,7 +10909,7 @@ impl App {
                         message: Box::new(Message::FlowStartRequested(kind)),
                     })
                     .collect();
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::FlowStartRequested(kind) => {
                 let Some((tab, config)) = self.active_tab().and_then(|t| {
@@ -11121,9 +11227,11 @@ impl App {
                 };
                 let ids = view.multi.ids().to_vec();
                 if !crate::repo_view::squashable(&view.snapshot, &ids) {
-                    self.status = "Select commits that follow each other on the current \
-                                   branch, without merges"
-                        .into();
+                    self.refuse(
+                        "Cannot squash",
+                        "Select commits that follow each other on the current branch, \
+                         without merges",
+                    );
                     return Task::none();
                 }
                 // Oldest first, like Git's combined squash message.
@@ -11214,7 +11322,7 @@ impl App {
                     return Task::none();
                 }
                 let entries = drop_entries(&view.snapshot, &drag.source, (&name, kind), writable);
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::BranchDragEnd => {
                 if let Some(view) = self.active_view_mut() {
@@ -11362,7 +11470,7 @@ impl App {
                             autostash: false,
                         });
                     }
-                    Err(problem) => self.status = problem,
+                    Err(problem) => self.refuse("Cannot start the rebase", problem),
                 }
             }
             Message::RunInteractiveRebase { .. } => return self.merge(message),
@@ -11461,7 +11569,7 @@ impl App {
                             move |git| git_core::resolve_conflict(git, &path, content.as_bytes()),
                         );
                     }
-                    Err(reason) => self.status = reason,
+                    Err(reason) => self.refuse("Cannot save the resolution", reason),
                 }
             }
             Message::ConflictTakeFile(side) => {
@@ -11494,10 +11602,12 @@ impl App {
                 };
             }
             Message::PickerClicked(id) => {
-                if self.action_block(id).is_none() {
-                    self.palette = None;
-                    return self.shortcut(id);
-                }
+                self.palette = None;
+                return match self.action_block(id) {
+                    None => self.shortcut(id),
+                    // A click on a disabled entry says why (M19-03).
+                    Some(reason) => self.refuse_action(&palette::Target::Action(id), reason),
+                };
             }
             Message::Shortcut(shortcut) if shortcut.works_in_text_input() => {
                 return self.shortcut(shortcut)
@@ -11678,9 +11788,11 @@ impl App {
                         let tab = dialog.tab;
                         self.init_dialog = None;
                         if outcome == git_core::init::InitOutcome::NoIdentity {
-                            self.status = "The new files are not committed: set your Git \
-                                           identity first (Preferences → Identities)."
-                                .into();
+                            self.refuse(
+                                "Files not committed",
+                                "The new files are not committed: set your Git identity \
+                                 first (Preferences → Identities).",
+                            );
                         }
                         let start_tab = self
                             .tabs
@@ -11702,7 +11814,7 @@ impl App {
             }
             Message::CopyPromptRequested => {
                 if let Some(reason) = self.action_block(Shortcut::CopyCommitPrompt) {
-                    self.status = reason;
+                    self.refuse(NOT_POSSIBLE, reason);
                     return Task::none();
                 }
                 return self.prompt_task(git_core::prompt::PromptSource::Staged);
@@ -11768,7 +11880,7 @@ impl App {
                         message: Box::new(Message::UnstageAll),
                     },
                 ];
-                self.context_menu = Some(ContextMenu::new(position, entries));
+                self.context_menu = Some(self.menu(position, entries));
             }
             Message::TemplateLoaded(result) => {
                 if let Some(page) = self.settings_page.as_mut() {
@@ -11846,9 +11958,11 @@ impl App {
             Message::TemplateWritten(result) => {
                 match result {
                     Ok(()) => self.status = "Commit template saved".into(),
-                    Err(error) => {
-                        self.status = format!("Could not save the commit template: {error}")
-                    }
+                    Err(error) => self.fail(
+                        "Could not save the commit template",
+                        "Git could not write the template file or the config.",
+                        error,
+                    ),
                 }
                 // The settings page and the tab's snapshot (prefill) follow.
                 let refresh = match self.active_repo_path() {
@@ -11885,7 +11999,11 @@ impl App {
             }
             Message::SigningWritten(result) => {
                 if let Err(error) = result {
-                    self.status = format!("Could not change the signing settings: {error}");
+                    self.fail(
+                        "Could not change the signing settings",
+                        "Git could not write the config.",
+                        error,
+                    );
                 }
                 return self.load_signing();
             }
@@ -13621,6 +13739,28 @@ pub fn commit_editor_entry(
     }
 }
 
+/// Title of a warning for an action that cannot run now (M19-03).
+pub const NOT_POSSIBLE: &str = "Not possible right now";
+
+/// Gives every disabled entry without a reason `reason` (M19-03).
+pub fn explain_disabled(entries: &mut [MenuEntry], reason: &str) {
+    for entry in entries {
+        if let MenuEntry::Item {
+            enabled: false,
+            hint,
+            ..
+        } = entry
+        {
+            if hint.as_deref().is_none_or(|h| h.trim().is_empty()) {
+                *hint = Some(reason.to_owned());
+            }
+        }
+    }
+}
+
+/// Title of the warning when no terminal is set or found (M19-03).
+pub const NO_TERMINAL_TITLE: &str = "No terminal found";
+
 /// Title of the warning when no external editor is set (M19-03).
 pub const NO_EDITOR_TITLE: &str = "No external editor set";
 
@@ -13667,6 +13807,12 @@ pub fn launch_toast(
         Err(LaunchError::Refused(notice)) => {
             Some(Toast::new(ToastKind::Warning, notice.title, notice.text))
         }
+        Err(LaunchError::Setup(notice)) => Some(
+            Toast::new(ToastKind::Warning, notice.title, notice.text).with_action(
+                "Open Preferences",
+                Message::SettingsOpenedAt(settings::Category::ExternalTools),
+            ),
+        ),
         Err(LaunchError::Failed { title, text, error }) => {
             Some(Toast::error_with(title, text, error))
         }
@@ -14882,7 +15028,7 @@ pub(crate) mod tests {
         // Without an open diff there is nothing to compare.
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::ExternalDiff);
-        assert_eq!(app.status, "Open the diff of a file first");
+        assert_eq!(toast_text(&app), "Open the diff of a file first");
     }
 
     #[test]
@@ -15788,7 +15934,7 @@ pub(crate) mod tests {
             write: true,
         }));
         assert_eq!(app.settings, loaded);
-        assert!(app.status.contains("defaults are used"));
+        assert!(toast_text(&app).contains("defaults are used"));
     }
 
     #[test]
@@ -16340,7 +16486,7 @@ pub(crate) mod tests {
             ] {
                 app.status.clear();
                 let _ = app.update(message);
-                assert_eq!(app.status, hint);
+                assert_eq!(toast_text(&app), hint);
                 assert!(app.modal.is_none());
                 assert!(app.tabs[0].view().unwrap().busy.is_none());
             }
@@ -17560,7 +17706,7 @@ pub(crate) mod tests {
         assert_eq!(commit_blocker(view, true).as_deref(), Some(NO_IDENTITY));
         let _ = app.update(Message::CommitRequested);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert_eq!(app.status, NO_IDENTITY);
+        assert_eq!(toast_text(&app), NO_IDENTITY);
         let _ = app.update(Message::AmendToggled(true));
         assert_eq!(
             commit_blocker(app.tabs[0].view().unwrap(), false).as_deref(),
@@ -17732,7 +17878,11 @@ pub(crate) mod tests {
         let _ = app.update(Message::SshPathInput("/keys/a\"b".into()));
         let _ = app.update(Message::SshPathSubmit);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert!(app.status.contains("double quote"), "{}", app.status);
+        assert!(
+            toast_text(&app).contains("double quote"),
+            "{}",
+            toast_text(&app)
+        );
         let _ = app.update(Message::SshPathInput("/keys/other".into()));
         let _ = app.update(Message::SshPathSubmit);
         assert_eq!(running_args(&app), ["Set SSH key"]);
@@ -17791,6 +17941,16 @@ pub(crate) mod tests {
             "{hint}"
         );
         assert_eq!(auth_hint_with_key("fatal: other", &key), None);
+    }
+
+    /// Text of the newest toast (refusals and failures, M19-03); empty
+    /// without one.
+    pub(crate) fn toast_text(app: &App) -> String {
+        app.toasts
+            .list
+            .last()
+            .map(|t| t.text.clone())
+            .unwrap_or_default()
     }
 
     fn editor_entry_of(app: &App) -> (bool, Option<String>, Option<Message>) {
@@ -17926,6 +18086,122 @@ pub(crate) mod tests {
         );
     }
 
+    /// M19-03: a program that does not exist fails visibly for every kind
+    /// of launch (editor, terminal, file manager, link): an error toast
+    /// with a plain reason, never only the status bar.
+    #[test]
+    fn failing_launches_show_an_error_toast() {
+        use crate::launch::{Launch, LaunchError, Launched};
+        let dir = tempfile::tempdir().unwrap();
+        for (what, title) in [
+            (Launched::Editor, "Could not start the editor"),
+            (Launched::Terminal, "Could not start the terminal"),
+            (Launched::FileManager, "Could not start the file manager"),
+            (Launched::Link, "Could not open the link"),
+        ] {
+            let error = crate::launch::spawn(&Launch::new(
+                "no-such-program-m19-check",
+                Vec::new(),
+                dir.path(),
+            ))
+            .unwrap_err();
+            let mut app = ready_app(&["c"]);
+            let _ = app.update(Message::LaunchFinished(
+                what,
+                Err(LaunchError::Start(error)),
+            ));
+            assert!(app.status.is_empty(), "{what:?}");
+            let toast = app.toasts.list.last().unwrap();
+            assert_eq!(toast.kind, crate::toast::ToastKind::Error);
+            assert_eq!(toast.title, title);
+            assert!(
+                toast.text.starts_with("The program was not found."),
+                "{}",
+                toast.text
+            );
+            assert!(toast.details.is_some());
+        }
+        // No terminal set and none found: a warning with the way forward.
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::LaunchFinished(
+            Launched::Terminal,
+            Err(LaunchError::Setup(crate::launch::Notice::new(
+                NO_TERMINAL_TITLE,
+                crate::launch::NO_TERMINAL,
+            ))),
+        ));
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.kind, crate::toast::ToastKind::Warning);
+        assert!(toast.action.is_some());
+    }
+
+    /// M19-03: Alt+E, the toolbar button and the palette without an editor
+    /// show one warning with "Open Preferences" (identical toasts do not
+    /// stack); the button opens External tools.
+    #[test]
+    fn missing_editor_is_a_warning_with_the_way_forward() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::Shortcut(Shortcut::OpenEditor));
+        let _ = app.update(checked(Shortcut::OpenEditor, false));
+        let _ = app.update(Message::OpenInEditor(None));
+        let _ = app.update(checked(Shortcut::CommandPalette, false));
+        let _ = app.update(Message::PaletteQuery("open repository in editor".into()));
+        let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
+        assert_eq!(entry.disabled.as_deref(), Some(crate::launch::NO_EDITOR));
+        let _ = app.update(Message::PaletteSubmit);
+        assert_eq!(app.toasts.list.len(), 1, "identical toasts are replaced");
+        let toast = app.toasts.list[0].clone();
+        assert_eq!(toast.kind, crate::toast::ToastKind::Warning);
+        assert_eq!(toast.title, NO_EDITOR_TITLE);
+        assert!(app.status.is_empty());
+        let (label, message) = toast.action.unwrap();
+        assert_eq!(label, "Open Preferences");
+        let _ = app.update(*message);
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::ExternalTools)
+        );
+    }
+
+    /// M19-03: failures that only reached the status bar are error toasts
+    /// with the raw error under "Details"; damaged files at start-up warn.
+    #[test]
+    fn failures_and_start_up_notices_become_toasts() {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsSaved(Err("disk full".into())));
+        let _ = app.update(Message::Saved(Err("read-only".into())));
+        let titles: Vec<_> = app
+            .toasts
+            .list
+            .iter()
+            .map(|t| (t.kind, t.title.as_str(), t.details.as_deref()))
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                (
+                    crate::toast::ToastKind::Error,
+                    "Could not save the settings",
+                    Some("disk full")
+                ),
+                (
+                    crate::toast::ToastKind::Error,
+                    "Could not save the session",
+                    Some("read-only")
+                ),
+            ]
+        );
+        assert!(app.status.is_empty());
+        let (mut app, _) = App::new(Vec::new(), None);
+        let _ = app.update(Message::SessionLoaded(session::Loaded {
+            session: Session::default(),
+            notice: Some("The session file is damaged and was reset.".into()),
+        }));
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.kind, crate::toast::ToastKind::Warning);
+        assert_eq!(toast.title, "Could not restore the session");
+    }
+
     /// The notice of a file of a commit reaches the toast list.
     #[test]
     fn launch_finished_pushes_the_toast() {
@@ -17952,7 +18228,15 @@ pub(crate) mod tests {
             Err(crate::launch::NO_EDITOR.to_owned())
         );
         let _ = app.update(checked(Shortcut::OpenEditor, false));
-        assert_eq!(app.status, crate::launch::NO_EDITOR);
+        // M19-03: a warning toast with the way to the setting.
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.kind, crate::toast::ToastKind::Warning);
+        assert_eq!(toast.title, NO_EDITOR_TITLE);
+        assert!(matches!(
+            toast.action.as_ref().map(|(_, m)| &**m),
+            Some(Message::SettingsOpenedAt(settings::Category::ExternalTools))
+        ));
+        assert!(app.status.is_empty());
         let _ = app.update(Message::FileContextMenu {
             file: file("a"),
             area: FileArea::Unstaged,
@@ -18750,7 +19034,7 @@ pub(crate) mod tests {
         let tab = app.tabs[0].id;
         let _ = app.run_write(tab, "Stage", |_| Ok(()));
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert!(app.status.contains("not found"));
+        assert!(toast_text(&app).contains("not found"));
     }
 
     #[test]
@@ -18898,7 +19182,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::SummaryChanged("Fix".into()));
         let _ = app.update(Message::CommitRequested);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert_eq!(app.status, "Stage files to commit");
+        assert_eq!(toast_text(&app), "Stage files to commit");
 
         // Ctrl+Shift+Enter stages everything first.
         let _ = app.update(Message::Shortcut(Shortcut::StageAllAndCommit));
@@ -18906,7 +19190,8 @@ pub(crate) mod tests {
 
         let mut app = staging_app(&[], &["a"]);
         let _ = app.update(Message::CommitRequested);
-        assert_eq!(app.status, "Enter a commit summary");
+        assert_eq!(toast_text(&app), "Enter a commit summary");
+        assert!(app.status.is_empty());
     }
 
     #[test]
@@ -18983,7 +19268,10 @@ pub(crate) mod tests {
 
         let _ = app.update(Message::StashPush);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert_eq!(app.status, "Cannot stash while a merge is in progress");
+        assert_eq!(
+            toast_text(&app),
+            "Cannot stash while a merge is in progress"
+        );
         let _ = app.update(Message::AmendToggled(true));
         assert!(!app.tabs[0].view().unwrap().amend);
         let _ = app.update(Message::StashDropConfirmed("s".into()));
@@ -19396,7 +19684,11 @@ pub(crate) mod tests {
             git_core::init::InitOutcome::NoIdentity,
         ))));
         assert!(app.init_dialog.is_none());
-        assert!(app.status.contains("not committed"), "{}", app.status);
+        assert!(
+            toast_text(&app).contains("not committed"),
+            "{}",
+            toast_text(&app)
+        );
         assert!(matches!(
             &app.tabs[0].state,
             TabState::Loading { path: p } if *p == path
@@ -19774,7 +20066,10 @@ pub(crate) mod tests {
         let _ = app.update(Message::LongPathsLoaded(Ok(Some(true))));
         assert_eq!(app.settings_page.as_ref().unwrap().long_paths, Some(true));
         let _ = app.update(Message::LongPathsLoaded(Err("no git".into())));
-        assert!(app.status.contains("core.longpaths"));
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.kind, crate::toast::ToastKind::Error);
+        assert!(toast.title.contains("core.longpaths"));
+        assert_eq!(toast.details.as_deref(), Some("no git"));
     }
 
     #[test]
@@ -19877,7 +20172,7 @@ pub(crate) mod tests {
             Some("Initialize Gitflow first")
         );
         let _ = app.update(checked(Shortcut::ToggleFlowLayout, false));
-        assert_eq!(app.status, "Initialize Gitflow first");
+        assert_eq!(toast_text(&app), "Initialize Gitflow first");
         let _ = app.update(Message::GraphColumnMenu(iced::Point::ORIGIN));
         let menu = app.context_menu.take().unwrap();
         assert!(menu.entries.iter().any(|e| matches!(e,
@@ -19913,7 +20208,7 @@ pub(crate) mod tests {
             Some("Stage changes first")
         );
         let _ = app.update(Message::CopyPromptRequested);
-        assert_eq!(app.status, "Stage changes first");
+        assert_eq!(toast_text(&app), "Stage changes first");
         assert!(app.prompt_dialog.is_none());
         let _ = app.update(Message::StagedHeaderMenu(iced::Point::ORIGIN));
         assert_eq!(
@@ -20527,7 +20822,7 @@ pub(crate) mod tests {
         app.tabs[0].view_mut().unwrap().summary.clear();
         let _ = app.update(Message::CommitRequested);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert_eq!(app.status, "Enter a commit summary");
+        assert_eq!(toast_text(&app), "Enter a commit summary");
     }
 
     #[test]
@@ -20592,7 +20887,10 @@ pub(crate) mod tests {
             autostash: false,
         });
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert_eq!(app.status, "Cannot merge while a rebase is in progress");
+        assert_eq!(
+            toast_text(&app),
+            "Cannot merge while a rebase is in progress"
+        );
 
         let _ = app.update(Message::FastForward {
             branch: Some("topic".into()),
@@ -20706,7 +21004,7 @@ pub(crate) mod tests {
         let _ = app.update(Message::ConflictSave);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
         assert_eq!(
-            app.status,
+            toast_text(&app),
             "Pick lines for the remaining conflict, or edit the output"
         );
         let _ = app.update(Message::ConflictTakeAll(git_core::Side::Theirs));
@@ -20799,7 +21097,11 @@ pub(crate) mod tests {
         let _ = app.update(checked(Shortcut::StageSelected, false));
         let _ = app.update(Message::RebaseStart);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert!(app.status.contains("oldest kept commit"), "{}", app.status);
+        assert!(
+            toast_text(&app).contains("oldest kept commit"),
+            "{}",
+            toast_text(&app)
+        );
 
         let _ = app.update(checked(Shortcut::TodoKey('p'), false));
         let _ = app.update(Message::RebaseStart);
@@ -21108,7 +21410,10 @@ pub(crate) mod tests {
         let mut app = app_in_state(merging());
         let _ = app.update(Message::ResetStart("c".into()));
         assert!(app.modal.is_none());
-        assert_eq!(app.status, "Cannot reset while a merge is in progress");
+        assert_eq!(
+            toast_text(&app),
+            "Cannot reset while a merge is in progress"
+        );
     }
 
     /// History main (checked out) at "m", feature one commit ahead at "f".
@@ -23394,12 +23699,16 @@ pub(crate) mod tests {
         };
         fail(&mut app);
         assert!(app.modal.is_none(), "no dialog for auto-fetch");
-        assert!(app
-            .status
-            .starts_with("Auto-fetch failed: fatal: unable to access"));
-        app.status.clear();
+        // An error toast once (M19-03), the raw error under "Details".
+        assert_eq!(app.toasts.list.len(), 1);
+        let toast = &app.toasts.list[0];
+        assert_eq!(toast.kind, crate::toast::ToastKind::Error);
+        assert_eq!(toast.title, "Auto-fetch failed");
+        assert!(toast.text.starts_with("fatal: unable to access"));
+        app.toasts.list.clear();
         fail(&mut app);
-        assert!(app.status.is_empty(), "the same failure stays quiet");
+        assert!(app.toasts.list.is_empty(), "the same failure stays quiet");
+        assert!(app.status.is_empty());
     }
 
     /// Remote app whose `main` tracks `origin/main`.
@@ -23599,6 +23908,153 @@ pub(crate) mod tests {
         }
         view.snapshot = Arc::new(snapshot);
         app
+    }
+
+    /// Labels of disabled entries without a reason in the open menu.
+    fn unexplained(app: &App) -> Vec<String> {
+        app.context_menu
+            .as_ref()
+            .map(|menu| {
+                menu.entries
+                    .iter()
+                    .filter_map(|e| match e {
+                        MenuEntry::Item {
+                            label,
+                            enabled: false,
+                            hint,
+                            ..
+                        } if hint.as_deref().is_none_or(|h| h.trim().is_empty()) => {
+                            Some(label.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// M19-03: every disabled entry of the context menus (file, commit,
+    /// branch, tag, remote, stash, submodule, GITFLOW rows) says why, with
+    /// Git available, missing, and during an operation.
+    #[test]
+    fn disabled_menu_entries_name_their_reason() {
+        let at = iced::Point::ORIGIN;
+        type Setup = (&'static str, fn() -> App);
+        let setups: [Setup; 4] = [
+            ("ready", flow_app),
+            ("no git", || {
+                let mut app = flow_app();
+                let _ = app.update(Message::GitDetected(git_core::GitAvailability::Missing));
+                app
+            }),
+            ("merging", || {
+                let mut app = flow_app();
+                let view = app.tabs[0].view_mut().unwrap();
+                let mut snapshot = (*view.snapshot).clone();
+                snapshot.state = merging();
+                view.apply_snapshot(Arc::new(snapshot));
+                app
+            }),
+            ("rebasing", || {
+                let mut app = flow_app();
+                let view = app.tabs[0].view_mut().unwrap();
+                let mut snapshot = (*view.snapshot).clone();
+                snapshot.state = rebasing();
+                view.apply_snapshot(Arc::new(snapshot));
+                app
+            }),
+        ];
+        let mut problems = Vec::new();
+        for (name, setup) in setups {
+            let mut app = setup();
+            {
+                let view = app.tabs[0].view_mut().unwrap();
+                let mut snapshot = (*view.snapshot).clone();
+                snapshot.refs.push(git_core::Reference {
+                    name: "v1.0".into(),
+                    kind: git_core::RefKind::Tag,
+                    target: "c".into(),
+                    is_head: false,
+                    upstream: None,
+                    ahead_behind: None,
+                });
+                view.snapshot = Arc::new(snapshot);
+                view.submodules = vec![submodule(
+                    "libs/sub",
+                    git_core::submodule::SubmoduleState::Current,
+                )];
+            }
+            let snapshot = Arc::clone(&app.tabs[0].view().unwrap().snapshot);
+            let mut menus: Vec<(String, Message)> = Vec::new();
+            for r in &snapshot.refs {
+                menus.push((
+                    format!("ref {}", r.name),
+                    Message::BranchContextMenu {
+                        name: r.name.clone(),
+                        kind: r.kind,
+                        position: at,
+                    },
+                ));
+            }
+            for id in snapshot.commits.iter().map(|c| c.id.clone()) {
+                menus.push((
+                    format!("commit {id}"),
+                    Message::CommitContextMenu { id, position: at },
+                ));
+            }
+            for remote in &snapshot.remotes {
+                menus.push((
+                    format!("remote {remote}"),
+                    Message::RemoteContextMenu {
+                        name: remote.clone(),
+                        position: at,
+                    },
+                ));
+            }
+            menus.push((
+                "stash".into(),
+                Message::StashContextMenu {
+                    id: "s".into(),
+                    position: at,
+                },
+            ));
+            menus.push((
+                "submodule".into(),
+                Message::SubmoduleContextMenu {
+                    path: "libs/sub".into(),
+                    position: at,
+                },
+            ));
+            menus.push(("submodules".into(), Message::SubmodulesHeaderMenu(at)));
+            menus.push(("gitflow start".into(), Message::FlowStartMenu(at)));
+            for kind in [
+                git_core::ChangeKind::Modified,
+                git_core::ChangeKind::Deleted,
+                git_core::ChangeKind::Untracked,
+                git_core::ChangeKind::Conflicted,
+            ] {
+                for area in [FileArea::Unstaged, FileArea::Staged, FileArea::Commit] {
+                    let mut change = file("src/a.rs");
+                    change.kind = kind;
+                    menus.push((
+                        format!("file {kind:?} {area:?}"),
+                        Message::FileContextMenu {
+                            file: change,
+                            area,
+                            position: at,
+                        },
+                    ));
+                }
+            }
+            for (label, message) in menus {
+                app.context_menu = None;
+                let _ = app.update(message);
+                for entry in unexplained(&app) {
+                    problems.push(format!("{name}: {label}: {entry}"));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
     #[test]
@@ -24337,12 +24793,16 @@ pub(crate) mod tests {
         let entry = palette.selected_entry().unwrap();
         assert_eq!(entry.label, "Fetch all");
         assert_eq!(entry.disabled.as_deref(), Some("Open a repository first"));
-        // Enter on a disabled entry does nothing and keeps the palette.
-        let _ = app.update(Message::PaletteSubmit);
-        assert!(app.palette.is_some());
         let _ = app.update(Message::PaletteQuery("interactive rebase: pick".into()));
         let entry = app.palette.as_ref().unwrap().selected_entry().unwrap();
         assert!(entry.disabled.is_some());
+        // Enter on a disabled entry runs nothing and says why (M19-03).
+        let _ = app.update(Message::PaletteQuery("fetch all".into()));
+        let _ = app.update(Message::PaletteSubmit);
+        assert!(app.palette.is_none());
+        let toast = app.toasts.list.last().unwrap();
+        assert_eq!(toast.kind, crate::toast::ToastKind::Warning);
+        assert_eq!(toast.text, "Open a repository first");
     }
 
     #[test]
@@ -25064,7 +25524,10 @@ pub(crate) mod tests {
             result: Err("Git failed (exit code 2): error: No such remote: 'github-fc'".into()),
         });
         assert!(app.modal.is_none(), "no error dialog");
-        assert_eq!(app.status, "Remote github-fc no longer exists");
+        assert_eq!(
+            toast_text(&app),
+            "Remote github-fc no longer exists; the list was reloaded."
+        );
         assert!(app.tabs[0].view().unwrap().refreshing, "repository reloads");
 
         // Other errors still show the error (as a toast, M12-02).
@@ -25126,7 +25589,7 @@ pub(crate) mod tests {
         app.tabs[0].view_mut().unwrap().undo.push(checkout_change());
         let _ = app.update(Message::Undo);
         assert!(app.tabs[0].view().unwrap().busy.is_none());
-        assert!(app.status.contains("merge"));
+        assert!(toast_text(&app).contains("merge"));
     }
 
     #[test]

@@ -35,6 +35,19 @@ fn visibility_entries(
     [hide, solo]
 }
 
+/// A write entry (M19-03: every disabled entry says why): disabled
+/// without Git (the app adds why), or with `reason` when `possible` is
+/// false.
+fn gated(label: &str, writable: bool, possible: bool, reason: &str, message: Message) -> MenuEntry {
+    if !writable {
+        return action(label, false, message);
+    }
+    item_with_hint(label, (!possible).then_some(reason), message)
+}
+
+/// Why the branch's Pull and Unset upstream are disabled.
+pub const NO_UPSTREAM: &str = "The branch has no upstream";
+
 fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
     MenuEntry::Item {
         label: label.into(),
@@ -46,7 +59,7 @@ fn action(label: &str, enabled: bool, message: Message) -> MenuEntry {
 }
 
 /// History actions on a commit that depend on its position.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CommitFacts {
     /// A proper ancestor of HEAD and no operation in progress: the commits
     /// after it can be rebased interactively.
@@ -59,6 +72,20 @@ pub struct CommitFacts {
     pub revertable: bool,
     /// HEAD can be reset to it (not HEAD itself, no operation).
     pub resettable: bool,
+    /// The operation in progress (e.g. "merge"), which blocks the history
+    /// actions; names the reason of the disabled entries (M19-03).
+    pub operation: Option<String>,
+}
+
+impl CommitFacts {
+    /// Why an entry whose fact is false is disabled: the operation in
+    /// progress, or `otherwise`.
+    fn reason(&self, otherwise: &str) -> String {
+        match &self.operation {
+            Some(operation) => format!("Not possible while a {operation} is in progress"),
+            None => otherwise.to_owned(),
+        }
+    }
 }
 
 /// "Change author…" of the commit menu (M15-11): the commits it changes
@@ -127,29 +154,42 @@ fn commit_menu_entries(
             Message::CreateTagStart(id.into()),
         ),
         MenuEntry::Separator,
-        action(
+        // Without Git (`writable` false) the app names that reason.
+        gated(
             "Edit commit message",
-            writable && facts.rewordable,
+            writable,
+            facts.rewordable,
+            &facts.reason(
+                "Only commits of the checked-out branch after its last merge can be edited",
+            ),
             Message::RewordStart(id.into()),
         ),
-        action(
+        gated(
             "Interactive rebase from here",
-            writable && facts.rebase_from,
+            writable,
+            facts.rebase_from,
+            &facts.reason("Only commits before the checked-out commit can be rebased"),
             Message::RebasePanelOpened(id.into()),
         ),
-        action(
+        gated(
             "Cherry-pick commit",
-            writable && facts.pickable,
+            writable,
+            facts.pickable,
+            &facts.reason("The commit is the checked-out commit"),
             Message::CherryPick(vec![id.into()]),
         ),
-        action(
+        gated(
             "Revert commit",
-            writable && facts.revertable,
+            writable,
+            facts.revertable,
+            &facts.reason("There is no checked-out commit"),
             Message::RevertStart(id.into()),
         ),
-        action(
+        gated(
             &format!("Reset {head} to this commit…"),
-            writable && facts.resettable,
+            writable,
+            facts.resettable,
+            &facts.reason("There is no checked-out commit"),
             Message::ResetStart(id.into()),
         ),
         MenuEntry::Separator,
@@ -283,16 +323,18 @@ pub fn local_branch(branch: LocalBranch<'_>) -> Vec<MenuEntry> {
         entries.push(MenuEntry::Separator);
     }
     entries.extend([
-        action("Pull", writable && has_upstream, pull),
+        gated("Pull", writable, has_upstream, NO_UPSTREAM, pull),
         action("Push", writable, push),
         action(
             "Set upstream…",
             writable,
             Message::SetUpstreamStart(name.into()),
         ),
-        action(
+        gated(
             "Unset upstream",
-            writable && has_upstream,
+            writable,
+            has_upstream,
+            NO_UPSTREAM,
             Message::UnsetUpstream(name.into()),
         ),
     ]);
@@ -1304,8 +1346,9 @@ mod tests {
             pickable: true,
             revertable: true,
             resettable: true,
+            operation: None,
         };
-        let menu = commit("c1", "msg", true, all, "topic", None);
+        let menu = commit("c1", "msg", true, all.clone(), "topic", None);
         let (_, disabled) = summary(&menu);
         assert!(disabled.is_empty(), "{disabled:?}");
         assert!(matches!(
@@ -1474,6 +1517,7 @@ mod tests {
                     pickable: true,
                     revertable: true,
                     resettable: true,
+                    operation: None,
                 },
                 "main",
                 None

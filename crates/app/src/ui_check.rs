@@ -4191,6 +4191,37 @@ mod tests {
         }
     }
 
+    /// M19: the read-only copy notice, a failed editor start with its
+    /// button, and the missing-editor warning, dark and light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_launch_toasts() {
+        use crate::launch::{LaunchError, Launched, Notice};
+        use crate::settings::ThemeChoice;
+        for (choice, theme) in [
+            (ThemeChoice::theme("dusk"), "dark"),
+            (ThemeChoice::theme("light"), "light"),
+        ] {
+            let mut app = crate::app::tests::graph_app();
+            app.settings.appearance.theme = choice.clone();
+            let _ = app.update(Message::LaunchFinished(
+                Launched::Editor,
+                Ok(Some(Notice::new(
+                    crate::open_file::COPY_TITLE,
+                    "README.md as of 3f2a9c1. Changes are not saved to the repository.",
+                ))),
+            ));
+            let _ = app.update(Message::LaunchFinished(
+                Launched::Editor,
+                Err(LaunchError::Start(
+                    "Could not start subl: No such file or directory (os error 2)".into(),
+                )),
+            ));
+            let _ = app.update(Message::OpenInEditor(None));
+            snapshot(&app, &format!("launch-toasts-{theme}"));
+        }
+    }
+
     /// Preferences modal (M11-13): a click on the backdrop does not close it,
     /// and the app behind is out of reach for focus and Tab. Layout only.
     #[test]

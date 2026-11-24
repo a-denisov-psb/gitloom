@@ -12,8 +12,6 @@ use crate::app::Message;
 pub const TIMEOUT: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Warning and Success are shown by later tasks; the view styles all kinds.
-#[allow(dead_code)]
 pub enum ToastKind {
     Error,
     Warning,
@@ -109,7 +107,11 @@ impl Toasts {
     pub const MAX: usize = 3;
 
     /// Shows `toast`; returns the timer to start for kinds that time out.
+    /// A visible toast with the same kind, title and text is replaced, not
+    /// stacked (M19-03, e.g. repeated Alt+E).
     pub fn push(&mut self, mut toast: Toast) -> Option<Timer> {
+        self.list
+            .retain(|t| !(t.kind == toast.kind && t.title == toast.title && t.text == toast.text));
         self.next += 1;
         toast.id = self.next;
         toast.seq = 0;
@@ -164,6 +166,24 @@ mod tests {
 
     fn info(title: &str) -> Toast {
         Toast::new(ToastKind::Info, title, "text")
+    }
+
+    #[test]
+    fn identical_toasts_do_not_stack() {
+        let mut toasts = Toasts::default();
+        toasts.push(Toast::new(ToastKind::Warning, "No editor", "Set one"));
+        toasts.push(Toast::new(ToastKind::Warning, "No editor", "Set one"));
+        assert_eq!(toasts.list.len(), 1);
+        // Another kind or text is another toast.
+        toasts.push(Toast::new(ToastKind::Error, "No editor", "Set one"));
+        toasts.push(Toast::new(ToastKind::Warning, "No editor", "Other"));
+        assert_eq!(toasts.list.len(), 3);
+        // The replaced toast moves to the end with a new id.
+        let first = toasts.list[0].id;
+        toasts.push(Toast::new(ToastKind::Warning, "No editor", "Set one"));
+        assert_eq!(toasts.list.len(), 3);
+        assert!(toasts.list.iter().all(|t| t.id != first));
+        assert_eq!(toasts.list[2].text, "Set one");
     }
 
     #[test]
