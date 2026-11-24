@@ -34,6 +34,10 @@ pub const ASKPASS_ENV: &str = "GITLOOM_ASKPASS";
 /// as (`git -c difftool.<name>.cmd=…` per call only, ADR-055).
 pub const CUSTOM_TOOL: &str = "gitloom-custom";
 
+/// Folder in the temp folder for read-only copies of commit files
+/// (ADR-061).
+pub const VIEW_DIR: &str = "gitloom-view";
+
 /// Environment variable naming the editor mode when started as Git editor.
 pub const EDITOR_ENV: &str = "GITLOOM_EDITOR";
 
