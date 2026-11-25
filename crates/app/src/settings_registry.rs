@@ -109,8 +109,10 @@ impl Choice {
     }
 
     /// The values (labels) to choose from; `global_editor` is the label of
-    /// "use the global editor" for the repository choice.
-    pub fn options(self, global_editor: &str) -> Vec<String> {
+    /// "use the global editor" for the repository choice. The external
+    /// editor lists "None" and the entries of the tool list with an open
+    /// command (M20, ADR-062).
+    pub fn options(self, settings: &Settings, global_editor: &str) -> Vec<String> {
         let editors = || {
             EditorPreset::ALL
                 .into_iter()
@@ -129,7 +131,15 @@ impl Choice {
                 .iter()
                 .map(|p| (*p).to_owned())
                 .collect(),
-            Self::ExternalEditor => editors().collect(),
+            Self::ExternalEditor => std::iter::once(NO_EDITOR.to_owned())
+                .chain(
+                    settings
+                        .tools
+                        .editor_entries()
+                        .into_iter()
+                        .map(|e| e.name.trim().to_owned()),
+                )
+                .collect(),
             Self::RepoEditor => std::iter::once(global_editor.to_owned())
                 .chain(editors().filter(|l| l != "None"))
                 .collect(),
@@ -137,7 +147,7 @@ impl Choice {
     }
 
     /// The messages that set `value` (a label from [`Self::options`]).
-    pub fn messages(self, value: &str) -> Vec<Message> {
+    pub fn messages(self, settings: &Settings, value: &str) -> Vec<Message> {
         match self {
             Self::Theme => {
                 let theme = if value == "System" {
@@ -160,15 +170,21 @@ impl Choice {
                 Message::StashTemplateToggled(true),
                 Message::StashTemplateChosen(value.to_owned()),
             ],
-            Self::ExternalEditor => EditorPreset::ALL
+            Self::ExternalEditor if value == NO_EDITOR => vec![Message::EditorChosen(None)],
+            Self::ExternalEditor => settings
+                .tools
+                .editor_entries()
                 .into_iter()
-                .find(|p| p.label() == value)
-                .map(|p| vec![Message::EditorPresetChosen(p)])
+                .find(|e| e.name.trim() == value)
+                .map(|e| vec![Message::EditorChosen(Some(e.id.clone()))])
                 .unwrap_or_default(),
             Self::RepoEditor => vec![Message::RepoEditorChosen(value.to_owned())],
         }
     }
 }
+
+/// "None" in the external editor choice.
+pub const NO_EDITOR: &str = "None";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -539,10 +555,13 @@ mod tests {
             );
         }
         for choice in Choice::ALL {
-            let options = choice.options("Use global setting");
+            let options = choice.options(&Settings::default(), "Use global setting");
             assert!(options.len() >= 2, "{choice:?}");
             for option in &options {
-                assert!(!choice.messages(option).is_empty(), "{choice:?} {option}");
+                assert!(
+                    !choice.messages(&Settings::default(), option).is_empty(),
+                    "{choice:?} {option}"
+                );
             }
         }
         assert_eq!(
@@ -559,13 +578,16 @@ mod tests {
     /// and chooses each of them (M16-06).
     #[test]
     fn theme_choice_lists_the_registry() {
-        let options = Choice::Theme.options("");
+        let options = Choice::Theme.options(&Settings::default(), "");
         let themes = crate::themes::all();
         assert_eq!(options.len(), themes.len() + 1);
         assert_eq!(options.last().map(String::as_str), Some("System"));
         for def in themes {
             assert!(options.contains(&def.name), "{}", def.name);
-            match Choice::Theme.messages(&def.name).as_slice() {
+            match Choice::Theme
+                .messages(&Settings::default(), &def.name)
+                .as_slice()
+            {
                 [Message::ThemeChosen(choice)] => {
                     assert_eq!(*choice, ThemeChoice::theme(&def.id));
                 }
@@ -573,9 +595,13 @@ mod tests {
             }
         }
         assert!(matches!(
-            Choice::Theme.messages("System").as_slice(),
+            Choice::Theme
+                .messages(&Settings::default(), "System")
+                .as_slice(),
             [Message::ThemeChosen(ThemeChoice::System)]
         ));
-        assert!(Choice::Theme.messages("No Such Theme").is_empty());
+        assert!(Choice::Theme
+            .messages(&Settings::default(), "No Such Theme")
+            .is_empty());
     }
 }

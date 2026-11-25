@@ -579,7 +579,7 @@ pub enum Message {
     Shortcut(Shortcut),
     /// Click on a toolbar picker: runs its palette action (M6-17).
     PickerClicked(Shortcut),
-    SettingsLoaded(settings::Loaded),
+    SettingsLoaded(Box<settings::Loaded>),
     /// The theme files of the config directory (ADR-059).
     UserThemesLoaded(Vec<crate::theme_file::Entry>),
     /// Preferences → Appearance → Manage themes (M17-02): select, New theme (a copy of the
@@ -638,9 +638,9 @@ pub enum Message {
     OpenCommitFile(crate::open_file::CommitFileRef),
     /// A launch task finished (M19-03): failures and notices become toasts.
     LaunchFinished(crate::launch::Launched, crate::launch::LaunchResult),
-    /// Preferences → External tools → External editor (M8-07).
-    EditorPresetChosen(settings::EditorPreset),
-    EditorCommandInput(String),
+    /// Preferences → External tools → External editor: an entry of the
+    /// tool list by its id, or none (M8-07, M20).
+    EditorChosen(Option<String>),
     /// Open the conflicted file in the merge tool.
     OpenMergeTool(String),
     ExternalToolFinished {
@@ -651,17 +651,13 @@ pub enum Message {
     },
     /// Tools listed in Preferences → External tools.
     ToolsLoaded(Result<(git_core::ToolInfo, git_core::ToolInfo), String>),
-    /// Preferences → External tools: a diff/merge tool list entry, and
-    /// the command typed into its field (fix after M15).
-    DiffToolChosen(crate::settings::ToolPick),
-    MergeToolChosen(crate::settings::ToolPick),
-    DiffToolCommandInput(String),
-    MergeToolCommandInput(String),
+    /// Preferences → External tools: an entry of the diff or merge tool
+    /// picker (M20, ADR-062).
+    DiffToolChosen(crate::settings::ToolOption),
+    MergeToolChosen(crate::settings::ToolOption),
     /// "Define tool…" of the "No diff tool" / "No merge tool" dialog:
-    /// External tools with the command field focused.
-    DefineTool {
-        merge: bool,
-    },
+    /// opens Preferences → External tools (M20).
+    DefineTool,
     /// Open the settings view at a category ("Open settings" in dialogs).
     SettingsOpenedAt(settings::Category),
     /// "Load avatars from Gravatar" switched in Appearance.
@@ -1564,7 +1560,9 @@ impl App {
                 });
                 let session = Task::done(Message::SessionLoaded(session));
                 let session = match settings {
-                    Some(settings) => Task::done(Message::SettingsLoaded(settings)).chain(session),
+                    Some(settings) => {
+                        Task::done(Message::SettingsLoaded(Box::new(settings))).chain(session)
+                    }
                     None => session,
                 };
                 match themes {
@@ -5457,10 +5455,10 @@ impl App {
             }
             Mode::Files => Vec::new(),
             Mode::Choice(choice) => {
-                let global = use_global_editor_label(&self.settings.tools.editor_command);
+                let global = use_global_editor_label(&self.settings.tools.editor_command());
                 let current = self.choice_value(choice);
                 choice
-                    .options(&global)
+                    .options(&self.settings, &global)
                     .into_iter()
                     .map(|value| {
                         let entry = Entry::new(
@@ -5644,18 +5642,24 @@ impl App {
             },
             Choice::DiffView => self.settings.diff.view_mode.label().to_owned(),
             Choice::StashTemplate => self.settings.templates.stash_template.clone(),
-            Choice::ExternalEditor => {
-                settings::EditorPreset::of(&self.settings.tools.editor_command)
-                    .label()
-                    .to_owned()
-            }
+            Choice::ExternalEditor => self
+                .settings
+                .tools
+                .editor
+                .as_deref()
+                .filter(|_| !self.settings.tools.editor_command().is_empty())
+                .and_then(|id| self.settings.tools.entry(id))
+                .map_or_else(
+                    || crate::settings_registry::NO_EDITOR.to_owned(),
+                    |e| e.name.trim().to_owned(),
+                ),
             Choice::RepoEditor => match self
                 .active_tab()
                 .and_then(Tab::view)
                 .and_then(|v| v.snapshot.repo_editor.clone())
             {
                 Some(command) => settings::EditorPreset::of(&command).label().to_owned(),
-                None => use_global_editor_label(&self.settings.tools.editor_command),
+                None => use_global_editor_label(&self.settings.tools.editor_command()),
             },
         })
     }
@@ -5668,13 +5672,15 @@ impl App {
                 let on = toggle.value(&self.settings);
                 self.update(toggle.message(!on))
             }
-            SettingTarget::Choose(choice, value) => Task::batch(
-                choice
-                    .messages(&value)
-                    .into_iter()
-                    .map(|message| self.update(message))
-                    .collect::<Vec<_>>(),
-            ),
+            SettingTarget::Choose(choice, value) => {
+                let messages = choice.messages(&self.settings, &value);
+                Task::batch(
+                    messages
+                        .into_iter()
+                        .map(|message| self.update(message))
+                        .collect::<Vec<_>>(),
+                )
+            }
             SettingTarget::Open(category, field) => {
                 let open = self.open_preferences(category);
                 let Some(field) = field else {
@@ -5830,17 +5836,19 @@ impl App {
         )
     }
 
-    /// The tool Git runs for `choice`: `Err` for "None" and an empty
-    /// command; a command template becomes a shell command for Git
-    /// (ADR-055).
+    /// The tool Git runs for `kind`: `Err` for "None" (also an entry that
+    /// is missing or has no valid command, ADR-062); an entry's command
+    /// becomes a shell command for Git (ADR-055).
     fn tool_argument(
-        choice: &settings::ToolChoice,
+        tools: &settings::ExternalTools,
+        kind: git_core::ToolKind,
     ) -> Result<git_core::ToolSelection, ExternalToolError> {
-        match choice {
+        match tools.effective_choice(kind) {
             settings::ToolChoice::GitConfig => Ok(git_core::ToolSelection::Configured),
-            settings::ToolChoice::Tool(name) => Ok(git_core::ToolSelection::Named(name.clone())),
+            settings::ToolChoice::Tool(name) => Ok(git_core::ToolSelection::Named(name)),
             settings::ToolChoice::None => Err(ExternalToolError::NotConfigured),
-            settings::ToolChoice::Command(command) => {
+            settings::ToolChoice::Entry(_) => {
+                let command = tools.entry_command(kind).unwrap_or_default();
                 let platform = crate::launch::Platform::current();
                 let words = crate::launch::split_words_for(platform, command).map_err(|_| {
                     ExternalToolError::Failed(
@@ -5859,31 +5867,14 @@ impl App {
         }
     }
 
-    /// A diff or merge tool list entry was picked (fix after M15): presets
-    /// fill the command field, "Custom" keeps (and focuses) it.
-    fn choose_tool(&mut self, kind: git_core::ToolKind, pick: settings::ToolPick) -> Task<Message> {
-        let custom = pick == settings::ToolPick::Custom;
-        if let Some(page) = &mut self.settings_page {
-            *page.tool_custom_mut(kind) = custom;
-        }
-        let choice = self.settings.tools.choice_mut(kind);
-        let field = crate::ui::settings::tool_input(kind);
-        *choice = match pick {
-            settings::ToolPick::GitConfig => settings::ToolChoice::GitConfig,
-            settings::ToolPick::None => settings::ToolChoice::None,
-            settings::ToolPick::Git(name) => settings::ToolChoice::Tool(name),
-            settings::ToolPick::Preset(preset) => {
-                settings::ToolChoice::Command(preset.template(kind).unwrap_or_default().to_owned())
-            }
-            // The setting changes once something is typed.
-            settings::ToolPick::Custom => return iced::widget::operation::focus(field),
-        };
-        let command = matches!(choice, settings::ToolChoice::Command(_));
-        let save = self.save_settings();
-        if command {
-            return Task::batch([save, iced::widget::operation::focus(field)]);
-        }
-        save
+    /// An entry of the diff or merge tool picker was chosen (M20).
+    fn choose_tool(
+        &mut self,
+        kind: git_core::ToolKind,
+        option: settings::ToolOption,
+    ) -> Task<Message> {
+        *self.settings.tools.choice_mut(kind) = option.choice();
+        self.save_settings()
     }
 
     /// Opens the shown diff (diff view or file history) in the external
@@ -5924,9 +5915,8 @@ impl App {
         let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
         };
-        let choice = self.settings.tools.diff_tool.clone();
-        let name = settings::tool_name(&choice, git_core::ToolKind::Diff);
-        let tool = match Self::tool_argument(&choice) {
+        let name = self.settings.tools.tool_name(git_core::ToolKind::Diff);
+        let tool = match Self::tool_argument(&self.settings.tools, git_core::ToolKind::Diff) {
             Ok(tool) => tool,
             Err(error) => {
                 return self.update(Message::ExternalToolFinished {
@@ -5970,8 +5960,8 @@ impl App {
         if self.write_block().is_some() {
             return Task::none();
         }
-        let name = settings::tool_name(&self.settings.tools.merge_tool, git_core::ToolKind::Merge);
-        let tool = match Self::tool_argument(&self.settings.tools.merge_tool) {
+        let name = self.settings.tools.tool_name(git_core::ToolKind::Merge);
+        let tool = match Self::tool_argument(&self.settings.tools, git_core::ToolKind::Merge) {
             Ok(tool) => tool,
             // Nothing ran: no refresh, but the merge tool's dialog or toast
             // (not the diff tool's).
@@ -6664,7 +6654,7 @@ impl App {
             self.active_tab()
                 .and_then(Tab::view)
                 .and_then(|v| v.snapshot.repo_editor.as_deref()),
-            &self.settings.tools.editor_command,
+            &self.settings.tools.editor_command(),
         )
     }
 
@@ -7651,7 +7641,7 @@ impl App {
             }
             Message::CrashReportDismissed => self.crash_notice = None,
             Message::RepoEditorChosen(choice) => {
-                let global = self.settings.tools.editor_command.clone();
+                let global = self.settings.tools.editor_command();
                 if choice == use_global_editor_label(&global) {
                     // Leaves Custom too (M15-02); the input is cleared by
                     // `write_repo_editor`.
@@ -8059,6 +8049,7 @@ impl App {
                 return self.highlight_code_views();
             }
             Message::SettingsLoaded(loaded) => {
+                let loaded = *loaded;
                 let settings::Loaded {
                     settings,
                     notice,
@@ -8183,21 +8174,8 @@ impl App {
                 self.settings.tools.terminal_command = command;
                 return self.save_settings();
             }
-            Message::EditorPresetChosen(preset) => {
-                if let Some(template) = preset.template() {
-                    if let Some(page) = &mut self.settings_page {
-                        page.editor_custom = false;
-                    }
-                    self.settings.tools.editor_command = template.to_owned();
-                    return self.save_settings();
-                }
-                // Custom keeps the text for editing; from a preset it stays.
-                if let Some(page) = &mut self.settings_page {
-                    page.editor_custom = true;
-                }
-            }
-            Message::EditorCommandInput(command) => {
-                self.settings.tools.editor_command = command;
+            Message::EditorChosen(id) => {
+                self.settings.tools.editor = id;
                 return self.save_settings();
             }
             Message::OpenMergeTool(path) => return self.open_merge_tool(path),
@@ -8243,29 +8221,10 @@ impl App {
             Message::MergeToolChosen(pick) => {
                 return self.choose_tool(git_core::ToolKind::Merge, pick)
             }
-            Message::DiffToolCommandInput(command) => {
-                self.settings.tools.diff_tool = settings::ToolChoice::Command(command);
-                return self.save_settings();
-            }
-            Message::MergeToolCommandInput(command) => {
-                self.settings.tools.merge_tool = settings::ToolChoice::Command(command);
-                return self.save_settings();
-            }
-            Message::DefineTool { merge } => {
+            Message::DefineTool => {
+                // The pickers and "Manage tools…" (M20, ADR-062).
                 self.modal = None;
-                let kind = if merge {
-                    git_core::ToolKind::Merge
-                } else {
-                    git_core::ToolKind::Diff
-                };
-                let open = self.open_preferences(settings::Category::ExternalTools);
-                if let Some(page) = &mut self.settings_page {
-                    *page.tool_custom_mut(kind) = true;
-                }
-                // After the page's own focus (the first field of General).
-                return open.chain(iced::widget::operation::focus(
-                    crate::ui::settings::tool_input(kind),
-                ));
+                return self.open_preferences(settings::Category::ExternalTools);
             }
             Message::SettingsOpenedAt(category) => return self.open_preferences(category),
             Message::AvatarsToggled(on) => {
@@ -13543,7 +13502,8 @@ fn run_tool(
     run(git).map_err(|e| ExternalToolError::Failed(e.to_string()))
 }
 
-/// No diff or merge tool: "Define tool…" opens the command field.
+/// No diff or merge tool: "Define tool…" opens Preferences → External
+/// tools (M20).
 fn tool_missing_dialog(merge: bool) -> Modal {
     let (title, kind) = if merge {
         ("No merge tool", "merge")
@@ -13555,7 +13515,7 @@ fn tool_missing_dialog(merge: bool) -> Modal {
         format!("No external {kind} tool is defined."),
         "Define tool…",
         false,
-        Message::DefineTool { merge },
+        Message::DefineTool,
     );
     modal.default = Some(1);
     modal
@@ -15003,10 +14963,7 @@ pub(crate) mod tests {
         let modal = app.modal.take().unwrap();
         assert_eq!(modal.title, "No diff tool");
         assert_eq!(modal.text, "No external diff tool is defined.");
-        assert!(matches!(
-            modal.default_action(),
-            Some(Message::DefineTool { merge: false })
-        ));
+        assert!(matches!(modal.default_action(), Some(Message::DefineTool)));
 
         app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
         let _ = app.update(Message::ExternalDiff);
@@ -15091,10 +15048,10 @@ pub(crate) mod tests {
             app.settings_page.as_ref().and_then(|p| p.tools.as_ref()),
             Some(Ok(_))
         ));
-        let _ = app.update(Message::DiffToolChosen(settings::ToolPick::Git(
+        let _ = app.update(Message::DiffToolChosen(settings::ToolOption::Git(
             "vimdiff".into(),
         )));
-        let _ = app.update(Message::MergeToolChosen(settings::ToolPick::None));
+        let _ = app.update(Message::MergeToolChosen(settings::ToolOption::None));
         assert_eq!(
             app.settings.tools.diff_tool,
             settings::ToolChoice::Tool("vimdiff".into())
@@ -15102,85 +15059,81 @@ pub(crate) mod tests {
         assert_eq!(app.settings.tools.merge_tool, settings::ToolChoice::None);
     }
 
-    /// Fix after M15: a preset fills the command field; editing it makes
-    /// it "Custom"; "Custom" from another choice opens an empty field and
-    /// changes the setting only once something is typed.
+    /// Chooses a new entry "Editor" with open command `command` as the
+    /// global editor.
+    pub(crate) fn set_editor(app: &mut App, command: &str) {
+        let tools = &mut app.settings.tools;
+        let id = settings::next_id(&tools.entries);
+        tools.entries.push(settings::ToolEntry {
+            id: id.clone(),
+            name: settings::unique_name(&tools.entries, "Editor"),
+            open: command.into(),
+            ..settings::ToolEntry::default()
+        });
+        tools.editor = Some(id);
+    }
+
+    /// Tools with one entry "Fake" (`tool-1`) whose `kind` command is
+    /// `command`, chosen for `kind`.
+    fn tools_with_entry(kind: git_core::ToolKind, command: &str) -> settings::ExternalTools {
+        let mut tools = settings::ExternalTools::default();
+        let mut entry = settings::ToolEntry {
+            id: "tool-1".into(),
+            name: "Fake".into(),
+            ..settings::ToolEntry::default()
+        };
+        *entry.command_mut(kind.into()) = command.into();
+        tools.entries.push(entry);
+        *tools.choice_mut(kind) = settings::ToolChoice::Entry("tool-1".into());
+        tools
+    }
+
+    /// M20: choosing an entry stores its id; the waiting message names the
+    /// entry; an entry without a valid command (empty, unclosed quote,
+    /// missing placeholder, deleted) behaves like "None".
     #[test]
-    fn tool_presets_fill_the_command_and_editing_makes_it_custom() {
-        use git_core::ToolKind;
-        use settings::{ToolChoice, ToolPick, ToolPreset};
+    fn tool_entries_are_chosen_by_id_and_named_while_waiting() {
+        use settings::{ToolChoice, ToolOption};
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::SettingsOpenedAt(settings::Category::ExternalTools));
-        let _ = app.update(Message::DiffToolChosen(ToolPick::Preset(
-            ToolPreset::VsCode,
+        let _ = app.update(Message::DiffToolChosen(ToolOption::Entry(
+            settings::VSCODE_ID.into(),
         )));
         assert_eq!(
             app.settings.tools.diff_tool,
-            ToolChoice::Command("code --wait --diff {local} {remote}".into())
+            ToolChoice::Entry(settings::VSCODE_ID.into())
         );
-        let shown = |app: &App, kind| {
-            let page = app.settings_page.as_ref().unwrap();
-            let (choice, custom) = match kind {
-                ToolKind::Diff => (&app.settings.tools.diff_tool, page.diff_tool_custom),
-                ToolKind::Merge => (&app.settings.tools.merge_tool, page.merge_tool_custom),
-            };
-            ToolPick::of(choice, kind, custom)
-        };
-        assert_eq!(
-            shown(&app, ToolKind::Diff),
-            ToolPick::Preset(ToolPreset::VsCode)
-        );
-        let full =
-            r#""C:\Program Files\Microsoft VS Code\Code.exe" --wait --diff {local} {remote}"#;
-        let _ = app.update(Message::DiffToolCommandInput(full.into()));
-        assert_eq!(
-            app.settings.tools.diff_tool,
-            ToolChoice::Command(full.into())
-        );
-        assert_eq!(shown(&app, ToolKind::Diff), ToolPick::Custom);
-        // Typing a preset's exact text shows the preset again.
-        let meld = ToolPreset::Meld.template(ToolKind::Diff).unwrap();
-        let _ = app.update(Message::DiffToolCommandInput(meld.into()));
-        assert_eq!(
-            shown(&app, ToolKind::Diff),
-            ToolPick::Preset(ToolPreset::Meld)
-        );
-        // Merge: "Custom" from Git's config keeps the setting until typed.
-        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
-        let _ = app.update(Message::MergeToolChosen(ToolPick::Custom));
-        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
-        assert_eq!(shown(&app, ToolKind::Merge), ToolPick::Custom);
-        let _ = app.update(Message::MergeToolCommandInput("kdiff3 {merged}".into()));
-        assert_eq!(
-            app.settings.tools.merge_tool,
-            ToolChoice::Command("kdiff3 {merged}".into())
-        );
-        // The waiting message names the preset or the program.
         let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
-        app.settings.tools.diff_tool =
-            ToolChoice::Command(ToolPreset::Zed.template(ToolKind::Diff).unwrap().into());
+        app.settings.tools.diff_tool = ToolChoice::Entry(settings::VSCODE_ID.into());
         let _ = app.update(Message::ExternalDiff);
-        assert_eq!(app.status, "Waiting for Zed…");
-        // An empty command is no tool; an unclosed quote is an error.
-        app.settings.tools.diff_tool = ToolChoice::Command("  ".into());
+        assert_eq!(app.status, "Waiting for VS Code…");
+        let tab = app.tabs[0].id;
+        let _ = app.update(Message::ExternalToolFinished {
+            tab,
+            merge_path: None,
+            result: Ok(()),
+        });
+        for command in ["  ", "\"meld {local} {remote}", "meld {local}"] {
+            app.settings.tools = tools_with_entry(git_core::ToolKind::Diff, command);
+            let _ = app.update(Message::ExternalDiff);
+            assert_eq!(
+                app.modal.take().map(|m| m.title),
+                Some("No diff tool".into()),
+                "{command}"
+            );
+        }
+        app.settings.tools = tools_with_entry(git_core::ToolKind::Diff, "meld {local} {remote}");
+        app.settings.tools.entries.retain(|e| e.id != "tool-1");
         let _ = app.update(Message::ExternalDiff);
         assert_eq!(
             app.modal.take().map(|m| m.title),
             Some("No diff tool".into())
         );
-        app.settings.tools.diff_tool = ToolChoice::Command("\"meld {local}".into());
-        let _ = app.update(Message::ExternalDiff);
-        assert!(app.modal.is_none());
-        assert_eq!(
-            app.toasts.list.last().map(|t| t.title.as_str()),
-            Some("Diff tool failed")
-        );
     }
 
-    /// Fix after M15: "Define tool…" opens Preferences → External tools
-    /// with the command field shown.
+    /// M20: "Define tool…" opens Preferences → External tools.
     #[test]
-    fn define_tool_opens_external_tools_with_the_field() {
+    fn define_tool_opens_external_tools() {
         for merge in [false, true] {
             let mut app = app_with_open_diff(git_core::DiffKind::Unstaged);
             let _ = app.update(Message::GitDetected(git_core::GitAvailability::Available(
@@ -15201,11 +15154,16 @@ pub(crate) mod tests {
                 "No diff tool"
             };
             assert_eq!(modal.title, title);
+            assert_eq!(
+                modal.text,
+                format!(
+                    "No external {} tool is defined.",
+                    if merge { "merge" } else { "diff" }
+                )
+            );
             let _ = app.update(modal.default_action().unwrap());
             let page = app.settings_page.as_ref().unwrap();
             assert_eq!(page.category, settings::Category::ExternalTools);
-            assert_eq!(page.merge_tool_custom, merge);
-            assert_eq!(page.diff_tool_custom, !merge);
             assert!(app.modal.is_none());
         }
     }
@@ -15270,7 +15228,8 @@ pub(crate) mod tests {
             .to_string_lossy()
             .replace('\\', "/");
         let template = format!("sh \"{script}\" {{local}} {{remote}}");
-        let tool = App::tool_argument(&settings::ToolChoice::Command(template)).unwrap();
+        let tools = tools_with_entry(git_core::ToolKind::Diff, &template);
+        let tool = App::tool_argument(&tools, git_core::ToolKind::Diff).unwrap();
         let cli = git_core::CliBackend::new(&root);
         let calls = || std::fs::read_to_string(dir.path().join("calls.txt")).unwrap_or_default();
         let run = |target: &git_core::DiffTarget| {
@@ -15298,10 +15257,11 @@ pub(crate) mod tests {
         git(&["checkout", "--quiet", "main"]);
         commit("main\n", "main");
         git(&["-c", "commit.gpgSign=false", "merge", "side"]);
-        let tool = App::tool_argument(&settings::ToolChoice::Command(
-            "sh -c \"exit 0\" {local} {remote} {base} {merged}".into(),
-        ))
-        .unwrap();
+        let tools = tools_with_entry(
+            git_core::ToolKind::Merge,
+            "sh -c \"exit 0\" {local} {remote} {base} {merged}",
+        );
+        let tool = App::tool_argument(&tools, git_core::ToolKind::Merge).unwrap();
         let start = std::time::Instant::now();
         let result = run_tool(&cli, git_core::ToolKind::Merge, true, |git| {
             git_core::run_mergetool(git, &tool, "a.txt", false)
@@ -15946,11 +15906,11 @@ pub(crate) mod tests {
         let mut app = ready_app(&["c"]);
         let mut loaded = Settings::default();
         loaded.general.auto_fetch_minutes = 30;
-        let _ = app.update(Message::SettingsLoaded(settings::Loaded {
+        let _ = app.update(Message::SettingsLoaded(Box::new(settings::Loaded {
             settings: loaded.clone(),
             notice: Some("The settings file was unreadable; defaults are used.".into()),
             write: true,
-        }));
+        })));
         assert_eq!(app.settings, loaded);
         assert!(toast_text(&app).contains("defaults are used"));
     }
@@ -17158,11 +17118,11 @@ pub(crate) mod tests {
         assert!(stored.contains("\"details_panel\":\"bottom\""), "{stored}");
         let mut restarted = ready_app(&["c"]);
         assert_eq!(restarted.panes.position, DetailsPanelPosition::Right);
-        let _ = restarted.update(Message::SettingsLoaded(settings::Loaded {
+        let _ = restarted.update(Message::SettingsLoaded(Box::new(settings::Loaded {
             settings: serde_json::from_str(&stored).unwrap(),
             notice: None,
             write: false,
-        }));
+        })));
         assert_eq!(restarted.panes.position, DetailsPanelPosition::Bottom);
         // Older settings without the field: right.
         let old: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
@@ -17996,7 +17956,7 @@ pub(crate) mod tests {
     #[test]
     fn commit_files_open_in_the_state_of_their_commit() {
         let mut app = staging_app(&[], &[]);
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        let _ = app.update(Message::EditorChosen(Some(settings::VSCODE_ID.into())));
         app.tabs[0].view_mut().unwrap().selection = Some(Selection::Commit("c".into()));
         let open = |app: &mut App, file: git_core::FileChange| {
             let _ = app.update(Message::FileContextMenu {
@@ -18041,7 +18001,7 @@ pub(crate) mod tests {
         assert!(!enabled);
         assert_eq!(hint.as_deref(), Some(crate::open_file::SUBMODULE));
         // Without an editor the existing reason wins.
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
+        let _ = app.update(Message::EditorChosen(None));
         let (enabled, hint, _) = open(&mut app, file("src/a.rs"));
         assert!(!enabled);
         assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
@@ -18054,7 +18014,7 @@ pub(crate) mod tests {
     fn stash_files_carry_their_part() {
         use git_core::StashPart;
         let mut app = stash_app();
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        let _ = app.update(Message::EditorChosen(Some(settings::VSCODE_ID.into())));
         app.tabs[0].view_mut().unwrap().selection = Some(Selection::Commit("s1".into()));
         let open = |app: &mut App, file: git_core::FileChange, part: StashPart| {
             let _ = app.update(Message::FileContextMenu {
@@ -18092,7 +18052,7 @@ pub(crate) mod tests {
         let (enabled, hint, _) = open(&mut app, file("libs/sub"), StashPart::Unstaged);
         assert!(!enabled);
         assert_eq!(hint.as_deref(), Some(crate::open_file::SUBMODULE));
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
+        let _ = app.update(Message::EditorChosen(None));
         let (enabled, hint, _) = open(&mut app, file("asdf"), StashPart::Untracked);
         assert!(!enabled);
         assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
@@ -18319,8 +18279,8 @@ pub(crate) mod tests {
         assert_eq!(hint.as_deref(), Some(crate::launch::NO_EDITOR));
 
         // With one: Alt+E and the toolbar open the root, files their path.
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
-        assert_eq!(app.settings.tools.editor_command, "code {path}");
+        let _ = app.update(Message::EditorChosen(Some(settings::VSCODE_ID.into())));
+        assert_eq!(app.settings.tools.editor_command(), "code {path}");
         assert_eq!(app.action_block(Shortcut::OpenEditor), None);
         let root = app.tabs[0].path().unwrap().to_path_buf();
         assert_eq!(
@@ -18369,16 +18329,11 @@ pub(crate) mod tests {
         let (enabled, hint, _) = editor_entry_of(&app);
         assert!(!enabled);
         assert_eq!(hint.as_deref(), Some(NOT_IN_WORKTREE));
-        // Custom keeps the text editable; None clears it.
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::Custom));
-        assert!(app.settings_page.is_none() || app.settings_page.as_ref().unwrap().editor_custom);
-        let _ = app.update(Message::EditorCommandInput("code -n {path}".into()));
-        assert_eq!(
-            settings::EditorPreset::of(&app.settings.tools.editor_command),
-            settings::EditorPreset::Custom
-        );
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::None));
-        assert_eq!(app.settings.tools.editor_command, "");
+        // Another entry's command is used; None clears it.
+        set_editor(&mut app, "code -n {path}");
+        assert_eq!(app.editor_command(), "code -n {path}");
+        let _ = app.update(Message::EditorChosen(None));
+        assert_eq!(app.settings.tools.editor_command(), "");
     }
 
     #[test]
@@ -19972,7 +19927,7 @@ pub(crate) mod tests {
     /// (M15-02).
     #[test]
     fn repository_editor_returns_to_the_global_setting() {
-        let global = |app: &App| use_global_editor_label(&app.settings.tools.editor_command);
+        let global = |app: &App| use_global_editor_label(&app.settings.tools.editor_command());
         let back = |app: &mut App| {
             let label = global(app);
             let _ = app.update(Message::RepoEditorChosen(label));
@@ -19981,7 +19936,7 @@ pub(crate) mod tests {
             assert_eq!(page.repo_editor_input, "");
         };
         let mut app = staging_app(&[], &[]);
-        app.settings.tools.editor_command = "/very/long/path/to/editors/code {path}".into();
+        set_editor(&mut app, "/very/long/path/to/editors/code {path}");
         let _ = app.update(Message::SettingsOpenedAt(settings::Category::RepoEditor));
         // Custom → global.
         let _ = app.update(Message::RepoEditorChosen("Custom".into()));
@@ -20032,7 +19987,7 @@ pub(crate) mod tests {
             Some(true)
         );
         // The repository wins over the global setting.
-        app.settings.tools.editor_command = "code {path}".into();
+        set_editor(&mut app, "code {path}");
         assert_eq!(app.editor_command(), "zed {path}");
     }
 
@@ -23285,7 +23240,7 @@ pub(crate) mod tests {
     #[test]
     fn history_entry_opens_its_own_version() {
         let mut app = ready_app(&["c", "b"]);
-        let _ = app.update(Message::EditorPresetChosen(settings::EditorPreset::VsCode));
+        let _ = app.update(Message::EditorChosen(Some(settings::VSCODE_ID.into())));
         let _ = app.update(Message::FileHistoryOpened {
             path: "new.txt".into(),
             start: None,

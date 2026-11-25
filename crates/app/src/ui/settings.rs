@@ -8,7 +8,7 @@ use crate::graph_columns::ColumnId;
 use iced::{Element, Fill, Length};
 
 use crate::app::{App, Message};
-use crate::settings::{Category, Page, Settings, ThemeChoice, ToolChoice, ToolPick};
+use crate::settings::{Category, Page, Settings, ThemeChoice, ToolOption};
 use crate::theme;
 use crate::ui::muted;
 
@@ -632,7 +632,7 @@ fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
 /// or the same presets and a custom command, stored in the repository config.
 fn repository_editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     use crate::settings::EditorPreset;
-    let global = &app.settings.tools.editor_command;
+    let global = &app.settings.tools.editor_command();
     let global_label = crate::app::use_global_editor_label(global);
     let current = app
         .active_tab()
@@ -1840,102 +1840,101 @@ fn zoom_note() -> &'static str {
     }
 }
 
-/// Id of the command field of the diff or merge tool.
-pub fn tool_input(kind: git_core::ToolKind) -> &'static str {
-    match kind {
-        git_core::ToolKind::Diff => "settings-diff-tool-command",
-        git_core::ToolKind::Merge => "settings-merge-tool-command",
-    }
-}
-
-/// Entry of the diff/merge tool lists.
+/// An entry of a tool picker with its label.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ToolOption {
-    pick: ToolPick,
+struct Labeled<T> {
+    value: T,
     label: String,
 }
 
-impl std::fmt::Display for ToolOption {
+impl<T> std::fmt::Display for Labeled<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.label)
     }
 }
 
-/// "Use Git config (meld)", "None", the presets, "Custom", then the tools
-/// Git offers that no preset covers (fix after M15).
+/// The diff or merge tool picker (M20, ADR-062): "Use Git config (meld)",
+/// "None", the entries with a valid command, then the tools Git offers.
 fn tool_options(
+    settings: &Settings,
     kind: git_core::ToolKind,
     info: Option<&git_core::ToolInfo>,
-    current: &ToolChoice,
-) -> Vec<ToolOption> {
+) -> Vec<Labeled<ToolOption>> {
     let configured = info.and_then(|i| i.configured.as_deref());
     let available = info.map(|i| i.available.as_slice()).unwrap_or_default();
-    ToolPick::list(kind, available, current)
+    settings
+        .tools
+        .tool_options(kind, available)
         .into_iter()
-        .map(|pick| ToolOption {
-            label: pick.label(configured),
-            pick,
+        .map(|option| Labeled {
+            label: option.label(&settings.tools.entries, configured),
+            value: option,
         })
         .collect()
 }
 
-/// The tool list and, for a preset or "Custom", the editable command.
 fn tool_control<'a>(
+    settings: &'a Settings,
     kind: git_core::ToolKind,
     info: Option<&git_core::ToolInfo>,
-    current: &'a ToolChoice,
-    custom: bool,
 ) -> Element<'a, Message> {
-    let (on_choose, on_input) = match kind {
-        git_core::ToolKind::Diff => (
-            Message::DiffToolChosen as fn(ToolPick) -> Message,
-            Message::DiffToolCommandInput as fn(String) -> Message,
-        ),
-        git_core::ToolKind::Merge => (
-            Message::MergeToolChosen as fn(ToolPick) -> Message,
-            Message::MergeToolCommandInput as fn(String) -> Message,
-        ),
+    let on_choose = match kind {
+        git_core::ToolKind::Diff => Message::DiffToolChosen as fn(ToolOption) -> Message,
+        git_core::ToolKind::Merge => Message::MergeToolChosen as fn(ToolOption) -> Message,
     };
-    let options = tool_options(kind, info, current);
-    let shown = ToolPick::of(current, kind, custom);
-    let selected = options.iter().find(|o| o.pick == shown).cloned();
-    let picker = iced::widget::pick_list(options, selected, move |option: ToolOption| {
-        on_choose(option.pick)
+    let options = tool_options(settings, kind, info);
+    let shown = settings.tools.shown_option(kind);
+    let selected = options.iter().find(|o| o.value == shown).cloned();
+    iced::widget::pick_list(options, selected, move |o: Labeled<ToolOption>| {
+        on_choose(o.value)
     })
-    .width(Length::Fixed(220.0));
-    let command = match current {
-        ToolChoice::Command(command) => Some(command.as_str()),
-        _ if custom => Some(""),
-        _ => None,
-    };
-    let mut control = row![picker].spacing(8).align_y(iced::Center);
-    if let Some(command) = command {
-        control = control.push(
-            text_input(placeholder_hint(kind), command)
-                .id(tool_input(kind))
-                .on_input(on_input)
-                .padding(6)
-                .style(theme::input)
-                .width(Length::Fixed(420.0)),
-        );
-    }
-    control.into()
+    .width(Length::Fixed(260.0))
+    .into()
 }
 
-/// Empty command field: what to type.
-fn placeholder_hint(kind: git_core::ToolKind) -> &'static str {
-    match kind {
-        git_core::ToolKind::Diff => "program {local} {remote}",
-        git_core::ToolKind::Merge => "program {local} {remote} {base} {merged}",
-    }
+/// The external editor picker (M20): "None" and the entries with a valid
+/// open command, in list order.
+fn editor_options(settings: &Settings) -> Vec<Labeled<Option<String>>> {
+    std::iter::once(Labeled {
+        value: None,
+        label: crate::settings_registry::NO_EDITOR.to_owned(),
+    })
+    .chain(
+        settings
+            .tools
+            .editor_entries()
+            .into_iter()
+            .map(|e| Labeled {
+                value: Some(e.id.clone()),
+                label: e.name.trim().to_owned(),
+            }),
+    )
+    .collect()
 }
 
-const DIFF_TOOL_NOTE: &str = "Used by Ctrl+D and \"Open in external diff tool\" (git difftool). \
-     In a command, {local} and {remote} are the old and the new version.";
+fn editor_control(settings: &Settings) -> Element<'_, Message> {
+    let options = editor_options(settings);
+    // A selection without a valid open command shows as "None".
+    let shown = settings
+        .tools
+        .editor
+        .clone()
+        .filter(|_| !settings.tools.editor_command().is_empty());
+    let selected = options.iter().find(|o| o.value == shown).cloned();
+    iced::widget::pick_list(options, selected, |o: Labeled<Option<String>>| {
+        Message::EditorChosen(o.value)
+    })
+    .width(Length::Fixed(260.0))
+    .into()
+}
 
-const MERGE_TOOL_NOTE: &str = "Used by \"Open in merge tool\" for conflicted files (git \
-     mergetool). In a command, {local} is ours, {remote} theirs, {base} the common version and \
-     {merged} the file to save the result to.";
+const DIFF_TOOL_NOTE: &str = "Used by Ctrl+D and \"Open in external diff tool\" (git difftool).";
+
+const MERGE_TOOL_NOTE: &str =
+    "Used by \"Open in merge tool\" for conflicted files (git mergetool).";
+
+const EDITOR_NOTE: &str = "Opens the repository (Alt+E, toolbar, palette) and files (file \
+     context menus).";
 
 fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
     let tools = &settings.tools;
@@ -1946,7 +1945,7 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
             None,
             Some(format!("Could not ask Git for its tools: {error}")),
         ),
-        // Loading: the presets are there already.
+        // Loading: the entries are there already.
         None => (None, None, None),
     };
     let mut content = column![].spacing(18);
@@ -1954,24 +1953,15 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
         content = content.push(muted(note).size(12));
     }
     content
+        .push(field("External editor", editor_control(settings), EDITOR_NOTE))
         .push(field(
             "Diff tool",
-            tool_control(
-                git_core::ToolKind::Diff,
-                diff_info,
-                &tools.diff_tool,
-                page.diff_tool_custom,
-            ),
+            tool_control(settings, git_core::ToolKind::Diff, diff_info),
             DIFF_TOOL_NOTE,
         ))
         .push(field(
             "Merge tool",
-            tool_control(
-                git_core::ToolKind::Merge,
-                merge_info,
-                &tools.merge_tool,
-                page.merge_tool_custom,
-            ),
+            tool_control(settings, git_core::ToolKind::Merge, merge_info),
             MERGE_TOOL_NOTE,
         ))
         .push(field(
@@ -1984,7 +1974,6 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
                 .into(),
             "Command for Alt+T and the toolbar's Terminal button; {path} is the repository folder. Empty: the first terminal found.",
         ))
-        .push(field("External editor", editor_control(settings, page), EDITOR_NOTE))
         .push(field(
             "Delete .orig files after merging",
             iced::widget::toggler(tools.delete_orig)
@@ -1994,36 +1983,6 @@ fn external_tools<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Mes
             "The merge tool leaves no .orig backup next to the resolved file \
              (mergetool.keepBackup=false).",
         ))
-        .into()
-}
-
-const EDITOR_NOTE: &str = "Opens the repository (Alt+E, toolbar, palette) and files (file \
-     context menus); {path} is the folder or file, without {path} it is added at the end.";
-
-/// Preset list and command template of the external editor (M8-07).
-fn editor_control<'a>(settings: &'a Settings, page: &'a Page) -> Element<'a, Message> {
-    let template = &settings.tools.editor_command;
-    let preset = if page.editor_custom {
-        crate::settings::EditorPreset::Custom
-    } else {
-        crate::settings::EditorPreset::of(template)
-    };
-    let picker = iced::widget::pick_list(
-        crate::settings::EditorPreset::ALL,
-        Some(preset),
-        Message::EditorPresetChosen,
-    )
-    .width(Length::Fixed(180.0));
-    let mut command = text_input("No editor", template)
-        .padding(6)
-        .style(theme::input)
-        .width(Length::Fixed(320.0));
-    if preset != crate::settings::EditorPreset::None {
-        command = command.on_input(Message::EditorCommandInput);
-    }
-    row![picker, command]
-        .spacing(8)
-        .align_y(iced::Center)
         .into()
 }
 
@@ -2040,43 +1999,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_options_list_git_config_none_presets_custom_and_git_tools() {
+    fn pickers_list_entries_in_order_then_git_tools() {
+        use crate::settings::{ToolChoice, ToolEntry};
         use git_core::ToolKind;
         let info = git_core::ToolInfo {
             configured: Some("meld".into()),
             available: vec!["meld".into(), "kdiff3".into(), "bc4".into()],
         };
-        let labels = |kind, current: &ToolChoice| -> Vec<String> {
-            tool_options(kind, Some(&info), current)
+        let mut settings = Settings::default();
+        settings.tools.entries.push(ToolEntry {
+            id: "tool-1".into(),
+            name: "Zed".into(),
+            open: "zed {path}".into(),
+            ..ToolEntry::default()
+        });
+        let labels = |settings: &Settings, kind| -> Vec<String> {
+            tool_options(settings, kind, Some(&info))
                 .into_iter()
                 .map(|o| o.label)
                 .collect()
         };
         assert_eq!(
-            labels(ToolKind::Diff, &ToolChoice::GitConfig),
+            labels(&settings, ToolKind::Diff),
             [
                 "Use Git config (meld)",
                 "None",
                 "VS Code",
-                "VSCodium",
-                "Zed",
-                "Meld",
-                "WinMerge",
-                "Beyond Compare",
-                "Custom",
-                "kdiff3 (Git)"
+                "meld (Git)",
+                "kdiff3 (Git)",
+                "bc4 (Git)"
             ]
         );
-        // Merge: IntelliJ IDEA, no Zed.
-        let merge = labels(ToolKind::Merge, &ToolChoice::GitConfig);
-        assert!(merge.contains(&"IntelliJ IDEA".to_owned()));
-        assert!(!merge.contains(&"Zed".to_owned()));
+        let editors: Vec<_> = editor_options(&settings)
+            .into_iter()
+            .map(|o| o.label)
+            .collect();
+        assert_eq!(editors, ["None", "VS Code", "Zed"]);
         // A chosen tool Git does not list (any more) stays selectable.
-        let options = tool_options(ToolKind::Diff, None, &ToolChoice::Tool("custom".into()));
+        settings.tools.diff_tool = ToolChoice::Tool("custom".into());
+        let options = tool_options(&settings, ToolKind::Diff, None);
         assert_eq!(options[0].label, "Use Git config (not configured)");
         assert!(options
             .iter()
-            .any(|o| o.pick == ToolPick::Git("custom".into())));
+            .any(|o| o.value == ToolOption::Git("custom".into())));
     }
 
     /// The System lists offer only themes of their base (M16-06): five
