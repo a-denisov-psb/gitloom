@@ -25,7 +25,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - GITFLOW section: feature, release and hotfix rows show a flag on hover that opens the finish dialog; while finishing is blocked (e.g. during a merge) the flag is muted and its tooltip says why (also in the branch menu).
 - Time markers in the graph like GitKraken: a small pill at the right of the commit message where the relative date changes ("just now", "25 minutes ago", "yesterday", "3 days ago", "1 week ago", "2 months ago", "1 year ago"); updated every minute.
 
-- Edit the message of a commit that was not pushed yet by clicking it in the commit details (also further back on the checked-out branch, across merges): Save with Ctrl+Enter, Cancel with Esc, one Undo step. The working tree and index stay untouched; other branches and tags that contain the commit keep the old one (the editor says which). Pushed commits, commits of other branches and running operations say why they cannot be edited.
+- Edit the message of a commit that was not pushed yet by clicking it in the commit details (also further back on the checked-out branch, across merges, as long as no other local branch or tag contains it): Save with Ctrl+Enter, Cancel with Esc, one Undo step. The working tree and index stay untouched. Pushed commits, commits that another branch or a tag also contains (the message names them), commits of other branches and running operations say why they cannot be edited. The same rules apply to "Change author…".
 
 - Gitflow layout (graph column menu, command palette "Toggle Gitflow layout", Preferences → Repository → Gitflow): with Git flow initialized, the graph groups its lanes like the classic Git flow diagram, production left, then hotfix, release, development and features, one color per branch type, also for branches that were deleted long ago. Stored per repository.
 
@@ -127,6 +127,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- A stash whose base commit is no longer in the history is drawn without a line running to the bottom of the list; a note says that the base is gone.
 - Windows: VS Code (and VSCodium) as external editor started with "The system could not start the program": Gitloom picked the shell script `code` instead of `code.cmd`. Program names without an extension are now looked up with the extensions of `PATHEXT` only; a file Windows cannot run says so in plain words.
 - Files of a stash open in the external diff tool from the diff header button, Ctrl+D and the file menu alike, with the same two versions the diff in Gitloom shows (staged: HEAD and index, unstaged: index and working tree, untracked: nothing and the file). Only an untracked file of the working tree has nothing to compare.
 

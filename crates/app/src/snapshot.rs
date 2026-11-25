@@ -219,13 +219,24 @@ impl RepoSnapshot {
                 }
             }
         };
+        // A stash whose base commit is not in the complete history (e.g.
+        // after the commit was edited, finding #58) gets no edge: it would
+        // run to the bottom of the list. A cut-off history keeps the edge.
+        let complete = !log.truncated;
         let graph: Vec<GraphCommit> = log
             .commits
             .iter()
             .enumerate()
             .map(|(i, c)| GraphCommit {
                 id: Id(i as u32),
-                parents: c.parents.iter().map(|p| id_of(p)).collect(),
+                parents: c
+                    .parents
+                    .iter()
+                    .filter(|p| {
+                        !(complete && i >= first_stash && !position.contains_key(p.as_str()))
+                    })
+                    .map(|p| id_of(p))
+                    .collect(),
                 time: c.commit_time,
             })
             .collect();
@@ -689,6 +700,60 @@ impl RepoSnapshot {
         complete.then_some(false)
     }
 
+    /// The stash `id` is drawn without an edge because its base commit is
+    /// no longer in the (complete) history (finding #58).
+    pub fn stash_base_missing(&self, id: &str) -> bool {
+        !self.truncated
+            && self.is_stash(id)
+            && self
+                .stashes
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.base.as_deref())
+                .is_some_and(|base| !self.index.contains_key(base))
+    }
+
+    /// Rows (indices into `commits`) that are `id` or descend from it,
+    /// judged from the loaded history; `None` when `id` is not loaded. The
+    /// display order is topological, so every descendant comes before `id`
+    /// and one pass over the rows above it is enough. Works on the graph
+    /// ids (plain arrays) instead of the commit ids: 100 000 rows take a
+    /// few milliseconds (finding #58, `docs/PERFORMANCE.md`).
+    pub fn descendant_rows(&self, id: &str) -> Option<Vec<bool>> {
+        let &start = self.index.get(id)?;
+        let graph = &self.graph;
+        // Graph id → row; parents outside the loaded set stay unmapped.
+        let mut row_of = vec![usize::MAX; graph.commits.len()];
+        for (row, gid) in graph.order.iter().enumerate() {
+            if let Some(slot) = row_of.get_mut(gid.index()) {
+                *slot = row;
+            }
+        }
+        let mut marked = vec![false; start + 1];
+        if let Some(slot) = marked.get_mut(start) {
+            *slot = true;
+        }
+        for row in (0..start).rev() {
+            let hit = graph
+                .order
+                .get(row)
+                .and_then(|gid| graph.commits.get(gid.index()))
+                .is_some_and(|commit| {
+                    commit.parents.iter().any(|p| {
+                        row_of
+                            .get(p.index())
+                            .and_then(|&r| marked.get(r))
+                            .copied()
+                            .unwrap_or(false)
+                    })
+                });
+            if let Some(slot) = marked.get_mut(row) {
+                *slot = hit;
+            }
+        }
+        Some(marked)
+    }
+
     /// Merge commits reachable from `head` but not from `base` (flattened
     /// by a rebase onto `base`), judged from the loaded history.
     pub fn merges_between(&self, base: &str, head: &str) -> usize {
@@ -819,6 +884,17 @@ mod tests {
         assert_eq!(snapshot.is_ancestor("d", "d"), Some(true));
         assert_eq!(snapshot.is_ancestor("c", "b"), Some(false));
         assert_eq!(snapshot.is_ancestor("a", "x"), None, "history incomplete");
+        // Descendant rows agree with `is_ancestor` (finding #58).
+        let rows = snapshot.descendant_rows("b").unwrap();
+        let marked: Vec<&str> = snapshot
+            .commits
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| rows.get(*i) == Some(&true))
+            .map(|(_, c)| c.id.as_str())
+            .collect();
+        assert_eq!(marked, ["d", "b"]);
+        assert_eq!(snapshot.descendant_rows("missing"), None);
         assert!(snapshot.head_can_fast_forward("d"));
         assert!(!snapshot.head_can_fast_forward("b"), "already there");
         assert!(!snapshot.head_can_fast_forward("c"), "diverged");
@@ -1034,6 +1110,104 @@ mod tests {
             .segments
             .iter()
             .any(|s| matches!(s, git_graph::Segment::FromNode { dashed: true, .. })));
+    }
+
+    /// Finding #58: a stash whose base commit is not in the history.
+    fn orphan_stash(truncated: bool, base: &str) -> RepoSnapshot {
+        let log = Log {
+            commits: vec![commit("b2", &["a"], 20), commit("a", &[], 10)],
+            truncated,
+        };
+        let stash = Stash {
+            index: 0,
+            message: "WIP on main: b".into(),
+            id: "s".into(),
+            base: Some(base.into()),
+            time: 30,
+            author: "A".into(),
+        };
+        let head = Head::Branch {
+            name: "main".into(),
+            target: "b2".into(),
+        };
+        RepoSnapshot::build(log, head, Vec::new(), vec![stash], WorkingTree::default()).unwrap()
+    }
+
+    fn dashed_rows(snapshot: &RepoSnapshot) -> Vec<usize> {
+        (0..snapshot.layout.len())
+            .filter(|&i| {
+                snapshot.layout.row(i).unwrap().segments.iter().any(|s| {
+                    matches!(
+                        s,
+                        git_graph::Segment::FromNode { dashed: true, .. }
+                            | git_graph::Segment::Through { dashed: true, .. }
+                            | git_graph::Segment::IntoNode { dashed: true, .. }
+                    )
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stash_without_its_base_has_no_edge() {
+        // Complete history without the base: no line below the stash.
+        let gone = orphan_stash(false, "b");
+        assert!(gone.is_stash("s"));
+        assert!(gone.stash_base_missing("s"));
+        assert!(dashed_rows(&gone).is_empty(), "{:?}", dashed_rows(&gone));
+        assert!(!gone.stash_base_missing("b2"));
+        // The stash row keeps its base for apply, pop and drop.
+        assert_eq!(gone.stashes[0].base.as_deref(), Some("b"));
+        // A history cut off by the limit keeps the edge as before.
+        let cut = orphan_stash(true, "b");
+        assert!(!cut.stash_base_missing("s"));
+        assert!(!dashed_rows(&cut).is_empty());
+        // A base in the history keeps its dashed line.
+        let kept = orphan_stash(false, "a");
+        assert!(!kept.stash_base_missing("s"));
+        let rows = dashed_rows(&kept);
+        assert!(rows.contains(&0) && rows.len() >= 2, "{rows:?}");
+    }
+
+    /// Finding #58 end to end: a stash on HEAD, the commit before it
+    /// edited (only on the branch): the stash row has no line and carries
+    /// the note; the stash still applies.
+    #[test]
+    fn stash_after_editing_the_commit_below_it() {
+        let repo = crate::test_repo::TestRepo::new();
+        repo.git(&["config", "user.name", "Gitloom Test"]);
+        repo.git(&["config", "user.email", "test@example.com"]);
+        repo.commit("a.txt", "1\n", "One");
+        let target = repo.commit("a.txt", "2\n", "Two");
+        repo.commit("a.txt", "3\n", "Three");
+        repo.write("a.txt", "dirty\n");
+        repo.git(&["stash", "push", "--quiet"]);
+        let cli = git_core::CliBackend::new(repo.path());
+        assert_eq!(git_core::reword::edit_block(&cli, &target).unwrap(), None);
+        git_core::reword::reword_unpushed(&cli, &target, "Two, reworded").unwrap();
+
+        let backend = git_core::GixBackend::discover(repo.path()).unwrap();
+        let snapshot = RepoSnapshot::load(&backend).unwrap();
+        assert!(!snapshot.truncated, "the log is complete");
+        let stash = snapshot.stashes[0].id.clone();
+        assert!(snapshot.stash_base_missing(&stash));
+        let row = snapshot.index[&stash];
+        assert!(
+            snapshot
+                .layout
+                .row(row)
+                .unwrap()
+                .segments
+                .iter()
+                .all(|s| !matches!(s, git_graph::Segment::FromNode { .. })),
+            "no line below the stash node"
+        );
+        assert!(dashed_rows(&snapshot).iter().all(|&r| r <= row));
+        git_core::apply_stash(&cli, &stash, false).unwrap();
+        assert_eq!(
+            std::fs::read(repo.path().join("a.txt")).unwrap(),
+            b"dirty\n"
+        );
     }
 
     #[test]

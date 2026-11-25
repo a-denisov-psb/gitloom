@@ -124,10 +124,6 @@ fn edit(modal: &MessageModal, max_height: f32, busy: bool) -> Element<'_, Messag
     let mut notes = column![].spacing(2);
     let mut extra = 0.0;
     if let Loadable::Ready(facts) = &modal.facts {
-        for name in &facts.keep_old {
-            notes = notes.push(muted(format!("{name} keeps the old commit")).size(11));
-            extra += NOTE_LINE;
-        }
         if facts.drops_signature {
             notes = notes.push(
                 muted("Signatures of the rewritten commits are removed (signing is off)").size(11),

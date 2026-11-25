@@ -30,6 +30,8 @@ const HBAR_HEIGHT: f32 = 10.0;
 /// Room the table needs besides its columns: row paddings and scrollbar.
 const FIXED_WIDTH: f32 = 2.0 * ROW_PADDING as f32 + SCROLLBAR_WIDTH;
 const MIN_LANES: u16 = 2;
+/// Tooltip of a stash node whose base commit is gone (finding #58).
+pub const STASH_BASE_MISSING: &str = "Base commit is no longer in the history";
 /// Narrowest Graph column: one whole lane (M11-02; with the cell padding
 /// since M15-05, so the overflow slot's nodes are not cut off).
 pub const MIN_GRAPH_WIDTH: f32 = CELL_PADDING + GRAPH_PADDING * 2.0 + LANE_WIDTH;
@@ -742,8 +744,14 @@ pub fn graph_row<'a>(
         },
     };
     let graph = graph_with_avatar(layout_row, row_index, node, dimmed, overflow);
-    // The node's branch type in the Git flow layout (M13-04).
-    let graph = match snapshot.flow_tooltip(index) {
+    // The node's branch type in the Git flow layout (M13-04); a stash
+    // without its base commit says why it has no line (finding #58).
+    let node_tip = if snapshot.stash_base_missing(&commit.id) {
+        Some(STASH_BASE_MISSING.to_owned())
+    } else {
+        snapshot.flow_tooltip(index)
+    };
+    let graph = match node_tip {
         Some(tip) => tooltip(
             graph,
             container(text(tip).size(12))

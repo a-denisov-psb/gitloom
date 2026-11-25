@@ -1543,9 +1543,10 @@ impl RepoView {
 
 /// Why the author of `ids` cannot be changed (M15-11), from the loaded
 /// history without Git: "<short sha>: <reason>" for the first commit that
-/// is a stash, not on the checked-out branch, already on a remote, or any
-/// while an operation runs (the texts of M14-05). `rewrite_unpushed`
-/// checks again with Git.
+/// is a stash, not on the checked-out branch, already on a remote, also
+/// contained in another local branch or a tag (finding #58), or any while
+/// an operation runs (the texts of M14-05). `rewrite_unpushed` checks
+/// again with Git.
 pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<String> {
     use git_core::reword::EditBlock;
     let blocked = |id: &str, reason: String| Some(format!("{}: {reason}", &id[..id.len().min(7)]));
@@ -1563,14 +1564,28 @@ pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<St
         else {
             return blocked(id, EditBlock::NotOnBranch.reason());
         };
-        if head != id && snapshot.is_ancestor(id, head) != Some(true) {
+        // One pass over the rows above the commit answers every "contains"
+        // question below (finding #58); a commit outside the loaded history
+        // counts as not on the branch, like before.
+        let Some(descendants) = snapshot.descendant_rows(id) else {
+            return blocked(id, EditBlock::NotOnBranch.reason());
+        };
+        let contains = |target: &str| {
+            snapshot
+                .index
+                .get(target)
+                .and_then(|&i| descendants.get(i))
+                .copied()
+                .unwrap_or(false)
+        };
+        if !contains(head) {
             return blocked(id, EditBlock::NotOnBranch.reason());
         }
         let containing: Vec<&git_core::Reference> = snapshot
             .refs
             .iter()
             .filter(|r| r.kind == git_core::RefKind::RemoteBranch && !r.name.ends_with("/HEAD"))
-            .filter(|r| r.target == *id || snapshot.is_ancestor(id, &r.target) == Some(true))
+            .filter(|r| contains(&r.target))
             .collect();
         if let Some(first) = containing.first() {
             // Name the branch's own upstream when it contains the commit.
@@ -1585,8 +1600,45 @@ pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<St
                 .unwrap_or(first);
             return blocked(id, EditBlock::Pushed(remote.name.clone()).reason());
         }
+        if let Some(block) = shared_with(snapshot, &descendants, branch) {
+            return blocked(id, block.reason());
+        }
     }
     None
+}
+
+/// [`git_core::reword::EditBlock::SharedWith`] from the loaded history
+/// (finding #58): other local branches and tags (peeled) whose target is
+/// the commit or a descendant of it (`descendants`, from
+/// [`RepoSnapshot::descendant_rows`]). `branch` (checked out),
+/// remote-tracking refs and stashes do not count; refs outside the loaded
+/// history do not count either (`rewrite_unpushed` checks again with Git).
+fn shared_with(
+    snapshot: &RepoSnapshot,
+    descendants: &[bool],
+    branch: &str,
+) -> Option<git_core::reword::EditBlock> {
+    let contains = |r: &&git_core::Reference| {
+        snapshot
+            .index
+            .get(&r.target)
+            .and_then(|&i| descendants.get(i))
+            .copied()
+            .unwrap_or(false)
+    };
+    let branches = snapshot
+        .refs
+        .iter()
+        .filter(|r| r.kind == git_core::RefKind::LocalBranch && r.name != branch)
+        .filter(contains)
+        .map(|r| r.name.clone());
+    let tags = snapshot
+        .refs
+        .iter()
+        .filter(|r| r.kind == git_core::RefKind::Tag)
+        .filter(contains)
+        .map(|r| r.name.as_str());
+    git_core::reword::EditBlock::shared_with(branches, tags)
 }
 
 /// The commits `ids` form an unbroken first-parent chain ending at HEAD's
@@ -1740,6 +1792,88 @@ pub fn restore_selection(
 mod tests {
     use super::*;
     use git_core::{ChangeKind, Commit, Head, Log, WorkingTree};
+
+    /// Finding #58 (A2): how long the shared-ref check of the commit menu
+    /// takes with 100 000 commits, 500 branches and 2 000 tags, for HEAD
+    /// and for the oldest commit (a check with `is_ancestor` per ref took
+    /// 34–49 s here). Run with `cargo test -p gitloom --release shared_block_timing
+    /// -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "timing; run with --ignored --nocapture"]
+    fn shared_block_timing() {
+        use std::time::Instant;
+        const N: usize = 100_000;
+        let id = |i: usize| format!("{i:040x}");
+        // Newest first: a main line with a side commit merged every 10.
+        let commits: Vec<Commit> = (0..N)
+            .map(|i| {
+                let mut parents: Vec<String> = (i + 1 < N).then(|| id(i + 1)).into_iter().collect();
+                if i % 10 == 0 && i + 2 < N {
+                    parents.push(id(i + 2));
+                }
+                Commit {
+                    id: id(i),
+                    parents,
+                    summary: String::new(),
+                    body: String::new(),
+                    author: String::new(),
+                    email: String::new(),
+                    author_time: (N - i) as i64,
+                    commit_time: (N - i) as i64,
+                    committer: String::new(),
+                }
+            })
+            .collect();
+        let reference = |name: String, kind, target: usize| git_core::Reference {
+            name,
+            kind,
+            target: id(target),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        // Refs spread over the history, none at or above row 0 besides main.
+        let mut refs = vec![reference("main".into(), git_core::RefKind::LocalBranch, 0)];
+        refs.extend((0..500).map(|b| {
+            reference(
+                format!("b{b}"),
+                git_core::RefKind::LocalBranch,
+                50 + b * 199,
+            )
+        }));
+        refs.extend(
+            (0..2000).map(|t| reference(format!("t{t}"), git_core::RefKind::Tag, 30 + t * 49)),
+        );
+        let snapshot = RepoSnapshot::build(
+            Log {
+                commits,
+                truncated: false,
+            },
+            Head::Branch {
+                name: "main".into(),
+                target: id(0),
+            },
+            refs,
+            Vec::new(),
+            WorkingTree::default(),
+        )
+        .unwrap();
+        let time = |what: &str, f: &dyn Fn() -> Option<String>| {
+            let start = Instant::now();
+            let result = f();
+            eprintln!(
+                "{what}: {:.2} ms ({})",
+                start.elapsed().as_secs_f64() * 1000.0,
+                result.map_or("editable".to_owned(), |r| r.chars().take(60).collect())
+            );
+        };
+        for (name, row) in [("HEAD", 0), ("row 20", 20), ("oldest", N - 1)] {
+            let ids = vec![id(row)];
+            time(&format!("author_change_block {name}"), &|| {
+                author_change_block(&snapshot, &ids)
+            });
+        }
+    }
 
     fn snapshot(ids: &[&str], dirty: bool) -> RepoSnapshot {
         let commits = ids

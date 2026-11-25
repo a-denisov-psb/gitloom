@@ -4971,8 +4971,8 @@ impl App {
     }
 
     /// "Change author" dialog for `ids` (M15-11): the repository's
-    /// identity first, then the saved ones, "Other…"; the note about refs
-    /// that keep the old commits arrives in the background.
+    /// identity first, then the saved ones, "Other…"; the note about
+    /// dropped signatures arrives in the background.
     fn change_author_dialog(&mut self, ids: Vec<String>) -> Task<Message> {
         let Some(tab) = self.active_tab().map(|t| t.id) else {
             return Task::none();
@@ -10505,9 +10505,6 @@ impl App {
                 }) {
                     match result {
                         Ok(facts) => {
-                            for name in &facts.keep_old {
-                                form.text.push_str(&format!("\n{name} keeps the old commit"));
-                            }
                             if facts.drops_signature {
                                 form.text.push_str(
                                     "\nSignatures of the rewritten commits are removed (signing \
@@ -23022,6 +23019,120 @@ pub(crate) mod tests {
         assert_eq!(running_args(&app), ["Change author"]);
     }
 
+    /// Finding #58: another local branch or a tag that contains the commit
+    /// disables "Change author…" with the same reason as the Git check;
+    /// the first blocked commit of a multi-selection names it.
+    #[test]
+    fn change_author_refused_for_shared_commits() {
+        let mut app = author_app();
+        let reference = |name: &str, kind, target: &str| git_core::Reference {
+            name: name.into(),
+            kind,
+            target: target.into(),
+            is_head: false,
+            upstream: None,
+            ahead_behind: None,
+        };
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut snapshot = (*view.snapshot).clone();
+        // The checked-out branch and a stash do not count.
+        snapshot
+            .refs
+            .push(reference("main", git_core::RefKind::LocalBranch, "c3"));
+        view.snapshot = Arc::new(snapshot.clone());
+        let ids = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            crate::repo_view::author_change_block(&view.snapshot, &ids(&["c3", "c1"])),
+            None
+        );
+        // A tag (peeled) on c2 and a branch on c1.
+        snapshot
+            .refs
+            .push(reference("r1", git_core::RefKind::Tag, "c2"));
+        snapshot.refs.push(reference(
+            "feature/f3",
+            git_core::RefKind::LocalBranch,
+            "c1",
+        ));
+        view.snapshot = Arc::new(snapshot.clone());
+        let expected_c1 =
+            git_core::reword::EditBlock::SharedWith(vec!["feature/f3".into(), "tag r1".into()])
+                .reason();
+        assert_eq!(
+            crate::repo_view::author_change_block(&view.snapshot, &ids(&["c3", "c1"])),
+            Some(format!("c1: {expected_c1}"))
+        );
+        assert_eq!(
+            crate::repo_view::author_change_block(&view.snapshot, &ids(&["c2", "c1"])),
+            Some(format!(
+                "c2: {}",
+                git_core::reword::EditBlock::SharedWith(vec!["tag r1".into()]).reason()
+            ))
+        );
+        // The menu entry shows it, the toast repeats it.
+        let view = app.tabs[0].view_mut().unwrap();
+        view.multi.single("c3");
+        view.multi.toggle("c1", &["c3", "c2", "c1"]);
+        let (enabled, hint, _) = author_entry(&mut app, "c1");
+        assert!(!enabled);
+        assert_eq!(hint, Some(format!("c1: {expected_c1}")));
+        let _ = app.update(Message::ChangeAuthorStart(ids(&["c3", "c1"])));
+        assert!(app.form.is_none());
+        assert!(!app.toasts.list.is_empty());
+        // Another branch exactly on HEAD counts too.
+        snapshot.refs.truncate(1);
+        snapshot.refs.push(reference(
+            "release/1.0",
+            git_core::RefKind::LocalBranch,
+            "c3",
+        ));
+        app.tabs[0].view_mut().unwrap().snapshot = Arc::new(snapshot.clone());
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            crate::repo_view::author_change_block(&view.snapshot, &ids(&["c3"])),
+            Some(format!(
+                "c3: {}",
+                git_core::reword::EditBlock::SharedWith(vec!["release/1.0".into()]).reason()
+            ))
+        );
+        // A ref outside the loaded history does not count (Git decides).
+        snapshot.refs.truncate(1);
+        snapshot
+            .refs
+            .push(reference("old", git_core::RefKind::LocalBranch, "unknown"));
+        app.tabs[0].view_mut().unwrap().snapshot = Arc::new(snapshot);
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            crate::repo_view::author_change_block(&view.snapshot, &ids(&["c3", "c2"])),
+            None
+        );
+    }
+
+    /// Finding #58: the Git check's reason reaches the pencil tooltip and
+    /// the read-only message window.
+    #[test]
+    fn shared_commit_opens_the_message_window_read_only() {
+        let mut app = author_app();
+        let tab = app.tabs[0].id;
+        let reason =
+            git_core::reword::EditBlock::SharedWith(vec!["main".into(), "tag r1".into()]).reason();
+        let _ = app.update(Message::CommitSelected("c2".into()));
+        let _ = app.update(Message::EditBlockLoaded {
+            tab,
+            id: "c2".into(),
+            result: Ok(Some(reason.clone())),
+        });
+        let view = app.tabs[0].view().unwrap();
+        assert_eq!(
+            crate::ui::panel::edit_icon_state(view, "c2"),
+            Some(Err(reason.clone()))
+        );
+        let _ = app.update(Message::CommitModalOpen);
+        let modal = app.message_modal.as_ref().unwrap();
+        assert_eq!(modal.read_only.as_deref(), Some(reason.as_str()));
+        assert!(!modal.editable());
+    }
+
     /// M15-11: the editor's author row preselects "Keep original author";
     /// saving with another author selects the rewritten commit and names
     /// the undo step.
@@ -23238,13 +23349,12 @@ pub(crate) mod tests {
             id: "c2".into(),
             result: Ok(git_core::reword::EditFacts {
                 branch: "main".into(),
-                keep_old: vec!["copy".into()],
                 drops_signature: false,
             }),
         });
         assert!(matches!(
             &app.message_modal.as_ref().unwrap().facts,
-            Loadable::Ready(f) if f.keep_old == ["copy"]
+            Loadable::Ready(f) if f.branch == "main"
         ));
         // Ctrl+Enter saves.
         let _ = app.update(checked(Shortcut::Commit, false));

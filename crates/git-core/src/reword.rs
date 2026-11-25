@@ -17,6 +17,10 @@ pub enum EditBlock {
     NotOnBranch,
     /// A merge, rebase, cherry-pick or revert runs.
     OperationRunning,
+    /// Other local branches (short names) and tags (`tag <name>`) contain
+    /// the commit, branches first, each sorted (ADR-051 amendment
+    /// 2026-11-25, finding #58).
+    SharedWith(Vec<String>),
 }
 
 impl EditBlock {
@@ -28,7 +32,42 @@ impl EditBlock {
             ),
             Self::NotOnBranch => "Check out a branch that contains this commit".to_owned(),
             Self::OperationRunning => "Finish the running operation first".to_owned(),
+            Self::SharedWith(refs) => {
+                let shown = refs.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+                let more = match refs.len().saturating_sub(3) {
+                    0 => String::new(),
+                    n => format!(" and {n} more"),
+                };
+                format!(
+                    "Also contained in {shown}{more}. Editing it would leave two copies of the \
+                     history. Use interactive rebase to change shared history."
+                )
+            }
         }
+    }
+
+    /// [`EditBlock::SharedWith`] for the other local branches and tags that
+    /// contain a commit (the checked-out branch, remote-tracking refs and
+    /// stashes are not passed), `None` when there are none. Branches come
+    /// before tags, each sorted by name.
+    pub fn shared_with<B, T>(branches: B, tags: T) -> Option<Self>
+    where
+        B: IntoIterator,
+        B::Item: Into<String>,
+        T: IntoIterator,
+        T::Item: AsRef<str>,
+    {
+        let mut branches: Vec<String> = branches.into_iter().map(Into::into).collect();
+        let mut tags: Vec<String> = tags.into_iter().map(|t| t.as_ref().to_owned()).collect();
+        branches.sort();
+        branches.dedup();
+        tags.sort();
+        tags.dedup();
+        let names: Vec<String> = branches
+            .into_iter()
+            .chain(tags.into_iter().map(|t| format!("tag {t}")))
+            .collect();
+        (!names.is_empty()).then_some(Self::SharedWith(names))
     }
 }
 
@@ -37,9 +76,6 @@ impl EditBlock {
 pub struct EditFacts {
     /// The checked-out branch that is moved.
     pub branch: String,
-    /// Other local branches and tags that contain the commit; they keep
-    /// the old commits.
-    pub keep_old: Vec<String>,
     /// A rebuilt commit is signed but signing is off: its signature is lost.
     pub drops_signature: bool,
 }
@@ -127,7 +163,15 @@ pub fn edit_block(git: &dyn GitWriter, commit: &str) -> Result<Option<EditBlock>
         .filter_map(|r| r.strip_prefix("refs/remotes/").map(str::to_owned))
         .collect();
     if remotes.is_empty() {
-        return Ok(None);
+        // Other local branches and tags would keep the old commits
+        // (finding #58); `refs/stash` and the checked-out branch do not count.
+        let refs = refs_containing(git, commit, &["refs/heads", "refs/tags"])?;
+        let branches = refs
+            .iter()
+            .filter_map(|r| r.strip_prefix("refs/heads/"))
+            .filter(|b| *b != branch);
+        let tags = refs.iter().filter_map(|r| r.strip_prefix("refs/tags/"));
+        return Ok(EditBlock::shared_with(branches, tags));
     }
     // Name the branch's own upstream when it contains the commit.
     let upstream = text(
@@ -247,51 +291,37 @@ fn sign_commits(git: &dyn GitWriter) -> Result<bool> {
     Ok(code == Some(0) && output.stdout_text().trim() == "true")
 }
 
-/// [`edit_facts`] for several commits (M15-11): refs that keep any of the
-/// old commits, and whether any rebuilt commit loses its signature.
+/// [`edit_facts`] for several commits (M15-11): whether any rebuilt
+/// commit loses its signature.
 pub fn edit_facts_many(git: &dyn GitWriter, commits: &[Oid]) -> Result<EditFacts> {
-    let mut facts = EditFacts::default();
-    for commit in commits {
-        let one = edit_facts(git, commit)?;
-        facts.branch = one.branch;
-        for name in one.keep_old {
-            if !facts.keep_old.contains(&name) {
-                facts.keep_old.push(name);
-            }
-        }
-        facts.drops_signature |= one.drops_signature;
+    let mut facts = EditFacts {
+        branch: head_branch(git)?.unwrap_or_default(),
+        drops_signature: false,
+    };
+    if sign_commits(git)? {
+        return Ok(facts);
     }
-    facts.keep_old.sort();
+    for commit in commits {
+        facts.drops_signature |= chain_drops_signature(git, commit)?;
+    }
     Ok(facts)
 }
 
-/// The note before saving: the moved branch, refs that keep the old
-/// commits and whether a signature would be dropped.
+/// The note before saving: the moved branch and whether a signature would
+/// be dropped.
 pub fn edit_facts(git: &dyn GitWriter, commit: &str) -> Result<EditFacts> {
-    let branch = head_branch(git)?.unwrap_or_default();
-    let own = format!("refs/heads/{branch}");
-    let keep_old = refs_containing(git, commit, &["refs/heads", "refs/tags"])?
-        .into_iter()
-        .filter(|r| *r != own)
-        .map(|r| {
-            r.strip_prefix("refs/heads/")
-                .or_else(|| r.strip_prefix("refs/tags/"))
-                .unwrap_or(&r)
-                .to_owned()
-        })
-        .collect();
-    let drops_signature = !sign_commits(git)?
-        && chain(git, commit)?
-            .iter()
-            .map(|id| raw_commit(git, id).map(|c| c.signed))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .any(|signed| signed);
-    Ok(EditFacts {
-        branch,
-        keep_old,
-        drops_signature,
-    })
+    edit_facts_many(git, &[commit.to_owned()])
+}
+
+/// A commit from `commit` to HEAD is signed (rebuilt without signing, it
+/// loses the signature).
+fn chain_drops_signature(git: &dyn GitWriter, commit: &str) -> Result<bool> {
+    for id in chain(git, commit)? {
+        if raw_commit(git, &id)?.signed {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn move_branch(
@@ -533,6 +563,42 @@ mod tests {
         assert_eq!(
             EditBlock::NotOnBranch.reason(),
             "Check out a branch that contains this commit"
+        );
+    }
+
+    #[test]
+    fn shared_reason_names_branches_before_tags() {
+        assert_eq!(
+            EditBlock::shared_with(Vec::<String>::new(), Vec::<String>::new()),
+            None
+        );
+        let block = EditBlock::shared_with(["main"], ["r1"]).unwrap();
+        assert_eq!(
+            block,
+            EditBlock::SharedWith(vec!["main".into(), "tag r1".into()])
+        );
+        assert_eq!(
+            block.reason(),
+            "Also contained in main, tag r1. Editing it would leave two copies of the \
+             history. Use interactive rebase to change shared history."
+        );
+        let many =
+            EditBlock::shared_with(["main", "feature/f3", "develop2"], ["r1", "a0"]).unwrap();
+        assert_eq!(
+            many,
+            EditBlock::SharedWith(vec![
+                "develop2".into(),
+                "feature/f3".into(),
+                "main".into(),
+                "tag a0".into(),
+                "tag r1".into(),
+            ])
+        );
+        assert!(
+            many.reason()
+                .starts_with("Also contained in develop2, feature/f3, main and 2 more. Editing"),
+            "{}",
+            many.reason()
         );
     }
 }

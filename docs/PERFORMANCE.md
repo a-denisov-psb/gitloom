@@ -205,3 +205,15 @@ The memory target counts private memory (heap and anonymous mappings, ADR-012): 
 3. ~~**Incremental refresh**~~: done in M2-05 (status-only refresh reuses the history).
 
 Items 1 and 2 were checked in M2-16 and stay open: neither is cheap (gix has no simple switch to unmap packs after loading; a different allocator is a new dependency and needs a decision).
+
+## Finding #58: shared-ref check of the commit menu
+
+Synthetic snapshot in a release build (this machine: cloud container, not the M1-15 laptop): 100 000 commits (a merge every 10 commits), 500 local branches, 2 000 tags. `author_change_block` decides "Change author…" and the menu's reason when the commit menu opens.
+
+| Commit | First version (hash lookups per row) | Final (graph ids) | `is_ancestor` per ref (rejected) |
+|---|---|---|---|
+| HEAD | 0.67 ms | 0.99 ms | 48.7 s |
+| 20 rows back | 0.52 ms | 0.39 ms | 41.1 s |
+| oldest (shared with all 2 500 refs) | 41.4 ms | **1.7 ms** | 34.3 s |
+
+One pass over the rows above the commit marks its descendants (topological order); the "not on the branch", "pushed" and "shared" checks all read that one result, so no cache per snapshot is needed. Run: `cargo test -p gitloom --release shared_block_timing -- --ignored --nocapture`.

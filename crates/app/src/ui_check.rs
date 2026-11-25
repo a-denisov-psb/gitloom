@@ -2025,8 +2025,9 @@ mod tests {
     }
 
     /// Finding #43: the hovered header with its button (pencil, open
-    /// icon), the modal in edit mode with the note about other refs and
-    /// read-only (pushed, stash); Dark and Light.
+    /// icon), the modal in edit mode with the signature note and read-only
+    /// (pushed, shared with other refs (finding #58), stash); Dark and
+    /// Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_message_modal() {
@@ -2071,7 +2072,6 @@ mod tests {
                 id: "c2".into(),
                 result: Ok(git_core::reword::EditFacts {
                     branch: "main".into(),
-                    keep_old: vec!["backup".into(), "v1.2".into()],
                     drops_signature: true,
                 }),
             });
@@ -2091,6 +2091,23 @@ mod tests {
             hovered(&app, &format!("message-button-open-{theme}"));
             let _ = app.update(Message::CommitModalOpen);
             snapshot(&app, &format!("message-modal-pushed-{theme}"));
+            app.message_modal = None;
+            // Shared with other refs (finding #58): read-only with the reason.
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(
+                    git_core::reword::EditBlock::SharedWith(vec![
+                        "feature/f3".into(),
+                        "main".into(),
+                        "tag r1".into(),
+                        "tag r2".into(),
+                    ])
+                    .reason(),
+                )),
+            });
+            let _ = app.update(Message::CommitModalOpen);
+            snapshot(&app, &format!("message-modal-shared-{theme}"));
             // A stash.
             let mut app = crate::app::tests::graph_app();
             app.settings.appearance.theme = choice.clone();
@@ -2156,7 +2173,6 @@ mod tests {
                 ids: vec!["c2".into(), "c1".into()],
                 result: Ok(git_core::reword::EditFacts {
                     branch: "main".into(),
-                    keep_old: vec!["v1.0".into()],
                     drops_signature: false,
                 }),
             });
@@ -2520,6 +2536,64 @@ mod tests {
         ] {
             app.settings.appearance.theme = choice.clone();
             snapshot(&app, &format!("stash-node-{name}"));
+        }
+    }
+
+    /// Finding #58: a stash whose base commit is no longer in the history
+    /// has no line below its node; hovering the node shows the note. Dark
+    /// and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_stash_without_base() {
+        use crate::settings::ThemeChoice;
+        let mut app = crate::app::tests::graph_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let old = view.snapshot.clone();
+        let mut stashes = old.stashes.clone();
+        stashes[0].base = Some("gone".into());
+        let commits: Vec<git_core::Commit> = old
+            .commits
+            .iter()
+            .filter(|c| !old.is_stash(&c.id))
+            .cloned()
+            .collect();
+        let rebuilt = crate::snapshot::RepoSnapshot::build(
+            git_core::Log {
+                commits,
+                truncated: false,
+            },
+            old.head.clone(),
+            old.refs.clone(),
+            stashes,
+            old.working_tree.clone(),
+        )
+        .unwrap();
+        assert!(rebuilt.stash_base_missing("s"));
+        view.snapshot = std::sync::Arc::new(rebuilt);
+        let _ = app.update(Message::CommitSelected("s".into()));
+        for (choice, name) in [
+            (ThemeChoice::theme("dusk"), "dark"),
+            (ThemeChoice::theme("light"), "light"),
+        ] {
+            app.settings.appearance.theme = choice.clone();
+            snapshot(&app, &format!("stash-without-base-{name}"));
+            // Hover the node: the note as its tooltip.
+            let path = fresh_path(&format!("stash-without-base-tooltip-{name}"));
+            let mut sim = simulator(&app);
+            // The stash row is the row above "Main work"; its node sits in
+            // the lane left of the message column.
+            let label = sim.find("Main work").unwrap();
+            let bounds = iced_test::selector::Bounded::bounds(&label);
+            let at = iced::Point::new(
+                bounds.x - 19.0,
+                bounds.center_y() - crate::ui::graph::ROW_HEIGHT,
+            );
+            sim.point_at(at);
+            let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: at,
+            })]);
+            let snap = sim.snapshot(&app.theme()).unwrap();
+            assert!(snap.matches_image(&path).unwrap());
         }
     }
 
@@ -3054,7 +3128,6 @@ mod tests {
             id: "c2".into(),
             result: Ok(git_core::reword::EditFacts {
                 branch: "main".into(),
-                keep_old: vec!["backup".into(), "v1.2".into()],
                 drops_signature: true,
             }),
         });

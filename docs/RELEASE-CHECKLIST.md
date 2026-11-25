@@ -162,7 +162,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Author block: avatar (also with avatars on), "authored <date>", "committed by" after a rebase of someone else's commit, "Co-authors:" with avatars for `Co-authored-by:` trailers; "parent:" links select and scroll (both parents of a merge).
 - [ ] File list: summary per kind, A→Z/Z→A, Path/Tree with Expand all / Collapse all, View all files (unchanged muted, click shows the content); the choice survives a restart.
 - [ ] Edit the message of an unpushed commit two commits back, with a merge after it and with staged and unstaged changes: the history keeps its shape and files, the changes stay, the rewritten commit is selected; Ctrl+Z restores the branch, Ctrl+Y redoes. With `commit.gpgSign` on, the rebuilt commits are signed.
-- [ ] A pushed commit, a commit of another branch and a commit during a merge cannot be edited; hovering says why. A branch or tag that also contains the commit is named in the editor ("… keeps the old commit").
+- [ ] A pushed commit, a commit of another branch, a commit that another local branch or a tag also contains (the reason names them) and a commit during a merge cannot be edited; hovering says why.
 - [ ] Time markers on the graph rows ("just now" … "years ago") where the age changes, readable in Dark and Light; they update after a minute.
 
 ## 7i. New in M15 (Windows required, Linux checked in CI)
@@ -302,6 +302,18 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Type a diff command without `{remote}`: a message appears under the field and the entry is missing from the diff picker; fix it and it returns.
 - [ ] Preferences → Repository → External editor offers "Use global setting" and the entries; palette "Set: External editor ›" lists the same entries.
 - [ ] An older `settings.json` (copy one from before M20 if you have it) opens without a "damaged settings" message; editor and tool selections are empty and can be set again.
+
+## 7u. Editing shared commits (fix after M20) (Windows required)
+
+- [ ] Test repository with `develop` checked out, and `main`, a tag and a feature branch that all contain an older commit: the pencil of that commit opens the message window read-only with "Also contained in main, tag …"; "Change author…" is disabled with "<sha>: Also contained in …"; nothing changes in the graph.
+- [ ] Select two commits of which only one is shared: "Change author…" is disabled with the reason of the shared one.
+- [ ] A few commits that only the checked-out feature branch contains, one of them with a merge after it: message and author can be changed; the graph shows one history without duplicate rows; Ctrl+Z and Ctrl+Y work.
+- [ ] Create a tag on that commit and try again: refused, the tag is named. Delete the tag: it works again.
+- [ ] More than three refs contain a commit: the reason shows three names and "and N more".
+- [ ] A pushed commit that another branch also contains still says "Already pushed to …".
+- [ ] With a stash on the newest commit (WIP): change the commit before it. The stash row has no line to a missing base, a note says that the base commit is no longer in the history, and Apply and Pop still work.
+- [ ] A stash on a commit that stays in the history keeps its dashed line.
+- [ ] The commit menu entry "Edit commit message" (interactive rebase of a commit after the last merge) behaves as before.
 
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
