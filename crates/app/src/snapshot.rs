@@ -716,22 +716,38 @@ impl RepoSnapshot {
     /// Rows (indices into `commits`) that are `id` or descend from it,
     /// judged from the loaded history; `None` when `id` is not loaded. The
     /// display order is topological, so every descendant comes before `id`
-    /// and one pass over the rows above it is enough.
+    /// and one pass over the rows above it is enough. Works on the graph
+    /// ids (plain arrays) instead of the commit ids: 100 000 rows take a
+    /// few milliseconds (finding #58, `docs/PERFORMANCE.md`).
     pub fn descendant_rows(&self, id: &str) -> Option<Vec<bool>> {
         let &start = self.index.get(id)?;
+        let graph = &self.graph;
+        // Graph id → row; parents outside the loaded set stay unmapped.
+        let mut row_of = vec![usize::MAX; graph.commits.len()];
+        for (row, gid) in graph.order.iter().enumerate() {
+            if let Some(slot) = row_of.get_mut(gid.index()) {
+                *slot = row;
+            }
+        }
         let mut marked = vec![false; start + 1];
-        for i in (0..=start).rev() {
-            let hit = i == start
-                || self.commits.get(i).is_some_and(|commit| {
+        if let Some(slot) = marked.get_mut(start) {
+            *slot = true;
+        }
+        for row in (0..start).rev() {
+            let hit = graph
+                .order
+                .get(row)
+                .and_then(|gid| graph.commits.get(gid.index()))
+                .is_some_and(|commit| {
                     commit.parents.iter().any(|p| {
-                        self.index
-                            .get(p)
-                            .and_then(|&j| marked.get(j))
+                        row_of
+                            .get(p.index())
+                            .and_then(|&r| marked.get(r))
                             .copied()
                             .unwrap_or(false)
                     })
                 });
-            if let Some(slot) = marked.get_mut(i) {
+            if let Some(slot) = marked.get_mut(row) {
                 *slot = hit;
             }
         }
@@ -868,6 +884,17 @@ mod tests {
         assert_eq!(snapshot.is_ancestor("d", "d"), Some(true));
         assert_eq!(snapshot.is_ancestor("c", "b"), Some(false));
         assert_eq!(snapshot.is_ancestor("a", "x"), None, "history incomplete");
+        // Descendant rows agree with `is_ancestor` (finding #58).
+        let rows = snapshot.descendant_rows("b").unwrap();
+        let marked: Vec<&str> = snapshot
+            .commits
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| rows.get(*i) == Some(&true))
+            .map(|(_, c)| c.id.as_str())
+            .collect();
+        assert_eq!(marked, ["d", "b"]);
+        assert_eq!(snapshot.descendant_rows("missing"), None);
         assert!(snapshot.head_can_fast_forward("d"));
         assert!(!snapshot.head_can_fast_forward("b"), "already there");
         assert!(!snapshot.head_can_fast_forward("c"), "diverged");

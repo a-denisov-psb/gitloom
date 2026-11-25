@@ -1564,14 +1564,28 @@ pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<St
         else {
             return blocked(id, EditBlock::NotOnBranch.reason());
         };
-        if head != id && snapshot.is_ancestor(id, head) != Some(true) {
+        // One pass over the rows above the commit answers every "contains"
+        // question below (finding #58); a commit outside the loaded history
+        // counts as not on the branch, like before.
+        let Some(descendants) = snapshot.descendant_rows(id) else {
+            return blocked(id, EditBlock::NotOnBranch.reason());
+        };
+        let contains = |target: &str| {
+            snapshot
+                .index
+                .get(target)
+                .and_then(|&i| descendants.get(i))
+                .copied()
+                .unwrap_or(false)
+        };
+        if !contains(head) {
             return blocked(id, EditBlock::NotOnBranch.reason());
         }
         let containing: Vec<&git_core::Reference> = snapshot
             .refs
             .iter()
             .filter(|r| r.kind == git_core::RefKind::RemoteBranch && !r.name.ends_with("/HEAD"))
-            .filter(|r| r.target == *id || snapshot.is_ancestor(id, &r.target) == Some(true))
+            .filter(|r| contains(&r.target))
             .collect();
         if let Some(first) = containing.first() {
             // Name the branch's own upstream when it contains the commit.
@@ -1586,7 +1600,7 @@ pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<St
                 .unwrap_or(first);
             return blocked(id, EditBlock::Pushed(remote.name.clone()).reason());
         }
-        if let Some(block) = shared_block(snapshot, id, branch) {
+        if let Some(block) = shared_with(snapshot, &descendants, branch) {
             return blocked(id, block.reason());
         }
     }
@@ -1595,15 +1609,15 @@ pub fn author_change_block(snapshot: &RepoSnapshot, ids: &[String]) -> Option<St
 
 /// [`git_core::reword::EditBlock::SharedWith`] from the loaded history
 /// (finding #58): other local branches and tags (peeled) whose target is
-/// `id` or a descendant of it. `branch` (checked out), remote-tracking refs
-/// and stashes do not count; refs outside the loaded history do not count
-/// either (`rewrite_unpushed` checks again with Git).
-pub fn shared_block(
+/// the commit or a descendant of it (`descendants`, from
+/// [`RepoSnapshot::descendant_rows`]). `branch` (checked out),
+/// remote-tracking refs and stashes do not count; refs outside the loaded
+/// history do not count either (`rewrite_unpushed` checks again with Git).
+fn shared_with(
     snapshot: &RepoSnapshot,
-    id: &str,
+    descendants: &[bool],
     branch: &str,
 ) -> Option<git_core::reword::EditBlock> {
-    let descendants = snapshot.descendant_rows(id)?;
     let contains = |r: &&git_core::Reference| {
         snapshot
             .index
@@ -1781,8 +1795,8 @@ mod tests {
 
     /// Finding #58 (A2): how long the shared-ref check of the commit menu
     /// takes with 100 000 commits, 500 branches and 2 000 tags, for HEAD
-    /// and for the oldest commit, against a check with `is_ancestor` per
-    /// ref. Run with `cargo test -p gitloom --release shared_block_timing
+    /// and for the oldest commit (a check with `is_ancestor` per ref took
+    /// 34–49 s here). Run with `cargo test -p gitloom --release shared_block_timing
     /// -- --ignored --nocapture`.
     #[test]
     #[ignore = "timing; run with --ignored --nocapture"]
@@ -1857,15 +1871,6 @@ mod tests {
             let ids = vec![id(row)];
             time(&format!("author_change_block {name}"), &|| {
                 author_change_block(&snapshot, &ids)
-            });
-            time(&format!("is_ancestor per ref {name}"), &|| {
-                let n = snapshot
-                    .refs
-                    .iter()
-                    .filter(|r| r.kind != git_core::RefKind::RemoteBranch && r.name != "main")
-                    .filter(|r| snapshot.is_ancestor(&id(row), &r.target) == Some(true))
-                    .count();
-                (n > 0).then(|| format!("{n} refs"))
             });
         }
     }
