@@ -166,7 +166,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7t, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M20 are done (ADR-042).
+1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7u, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M20 are done (ADR-042).
 2. Planning after 1.0.0: backlog items in `docs/ROADMAP.md` (custom commands, WSL mode, SSH remote, …).
 3. M6-10 (SignPath) can happen any time before 1.0.0.
 

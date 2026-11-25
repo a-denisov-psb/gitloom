@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7t); 1.0.0 is released from `develop` when the maintainer asks.
+**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7u); 1.0.0 is released from `develop` when the maintainer asks.
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M20 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -152,6 +152,8 @@ Files of a commit and entries of the file history open in the external editor in
 ### M20 – Tool list instead of presets (done)
 
 Preferences → External tools has no hard-coded editor and tool presets any more: the user builds a list of tools (name plus commands for opening, diffing and merging) and picks one entry for each purpose, and a fresh installation has exactly one entry, VS Code, which can be edited, deleted and restored. Details: [`milestones/M20-tool-list.md`](milestones/M20-tool-list.md).
+
+Finding #58 (planning update 19, branch `fix/edit-exclusive-commits`, on `develop`): message and author of a commit can only be changed when no other local branch and no tag contains it (`EditBlock::SharedWith`, ADR-051 amendment); the notes "<ref> keeps the old commit" are gone; a stash whose base commit is no longer in the history is drawn without a line. Checklist 7u.
 
 ## Non-goals
 
