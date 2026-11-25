@@ -629,29 +629,27 @@ fn editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     .into()
 }
 
-/// Preferences → Repository → External editor (M10-11): the global setting
-/// or the same presets and a custom command, stored in the repository config.
-fn repository_editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
-    use crate::settings::EditorPreset;
-    let global = &app.settings.tools.editor_command();
-    let global_label = crate::app::use_global_editor_label(global);
+/// Preferences → Repository → External editor (M10-11, M20): the global
+/// setting or an entry of the tool list, whose open command is stored in
+/// the repository config; a stored command that matches no entry shows as
+/// "<program> (not in the list)" and keeps working.
+fn repository_editor<'a>(app: &'a App, _page: &'a Page) -> Element<'a, Message> {
+    let tools = &app.settings.tools;
+    let global = tools.editor_command();
+    let global_label = crate::app::use_global_editor_label(tools);
     let current = app
         .active_tab()
         .and_then(crate::app::Tab::view)
         .and_then(|v| v.snapshot.repo_editor.clone());
-    let selected = match (&current, page.repo_editor_custom) {
-        (_, true) => EditorPreset::Custom.label().to_owned(),
-        (None, false) => global_label.clone(),
-        (Some(command), false) => EditorPreset::of(command).label().to_owned(),
+    let mut options =
+        crate::settings_registry::Choice::RepoEditor.options(&app.settings, &global_label);
+    let selected = match &current {
+        None => global_label.clone(),
+        Some(command) => crate::settings::repo_editor_label(&tools.entries, command),
     };
-    let options: Vec<String> = std::iter::once(global_label)
-        .chain(
-            EditorPreset::ALL
-                .into_iter()
-                .filter(|p| *p != EditorPreset::None)
-                .map(|p| p.label().to_owned()),
-        )
-        .collect();
+    if !options.contains(&selected) {
+        options.push(selected.clone());
+    }
     let picker = iced::widget::pick_list(options, Some(selected), Message::RepoEditorChosen)
         .width(Length::Fixed(320.0));
     // The full global command below the picker (M15-02); wraps.
@@ -660,31 +658,26 @@ fn repository_editor<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
     } else {
         format!("Global: {}", global.trim())
     };
-    let mut content = column![column![
+    let mut lines = column![
         picker,
         muted(global_line).size(12).width(Length::Fixed(320.0))
     ]
-    .spacing(4)]
-    .spacing(10);
-    if current.is_some() || page.repo_editor_custom {
-        let changed = page.repo_editor_input.trim() != current.as_deref().unwrap_or("");
-        content = content.push(
-            row![
-                text_input("code {path}", &page.repo_editor_input)
-                    .on_input(Message::RepoEditorInput)
-                    .on_submit(Message::RepoEditorSave)
-                    .padding(6)
-                    .style(theme::input)
-                    .width(Length::Fixed(320.0)),
-                button(text("Save"))
-                    .on_press_maybe(changed.then_some(Message::RepoEditorSave))
-                    .padding([5, 12])
-                    .style(button::secondary),
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+    .spacing(4);
+    if let Some(command) = &current {
+        lines = lines.push(
+            muted(format!("This repository: {}", command.trim()))
+                .size(12)
+                .width(Length::Fixed(320.0)),
         );
     }
+    let content = column![
+        lines,
+        button(text(MANAGE_TOOLS).size(13))
+            .on_press(Message::SettingsCategory(Category::Tools))
+            .padding([2, 0])
+            .style(button::text),
+    ]
+    .spacing(10);
     column![
         text("External editor"),
         content,

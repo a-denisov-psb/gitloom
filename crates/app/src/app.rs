@@ -922,11 +922,9 @@ pub enum Message {
     SigningProgramInput(String),
     SigningProgramSave,
     SigningRefresh,
-    /// Repository → External editor (M10-11): the global setting, a preset
-    /// label or "Custom".
+    /// Repository → External editor (M10-11, M20): "Use global setting
+    /// (…)" or the name of an entry of the tool list.
     RepoEditorChosen(String),
-    RepoEditorInput(String),
-    RepoEditorSave,
     RepoEditorWritten(Result<(), String>),
     /// Stash message template (M10-10).
     StashTemplateToggled(bool),
@@ -5467,7 +5465,7 @@ impl App {
             }
             Mode::Files => Vec::new(),
             Mode::Choice(choice) => {
-                let global = use_global_editor_label(&self.settings.tools.editor_command());
+                let global = use_global_editor_label(&self.settings.tools);
                 let current = self.choice_value(choice);
                 choice
                     .options(&self.settings, &global)
@@ -5670,8 +5668,10 @@ impl App {
                 .and_then(Tab::view)
                 .and_then(|v| v.snapshot.repo_editor.clone())
             {
-                Some(command) => settings::EditorPreset::of(&command).label().to_owned(),
-                None => use_global_editor_label(&self.settings.tools.editor_command()),
+                Some(command) => {
+                    settings::repo_editor_label(&self.settings.tools.entries, &command)
+                }
+                None => use_global_editor_label(&self.settings.tools),
             },
         })
     }
@@ -6659,6 +6659,13 @@ impl App {
         }
     }
 
+    /// Name of the editor Alt+E starts for the active tab (M20): the entry's
+    /// name, else the program's file name; `None` without an editor.
+    pub fn editor_label(&self) -> Option<String> {
+        let command = self.editor_command();
+        (!command.is_empty()).then(|| settings::editor_name(&self.settings.tools.entries, &command))
+    }
+
     /// Index of the entry Manage tools shows (M20).
     pub fn shown_tool(&self) -> Option<usize> {
         settings::shown_tool(
@@ -6988,9 +6995,6 @@ impl App {
         else {
             return Task::none();
         };
-        if let Some(page) = self.settings_page.as_mut() {
-            page.repo_editor_input = command.clone().unwrap_or_default();
-        }
         Task::perform(
             blocking(move || {
                 git_core::set_repository_editor(writer.as_ref(), command.as_deref())
@@ -7663,38 +7667,9 @@ impl App {
             }
             Message::CrashReportDismissed => self.crash_notice = None,
             Message::RepoEditorChosen(choice) => {
-                let global = self.settings.tools.editor_command();
-                if choice == use_global_editor_label(&global) {
-                    // Leaves Custom too (M15-02); the input is cleared by
-                    // `write_repo_editor`.
-                    if let Some(page) = self.settings_page.as_mut() {
-                        page.repo_editor_custom = false;
-                    }
-                    return self.write_repo_editor(None);
+                if let Some(command) = repo_editor_choice(&self.settings.tools, &choice) {
+                    return self.write_repo_editor(command);
                 }
-                let preset = settings::EditorPreset::ALL
-                    .into_iter()
-                    .find(|p| p.label() == choice)
-                    .unwrap_or(settings::EditorPreset::Custom);
-                if let Some(page) = self.settings_page.as_mut() {
-                    page.repo_editor_custom = preset == settings::EditorPreset::Custom;
-                }
-                if let Some(template) = preset.template().filter(|t| !t.is_empty()) {
-                    return self.write_repo_editor(Some(template.to_owned()));
-                }
-            }
-            Message::RepoEditorInput(command) => {
-                if let Some(page) = self.settings_page.as_mut() {
-                    page.repo_editor_input = command;
-                }
-            }
-            Message::RepoEditorSave => {
-                let command = self
-                    .settings_page
-                    .as_ref()
-                    .map(|p| p.repo_editor_input.trim().to_owned())
-                    .filter(|c| !c.is_empty());
-                return self.write_repo_editor(command);
             }
             Message::RepoEditorWritten(result) => {
                 if let Err(error) = result {
@@ -8188,7 +8163,11 @@ impl App {
             }
             Message::OpenCommitFile(file) => return self.open_commit_file(file),
             Message::LaunchFinished(what, result) => {
-                if let Some(toast) = launch_toast(what, result) {
+                let editor = match what {
+                    crate::launch::Launched::Editor => self.editor_label(),
+                    _ => None,
+                };
+                if let Some(toast) = launch_toast(what, result, editor.as_deref()) {
                     return self.notify(toast);
                 }
             }
@@ -8391,10 +8370,6 @@ impl App {
                 // Repository categories need an open repository (the list
                 // shows them disabled otherwise).
                 let repo = self.active_repo_path();
-                let repo_editor = self
-                    .active_tab()
-                    .and_then(Tab::view)
-                    .and_then(|v| v.snapshot.repo_editor.clone());
                 if category.is_repository() && repo.is_none() {
                     return Task::none();
                 }
@@ -8416,10 +8391,6 @@ impl App {
                     }
                     if category == settings::Category::Editor && page.fonts.is_empty() {
                         page.fonts = crate::editor_style::monospace_families();
-                    }
-                    if category == settings::Category::RepoEditor {
-                        page.repo_editor_input = repo_editor.clone().unwrap_or_default();
-                        page.repo_editor_custom = false;
                     }
                     if category == settings::Category::Templates {
                         self.prompt_instruction = iced::widget::text_editor::Content::with_text(
@@ -13763,10 +13734,29 @@ pub fn resolve_editor(repository: Option<&str>, global: &str) -> String {
 }
 
 /// First entry of the repository editor list (M10-11).
-pub fn use_global_editor_label(global: &str) -> String {
+pub fn use_global_editor_label(tools: &settings::ExternalTools) -> String {
     // The editor's name, not the command: a long path does not fit the
     // picker (M15-02); the full command is shown below it.
-    format!("Use global setting ({})", settings::editor_name(global))
+    format!(
+        "Use global setting ({})",
+        settings::editor_name(&tools.entries, &tools.editor_command())
+    )
+}
+
+/// What choosing `label` in Preferences → Repository → External editor
+/// stores (M20, ADR-062): `Some(None)` removes the repository's editor
+/// ("Use global setting"), `Some(Some(command))` stores an entry's open
+/// command; `None` changes nothing ("<program> (not in the list)" is the
+/// stored command itself).
+pub fn repo_editor_choice(tools: &settings::ExternalTools, label: &str) -> Option<Option<String>> {
+    if label == use_global_editor_label(tools) {
+        return Some(None);
+    }
+    tools
+        .editor_entries()
+        .into_iter()
+        .find(|e| e.name.trim() == label)
+        .map(|e| Some(e.open.trim().to_owned()))
 }
 
 /// Dropdown entry for a custom stash message template (M10-10).
@@ -13881,9 +13871,12 @@ pub fn launch_task(
 /// The toast for the result of a launch (M19-03, ADR-044 amendment):
 /// notices as info, refusals as warnings, failures as errors with the raw
 /// error under "Details". A plain start shows nothing.
+/// `editor`: the editor's name for the title ("Could not start VS Code",
+/// M20) when it is known.
 pub fn launch_toast(
     what: crate::launch::Launched,
     result: crate::launch::LaunchResult,
+    editor: Option<&str>,
 ) -> Option<crate::toast::Toast> {
     use crate::launch::LaunchError;
     use crate::toast::{Toast, ToastKind};
@@ -13907,7 +13900,11 @@ pub fn launch_toast(
             if let Some(next) = what.way_forward() {
                 text = format!("{text} {next}");
             }
-            let toast = Toast::error_with(what.failure_title(), text, error);
+            let title = match (what, editor) {
+                (crate::launch::Launched::Editor, Some(name)) => format!("Could not start {name}"),
+                _ => what.failure_title().to_owned(),
+            };
+            let toast = Toast::error_with(title, text, error);
             Some(match what.way_forward() {
                 Some(_) => toast.with_action(
                     "Open Preferences",
@@ -15477,6 +15474,70 @@ pub(crate) mod tests {
         assert_eq!(app.settings.tools, before);
         assert_eq!(app.settings.tools.editor.as_deref(), Some("tool-1"));
         assert_eq!(app.settings.tools.entries[1].open, "zed {path}");
+    }
+
+    /// M20: the editor of the selected entry opens from Alt+E (the
+    /// palette and the toolbar use the same request); a selection that
+    /// points to a deleted entry behaves like none. The palette lists the
+    /// entries with an open command. Diff and merge commands of an entry
+    /// reach Git as `-c difftool.gitloom-custom.cmd=…`.
+    #[test]
+    fn entry_points_use_the_chosen_entries() {
+        use crate::settings_registry::Choice;
+        let mut app = staging_app(&["a"], &[]);
+        let _ = app.update(Message::EditorChosen(Some(settings::VSCODE_ID.into())));
+        let (template, _) = app.editor_request(Some("a")).unwrap().unwrap();
+        assert_eq!(template, settings::VSCODE_OPEN);
+        assert_eq!(app.editor_label().as_deref(), Some("VS Code"));
+        set_editor(&mut app, "zed {path}");
+        assert_eq!(
+            Choice::ExternalEditor.options(&app.settings, ""),
+            ["None", "VS Code", "Editor"]
+        );
+        assert_eq!(
+            app.choice_value(Choice::ExternalEditor).as_deref(),
+            Some("Editor")
+        );
+        let messages = Choice::ExternalEditor.messages(&app.settings, "VS Code");
+        assert!(matches!(
+            messages.as_slice(),
+            [Message::EditorChosen(Some(id))] if id == settings::VSCODE_ID
+        ));
+        // The entry is deleted: no editor.
+        let id = app.settings.tools.editor.clone().unwrap();
+        app.settings.tools.delete_entry(&id);
+        app.settings.tools.editor = Some(id);
+        assert_eq!(app.editor_command(), "");
+        assert_eq!(
+            app.choice_value(Choice::ExternalEditor).as_deref(),
+            Some("None")
+        );
+        let _ = app.update(Message::OpenInEditor(None));
+        assert_eq!(
+            app.toasts.list.last().map(|t| t.title.as_str()),
+            Some(NO_EDITOR_TITLE)
+        );
+        // Diff and merge commands go to Git per call.
+        let tools = tools_with_entry(git_core::ToolKind::Diff, "meld {local} {remote}");
+        let tool = App::tool_argument(&tools, git_core::ToolKind::Diff).unwrap();
+        let args =
+            git_core::difftool_args(&git_core::DiffTarget::Unstaged, &tool, "a.txt", None, "");
+        assert_eq!(args[0], "-c");
+        assert!(
+            args[1].starts_with("difftool.gitloom-custom.cmd='meld'"),
+            "{args:?}"
+        );
+        let tools = tools_with_entry(git_core::ToolKind::Merge, "meld --output={merged}");
+        let tool = App::tool_argument(&tools, git_core::ToolKind::Merge).unwrap();
+        let args = git_core::mergetool_args(&tool, "a.txt", false);
+        assert!(
+            args[1].starts_with("mergetool.gitloom-custom.cmd="),
+            "{args:?}"
+        );
+        assert_eq!(
+            tools.tool_name(git_core::ToolKind::Merge).as_deref(),
+            Some("Fake")
+        );
     }
 
     /// M20: "Define tool…" opens Preferences → External tools.
@@ -18411,13 +18472,14 @@ pub(crate) mod tests {
     fn launch_results_become_toasts() {
         use crate::launch::{LaunchError, Launched, Notice};
         use crate::toast::ToastKind;
-        assert!(launch_toast(Launched::Editor, Ok(None)).is_none());
+        assert!(launch_toast(Launched::Editor, Ok(None), None).is_none());
         let copy = launch_toast(
             Launched::Editor,
             Ok(Some(Notice::new(
                 crate::open_file::COPY_TITLE,
                 "a.txt as of abc1234.",
             ))),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -18430,6 +18492,7 @@ pub(crate) mod tests {
                 "Could not open a.txt",
                 "The file is not in commit abc1234",
             ))),
+            None,
         )
         .unwrap();
         assert_eq!(refused.kind, ToastKind::Warning);
@@ -18438,10 +18501,19 @@ pub(crate) mod tests {
             Err(LaunchError::Start(
                 "Could not start nope: No such file or directory (os error 2)".into(),
             )),
+            None,
         )
         .unwrap();
         assert_eq!(failed.kind, ToastKind::Error);
         assert_eq!(failed.title, "Could not start the editor");
+        // With the entry's name (M20).
+        let named = launch_toast(
+            Launched::Editor,
+            Err(LaunchError::Start("Could not start code: boom".into())),
+            Some("VS Code"),
+        )
+        .unwrap();
+        assert_eq!(named.title, "Could not start VS Code");
         assert_eq!(
             failed.text,
             "The program was not found. Check the command in Preferences → External tools."
@@ -18454,6 +18526,7 @@ pub(crate) mod tests {
         let link = launch_toast(
             Launched::Link,
             Err(LaunchError::Start("Could not start x: boom".into())),
+            None,
         )
         .unwrap();
         assert_eq!(link.title, "Could not open the link");
@@ -20122,14 +20195,12 @@ pub(crate) mod tests {
         assert_eq!(resolve_editor(Some("  "), "code {path}"), "code {path}");
         assert_eq!(resolve_editor(None, "code {path}"), "code {path}");
         assert_eq!(resolve_editor(None, ""), "");
+        let mut tools = settings::ExternalTools::default();
+        assert_eq!(use_global_editor_label(&tools), "Use global setting (none)");
+        tools.editor = Some(settings::VSCODE_ID.into());
         assert_eq!(
-            use_global_editor_label("code {path}"),
+            use_global_editor_label(&tools),
             "Use global setting (VS Code)"
-        );
-        assert_eq!(use_global_editor_label(""), "Use global setting (none)");
-        assert_eq!(
-            use_global_editor_label("vim {path}"),
-            "Use global setting (vim)"
         );
     }
 
@@ -20242,68 +20313,62 @@ pub(crate) mod tests {
         assert!(app.prompt_dialog.is_some());
     }
 
+    /// M20: the repository editor offers "Use global setting" and the
+    /// entries with an open command; choosing one stores its command; a
+    /// stored command without an entry shows "(not in the list)" and still
+    /// launches.
     #[test]
-    fn editor_names_for_labels() {
-        use settings::editor_name;
-        // Every preset by its template.
-        for preset in settings::EditorPreset::ALL {
-            if let Some(template) = preset.template().filter(|t| !t.is_empty()) {
-                assert_eq!(editor_name(template), preset.label());
-            }
-        }
-        assert_eq!(editor_name(""), "none");
-        assert_eq!(editor_name("code --wait {path}"), "VS Code");
-        assert_eq!(editor_name("/usr/bin/codium -n {path}"), "VSCodium");
-        assert_eq!(
-            editor_name(r#""C:\Program Files\Sublime Text\sublime_text.exe" {path}"#),
-            "Sublime Text"
-        );
-        assert_eq!(editor_name("idea64.exe {path}"), "IntelliJ IDEA");
-        assert_eq!(
-            editor_name(r#""C:\Users\me\AppData\Local\Programs\Zed\Zed.exe" {path}"#),
-            "Zed"
-        );
-        assert_eq!(editor_name("subl {path}:1"), "Sublime Text");
-        assert_eq!(editor_name("/opt/nvim/bin/nvim {path}"), "nvim");
-        assert_eq!(
-            editor_name(r#""C:\Tools\Notepad++.exe" {path}"#),
-            "Notepad++.exe"
-        );
-    }
-
-    /// "Use global setting" leaves every state of the repository picker
-    /// (M15-02).
-    #[test]
-    fn repository_editor_returns_to_the_global_setting() {
-        let global = |app: &App| use_global_editor_label(&app.settings.tools.editor_command());
-        let back = |app: &mut App| {
-            let label = global(app);
-            let _ = app.update(Message::RepoEditorChosen(label));
-            let page = app.settings_page.as_ref().unwrap();
-            assert!(!page.repo_editor_custom);
-            assert_eq!(page.repo_editor_input, "");
-        };
-        let mut app = staging_app(&[], &[]);
+    fn repository_editor_uses_the_tool_list() {
+        use crate::settings_registry::Choice;
+        let mut app = staging_app(&["a"], &[]);
         set_editor(&mut app, "/very/long/path/to/editors/code {path}");
-        let _ = app.update(Message::SettingsOpenedAt(settings::Category::RepoEditor));
-        // Custom → global.
-        let _ = app.update(Message::RepoEditorChosen("Custom".into()));
-        back(&mut app);
-        // Custom with an unsaved input → global.
-        let _ = app.update(Message::RepoEditorChosen("Custom".into()));
-        let _ = app.update(Message::RepoEditorInput("vim {path}".into()));
-        back(&mut app);
-        // Preset → global.
-        let _ = app.update(Message::RepoEditorChosen("Zed".into()));
-        back(&mut app);
-        // A command stored in the repository → global (the key is removed
-        // by `set_repository_editor(None)`, also when it is not set).
+        let tools = app.settings.tools.clone();
+        let global = use_global_editor_label(&tools);
+        assert_eq!(global, "Use global setting (Editor)");
+        assert_eq!(
+            Choice::RepoEditor.options(&app.settings, &global),
+            [global.as_str(), "VS Code", "Editor"]
+        );
+        assert_eq!(repo_editor_choice(&tools, &global), Some(None));
+        assert_eq!(
+            repo_editor_choice(&tools, "VS Code"),
+            Some(Some(settings::VSCODE_OPEN.to_owned()))
+        );
+        assert_eq!(repo_editor_choice(&tools, "idea (not in the list)"), None);
+        // An entry without an open command is not offered.
+        app.settings.tools.entries[0].open.clear();
+        assert_eq!(
+            Choice::RepoEditor.options(&app.settings, &global),
+            [global.as_str(), "Editor"]
+        );
+        assert_eq!(repo_editor_choice(&app.settings.tools, "VS Code"), None);
+        // A stored command that matches no entry.
         let view = app.tabs[0].view_mut().unwrap();
         let mut repo = (*view.snapshot).clone();
         repo.repo_editor = Some("idea {path}".into());
         view.apply_snapshot(Arc::new(repo));
-        back(&mut app);
-        assert_eq!(global(&app), "Use global setting (VS Code)");
+        assert_eq!(
+            app.choice_value(Choice::RepoEditor).as_deref(),
+            Some("idea (not in the list)")
+        );
+        assert_eq!(app.editor_command(), "idea {path}");
+        assert_eq!(app.editor_label().as_deref(), Some("idea"));
+        let (template, _) = app.editor_request(None).unwrap().unwrap();
+        assert_eq!(template, "idea {path}");
+        // One that matches an entry shows its name.
+        let view = app.tabs[0].view_mut().unwrap();
+        let mut repo = (*view.snapshot).clone();
+        repo.repo_editor = Some("/very/long/path/to/editors/code {path}".into());
+        view.apply_snapshot(Arc::new(repo));
+        assert_eq!(
+            app.choice_value(Choice::RepoEditor).as_deref(),
+            Some("Editor")
+        );
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::RepoEditor));
+        assert_eq!(
+            app.settings_page.as_ref().unwrap().category,
+            settings::Category::RepoEditor
+        );
     }
 
     #[test]
@@ -20337,32 +20402,6 @@ pub(crate) mod tests {
         // The repository wins over the global setting.
         set_editor(&mut app, "code {path}");
         assert_eq!(app.editor_command(), "zed {path}");
-    }
-
-    #[test]
-    fn repository_editor_page_choices() {
-        let mut app = staging_app(&[], &[]);
-        let _ = app.update(Message::SettingsOpenedAt(settings::Category::RepoEditor));
-        assert_eq!(
-            app.settings_page.as_ref().unwrap().category,
-            settings::Category::RepoEditor
-        );
-        let _ = app.update(Message::RepoEditorChosen("Custom".into()));
-        assert!(app.settings_page.as_ref().unwrap().repo_editor_custom);
-        let _ = app.update(Message::RepoEditorInput("vim {path}".into()));
-        assert_eq!(
-            app.settings_page.as_ref().unwrap().repo_editor_input,
-            "vim {path}"
-        );
-        let _ = app.update(Message::RepoEditorChosen("Zed".into()));
-        assert_eq!(
-            app.settings_page.as_ref().unwrap().repo_editor_input,
-            "zed {path}"
-        );
-        let _ = app.update(Message::RepoEditorChosen(
-            "Use global setting (none)".into(),
-        ));
-        assert_eq!(app.settings_page.as_ref().unwrap().repo_editor_input, "");
     }
 
     #[test]

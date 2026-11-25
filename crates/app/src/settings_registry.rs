@@ -4,7 +4,7 @@
 //! (scroll and highlight). Pure.
 
 use crate::app::Message;
-use crate::settings::{Category, DiffMode, EditorPreset, Settings, ThemeChoice};
+use crate::settings::{Category, DiffMode, Settings, ThemeChoice};
 
 /// A boolean setting of `settings.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,10 +114,11 @@ impl Choice {
     /// command (M20, ADR-062).
     pub fn options(self, settings: &Settings, global_editor: &str) -> Vec<String> {
         let editors = || {
-            EditorPreset::ALL
+            settings
+                .tools
+                .editor_entries()
                 .into_iter()
-                .filter(|p| *p != EditorPreset::Custom)
-                .map(|p| p.label().to_owned())
+                .map(|e| e.name.trim().to_owned())
         };
         match self {
             // The registry's names in list order, then System (ADR-058).
@@ -132,16 +133,10 @@ impl Choice {
                 .map(|p| (*p).to_owned())
                 .collect(),
             Self::ExternalEditor => std::iter::once(NO_EDITOR.to_owned())
-                .chain(
-                    settings
-                        .tools
-                        .editor_entries()
-                        .into_iter()
-                        .map(|e| e.name.trim().to_owned()),
-                )
+                .chain(editors())
                 .collect(),
             Self::RepoEditor => std::iter::once(global_editor.to_owned())
-                .chain(editors().filter(|l| l != "None"))
+                .chain(editors())
                 .collect(),
         }
     }
