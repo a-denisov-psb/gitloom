@@ -285,6 +285,13 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] Stash with a new file: create a new file, stash it (untracked files included), select the stash in the graph and open the file under "Untracked" with "Open in external editor": a read-only copy with the file's content opens, the toast says "as of stash <hash>" with the hash shown in the details header.
 - [ ] Stash with a modified file that was staged and then changed again: the file shows in Staged and in Unstaged; each opens its own version (index and working tree). A file deleted in the stash opens as it was before.
 
+## 7s. Editor start and stash diffs (fix after M19) (Windows required)
+
+- [ ] VS Code as external editor: the toolbar button, Alt+E and "Open in external editor" in a file menu open VS Code (no "could not start"). Run `where.exe code` first: it finds `code` and `code.cmd`.
+- [ ] Zed as external editor still works.
+- [ ] A stash with a modified, staged file, a file changed again after staging and a new (untracked) file: in each of the three parts, "Open in external diff tool" (context menu) and the diff button of the toolbar open the same diff that the internal diff shows.
+- [ ] An untracked file in the working tree: the diff button and the menu entry stay disabled, with the reason.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:

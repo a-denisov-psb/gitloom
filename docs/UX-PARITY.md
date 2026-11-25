@@ -137,7 +137,7 @@ Windows/Linux shown; macOS uses ⌘ instead of Ctrl (and Option instead of Alt).
 | Open repo in terminal | Alt+T | done (M5-13; the system terminal, see deviations) |
 | Open repo in file manager | Alt+O | done (M5-13) |
 | Open repo in external editor | Alt+E | done (M8-08; Gitloom shortcut next to Alt+T/Alt+O; GitKraken check open) |
-| Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts; fix after M15: presets and a custom command, handed to Git per call (ADR-055); without a tool "No external diff tool is defined." with "Define tool…") |
+| Open diff/merge tool | Ctrl+D | done (M5-12; `git difftool`/`git mergetool`, tool chosen in Preferences → External tools; also the External button of the diff and "Open in merge tool" for conflicts; fix after M15: presets and a custom command, handed to Git per call (ADR-055); without a tool "No external diff tool is defined." with "Define tool…"; files of a stash open with the internal diff's sides from the button, Ctrl+D and the file menu (Gitloom extension, finding #57, no GitKraken check needed) |
 | Close current repo | Ctrl+W | done (M1) |
 
 ### Interface

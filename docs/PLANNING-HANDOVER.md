@@ -137,6 +137,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - 2026-11-20 planning updates 13 and 14: M18 theme revision (findings #50, #51) and M18-06 tab switch closes center views (finding #52), ADR-060 (ADR-058 and ADR-059 superseded in part).
 - 2026-11-24 planning update 15: M19 history files and visible failures (findings #53, #54), ADR-061, ADR-044 amended.
 - 2026-11-24 planning update 16: fix for finding #55 (files of a stash in the external editor), ADR-061 note.
+- 2026-11-25 planning update 17: fixes for findings #56 (VS Code as external editor on Windows: `PATHEXT` lookup, ADR-044 note) and #57 (external diff of stash files with the internal diff's sides, ADR-055 note); checklist 7s.
 
 Add new agreed-but-not-yet-applied changes here.
 
@@ -163,7 +164,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7r, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M19 are done (ADR-042).
+1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7s, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M19 are done (ADR-042).
 2. Planning after 1.0.0: backlog items in `docs/ROADMAP.md` (custom commands, WSL mode, SSH remote, …).
 3. M6-10 (SignPath) can happen any time before 1.0.0.
 

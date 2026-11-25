@@ -127,6 +127,9 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ### Fixed
 
+- Windows: VS Code (and VSCodium) as external editor started with "The system could not start the program": Gitloom picked the shell script `code` instead of `code.cmd`. Program names without an extension are now looked up with the extensions of `PATHEXT` only; a file Windows cannot run says so in plain words.
+- Files of a stash open in the external diff tool from the diff header button, Ctrl+D and the file menu alike, with the same two versions the diff in Gitloom shows (staged: HEAD and index, unstaged: index and working tree, untracked: nothing and the file). Only an untracked file of the working tree has nothing to compare.
+
 - Dragging the divider between the panes no longer grabs the scrollbar of the neighbouring pane: the scroll position of the branch tree, the graph and the diff stays where it was, and the scrollbars next to a divider still work.
 - Opening a conflicted file in the merge tool without a merge tool showed the "No diff tool" dialog.
 
