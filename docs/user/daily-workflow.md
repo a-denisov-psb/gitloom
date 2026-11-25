@@ -54,7 +54,7 @@ Switching to another tab (or to a new tab's start screen) closes the diff, the b
 
 ![Diff view](../screenshots/m5-diff-light.png)
 
-**External** (or Ctrl+D) opens the diff in your diff tool (also for files of a stash, not for untracked files) (without one: "No diff tool" with **Define tool…**, which opens Preferences → External tools at the command field), **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
+**External** (or Ctrl+D) opens the diff in your diff tool (also for files of a stash, not for untracked files) (without one: "No diff tool" with **Define tool…**, which opens Preferences → External tools), **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
 
 ## Staging
 

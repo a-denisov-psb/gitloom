@@ -168,7 +168,7 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 ## 7i. New in M15 (Windows required, Linux checked in CI)
 
 - [ ] Conflict from a PowerShell-written file: in PowerShell 5 write `"asdf" > readme.md` (UTF-16 LE with BOM), commit it, change it differently on two branches and merge: the conflict view shows the lines, "UTF-16 LE" next to the path; pick lines, **Save and mark resolved**; the file is still UTF-16 LE with BOM and CRLF (e.g. `Format-Hex readme.md` starts with `FF FE`), and the merge commits. The same with a Latin-1 file (ä, ö, ü saved as ANSI) keeps its bytes. A UTF-16 file against a UTF-8 version says "The sides use different encodings (UTF-16 LE, UTF-8)" and offers the whole sides.
-- [ ] Preferences → Repository → External editor: choose Custom, type a command without saving, then "Use global setting (…)": the picker shows the global entry and the input is gone; the same from a preset and from a saved repository command. The entries name the editor (e.g. "Use global setting (Zed)" for `"C:\…\Zed.exe" {path}`); the full global command is shown below the picker.
+- [ ] Preferences → Repository → External editor: choose a tool, then "Use global setting (…)": the picker shows the global entry; the entries name the editor (e.g. "Use global setting (Zed)" for a tool "Zed" with `"C:\…\Zed.exe" {path}`); the full global command is shown below the picker.
 - [ ] Gitflow in a repository whose only branch is `trunk`, with Default branch name `trunk2` in Preferences → General: the Gitflow form proposes `trunk2` as production branch; both notes explain the difference.
 - [ ] GITFLOW section: hover a feature, release and hotfix row: a flag left of the eye opens the finish dialog; during a merge the flag is muted and its tooltip says why; development and production have no flag.
 - [ ] The Gitflow layout shows "Experimental" in Preferences → Repository → Gitflow, "Gitflow layout (experimental)" in the gear menu and "Toggle Gitflow layout (experimental)" in the palette.
@@ -183,10 +183,10 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 
 - [ ] Open a diff of `crates/app/src/app.rs` (Hunk, Inline, Split) and its Blame: colors appear within a second, top first; scrolling stays smooth; switching to another file during highlighting shows no stale colors.
 - [ ] Change `fn x` to `pub(crate) fn x` and look at the diff in all three modes: only `pub(crate) ` is highlighted stronger; a completely rewritten line has no extra highlight; Dark and Light readable.
-- [ ] Preferences → External tools without an open repository: the lists load. Diff tool "VS Code" (and Zed): Ctrl+D on an unstaged, a staged and a commit file opens the right two versions; the temporary files are gone after closing.
-- [ ] Diff tool "Custom" with a full path containing spaces (e.g. WinMerge or Beyond Compare under `C:\Program Files\…`) works.
+- [ ] Preferences → External tools without an open repository: the lists load. Diff tool "VS Code": Ctrl+D on an unstaged, a staged and a commit file opens the right two versions; the temporary files are gone after closing.
+- [ ] A tool in Manage tools with a diff command that uses a full path containing spaces (e.g. `"C:\Program Files\WinMerge\WinMergeU.exe" -u -e {local} {remote}`) works as diff tool.
 - [ ] Merge tool "VS Code" (or Meld/WinMerge) on a conflicted file: resolve, save, close: the file counts as resolved; closing without saving leaves it conflicted; Gitloom never hangs.
-- [ ] Without a diff tool: Ctrl+D shows "No diff tool" with "Define tool…", which opens External tools with the field focused.
+- [ ] Without a diff tool: Ctrl+D shows "No diff tool" with "Define tool…", which opens External tools.
 
 ## 7k. Left panel section headers (Windows required, Linux checked in CI)
 
@@ -292,6 +292,17 @@ Platforms: **W** = Windows (required), **M** = macOS (if a Mac is available; oth
 - [ ] A stash with a modified, staged file, a file changed again after staging and a new (untracked) file: in each of the three parts, "Open in external diff tool" (context menu) and the diff button of the toolbar open the same diff that the internal diff shows.
 - [ ] An untracked file in the working tree: the diff button and the menu entry stay disabled, with the reason.
 
+## 7t. Tool list (M20) (Windows required, Linux checked in CI)
+
+- [ ] Start with a fresh settings file (move `settings.json` away): Preferences → External tools shows the three pickers (editor None, diff and merge Use Git config); "Manage tools…" lists only "VS Code" with its three commands.
+- [ ] Choose VS Code as editor: Alt+E, the toolbar button and "Open in external editor" in a file menu open VS Code. Choose it as diff tool: Ctrl+D opens the VS Code diff; as merge tool: a conflicted file opens in VS Code's merge editor.
+- [ ] New tool "Zed" with open command `zed {path}`: it appears in the editor picker only; add a diff command and it appears in the diff picker too. Duplicate it: the copy is named "Zed copy".
+- [ ] Delete a tool that is in use: the confirm names where it is used; afterwards that picker shows None and Alt+E says "No external editor set" with "Open Preferences".
+- [ ] Delete "VS Code", restart Gitloom: it stays deleted. "Restore VS Code" brings it back at the top; change its open command, "Restore VS Code" resets it; other entries are untouched.
+- [ ] Type a diff command without `{remote}`: a message appears under the field and the entry is missing from the diff picker; fix it and it returns.
+- [ ] Preferences → Repository → External editor offers "Use global setting" and the entries; palette "Set: External editor ›" lists the same entries.
+- [ ] An older `settings.json` (copy one from before M20 if you have it) opens without a "damaged settings" message; editor and tool selections are empty and can be set again.
+
 ## 8. GitKraken verification (answers adjust code or UX-PARITY)
 
 Compare in a current GitKraken and write the answer next to each item:
@@ -309,7 +320,6 @@ Compare in a current GitKraken and write the answer next to each item:
 - [ ] M15: which icons (or text) does GitKraken use for Blame and History in the diff header? (Gitloom: `file-user` and `history`.)
 - [ ] M15: can GitKraken change the author of a commit (context menu or details)? (Gitloom: yes, for unpushed commits.)
 - [ ] Fix/sidebar-section-headers: how does GitKraken 7.5.2 style the left panel section headers (color, weight, separators)? (Gitloom: full text color, semibold, hairline and extra space above every section but the first.)
-- [ ] Fix after M15: which diff and merge tools does GitKraken 7.5.2 offer in Preferences → General, and is there "Custom"? (Gitloom: presets VS Code, VSCodium, Zed, IntelliJ IDEA, Meld, WinMerge, Beyond Compare, plus Custom and Git's tools.)
 - [x] M14: what does the icon at the right of GitKraken's details header do? Answered 2026-11-19: Pin to bottom (Gitloom: status bar button, finding #44).
 - [ ] Fix after M15 (#44): where does GitKraken open the diff when the details panel is pinned to the bottom? (Gitloom: in the center above the panel.)
 - [ ] Fix after M15 (#44): is the pin per repository or global in GitKraken? (Gitloom: global.)

@@ -113,6 +113,7 @@ One line per milestone: version, date, scope, notable deviations.
 | M17 Theme editor | 1.0.0 (unreleased) | 2026-11-19 | Theme files (JSON, validation, derive), Preferences → Themes with New / Edit / Rename / Delete / Import / Export / Open folder, editor with hex fields, sliders, Derive, feature list, syntax theme, preview with the edited theme only and contrast warnings (ADR-059) | Picker as RGB(A) sliders (no new dependency); Rename/Delete disabled for built-ins instead of hidden; node text not stored (chosen from the lanes) |
 | M18 Theme revision | 1.0.0 (unreleased) | 2026-11-20 | Dusk replaces Dark (default dark), Studio Dark with its own Dark+ syntax theme, renames without product names and old-id migration, embedded `.tmTheme` syntax themes, themes as a sub-page of Appearance, tab switch closes diff/blame/file history (ADR-060, updates 13 and 14) | Start buttons cap the accent alpha instead of a darker Dusk accent; muted/hover/selected adjusted for contrast; four extra Studio Dark rules for Sublime grammar scopes; Preferences still open on General; conflict view stays open with unsaved work |
 | M19 History files and visible failures | 1.0.0 (unreleased) | 2026-11-24 | Files of a commit and file history entries open in the external editor as read-only copies of that commit (real file for an unchanged file of HEAD), start-up cleanup; launch failures, refusals and failures as toasts instead of status bar text; every disabled menu entry names its reason (ADR-061, ADR-044 amendment, findings #53, #54) |
+| M20 Tool list instead of presets | 1.0.0 (unreleased) | 2026-11-25 | Editor, diff and merge tool chosen from a list the user builds under External tools → Manage tools… (only VS Code predefined, restorable); repository override, palette, dialog and labels use the list; presets removed; no migration of older tool choices (ADR-062, finding #56) |
 | M6 Release readiness | 1.0.0 | in progress | Done 2026-11-06 by Claude Code: identity, GPL-3.0-or-later with cargo-deny and notices, About dialog, app icon, crash reports, opt-in update check, accessibility pass, packaging (cargo-packager), release workflow (dry run green), user guide; public-repo files and the release checklist prepared | Open for the maintainer: M6-10 SignPath, M6-11 approval, M6-13 checklist run, M6-14 rc.1 (tag and going public), M6-15. MSI installs per machine (ADR-031); "About" in palette and Preferences (no gear menu); headless UI checks with `iced_test` (ADR-035) because the Windows desktop was locked |
 
 ## 6. Pending changes
@@ -137,6 +138,7 @@ Items agreed in the first planning chat 2026-10-21; all applied in the repositor
 - 2026-11-20 planning updates 13 and 14: M18 theme revision (findings #50, #51) and M18-06 tab switch closes center views (finding #52), ADR-060 (ADR-058 and ADR-059 superseded in part).
 - 2026-11-24 planning update 15: M19 history files and visible failures (findings #53, #54), ADR-061, ADR-044 amended.
 - 2026-11-24 planning update 16: fix for finding #55 (files of a stash in the external editor), ADR-061 note.
+- 2026-11-25 planning update 18: M20 tool list instead of presets, ADR-062 (ADR-055 presets superseded); checklist 7t.
 - 2026-11-25 planning update 17: fixes for findings #56 (VS Code as external editor on Windows: `PATHEXT` lookup, ADR-044 note) and #57 (external diff of stash files with the internal diff's sides, ADR-055 note); checklist 7s.
 
 Add new agreed-but-not-yet-applied changes here.
@@ -164,7 +166,7 @@ Questions raised by Claude Code during implementation are tracked in `docs/HANDO
 
 ## 8. Suggested next planning steps
 
-1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7s, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M19 are done (ADR-042).
+1. Next: final check by the maintainer (whole release checklist on Windows, sections 1 … 8 including 7 … 7t, and the open GitKraken items), then 1.0.0 (M6-15). M9 … M20 are done (ADR-042).
 2. Planning after 1.0.0: backlog items in `docs/ROADMAP.md` (custom commands, WSL mode, SSH remote, …).
 3. M6-10 (SignPath) can happen any time before 1.0.0.
 
