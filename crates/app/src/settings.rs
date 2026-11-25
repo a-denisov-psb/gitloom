@@ -413,8 +413,8 @@ impl From<ToolChoiceRepr> for ToolChoice {
 
 /// Id of the built-in entry (M20, ADR-062); other entries get `tool-<n>`.
 pub const VSCODE_ID: &str = "vscode";
-/// Name and commands of the built-in entry: the commands of the former
-/// VS Code presets (ADR-055, VS Code docs "merge conflicts").
+/// Name and commands of the built-in entry: the VS Code commands of
+/// ADR-055 (VS Code docs "merge conflicts").
 pub const VSCODE_NAME: &str = "VS Code";
 pub const VSCODE_OPEN: &str = "code {path}";
 pub const VSCODE_DIFF: &str = "code --wait --diff {local} {remote}";
@@ -842,106 +842,50 @@ impl ExternalTools {
     }
 }
 
-/// Presets of the external editor (M8-07); a preset fills the editable
-/// command template.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorPreset {
-    None,
-    VsCode,
-    VsCodium,
-    SublimeText,
-    IntellijIdea,
-    Zed,
-    Custom,
-}
-
-impl EditorPreset {
-    pub const ALL: [Self; 7] = [
-        Self::None,
-        Self::VsCode,
-        Self::VsCodium,
-        Self::SublimeText,
-        Self::IntellijIdea,
-        Self::Zed,
-        Self::Custom,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::VsCode => "VS Code",
-            Self::VsCodium => "VSCodium",
-            Self::SublimeText => "Sublime Text",
-            Self::IntellijIdea => "IntelliJ IDEA",
-            Self::Zed => "Zed",
-            Self::Custom => "Custom",
-        }
-    }
-
-    /// Template a preset puts into the command field (`None` for Custom,
-    /// which keeps the current text).
-    pub fn template(self) -> Option<&'static str> {
-        match self {
-            Self::None => Some(""),
-            Self::VsCode => Some("code {path}"),
-            Self::VsCodium => Some("codium {path}"),
-            Self::SublimeText => Some("subl {path}"),
-            Self::IntellijIdea => Some("idea {path}"),
-            Self::Zed => Some("zed {path}"),
-            Self::Custom => None,
-        }
-    }
-
-    /// The preset a stored template matches (Custom for anything else).
-    pub fn of(template: &str) -> Self {
-        let template = template.trim();
-        Self::ALL
-            .into_iter()
-            .find(|preset| preset.template() == Some(template))
-            .unwrap_or(Self::Custom)
-    }
-}
-
-/// Name of the editor an editor command starts (M15-02), for labels: the
-/// preset by its template, else by the program's file name (first token,
-/// quotes removed, stem compared case-insensitively), else the program's
-/// file name. "none" for an empty command.
-pub fn editor_name(command: &str) -> String {
+/// The program's file name of a command (first word, quotes removed):
+/// `"C:\Programs\Zed\Zed.exe" {path}` → `Zed.exe`.
+pub fn program_name(command: &str) -> String {
     let command = command.trim();
-    if command.is_empty() {
-        return "none".to_owned();
-    }
-    match EditorPreset::of(command) {
-        EditorPreset::Custom | EditorPreset::None => {}
-        preset => return preset.label().to_owned(),
-    }
     let program = match command.strip_prefix('"') {
         Some(rest) => rest.split('"').next().unwrap_or(rest),
         None => command.split_whitespace().next().unwrap_or(command),
     };
-    let file = program
+    program
         .rsplit(['/', '\\'])
         .next()
         .filter(|f| !f.is_empty())
-        .unwrap_or(program);
-    let stem = match file.rsplit_once('.') {
-        Some((stem, _)) if !stem.is_empty() => stem,
-        _ => file,
-    };
-    let preset = match stem.to_lowercase().as_str() {
-        "code" => Some(EditorPreset::VsCode),
-        "codium" => Some(EditorPreset::VsCodium),
-        "subl" | "sublime_text" => Some(EditorPreset::SublimeText),
-        "idea" | "idea64" => Some(EditorPreset::IntellijIdea),
-        "zed" => Some(EditorPreset::Zed),
-        _ => None,
-    };
-    preset.map_or_else(|| file.to_owned(), |p| p.label().to_owned())
+        .unwrap_or(program)
+        .to_owned()
 }
 
-impl std::fmt::Display for EditorPreset {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
+/// Name of the editor an editor command starts, for labels (M15-02, M20):
+/// the name of the entry whose open command it is, else the program's file
+/// name; "none" for an empty command.
+pub fn editor_name(entries: &[ToolEntry], command: &str) -> String {
+    let command = command.trim();
+    if command.is_empty() {
+        return "none".to_owned();
+    }
+    entries
+        .iter()
+        .find(|e| e.open.trim() == command && !e.name.trim().is_empty())
+        .map_or_else(|| program_name(command), |e| e.name.trim().to_owned())
+}
+
+/// The entry of the list whose open command `command` is, if any.
+pub fn entry_of_command<'a>(entries: &'a [ToolEntry], command: &str) -> Option<&'a ToolEntry> {
+    let command = command.trim();
+    entries
+        .iter()
+        .find(|e| !command.is_empty() && e.open.trim() == command)
+}
+
+/// How a repository's own editor command shows (M20, ADR-062): the
+/// entry's name, or "<program> (not in the list)".
+pub fn repo_editor_label(entries: &[ToolEntry], command: &str) -> String {
+    match entry_of_command(entries, command) {
+        Some(entry) if !entry.name.trim().is_empty() => entry.name.trim().to_owned(),
+        _ => format!("{} (not in the list)", program_name(command)),
     }
 }
 
@@ -1084,10 +1028,6 @@ pub struct Page {
     pub signing: Option<Result<SigningPage, String>>,
     /// Typed GPG program (saved with Save).
     pub gpg_program_input: String,
-    /// The repository's editor command being typed, and "Custom" picked
-    /// while it matches a preset (M10-11).
-    pub repo_editor_input: String,
-    pub repo_editor_custom: bool,
     /// "Custom" was picked for the stash template while its text still
     /// matches a preset (M10-10).
     pub stash_custom: bool,
@@ -1181,8 +1121,6 @@ impl Page {
             gpg_program_input: String::new(),
             long_paths: None,
             stash_custom: false,
-            repo_editor_input: String::new(),
-            repo_editor_custom: false,
             template: None,
             template_summary: String::new(),
             fonts: Vec::new(),
@@ -1361,19 +1299,45 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn editor_presets_and_older_files() {
+    fn older_files_have_no_editor() {
         // Files written before M8-07 have no editor: none.
         let old = parse(r#"{"tools": {"terminal_command": "wt"}}"#).unwrap();
         assert_eq!(old.tools.editor, None);
         assert_eq!(old.tools.terminal_command, "wt");
-        assert_eq!(EditorPreset::of(""), EditorPreset::None);
-        assert_eq!(EditorPreset::of(" code {path} "), EditorPreset::VsCode);
-        assert_eq!(EditorPreset::of("code -n {path}"), EditorPreset::Custom);
-        for preset in EditorPreset::ALL {
-            if let Some(template) = preset.template() {
-                assert_eq!(EditorPreset::of(template), preset, "{template}");
-            }
-        }
+    }
+
+    /// M20: labels name the entry, otherwise the program's file name.
+    #[test]
+    fn editor_names_for_labels() {
+        let mut entries = vec![ToolEntry::vscode()];
+        entries.push(entry(
+            "tool-1",
+            "Zed",
+            r#""C:\Programs\Zed\Zed.exe" {path}"#,
+            "",
+            "",
+        ));
+        assert_eq!(editor_name(&entries, ""), "none");
+        assert_eq!(editor_name(&entries, " code {path} "), "VS Code");
+        assert_eq!(
+            editor_name(&entries, r#""C:\Programs\Zed\Zed.exe" {path}"#),
+            "Zed"
+        );
+        assert_eq!(editor_name(&entries, "code -n {path}"), "code");
+        assert_eq!(editor_name(&entries, "/usr/bin/codium -n {path}"), "codium");
+        assert_eq!(
+            editor_name(
+                &[],
+                r#""C:\Program Files\Sublime Text\sublime_text.exe" {path}"#
+            ),
+            "sublime_text.exe"
+        );
+        assert_eq!(repo_editor_label(&entries, "code {path}"), "VS Code");
+        assert_eq!(
+            repo_editor_label(&entries, "idea64.exe {path}"),
+            "idea64.exe (not in the list)"
+        );
+        assert_eq!(entry_of_command(&entries, "").map(|e| &e.id), None);
     }
 
     #[test]

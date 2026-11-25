@@ -2495,8 +2495,7 @@ mod tests {
                 &mut app,
                 r#""C:\Users\maintainer\AppData\Local\Programs\Zed\Zed.exe" --new-window {path}"#,
             );
-            let label = crate::app::use_global_editor_label(&app.settings.tools.editor_command());
-            let _ = app.update(Message::RepoEditorChosen("Custom".into()));
+            let label = crate::app::use_global_editor_label(&app.settings.tools);
             let _ = app.update(Message::RepoEditorChosen(label));
             let view = app.tabs[0].view_mut().unwrap();
             let mut repo = (*view.snapshot).clone();

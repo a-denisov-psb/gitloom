@@ -102,8 +102,9 @@ fn toolbar_button<'a>(
 pub struct Pickers {
     pub repository: Option<String>,
     pub branch: Option<String>,
-    /// An external editor is set: the "Editor" button shows (M8-08).
-    pub editor: bool,
+    /// The external editor's name when one is set: the "Editor" button
+    /// shows (M8-08) and names it (M20).
+    pub editor: Option<String>,
 }
 
 /// `compact`: the window is too narrow for labelled buttons (icons only).
@@ -150,11 +151,7 @@ pub fn view(
         space::horizontal(),
         action(view, compact, ToolbarAction::Terminal),
     ]
-    .push(
-        blocks
-            .editor
-            .then(|| action(view, compact, ToolbarAction::Editor)),
-    )
+    .push(blocks.editor.map(|name| editor_button(compact, Some(name))))
     .push(settings_button(compact))
     .padding([4, 12])
     .align_y(iced::Center);
@@ -283,13 +280,7 @@ fn action<'a>(view: &RepoView, compact: bool, action: ToolbarAction) -> Element<
         (ToolbarAction::Pop, _) if view.write_block.is_none() => {
             with_tooltip_text(disabled(), "Pop: no stash to pop".to_owned())
         }
-        (ToolbarAction::Editor, _) => with_tooltip_text(
-            toolbar_button(action, Some(Message::OpenInEditor(None)), compact).into(),
-            match crate::actions::ActionId::OpenEditor.shortcut_text() {
-                Some(keys) => format!("Open this repository in the external editor ({keys})"),
-                None => "Open this repository in the external editor".to_owned(),
-            },
-        ),
+        (ToolbarAction::Editor, _) => editor_button(compact, None),
         (ToolbarAction::Terminal, _) => with_tooltip_text(
             toolbar_button(action, Some(Message::OpenTerminal), compact).into(),
             match crate::actions::ActionId::OpenTerminal.shortcut_text() {
@@ -302,6 +293,24 @@ fn action<'a>(view: &RepoView, compact: bool, action: ToolbarAction) -> Element<
 }
 
 /// Pull in the current mode; the tooltip names the mode.
+/// "Editor": opens the repository in the external editor, named in the
+/// tooltip (M8-08, M20).
+fn editor_button<'a>(compact: bool, name: Option<String>) -> Element<'a, Message> {
+    let tool = name.unwrap_or_else(|| "the external editor".to_owned());
+    with_tooltip_text(
+        toolbar_button(
+            ToolbarAction::Editor,
+            Some(Message::OpenInEditor(None)),
+            compact,
+        )
+        .into(),
+        match crate::actions::ActionId::OpenEditor.shortcut_text() {
+            Some(keys) => format!("Open this repository in {tool} ({keys})"),
+            None => format!("Open this repository in {tool}"),
+        },
+    )
+}
+
 fn pull_button<'a>(
     view: &RepoView,
     mode: git_core::PullMode,
