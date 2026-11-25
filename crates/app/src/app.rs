@@ -579,7 +579,7 @@ pub enum Message {
     Shortcut(Shortcut),
     /// Click on a toolbar picker: runs its palette action (M6-17).
     PickerClicked(Shortcut),
-    SettingsLoaded(settings::Loaded),
+    SettingsLoaded(Box<settings::Loaded>),
     /// The theme files of the config directory (ADR-059).
     UserThemesLoaded(Vec<crate::theme_file::Entry>),
     /// Preferences → Appearance → Manage themes (M17-02): select, New theme (a copy of the
@@ -1560,7 +1560,9 @@ impl App {
                 });
                 let session = Task::done(Message::SessionLoaded(session));
                 let session = match settings {
-                    Some(settings) => Task::done(Message::SettingsLoaded(settings)).chain(session),
+                    Some(settings) => {
+                        Task::done(Message::SettingsLoaded(Box::new(settings))).chain(session)
+                    }
                     None => session,
                 };
                 match themes {
@@ -8047,6 +8049,7 @@ impl App {
                 return self.highlight_code_views();
             }
             Message::SettingsLoaded(loaded) => {
+                let loaded = *loaded;
                 let settings::Loaded {
                     settings,
                     notice,
@@ -15903,11 +15906,11 @@ pub(crate) mod tests {
         let mut app = ready_app(&["c"]);
         let mut loaded = Settings::default();
         loaded.general.auto_fetch_minutes = 30;
-        let _ = app.update(Message::SettingsLoaded(settings::Loaded {
+        let _ = app.update(Message::SettingsLoaded(Box::new(settings::Loaded {
             settings: loaded.clone(),
             notice: Some("The settings file was unreadable; defaults are used.".into()),
             write: true,
-        }));
+        })));
         assert_eq!(app.settings, loaded);
         assert!(toast_text(&app).contains("defaults are used"));
     }
@@ -17115,11 +17118,11 @@ pub(crate) mod tests {
         assert!(stored.contains("\"details_panel\":\"bottom\""), "{stored}");
         let mut restarted = ready_app(&["c"]);
         assert_eq!(restarted.panes.position, DetailsPanelPosition::Right);
-        let _ = restarted.update(Message::SettingsLoaded(settings::Loaded {
+        let _ = restarted.update(Message::SettingsLoaded(Box::new(settings::Loaded {
             settings: serde_json::from_str(&stored).unwrap(),
             notice: None,
             write: false,
-        }));
+        })));
         assert_eq!(restarted.panes.position, DetailsPanelPosition::Bottom);
         // Older settings without the field: right.
         let old: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
