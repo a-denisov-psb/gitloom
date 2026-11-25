@@ -655,6 +655,18 @@ pub enum Message {
     /// picker (M20, ADR-062).
     DiffToolChosen(crate::settings::ToolOption),
     MergeToolChosen(crate::settings::ToolOption),
+    /// External tools → Manage tools (M20, ADR-062): select an entry, add
+    /// one, duplicate or delete the selected one, restore VS Code, edit
+    /// the selected entry's name and commands.
+    ToolSelected(String),
+    ToolNew,
+    ToolDuplicate,
+    ToolDelete {
+        confirmed: bool,
+    },
+    ToolRestoreVsCode,
+    ToolNameInput(String),
+    ToolCommandInput(crate::settings::Purpose, String),
     /// "Define tool…" of the "No diff tool" / "No merge tool" dialog:
     /// opens Preferences → External tools (M20).
     DefineTool,
@@ -6647,6 +6659,16 @@ impl App {
         }
     }
 
+    /// Index of the entry Manage tools shows (M20).
+    pub fn shown_tool(&self) -> Option<usize> {
+        settings::shown_tool(
+            &self.settings.tools.entries,
+            self.settings_page
+                .as_ref()
+                .and_then(|p| p.tool_selected.as_deref()),
+        )
+    }
+
     /// The editor command for the active tab: the repository's own
     /// (M10-11), else the global one; empty when neither is set.
     pub fn editor_command(&self) -> String {
@@ -8220,6 +8242,92 @@ impl App {
             Message::DiffToolChosen(pick) => return self.choose_tool(git_core::ToolKind::Diff, pick),
             Message::MergeToolChosen(pick) => {
                 return self.choose_tool(git_core::ToolKind::Merge, pick)
+            }
+            Message::ToolSelected(id) => {
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.tool_selected = Some(id);
+                }
+            }
+            Message::ToolNew => {
+                let tools = &mut self.settings.tools;
+                let id = settings::next_id(&tools.entries);
+                tools.entries.push(settings::ToolEntry {
+                    id: id.clone(),
+                    name: settings::unique_name(&tools.entries, NEW_TOOL),
+                    ..settings::ToolEntry::default()
+                });
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.tool_selected = Some(id);
+                }
+                return Task::batch([
+                    self.save_settings(),
+                    iced::widget::operation::focus(crate::ui::settings::TOOL_NAME_INPUT),
+                ]);
+            }
+            Message::ToolDuplicate => {
+                let Some(index) = self.shown_tool() else {
+                    return Task::none();
+                };
+                let tools = &mut self.settings.tools;
+                let mut copy = tools.entries[index].clone();
+                copy.id = settings::next_id(&tools.entries);
+                copy.name = settings::unique_name(
+                    &tools.entries,
+                    &format!("{} copy", copy.name.trim()),
+                );
+                let id = copy.id.clone();
+                tools.entries.insert(index + 1, copy);
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.tool_selected = Some(id);
+                }
+                return self.save_settings();
+            }
+            Message::ToolDelete { confirmed } => {
+                let Some(index) = self.shown_tool() else {
+                    return Task::none();
+                };
+                let entry = self.settings.tools.entries[index].clone();
+                if !confirmed {
+                    self.modal = Some(Modal::confirm(
+                        "Delete tool",
+                        delete_tool_text(&entry.name, &self.settings.tools.usage(&entry.id)),
+                        "Delete",
+                        true,
+                        Message::ToolDelete { confirmed: true },
+                    ));
+                    return Task::none();
+                }
+                self.settings.tools.delete_entry(&entry.id);
+                // The neighbour below, else the one above, is shown next.
+                let next = self
+                    .settings
+                    .tools
+                    .entries
+                    .get(index.min(self.settings.tools.entries.len().saturating_sub(1)))
+                    .map(|e| e.id.clone());
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.tool_selected = next;
+                }
+                return self.save_settings();
+            }
+            Message::ToolRestoreVsCode => {
+                settings::restore_vscode(&mut self.settings.tools.entries);
+                if let Some(page) = self.settings_page.as_mut() {
+                    page.tool_selected = Some(settings::VSCODE_ID.to_owned());
+                }
+                return self.save_settings();
+            }
+            Message::ToolNameInput(name) => {
+                if let Some(index) = self.shown_tool() {
+                    self.settings.tools.entries[index].name = name;
+                    return self.save_settings();
+                }
+            }
+            Message::ToolCommandInput(purpose, command) => {
+                if let Some(index) = self.shown_tool() {
+                    *self.settings.tools.entries[index].command_mut(purpose) = command;
+                    return self.save_settings();
+                }
             }
             Message::DefineTool => {
                 // The pickers and "Manage tools…" (M20, ADR-062).
@@ -13502,6 +13610,21 @@ fn run_tool(
     run(git).map_err(|e| ExternalToolError::Failed(e.to_string()))
 }
 
+/// Name of a tool added with "New tool" (M20).
+pub const NEW_TOOL: &str = "New tool";
+
+/// The question before deleting a tool entry (ADR-062): names where it is
+/// in use, which then becomes "None".
+pub fn delete_tool_text(name: &str, usage: &[&str]) -> String {
+    let name = name.trim();
+    let used = match usage {
+        [] => return format!("Delete {name}? It is not in use."),
+        [one] => (*one).to_owned(),
+        [first @ .., last] => format!("{} and {last}", first.join(", ")),
+    };
+    format!("Delete {name}? It is used as {used}; that setting becomes None.")
+}
+
 /// No diff or merge tool: "Define tool…" opens Preferences → External
 /// tools (M20).
 fn tool_missing_dialog(merge: bool) -> Modal {
@@ -15129,6 +15252,231 @@ pub(crate) mod tests {
             app.modal.take().map(|m| m.title),
             Some("No diff tool".into())
         );
+    }
+
+    fn tools_app() -> App {
+        let mut app = ready_app(&["c"]);
+        let _ = app.update(Message::SettingsOpenedAt(settings::Category::ExternalTools));
+        let _ = app.update(Message::SettingsCategory(settings::Category::Tools));
+        app
+    }
+
+    fn tool_names(app: &App) -> Vec<String> {
+        app.settings
+            .tools
+            .entries
+            .iter()
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    fn shown_tool_name(app: &App) -> String {
+        app.shown_tool()
+            .map(|i| app.settings.tools.entries[i].name.clone())
+            .unwrap_or_default()
+    }
+
+    /// M20: Manage tools is a sub-page of External tools; Esc goes back
+    /// one level, then closes.
+    #[test]
+    fn manage_tools_is_a_sub_page_of_external_tools() {
+        use settings::Category;
+        assert!(!Category::GLOBAL.contains(&Category::Tools));
+        assert_eq!(Category::Tools.sidebar(), Category::ExternalTools);
+        assert_eq!(
+            crate::ui::settings::back_label(Category::Tools.parent().unwrap()),
+            "← External tools"
+        );
+        let mut app = tools_app();
+        let category = |app: &App| app.settings_page.as_ref().map(|p| p.category);
+        assert_eq!(category(&app), Some(Category::Tools));
+        assert_eq!(
+            shown_tool_name(&app),
+            "VS Code",
+            "a fresh list: VS Code only"
+        );
+        assert_eq!(tool_names(&app), ["VS Code"]);
+        let _ = app.update(Message::EscapeCaptured);
+        assert_eq!(category(&app), Some(Category::ExternalTools));
+        let _ = app.update(Message::EscapeCaptured);
+        assert_eq!(category(&app), None);
+        // The search row opens the sub-page.
+        let row = crate::settings_registry::SETTINGS
+            .iter()
+            .find(|s| s.label == crate::ui::settings::MANAGE_TOOLS)
+            .unwrap();
+        assert_eq!(row.category, Some(Category::Tools));
+    }
+
+    /// M20: New tool, Duplicate and Delete change the list and the
+    /// selections; Delete asks first and Esc cancels the question.
+    #[test]
+    fn new_duplicate_and_delete_tools() {
+        use settings::{Purpose, ToolChoice, ToolOption, VSCODE_ID};
+        let mut app = tools_app();
+        let _ = app.update(Message::ToolNew);
+        assert_eq!(tool_names(&app), ["VS Code", "New tool"]);
+        assert_eq!(
+            shown_tool_name(&app),
+            "New tool",
+            "the new entry is selected"
+        );
+        assert_eq!(app.settings.tools.entries[1].id, "tool-1");
+        let _ = app.update(Message::ToolNew);
+        assert_eq!(shown_tool_name(&app), "New tool 2");
+        let _ = app.update(Message::ToolNameInput("Zed".into()));
+        let _ = app.update(Message::ToolCommandInput(
+            Purpose::Open,
+            "zed {path}".into(),
+        ));
+        let _ = app.update(Message::ToolDuplicate);
+        assert_eq!(tool_names(&app), ["VS Code", "New tool", "Zed", "Zed copy"]);
+        assert_eq!(shown_tool_name(&app), "Zed copy");
+        let _ = app.update(Message::ToolSelected("tool-2".into()));
+        let _ = app.update(Message::ToolDuplicate);
+        assert_eq!(shown_tool_name(&app), "Zed copy 2");
+        assert_eq!(app.settings.tools.entries[3].open, "zed {path}");
+        let ids: Vec<_> = app
+            .settings
+            .tools
+            .entries
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
+        assert_eq!(ids, [VSCODE_ID, "tool-1", "tool-2", "tool-4", "tool-3"]);
+
+        // Delete VS Code while it is the editor and the diff tool.
+        let _ = app.update(Message::EditorChosen(Some(VSCODE_ID.into())));
+        let _ = app.update(Message::DiffToolChosen(ToolOption::Entry(VSCODE_ID.into())));
+        let _ = app.update(Message::ToolSelected(VSCODE_ID.into()));
+        let _ = app.update(Message::ToolDelete { confirmed: false });
+        let modal = app.modal.as_ref().expect("asks first");
+        assert_eq!(
+            modal.text,
+            "Delete VS Code? It is used as external editor and diff tool; that setting becomes None."
+        );
+        // Esc cancels: nothing changes, the page stays.
+        let _ = app.update(Message::EscapeCaptured);
+        assert!(app.modal.is_none());
+        assert_eq!(tool_names(&app).len(), 5);
+        assert_eq!(
+            app.settings_page.as_ref().map(|p| p.category),
+            Some(settings::Category::Tools)
+        );
+        let _ = app.update(Message::ToolDelete { confirmed: false });
+        let action = app.modal.take().unwrap().default_action();
+        assert!(
+            matches!(action, Some(Message::ToolDelete { confirmed: true })) || action.is_none()
+        );
+        let _ = app.update(Message::ToolDelete { confirmed: true });
+        assert_eq!(
+            tool_names(&app),
+            ["New tool", "Zed", "Zed copy 2", "Zed copy"]
+        );
+        assert_eq!(app.settings.tools.editor, None);
+        assert_eq!(app.settings.tools.diff_tool, ToolChoice::None);
+        assert_eq!(app.settings.tools.merge_tool, ToolChoice::GitConfig);
+        assert_eq!(shown_tool_name(&app), "New tool", "the next entry is shown");
+        assert_eq!(app.editor_command(), "");
+        assert_eq!(
+            delete_tool_text("Zed", &[]),
+            "Delete Zed? It is not in use."
+        );
+        assert_eq!(
+            delete_tool_text("Zed", &["external editor", "diff tool", "merge tool"]),
+            "Delete Zed? It is used as external editor, diff tool and merge tool; that setting becomes None."
+        );
+    }
+
+    /// M20: the name and command rules show their message and keep the
+    /// entry out of the picker of that purpose; fixing it brings it back.
+    #[test]
+    fn invalid_entries_leave_the_pickers() {
+        use git_core::ToolKind::Diff;
+        use settings::{Purpose, VSCODE_ID};
+        let mut app = tools_app();
+        let in_diff = |app: &App| {
+            app.settings
+                .tools
+                .tool_options(Diff, &[])
+                .contains(&settings::ToolOption::Entry(VSCODE_ID.into()))
+        };
+        assert!(in_diff(&app));
+        let _ = app.update(Message::ToolCommandInput(
+            Purpose::Diff,
+            "code --wait --diff {local}".into(),
+        ));
+        let problems = settings::entry_problems(&app.settings.tools.entries, 0);
+        assert_eq!(problems.diff, Some(settings::DIFF_PLACEHOLDERS));
+        assert!(!in_diff(&app));
+        assert_eq!(
+            app.settings.tools.editor_entries().len(),
+            1,
+            "still an editor"
+        );
+        let _ = app.update(Message::ToolCommandInput(
+            Purpose::Diff,
+            settings::VSCODE_DIFF.into(),
+        ));
+        assert!(in_diff(&app));
+        // An empty name: out of every picker.
+        let _ = app.update(Message::ToolNameInput("  ".into()));
+        assert_eq!(
+            settings::entry_problems(&app.settings.tools.entries, 0).name,
+            Some(settings::NAME_EMPTY)
+        );
+        assert!(!in_diff(&app));
+        assert!(app.settings.tools.editor_entries().is_empty());
+        // A taken name.
+        let _ = app.update(Message::ToolNameInput("VS Code".into()));
+        let _ = app.update(Message::ToolNew);
+        let _ = app.update(Message::ToolNameInput("vs code".into()));
+        assert_eq!(
+            settings::entry_problems(&app.settings.tools.entries, 1).name,
+            Some(settings::NAME_TAKEN)
+        );
+    }
+
+    /// M20: Restore VS Code when it is missing, changed and unchanged;
+    /// other entries and the selections stay. A deleted VS Code stays
+    /// deleted after saving and loading.
+    #[test]
+    fn restore_vs_code_and_a_deleted_one_stays_deleted() {
+        use settings::{Purpose, ToolEntry};
+        let mut app = tools_app();
+        let _ = app.update(Message::ToolNew);
+        let _ = app.update(Message::ToolNameInput("Zed".into()));
+        let _ = app.update(Message::ToolCommandInput(
+            Purpose::Open,
+            "zed {path}".into(),
+        ));
+        let _ = app.update(Message::EditorChosen(Some("tool-1".into())));
+        let _ = app.update(Message::ToolSelected(settings::VSCODE_ID.into()));
+        let _ = app.update(Message::ToolDelete { confirmed: true });
+        assert_eq!(tool_names(&app), ["Zed"]);
+        // Saved and loaded: still deleted.
+        let loaded = settings::parse(&settings::to_json(&app.settings)).unwrap();
+        assert_eq!(loaded.tools.entries.len(), 1);
+        assert_eq!(loaded.tools.entries[0].name, "Zed");
+        // Missing: back at the top.
+        let _ = app.update(Message::ToolRestoreVsCode);
+        assert_eq!(tool_names(&app), ["VS Code", "Zed"]);
+        assert_eq!(app.settings.tools.entries[0], ToolEntry::vscode());
+        assert_eq!(shown_tool_name(&app), "VS Code");
+        // Changed: reset in place.
+        let _ = app.update(Message::ToolNameInput("Code".into()));
+        let _ = app.update(Message::ToolCommandInput(
+            Purpose::Open,
+            "code -n {path}".into(),
+        ));
+        let _ = app.update(Message::ToolRestoreVsCode);
+        assert_eq!(app.settings.tools.entries[0], ToolEntry::vscode());
+        // Unchanged: nothing happens.
+        let before = app.settings.tools.clone();
+        let _ = app.update(Message::ToolRestoreVsCode);
+        assert_eq!(app.settings.tools, before);
+        assert_eq!(app.settings.tools.editor.as_deref(), Some("tool-1"));
+        assert_eq!(app.settings.tools.entries[1].open, "zed {path}");
     }
 
     /// M20: "Define tool…" opens Preferences → External tools.

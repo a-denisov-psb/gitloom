@@ -2373,28 +2373,65 @@ mod tests {
     }
 
     /// Preferences → External tools (M20): the editor, diff and merge
-    /// pickers built from the tool list, with the tools Git offers.
+    /// pickers built from the tool list, with the tools Git offers and the
+    /// "Manage tools…" links; the default list and a choice; Dusk and Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_external_tools() {
-        use crate::settings::ToolOption;
-        let mut app = ready_app(&["c"]);
-        let _ = app.update(Message::SettingsOpenedAt(
-            crate::settings::Category::ExternalTools,
-        ));
-        let info = git_core::ToolInfo {
-            configured: None,
-            available: vec!["meld".into(), "kdiff3".into(), "vimdiff".into()],
-        };
-        let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
-        let _ = app.update(Message::EditorChosen(Some(
-            crate::settings::VSCODE_ID.into(),
-        )));
-        let _ = app.update(Message::DiffToolChosen(ToolOption::Entry(
-            crate::settings::VSCODE_ID.into(),
-        )));
-        let _ = app.update(Message::MergeToolChosen(ToolOption::Git("kdiff3".into())));
-        snapshot(&app, "preferences-external-tools");
+        use crate::settings::{ThemeChoice, ToolOption};
+        for (choice, theme) in [
+            (ThemeChoice::theme("dusk"), "dusk"),
+            (ThemeChoice::theme("light"), "light"),
+        ] {
+            let mut app = ready_app(&["c"]);
+            app.settings.appearance.theme = choice;
+            let _ = app.update(Message::SettingsOpenedAt(
+                crate::settings::Category::ExternalTools,
+            ));
+            let info = git_core::ToolInfo {
+                configured: None,
+                available: vec!["meld".into(), "kdiff3".into(), "vimdiff".into()],
+            };
+            let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
+            snapshot(&app, &format!("preferences-external-tools-default-{theme}"));
+            let _ = app.update(Message::EditorChosen(Some(
+                crate::settings::VSCODE_ID.into(),
+            )));
+            let _ = app.update(Message::DiffToolChosen(ToolOption::Entry(
+                crate::settings::VSCODE_ID.into(),
+            )));
+            let _ = app.update(Message::MergeToolChosen(ToolOption::Git("kdiff3".into())));
+            snapshot(&app, &format!("preferences-external-tools-{theme}"));
+        }
+    }
+
+    /// External tools → Manage tools (M20): the default list, then a
+    /// second entry with a diff command that lacks {remote} (marked in the
+    /// list, message under the field); Dusk and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_manage_tools() {
+        use crate::settings::{Purpose, ThemeChoice};
+        for (choice, theme) in [
+            (ThemeChoice::theme("dusk"), "dusk"),
+            (ThemeChoice::theme("light"), "light"),
+        ] {
+            let mut app = ready_app(&["c"]);
+            app.settings.appearance.theme = choice;
+            let _ = app.update(Message::SettingsOpenedAt(crate::settings::Category::Tools));
+            snapshot(&app, &format!("preferences-tools-default-{theme}"));
+            let _ = app.update(Message::ToolNew);
+            let _ = app.update(Message::ToolNameInput("Zed".into()));
+            let _ = app.update(Message::ToolCommandInput(
+                Purpose::Open,
+                "zed {path}".into(),
+            ));
+            let _ = app.update(Message::ToolCommandInput(
+                Purpose::Diff,
+                "zed --wait --diff {local}".into(),
+            ));
+            snapshot(&app, &format!("preferences-tools-problem-{theme}"));
+        }
     }
 
     /// Toolbar without labels (M10-08).

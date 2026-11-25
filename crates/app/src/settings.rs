@@ -475,7 +475,6 @@ impl ToolEntry {
         }
     }
 
-    #[allow(dead_code)] // Manage tools (M20-02)
     pub fn command_mut(&mut self, purpose: Purpose) -> &mut String {
         match purpose {
             Purpose::Open => &mut self.open,
@@ -495,7 +494,6 @@ pub struct EntryProblems {
 }
 
 impl EntryProblems {
-    #[allow(dead_code)] // Manage tools (M20-02)
     pub fn any(&self) -> bool {
         *self != Self::default()
     }
@@ -609,6 +607,14 @@ pub fn restore_vscode(entries: &mut Vec<ToolEntry>) {
         Some(entry) => *entry = ToolEntry::vscode(),
         None => entries.insert(0, ToolEntry::vscode()),
     }
+}
+
+/// Index of the entry shown in Manage tools: `selected` when it exists,
+/// else the first entry.
+pub fn shown_tool(entries: &[ToolEntry], selected: Option<&str>) -> Option<usize> {
+    selected
+        .and_then(|id| entries.iter().position(|e| e.id == id))
+        .or_else(|| (!entries.is_empty()).then_some(0))
 }
 
 /// An entry of the diff or merge tool picker (ADR-062).
@@ -792,6 +798,39 @@ impl ExternalTools {
         list
     }
 
+    /// Where entry `id` is selected: "external editor", "diff tool",
+    /// "merge tool" (stored selections, for the delete question).
+    pub fn usage(&self, id: &str) -> Vec<&'static str> {
+        let mut used = Vec::new();
+        if self.editor.as_deref() == Some(id) {
+            used.push("external editor");
+        }
+        for (kind, label) in [
+            (git_core::ToolKind::Diff, "diff tool"),
+            (git_core::ToolKind::Merge, "merge tool"),
+        ] {
+            if *self.choice(kind) == ToolChoice::Entry(id.to_owned()) {
+                used.push(label);
+            }
+        }
+        used
+    }
+
+    /// Deletes entry `id`; the selections that pointed to it become
+    /// "None" (ADR-062).
+    pub fn delete_entry(&mut self, id: &str) {
+        self.entries.retain(|e| e.id != id);
+        if self.editor.as_deref() == Some(id) {
+            self.editor = None;
+        }
+        for kind in [git_core::ToolKind::Diff, git_core::ToolKind::Merge] {
+            let choice = self.choice_mut(kind);
+            if *choice == ToolChoice::Entry(id.to_owned()) {
+                *choice = ToolChoice::None;
+            }
+        }
+    }
+
     /// The option the stored choice shows as.
     pub fn shown_option(&self, kind: git_core::ToolKind) -> ToolOption {
         match self.effective_choice(kind) {
@@ -935,6 +974,9 @@ pub enum Category {
     /// sub-page of Appearance ("Manage themes…", ADR-060), not in the
     /// sidebar.
     Themes,
+    /// The tool list (M20, ADR-062): a sub-page of External tools
+    /// ("Manage tools…"), not in the sidebar.
+    Tools,
 }
 
 impl Category {
@@ -964,6 +1006,7 @@ impl Category {
     pub fn sidebar(self) -> Self {
         match self {
             Self::Themes => Self::Appearance,
+            Self::Tools => Self::ExternalTools,
             other => other,
         }
     }
@@ -973,6 +1016,7 @@ impl Category {
     pub fn parent(self) -> Option<Self> {
         match self {
             Self::Themes => Some(Self::Appearance),
+            Self::Tools => Some(Self::ExternalTools),
             _ => None,
         }
     }
@@ -997,6 +1041,7 @@ impl Category {
             Self::ExternalTools => "External tools",
             Self::Gitflow => "Gitflow",
             Self::Themes => "Themes",
+            Self::Tools => "Tools",
         }
     }
 }
@@ -1009,6 +1054,8 @@ pub struct Page {
     pub theme_selected: Option<String>,
     /// The theme editor, while a user theme is edited (M17-03).
     pub theme_editor: Option<crate::theme_editor::Editor>,
+    /// Entry selected in External tools → Manage tools (`None`: the first).
+    pub tool_selected: Option<String>,
     /// Field opened from the palette, highlighted for a moment (M12-12).
     pub highlight: Option<&'static str>,
     /// Text of the auto-fetch input (may be invalid while typing).
@@ -1117,6 +1164,7 @@ impl Page {
             category: Category::General,
             theme_selected: None,
             theme_editor: None,
+            tool_selected: None,
             highlight: None,
             auto_fetch_input: settings.general.auto_fetch_minutes.to_string(),
             error: None,
@@ -1749,6 +1797,26 @@ mod tests {
         let before = entries.clone();
         restore_vscode(&mut entries);
         assert_eq!(entries, before, "unchanged");
+    }
+
+    #[test]
+    fn delete_resets_the_selections_that_used_the_entry() {
+        let mut tools = ExternalTools::default();
+        tools
+            .entries
+            .push(entry("tool-1", "Zed", "zed {path}", "", ""));
+        tools.editor = Some(VSCODE_ID.into());
+        tools.diff_tool = ToolChoice::Entry(VSCODE_ID.into());
+        tools.merge_tool = ToolChoice::Tool("meld".into());
+        assert_eq!(tools.usage(VSCODE_ID), ["external editor", "diff tool"]);
+        assert!(tools.usage("tool-1").is_empty());
+        tools.delete_entry(VSCODE_ID);
+        assert_eq!(tools.entries.len(), 1);
+        assert_eq!(tools.editor, None);
+        assert_eq!(tools.diff_tool, ToolChoice::None);
+        assert_eq!(tools.merge_tool, ToolChoice::Tool("meld".into()));
+        assert_eq!(shown_tool(&tools.entries, Some(VSCODE_ID)), Some(0));
+        assert_eq!(shown_tool(&[], None), None);
     }
 
     #[test]
