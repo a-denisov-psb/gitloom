@@ -827,12 +827,67 @@ pub struct FileFacts<'a> {
     pub commit: Option<&'a str>,
     /// First parent of `commit` (`None`: root commit).
     pub parent: Option<&'a str>,
+    /// The stash part the file is listed in, for a file of a stash
+    /// (finding #55); `None` otherwise.
+    pub stash: Option<git_core::StashPart>,
     /// A diff tool is chosen in Preferences (or Git's configured one).
     pub diff_tool: bool,
     /// "Open in external editor" (built by the app from its settings).
     pub editor: MenuEntry,
     /// Absolute path with native separators for "Copy file path".
     pub copy_path: String,
+}
+
+/// Why the external diff tool cannot open a diff of `kind` (finding #57):
+/// only an untracked file of the working tree has no previous version.
+pub const UNTRACKED_DIFF: &str = "Not available for untracked files";
+
+/// What `git difftool` compares for a diff of `kind`, with the sides the
+/// internal diff shows (finding #57); `first_parent` is the first parent of
+/// a commit (`None`: root commit). Shared by the diff header button, Ctrl+D
+/// and the file menus.
+pub fn external_diff_target(
+    kind: &git_core::DiffKind,
+    first_parent: Option<String>,
+) -> Result<git_core::DiffTarget, &'static str> {
+    use git_core::{DiffKind, DiffTarget};
+    match kind {
+        DiffKind::Commit(id) => Ok(DiffTarget::Commit {
+            id: id.clone(),
+            parent: first_parent,
+        }),
+        DiffKind::Unstaged => Ok(DiffTarget::Unstaged),
+        DiffKind::Staged => Ok(DiffTarget::Staged),
+        DiffKind::Stash { id, part } => Ok(DiffTarget::Stash {
+            id: id.clone(),
+            part: *part,
+        }),
+        DiffKind::Untracked => Err(UNTRACKED_DIFF),
+    }
+}
+
+/// The diff a file row shows, as the panel builds it (`None`: a commit
+/// file without one selected commit).
+pub fn row_diff_kind(
+    file: &git_core::FileChange,
+    area: crate::app::FileArea,
+    commit: Option<&str>,
+    stash: Option<git_core::StashPart>,
+) -> Option<git_core::DiffKind> {
+    use crate::app::FileArea;
+    use git_core::DiffKind;
+    Some(match area {
+        FileArea::Unstaged if file.kind == git_core::ChangeKind::Untracked => DiffKind::Untracked,
+        FileArea::Unstaged => DiffKind::Unstaged,
+        FileArea::Staged => DiffKind::Staged,
+        FileArea::Commit => {
+            let id = commit?.to_owned();
+            match stash {
+                Some(part) => DiffKind::Stash { id, part },
+                None => DiffKind::Commit(id),
+            }
+        }
+    })
 }
 
 fn item_with_hint(label: &str, reason: Option<&str>, message: Message) -> MenuEntry {
@@ -855,6 +910,7 @@ pub fn file(facts: FileFacts<'_>) -> Vec<MenuEntry> {
         writable,
         commit,
         parent,
+        stash,
         diff_tool,
         editor,
         copy_path,
@@ -938,31 +994,25 @@ pub fn file(facts: FileFacts<'_>) -> Vec<MenuEntry> {
         },
     ));
     entries.push(MenuEntry::Separator);
-    // External diff tool (M5/M8): the sides of the diff the row shows.
-    let target = match area {
-        FileArea::Unstaged => git_core::DiffTarget::Unstaged,
-        FileArea::Staged => git_core::DiffTarget::Staged,
-        FileArea::Commit => git_core::DiffTarget::Commit {
-            id: commit.unwrap_or_default().to_owned(),
-            parent: parent.map(str::to_owned),
-        },
+    // External diff tool (M5/M8): the sides of the diff the row shows,
+    // like the diff header button (finding #57).
+    let target = match row_diff_kind(file, area, commit, stash) {
+        Some(kind) => external_diff_target(&kind, parent.map(str::to_owned)),
+        None => Err("Select one commit"),
     };
     let diff_reason = if !diff_tool {
         Some(NO_DIFF_TOOL)
-    } else if untracked {
-        Some("Untracked files have no previous version")
     } else if file.kind == ChangeKind::Conflicted {
         Some("Use the merge tool for conflicts")
-    } else if area == FileArea::Commit && commit.is_none() {
-        Some("Select one commit")
     } else {
-        None
+        target.as_ref().err().copied()
     };
     entries.push(item_with_hint(
         "Open in external diff tool",
         diff_reason,
         Message::ExternalDiffFile {
-            target,
+            // Disabled without a target; the message is never sent then.
+            target: target.unwrap_or(git_core::DiffTarget::Unstaged),
             path: path.clone(),
             old_path: file.old_path.clone(),
         },
@@ -1602,6 +1652,7 @@ mod tests {
             writable,
             commit,
             parent: commit.map(|_| "c1"),
+            stash: None,
             diff_tool,
             editor: action("Open in external editor", true, Message::OpenInEditor(None)),
             copy_path: "/repo/src/a.rs".into(),
@@ -1757,6 +1808,84 @@ mod tests {
             assert!(enabled.contains(&"File blame") && enabled.contains(&"Copy file path"));
             assert!(enabled.contains(&"Open in external diff tool"));
         }
+    }
+
+    /// Finding #57: for every kind of diff, the diff header button (which
+    /// uses [`external_diff_target`]) is enabled exactly when "Open in
+    /// external diff tool" of the file row with that kind is, and both
+    /// carry the same target.
+    #[test]
+    fn external_diff_button_and_file_menu_agree() {
+        use crate::app::FileArea;
+        use git_core::{ChangeKind, DiffKind, DiffTarget, StashPart};
+        let stash = |part| DiffKind::Stash {
+            id: "s1".into(),
+            part,
+        };
+        let kinds = [
+            DiffKind::Commit("c2".into()),
+            DiffKind::Staged,
+            DiffKind::Unstaged,
+            DiffKind::Untracked,
+            stash(StashPart::Staged),
+            stash(StashPart::Unstaged),
+            stash(StashPart::Untracked),
+        ];
+        for kind in kinds {
+            // The file row the panel shows for this kind (ui/panel.rs).
+            let (change_kind, area, commit, part) = match &kind {
+                DiffKind::Commit(id) => (ChangeKind::Modified, FileArea::Commit, Some(id), None),
+                DiffKind::Staged => (ChangeKind::Modified, FileArea::Staged, None, None),
+                DiffKind::Unstaged => (ChangeKind::Modified, FileArea::Unstaged, None, None),
+                DiffKind::Untracked => (ChangeKind::Untracked, FileArea::Unstaged, None, None),
+                DiffKind::Stash { id, part } => {
+                    let change = if *part == StashPart::Untracked {
+                        ChangeKind::Untracked
+                    } else {
+                        ChangeKind::Modified
+                    };
+                    (change, FileArea::Commit, Some(id), Some(*part))
+                }
+            };
+            let file = change(change_kind);
+            assert_eq!(
+                row_diff_kind(&file, area, commit.map(String::as_str), part).as_ref(),
+                Some(&kind)
+            );
+            let menu = super::file(FileFacts {
+                file: &file,
+                area,
+                writable: true,
+                commit: commit.map(String::as_str),
+                parent: commit.map(|_| "c1"),
+                stash: part,
+                diff_tool: true,
+                editor: MenuEntry::Separator,
+                copy_path: String::new(),
+            });
+            let button = external_diff_target(&kind, Some("c1".into()));
+            let entry = hint_of(&menu, "Open in external diff tool");
+            assert_eq!(button.is_ok(), entry.is_none(), "{kind:?}");
+            if let Ok(target) = button {
+                assert!(
+                    matches!(
+                        message_of(&menu, "Open in external diff tool"),
+                        Some(Message::ExternalDiffFile { target: t, .. }) if t == target
+                    ),
+                    "{kind:?}"
+                );
+            } else {
+                assert_eq!(entry, Some(UNTRACKED_DIFF));
+            }
+        }
+        // The stash parts carry the internal diff's sides.
+        assert_eq!(
+            external_diff_target(&stash(StashPart::Untracked), None),
+            Ok(DiffTarget::Stash {
+                id: "s1".into(),
+                part: StashPart::Untracked
+            })
+        );
     }
 
     fn facts(writable: bool, external: Option<git_core::ConfigScope>) -> RemoteFacts {

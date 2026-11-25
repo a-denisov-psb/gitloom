@@ -5896,21 +5896,17 @@ impl App {
             self.refuse(NOT_POSSIBLE, "Open the diff of a file first");
             return Task::none();
         };
-        let target = match &request.kind {
-            git_core::DiffKind::Commit(id) => git_core::DiffTarget::Commit {
-                id: id.clone(),
-                parent: view
-                    .snapshot
-                    .commit(id)
-                    .and_then(|c| c.parents.first().cloned()),
-            },
-            git_core::DiffKind::Unstaged => git_core::DiffTarget::Unstaged,
-            git_core::DiffKind::Staged => git_core::DiffTarget::Staged,
-            git_core::DiffKind::Untracked | git_core::DiffKind::Stash { .. } => {
-                self.refuse(
-                    NOT_POSSIBLE,
-                    "The external diff tool is not available for this file",
-                );
+        let first_parent = match &request.kind {
+            git_core::DiffKind::Commit(id) => view
+                .snapshot
+                .commit(id)
+                .and_then(|c| c.parents.first().cloned()),
+            _ => None,
+        };
+        let target = match crate::menus::external_diff_target(&request.kind, first_parent) {
+            Ok(target) => target,
+            Err(reason) => {
+                self.refuse(NOT_POSSIBLE, reason);
                 return Task::none();
             }
         };
@@ -8866,6 +8862,7 @@ impl App {
                     writable,
                     commit: commit.as_deref(),
                     parent: parent.as_deref(),
+                    stash,
                     diff_tool: self.settings.tools.diff_tool != settings::ToolChoice::None,
                     editor,
                     copy_path,
@@ -15035,6 +15032,21 @@ pub(crate) mod tests {
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::ExternalDiff);
         assert_eq!(toast_text(&app), "Open the diff of a file first");
+
+        // Finding #57: a stash part opens; only an untracked file of the
+        // working tree is refused, with the button's reason.
+        let stash = git_core::DiffKind::Stash {
+            id: "s1".into(),
+            part: git_core::StashPart::Untracked,
+        };
+        let mut app = app_with_open_diff(stash);
+        app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(app.status, "Waiting for meld…");
+        let mut app = app_with_open_diff(git_core::DiffKind::Untracked);
+        app.settings.tools.diff_tool = settings::ToolChoice::Tool("meld".into());
+        let _ = app.update(Message::ExternalDiff);
+        assert_eq!(toast_text(&app), crate::menus::UNTRACKED_DIFF);
     }
 
     #[test]

@@ -196,14 +196,16 @@ fn with_shortcut(name: &str, action: crate::actions::ActionId) -> String {
 
 /// "Open in external diff tool" (M5-12; Ctrl+D).
 fn external_button<'a>(request: &DiffRequest) -> Element<'a, Message> {
-    let enabled = !matches!(request.kind, DiffKind::Untracked | DiffKind::Stash { .. });
-    let tip = if enabled {
-        with_shortcut(
+    // The same target as the file menus (finding #57); the first parent
+    // only matters when the tool runs.
+    let reason = crate::menus::external_diff_target(&request.kind, None).err();
+    let enabled = reason.is_none();
+    let tip = match reason {
+        None => with_shortcut(
             "Open in external diff tool",
             crate::actions::ActionId::ExternalDiff,
-        )
-    } else {
-        "Not available for untracked files and stashes".to_owned()
+        ),
+        Some(reason) => reason.to_owned(),
     };
     icon_button(
         crate::icons::Icon::ExternalTool,
