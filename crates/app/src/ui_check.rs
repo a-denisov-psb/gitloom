@@ -145,7 +145,7 @@ pub fn click(app: &mut App, label: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::tests::{checked, ready_app};
+    use crate::app::tests::{checked, ready_app, set_editor};
     use crate::shortcuts::Shortcut;
 
     #[test]
@@ -2372,13 +2372,12 @@ mod tests {
         snapshot(&app, "preferences-templates");
     }
 
-    /// Preferences → External tools with the command field (fix after
-    /// M15): a preset for diffs, a custom merge command with a full path,
-    /// the tool list Git offers, and the empty field "Define tool…" opens.
+    /// Preferences → External tools (M20): the editor, diff and merge
+    /// pickers built from the tool list, with the tools Git offers.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_external_tools() {
-        use crate::settings::{ToolPick, ToolPreset};
+        use crate::settings::ToolOption;
         let mut app = ready_app(&["c"]);
         let _ = app.update(Message::SettingsOpenedAt(
             crate::settings::Category::ExternalTools,
@@ -2388,22 +2387,14 @@ mod tests {
             available: vec!["meld".into(), "kdiff3".into(), "vimdiff".into()],
         };
         let _ = app.update(Message::ToolsLoaded(Ok((info.clone(), info))));
-        let _ = app.update(Message::DiffToolChosen(ToolPick::Preset(
-            ToolPreset::VsCode,
+        let _ = app.update(Message::EditorChosen(Some(
+            crate::settings::VSCODE_ID.into(),
         )));
-        let _ = app.update(Message::MergeToolChosen(ToolPick::Custom));
-        let _ = app.update(Message::MergeToolCommandInput(
-            r#""C:\Program Files\WinMerge\WinMergeU.exe" -u -e {local} {remote} {merged}"#.into(),
-        ));
+        let _ = app.update(Message::DiffToolChosen(ToolOption::Entry(
+            crate::settings::VSCODE_ID.into(),
+        )));
+        let _ = app.update(Message::MergeToolChosen(ToolOption::Git("kdiff3".into())));
         snapshot(&app, "preferences-external-tools");
-        // "Define tool…" for diffs with no tool: the empty field, focused.
-        let _ = app.update(Message::DiffToolChosen(ToolPick::None));
-        let _ = app.update(Message::DefineTool { merge: false });
-        snapshot_focused(
-            &app,
-            crate::ui::settings::tool_input(git_core::ToolKind::Diff),
-            "preferences-external-tools-define",
-        );
     }
 
     /// Toolbar without labels (M10-08).
@@ -2453,7 +2444,7 @@ mod tests {
         ] {
             let mut app = ready_app(&["c"]);
             app.settings.appearance.theme = choice.clone();
-            app.settings.tools.editor_command = "code {path}".into();
+            set_editor(&mut app, "code {path}");
             let view = app.tabs[0].view_mut().unwrap();
             let mut repo = (*view.snapshot).clone();
             repo.repo_editor = Some("idea {path}".into());
@@ -2463,10 +2454,11 @@ mod tests {
             ));
             snapshot(&app, &format!("repository-editor-{theme}"));
             // M15-02: a long global command; back to the global setting.
-            app.settings.tools.editor_command =
-                r#""C:\Users\maintainer\AppData\Local\Programs\Zed\Zed.exe" --new-window {path}"#
-                    .into();
-            let label = crate::app::use_global_editor_label(&app.settings.tools.editor_command);
+            set_editor(
+                &mut app,
+                r#""C:\Users\maintainer\AppData\Local\Programs\Zed\Zed.exe" --new-window {path}"#,
+            );
+            let label = crate::app::use_global_editor_label(&app.settings.tools.editor_command());
             let _ = app.update(Message::RepoEditorChosen("Custom".into()));
             let _ = app.update(Message::RepoEditorChosen(label));
             let view = app.tabs[0].view_mut().unwrap();
@@ -4618,7 +4610,7 @@ mod tests {
     fn ui_check_toolbar_editor() {
         let mut app = ready_app(&["c"]);
         snapshot(&app, "toolbar-no-editor");
-        app.settings.tools.editor_command = "code {path}".into();
+        set_editor(&mut app, "code {path}");
         snapshot(&app, "toolbar-editor");
     }
 

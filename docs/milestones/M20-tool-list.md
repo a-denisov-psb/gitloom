@@ -81,7 +81,7 @@ Open: none. For the maintainer's check: checklist section 7t.
 
 ## Tasks
 
-### [ ] M20-01 Entries, selections, validation and loading
+### [x] M20-01 Entries, selections, validation and loading
 
 - `crates/app/src/settings.rs`: `ToolEntry`, `ExternalTools.entries` (serde default: the VS Code entry; a stored empty list stays empty), `ExternalTools.editor: Option<String>`, `ToolChoice::Entry(String)` replacing `Command(String)`; the fields `editor_command` and the preset types are removed. Keep the settings `VERSION` (the change is tolerant, like ADR-055).
 - Pure functions (no I/O): the effective editor command, the effective `ToolChoice` for diff and merge (missing entry or empty command → None), `entry_problems(&entries, index)` with the validation rules of the decision table, `next_id`, `unique_name` (for New tool and Duplicate: "New tool", "<name> copy", "<name> copy 2"), `restore_vscode`.
@@ -89,6 +89,8 @@ Open: none. For the maintainer's check: checklist section 7t.
 - The built-in commands live in one place (constants), taken from ADR-055.
 
 Acceptance: unit tests: defaults of a fresh `Settings` (one entry, editor None, diff and merge GitConfig); a settings JSON without `entries` gets the default list, with `"entries": []` stays empty; round trip of entries and selections; a literal old settings file (with `editor_command` and a `command` selection) loads without the damaged-file path and keeps its other values; effective editor command for a selected, missing and empty-command entry; effective diff and merge choice; ids are unique and the `vscode` id is reserved for the built-in entry; names are unique case-insensitively; validation: empty name, taken name, unclosed quote, diff without `{local}` or `{remote}`, merge without `{merged}`; `unique_name` sequence; `restore_vscode` adds a missing entry at the top, resets a changed one, leaves other entries and selections as they are.
+
+> Done (2026-11-25): `settings::ToolEntry`, `ExternalTools { entries, editor, … }` (`Default` holds the VS Code entry; `#[serde(default)]` takes it for a missing key, a stored list stays as it is), `ToolChoice::Entry`, old `{"command": …}` read through `ToolChoiceRepr` as "Use Git config" (any other unknown variant is still a damaged file), `editor_command` and other unknown keys ignored. Pure functions: `ExternalTools::editor_command`, `effective_choice`, `entry_command`, `tool_name`, `tool_options`, `editor_entries`; free `entry_problems`, `runnable`, `offered`, `next_id`, `unique_name`, `restore_vscode`; constants `VSCODE_*`. Deviation (ADR-034): removing `editor_command` and `ToolChoice::Command` leaves nothing for the old controls to write, so the External tools pickers (first bullet of M20-02), "Set: External editor ›" in the palette, "Define tool…" opening External tools, and the removal of `ToolPreset`, `ToolPick` and the editor/tool command fields (M20-03) moved into this task. `EditorPreset` stays until M20-03 for the repository override. Decisions: a name problem keeps an entry out of the pickers but does not stop a selected entry from running; a command problem makes that purpose "None" (like an empty command), so an unclosed quote now shows the "No diff tool" dialog instead of "Diff tool failed". "New tool" when taken continues as "New tool 2".
 
 ### [ ] M20-02 Pickers and the Manage tools sub-page
 

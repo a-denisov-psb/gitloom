@@ -375,7 +375,7 @@ impl Default for Appearance {
 
 /// External diff or merge tool.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", from = "ToolChoiceRepr")]
 pub enum ToolChoice {
     /// Whatever `diff.tool` / `merge.tool` say.
     #[default]
@@ -383,202 +383,302 @@ pub enum ToolChoice {
     /// A tool by name, passed as `--tool=<name>`.
     Tool(String),
     None,
-    /// A command template with `{local}`, `{remote}` (and for merging
-    /// `{base}`, `{merged}`), run through Git (fix after M15, ADR-055).
-    Command(String),
+    /// An entry of the tool list by its id (M20, ADR-062); its diff or
+    /// merge command runs through Git (ADR-055).
+    Entry(String),
 }
 
-/// Presets of the diff and merge tool command (fix after M15, ADR-055).
-/// Each template was checked against the tool's documentation or Git's own
-/// tool definitions; a preset only offers the modes it is documented for.
+/// How a tool choice is read: the `{"command": …}` selections of settings
+/// files before M20 read as "Use Git config" (no migration, ADR-062).
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ToolChoiceRepr {
+    GitConfig,
+    Tool(String),
+    None,
+    Entry(String),
+    Command(serde::de::IgnoredAny),
+}
+
+impl From<ToolChoiceRepr> for ToolChoice {
+    fn from(repr: ToolChoiceRepr) -> Self {
+        match repr {
+            ToolChoiceRepr::GitConfig | ToolChoiceRepr::Command(_) => Self::GitConfig,
+            ToolChoiceRepr::Tool(name) => Self::Tool(name),
+            ToolChoiceRepr::None => Self::None,
+            ToolChoiceRepr::Entry(id) => Self::Entry(id),
+        }
+    }
+}
+
+/// Id of the built-in entry (M20, ADR-062); other entries get `tool-<n>`.
+pub const VSCODE_ID: &str = "vscode";
+/// Name and commands of the built-in entry: the commands of the former
+/// VS Code presets (ADR-055, VS Code docs "merge conflicts").
+pub const VSCODE_NAME: &str = "VS Code";
+pub const VSCODE_OPEN: &str = "code {path}";
+pub const VSCODE_DIFF: &str = "code --wait --diff {local} {remote}";
+pub const VSCODE_MERGE: &str = "code --wait --merge {remote} {local} {base} {merged}";
+
+/// What a tool entry is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolPreset {
-    VsCode,
-    VsCodium,
-    IntellijIdea,
-    Zed,
-    Meld,
-    WinMerge,
-    BeyondCompare,
+pub enum Purpose {
+    /// External editor (`{path}`).
+    Open,
+    Diff,
+    Merge,
 }
 
-impl ToolPreset {
-    pub const ALL: [Self; 7] = [
-        Self::VsCode,
-        Self::VsCodium,
-        Self::IntellijIdea,
-        Self::Zed,
-        Self::Meld,
-        Self::WinMerge,
-        Self::BeyondCompare,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::VsCode => "VS Code",
-            Self::VsCodium => "VSCodium",
-            Self::IntellijIdea => "IntelliJ IDEA",
-            Self::Zed => "Zed",
-            Self::Meld => "Meld",
-            Self::WinMerge => "WinMerge",
-            Self::BeyondCompare => "Beyond Compare",
+impl From<git_core::ToolKind> for Purpose {
+    fn from(kind: git_core::ToolKind) -> Self {
+        match kind {
+            git_core::ToolKind::Diff => Self::Diff,
+            git_core::ToolKind::Merge => Self::Merge,
         }
-    }
-
-    /// The command template for `kind`; `None` when the tool has no
-    /// documented mode for it.
-    pub fn template(self, kind: git_core::ToolKind) -> Option<&'static str> {
-        use git_core::ToolKind::{Diff, Merge};
-        match (self, kind) {
-            // code.visualstudio.com/docs/sourcecontrol/merge-conflicts
-            (Self::VsCode, Diff) => Some("code --wait --diff {local} {remote}"),
-            (Self::VsCode, Merge) => Some("code --wait --merge {remote} {local} {base} {merged}"),
-            (Self::VsCodium, Diff) => Some("codium --wait --diff {local} {remote}"),
-            (Self::VsCodium, Merge) => {
-                Some("codium --wait --merge {remote} {local} {base} {merged}")
-            }
-            // JetBrains' mergetool tutorial; `idea diff` is not documented
-            // to wait, and Git removes the files when it returns.
-            (Self::IntellijIdea, Diff) => None,
-            (Self::IntellijIdea, Merge) => Some("idea merge {local} {remote} {base} {merged}"),
-            // zed.dev/docs/reference/cli; Zed has no merge mode.
-            (Self::Zed, Diff) => Some("zed --wait --diff {local} {remote}"),
-            (Self::Zed, Merge) => None,
-            // Git's own tool definitions (mergetools/meld, winmerge, bc).
-            (Self::Meld, Diff) => Some("meld {local} {remote}"),
-            (Self::Meld, Merge) => Some("meld --output={merged} {local} {base} {remote}"),
-            (Self::WinMerge, Diff) => Some("WinMergeU -u -e {local} {remote}"),
-            (Self::WinMerge, Merge) => {
-                Some("WinMergeU -u -e -dl Local -dr Remote {local} {remote} {merged}")
-            }
-            (Self::BeyondCompare, Diff) => Some("bcomp {local} {remote}"),
-            (Self::BeyondCompare, Merge) => {
-                Some("bcomp {local} {remote} {base} -mergeoutput={merged}")
-            }
-        }
-    }
-
-    /// Names of Git's built-in tools this preset covers (not listed again).
-    fn git_names(self) -> &'static [&'static str] {
-        match self {
-            Self::Meld => &["meld"],
-            Self::WinMerge => &["winmerge"],
-            Self::BeyondCompare => &["bc", "bc3", "bc4"],
-            Self::VsCode | Self::VsCodium | Self::IntellijIdea | Self::Zed => &[],
-        }
-    }
-
-    /// The preset whose `kind` template is `command` (trimmed).
-    pub fn of(command: &str, kind: git_core::ToolKind) -> Option<Self> {
-        let command = command.trim();
-        Self::ALL
-            .into_iter()
-            .find(|preset| preset.template(kind) == Some(command))
     }
 }
 
-/// An entry of the diff or merge tool list (Preferences → External tools).
+/// An entry of the tool list (Preferences → External tools → Manage
+/// tools…, M20, ADR-062). An empty command means "not for this purpose".
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolEntry {
+    /// Stable, never shown: [`VSCODE_ID`] or `tool-<n>`.
+    pub id: String,
+    pub name: String,
+    /// Editor command with `{path}` (appended when missing).
+    pub open: String,
+    /// Diff command with `{local}` and `{remote}`.
+    pub diff: String,
+    /// Merge command with `{merged}`, optionally `{local}`, `{remote}`,
+    /// `{base}`.
+    pub merge: String,
+}
+
+impl ToolEntry {
+    /// The built-in VS Code entry.
+    pub fn vscode() -> Self {
+        Self {
+            id: VSCODE_ID.to_owned(),
+            name: VSCODE_NAME.to_owned(),
+            open: VSCODE_OPEN.to_owned(),
+            diff: VSCODE_DIFF.to_owned(),
+            merge: VSCODE_MERGE.to_owned(),
+        }
+    }
+
+    pub fn command(&self, purpose: Purpose) -> &str {
+        match purpose {
+            Purpose::Open => &self.open,
+            Purpose::Diff => &self.diff,
+            Purpose::Merge => &self.merge,
+        }
+    }
+
+    #[allow(dead_code)] // Manage tools (M20-02)
+    pub fn command_mut(&mut self, purpose: Purpose) -> &mut String {
+        match purpose {
+            Purpose::Open => &mut self.open,
+            Purpose::Diff => &mut self.diff,
+            Purpose::Merge => &mut self.merge,
+        }
+    }
+}
+
+/// Why fields of a tool entry are not valid (shown under the field).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EntryProblems {
+    pub name: Option<&'static str>,
+    pub open: Option<&'static str>,
+    pub diff: Option<&'static str>,
+    pub merge: Option<&'static str>,
+}
+
+impl EntryProblems {
+    #[allow(dead_code)] // Manage tools (M20-02)
+    pub fn any(&self) -> bool {
+        *self != Self::default()
+    }
+
+    pub fn command(&self, purpose: Purpose) -> Option<&'static str> {
+        match purpose {
+            Purpose::Open => self.open,
+            Purpose::Diff => self.diff,
+            Purpose::Merge => self.merge,
+        }
+    }
+}
+
+pub const NAME_EMPTY: &str = "Enter a name";
+pub const NAME_TAKEN: &str = "Another tool has this name";
+pub const UNCLOSED_QUOTE: &str = "A quote is not closed";
+pub const DIFF_PLACEHOLDERS: &str = "The diff command needs {local} and {remote}";
+pub const MERGE_PLACEHOLDER: &str = "The merge command needs {merged}";
+
+/// Problems of a command for `purpose`; an empty command has none.
+fn command_problem(command: &str, purpose: Purpose) -> Option<&'static str> {
+    let command = command.trim();
+    if command.is_empty() {
+        return None;
+    }
+    if crate::launch::split_words_for(crate::launch::Platform::current(), command).is_err() {
+        return Some(UNCLOSED_QUOTE);
+    }
+    match purpose {
+        Purpose::Open => None,
+        Purpose::Diff => (!command.contains("{local}") || !command.contains("{remote}"))
+            .then_some(DIFF_PLACEHOLDERS),
+        Purpose::Merge => (!command.contains("{merged}")).then_some(MERGE_PLACEHOLDER),
+    }
+}
+
+/// Validation of entry `index` (ADR-062): name empty or taken
+/// (case-insensitive), an unclosed quote, a diff command without
+/// `{local}` or `{remote}`, a merge command without `{merged}`.
+pub fn entry_problems(entries: &[ToolEntry], index: usize) -> EntryProblems {
+    let Some(entry) = entries.get(index) else {
+        return EntryProblems::default();
+    };
+    let name = entry.name.trim();
+    let taken = entries
+        .iter()
+        .enumerate()
+        .any(|(i, other)| i != index && other.name.trim().to_lowercase() == name.to_lowercase());
+    EntryProblems {
+        name: if name.is_empty() {
+            Some(NAME_EMPTY)
+        } else if taken {
+            Some(NAME_TAKEN)
+        } else {
+            None
+        },
+        open: command_problem(&entry.open, Purpose::Open),
+        diff: command_problem(&entry.diff, Purpose::Diff),
+        merge: command_problem(&entry.merge, Purpose::Merge),
+    }
+}
+
+/// The command of entry `index` for `purpose` can run: not empty and
+/// without a problem.
+pub fn runnable(entries: &[ToolEntry], index: usize, purpose: Purpose) -> bool {
+    entries.get(index).is_some_and(|entry| {
+        !entry.command(purpose).trim().is_empty()
+            && entry_problems(entries, index).command(purpose).is_none()
+    })
+}
+
+/// The entry is offered by the picker of `purpose`: runnable and with a
+/// valid name.
+pub fn offered(entries: &[ToolEntry], index: usize, purpose: Purpose) -> bool {
+    runnable(entries, index, purpose) && entry_problems(entries, index).name.is_none()
+}
+
+/// Next free id `tool-<n>` (never [`VSCODE_ID`]).
+#[allow(dead_code)] // Manage tools (M20-02)
+pub fn next_id(entries: &[ToolEntry]) -> String {
+    (1..)
+        .map(|n| format!("tool-{n}"))
+        .find(|id| !entries.iter().any(|e| &e.id == id))
+        .unwrap_or_default()
+}
+
+/// `wanted`, or `wanted 2`, `wanted 3`, … when the name is taken
+/// (case-insensitive): "New tool", "<name> copy", "<name> copy 2".
+#[allow(dead_code)] // Manage tools (M20-02)
+pub fn unique_name(entries: &[ToolEntry], wanted: &str) -> String {
+    let taken = |name: &str| {
+        entries
+            .iter()
+            .any(|e| e.name.trim().to_lowercase() == name.to_lowercase())
+    };
+    if !taken(wanted) {
+        return wanted.to_owned();
+    }
+    (2..)
+        .map(|n| format!("{wanted} {n}"))
+        .find(|name| !taken(name))
+        .unwrap_or_default()
+}
+
+/// "Restore VS Code" (ADR-062): adds the built-in entry at the top when it
+/// is missing, otherwise resets its name and commands in place. Other
+/// entries and the selections are not touched.
+#[allow(dead_code)] // Manage tools (M20-02)
+pub fn restore_vscode(entries: &mut Vec<ToolEntry>) {
+    match entries.iter_mut().find(|e| e.id == VSCODE_ID) {
+        Some(entry) => *entry = ToolEntry::vscode(),
+        None => entries.insert(0, ToolEntry::vscode()),
+    }
+}
+
+/// An entry of the diff or merge tool picker (ADR-062).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolPick {
+pub enum ToolOption {
     GitConfig,
     None,
-    Preset(ToolPreset),
-    /// The command field, keeping its text.
-    Custom,
-    /// A tool Git offers that no preset covers.
+    /// An entry of the list by its id.
+    Entry(String),
+    /// A tool Git offers ("<name> (Git)").
     Git(String),
 }
 
-impl ToolPick {
-    /// The list in its order: "Use Git config", "None", the presets of
-    /// `kind`, "Custom", then the tools Git offers that no preset covers
-    /// (and a chosen Git tool that Git does not list any more).
-    pub fn list(kind: git_core::ToolKind, git_tools: &[String], current: &ToolChoice) -> Vec<Self> {
-        let mut list = vec![Self::GitConfig, Self::None];
-        list.extend(
-            ToolPreset::ALL
-                .into_iter()
-                .filter(|p| p.template(kind).is_some())
-                .map(Self::Preset),
-        );
-        list.push(Self::Custom);
-        let covered = |name: &str| {
-            ToolPreset::ALL
-                .iter()
-                .any(|p| p.git_names().contains(&name))
-        };
-        let mut names: Vec<String> = git_tools.to_vec();
-        if let ToolChoice::Tool(name) = current {
-            if !names.contains(name) {
-                names.push(name.clone());
-            }
-        }
-        list.extend(
-            names
-                .into_iter()
-                .filter(|name| name != git_core::CUSTOM_TOOL && !covered(name))
-                .map(Self::Git),
-        );
-        list
-    }
-
-    /// The entry `choice` shows as; `custom`: "Custom" was picked while
-    /// the command still matches a preset.
-    pub fn of(choice: &ToolChoice, kind: git_core::ToolKind, custom: bool) -> Self {
-        if custom {
-            return Self::Custom;
-        }
-        match choice {
-            ToolChoice::GitConfig => Self::GitConfig,
-            ToolChoice::None => Self::None,
-            ToolChoice::Tool(name) => Self::Git(name.clone()),
-            ToolChoice::Command(command) => {
-                ToolPreset::of(command, kind).map_or(Self::Custom, Self::Preset)
-            }
+impl ToolOption {
+    /// The choice the option stores.
+    pub fn choice(&self) -> ToolChoice {
+        match self {
+            Self::GitConfig => ToolChoice::GitConfig,
+            Self::None => ToolChoice::None,
+            Self::Entry(id) => ToolChoice::Entry(id.clone()),
+            Self::Git(name) => ToolChoice::Tool(name.clone()),
         }
     }
 
-    /// The label in the list; `configured` is Git's `diff.tool` /
+    /// The label in the picker; `configured` is Git's `diff.tool` /
     /// `merge.tool`, if known.
-    pub fn label(&self, configured: Option<&str>) -> String {
+    pub fn label(&self, entries: &[ToolEntry], configured: Option<&str>) -> String {
         match self {
             Self::GitConfig => format!(
                 "Use Git config ({})",
                 configured.unwrap_or("not configured")
             ),
             Self::None => "None".to_owned(),
-            Self::Preset(preset) => preset.label().to_owned(),
-            Self::Custom => "Custom".to_owned(),
+            Self::Entry(id) => entries
+                .iter()
+                .find(|e| &e.id == id)
+                .map_or_else(|| id.clone(), |e| e.name.trim().to_owned()),
             Self::Git(name) => format!("{name} (Git)"),
         }
     }
 }
 
-/// Program name of a command template for messages ("Waiting for …").
-pub fn tool_name(choice: &ToolChoice, kind: git_core::ToolKind) -> Option<String> {
-    match choice {
-        ToolChoice::Tool(name) => Some(name.clone()),
-        ToolChoice::Command(command) => Some(
-            ToolPreset::of(command, kind)
-                .map_or_else(|| editor_name(command), |p| p.label().to_owned()),
-        ),
-        ToolChoice::GitConfig | ToolChoice::None => None,
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExternalTools {
+    /// The tool list (M20, ADR-062). A missing key means the default list
+    /// (VS Code); a stored list, also an empty one, is kept.
+    pub entries: Vec<ToolEntry>,
+    /// The entry used as external editor (M8-07, M20); `None`: none.
+    pub editor: Option<String>,
     pub diff_tool: ToolChoice,
     pub merge_tool: ToolChoice,
     /// Command template with `{path}`; empty means auto-detection.
     pub terminal_command: String,
-    /// External editor command template with `{path}`; empty means none
-    /// (M8-07).
-    pub editor_command: String,
     /// "Delete .orig files after merging" (`mergetool.keepBackup=false`,
     /// M10-08); off by default like GitKraken.
     pub delete_orig: bool,
+}
+
+impl Default for ExternalTools {
+    fn default() -> Self {
+        Self {
+            entries: vec![ToolEntry::vscode()],
+            editor: None,
+            diff_tool: ToolChoice::GitConfig,
+            merge_tool: ToolChoice::GitConfig,
+            terminal_command: String::new(),
+            delete_orig: false,
+        }
+    }
 }
 
 impl ExternalTools {
@@ -587,6 +687,118 @@ impl ExternalTools {
         match kind {
             git_core::ToolKind::Diff => &mut self.diff_tool,
             git_core::ToolKind::Merge => &mut self.merge_tool,
+        }
+    }
+
+    pub fn choice(&self, kind: git_core::ToolKind) -> &ToolChoice {
+        match kind {
+            git_core::ToolKind::Diff => &self.diff_tool,
+            git_core::ToolKind::Merge => &self.merge_tool,
+        }
+    }
+
+    fn index(&self, id: &str) -> Option<usize> {
+        self.entries.iter().position(|e| e.id == id)
+    }
+
+    pub fn entry(&self, id: &str) -> Option<&ToolEntry> {
+        self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// The runnable entry `id` for `purpose` (missing, empty or invalid
+    /// command: `None`).
+    fn runnable_entry(&self, id: &str, purpose: Purpose) -> Option<&ToolEntry> {
+        let index = self.index(id)?;
+        runnable(&self.entries, index, purpose).then(|| &self.entries[index])
+    }
+
+    /// The global editor command (empty: none). A selection that points to
+    /// a missing entry or one without a valid open command is "None"; the
+    /// id stays stored.
+    pub fn editor_command(&self) -> String {
+        self.editor
+            .as_deref()
+            .and_then(|id| self.runnable_entry(id, Purpose::Open))
+            .map(|e| e.open.trim().to_owned())
+            .unwrap_or_default()
+    }
+
+    /// The diff or merge choice that applies: an entry that is missing or
+    /// has no valid command for `kind` is "None".
+    pub fn effective_choice(&self, kind: git_core::ToolKind) -> ToolChoice {
+        match self.choice(kind) {
+            ToolChoice::Entry(id) if self.runnable_entry(id, kind.into()).is_none() => {
+                ToolChoice::None
+            }
+            choice => choice.clone(),
+        }
+    }
+
+    /// The command of the effective entry for `kind`, if it is one.
+    pub fn entry_command(&self, kind: git_core::ToolKind) -> Option<&str> {
+        match self.choice(kind) {
+            ToolChoice::Entry(id) => self
+                .runnable_entry(id, kind.into())
+                .map(|e| e.command(kind.into()).trim()),
+            _ => None,
+        }
+    }
+
+    /// Name of the diff or merge tool for messages ("Waiting for …").
+    pub fn tool_name(&self, kind: git_core::ToolKind) -> Option<String> {
+        match self.effective_choice(kind) {
+            ToolChoice::Tool(name) => Some(name),
+            ToolChoice::Entry(id) => self.entry(&id).map(|e| e.name.trim().to_owned()),
+            ToolChoice::GitConfig | ToolChoice::None => None,
+        }
+    }
+
+    /// Ids of the entries the editor picker offers, in list order.
+    pub fn editor_entries(&self) -> Vec<&ToolEntry> {
+        self.offered(Purpose::Open)
+    }
+
+    /// Entries the picker of `purpose` offers, in list order.
+    pub fn offered(&self, purpose: Purpose) -> Vec<&ToolEntry> {
+        (0..self.entries.len())
+            .filter(|&i| offered(&self.entries, i, purpose))
+            .map(|i| &self.entries[i])
+            .collect()
+    }
+
+    /// The diff or merge picker (ADR-062): "Use Git config", "None", the
+    /// entries with a valid command for `kind`, then every tool Git offers
+    /// (and a chosen Git tool it does not list any more); the internal
+    /// [`git_core::CUSTOM_TOOL`] is never listed.
+    pub fn tool_options(&self, kind: git_core::ToolKind, git_tools: &[String]) -> Vec<ToolOption> {
+        let mut list = vec![ToolOption::GitConfig, ToolOption::None];
+        list.extend(
+            self.offered(kind.into())
+                .into_iter()
+                .map(|e| ToolOption::Entry(e.id.clone())),
+        );
+        let mut names: Vec<String> = git_tools.to_vec();
+        if let ToolChoice::Tool(name) = self.choice(kind) {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        list.extend(
+            names
+                .into_iter()
+                .filter(|name| name != git_core::CUSTOM_TOOL)
+                .map(ToolOption::Git),
+        );
+        list
+    }
+
+    /// The option the stored choice shows as.
+    pub fn shown_option(&self, kind: git_core::ToolKind) -> ToolOption {
+        match self.effective_choice(kind) {
+            ToolChoice::GitConfig => ToolOption::GitConfig,
+            ToolChoice::None => ToolOption::None,
+            ToolChoice::Entry(id) => ToolOption::Entry(id),
+            ToolChoice::Tool(name) => ToolOption::Git(name),
         }
     }
 }
@@ -813,14 +1025,6 @@ pub struct Page {
     pub ssh_keys: Option<Vec<std::path::PathBuf>>,
     pub ssh_path: String,
     pub ssh_replace: bool,
-    /// "Custom" was picked for the editor while the template still matches
-    /// a preset (M8-07).
-    pub editor_custom: bool,
-    /// "Custom" was picked for the diff or merge tool while the command
-    /// still matches a preset, or "Define tool…" opened the field (fix
-    /// after M15).
-    pub diff_tool_custom: bool,
-    pub merge_tool_custom: bool,
     /// Repository the repository category's form was built for; the form
     /// follows the active tab (M8-01).
     pub repo: Option<(crate::app::TabId, std::path::PathBuf)>,
@@ -908,14 +1112,6 @@ impl FlowForm {
 }
 
 impl Page {
-    /// "Custom" picked for the diff or merge tool.
-    pub fn tool_custom_mut(&mut self, kind: git_core::ToolKind) -> &mut bool {
-        match kind {
-            git_core::ToolKind::Diff => &mut self.diff_tool_custom,
-            git_core::ToolKind::Merge => &mut self.merge_tool_custom,
-        }
-    }
-
     pub fn new(settings: &Settings) -> Self {
         Self {
             category: Category::General,
@@ -929,9 +1125,6 @@ impl Page {
             ssh_keys: None,
             ssh_path: String::new(),
             ssh_replace: false,
-            editor_custom: false,
-            diff_tool_custom: false,
-            merge_tool_custom: false,
             repo: None,
             default_branch: None,
             default_branch_input: String::new(),
@@ -1123,7 +1316,7 @@ mod tests {
     fn editor_presets_and_older_files() {
         // Files written before M8-07 have no editor: none.
         let old = parse(r#"{"tools": {"terminal_command": "wt"}}"#).unwrap();
-        assert_eq!(old.tools.editor_command, "");
+        assert_eq!(old.tools.editor, None);
         assert_eq!(old.tools.terminal_command, "wt");
         assert_eq!(EditorPreset::of(""), EditorPreset::None);
         assert_eq!(EditorPreset::of(" code {path} "), EditorPreset::VsCode);
@@ -1133,9 +1326,6 @@ mod tests {
                 assert_eq!(EditorPreset::of(template), preset, "{template}");
             }
         }
-        let mut settings = Settings::default();
-        settings.tools.editor_command = "zed {path}".into();
-        assert_eq!(parse(&to_json(&settings)).unwrap(), settings);
     }
 
     #[test]
@@ -1320,8 +1510,15 @@ mod tests {
         settings.file_list.descending = true;
         settings.appearance.avatars = true;
         settings.tools.diff_tool = ToolChoice::Tool("meld".into());
-        settings.tools.merge_tool =
-            ToolChoice::Command("meld --output={merged} {local} {base} {remote}".into());
+        settings.tools.entries.push(ToolEntry {
+            id: "tool-1".into(),
+            name: "Meld".into(),
+            open: String::new(),
+            diff: "meld {local} {remote}".into(),
+            merge: "meld --output={merged} {local} {base} {remote}".into(),
+        });
+        settings.tools.merge_tool = ToolChoice::Entry("tool-1".into());
+        settings.tools.editor = Some(VSCODE_ID.into());
         settings.tools.terminal_command = "alacritty --working-directory {path}".into();
         settings.diff.view_mode = DiffMode::Split;
         settings.appearance.graph_columns.refs = 150.0;
@@ -1355,10 +1552,10 @@ mod tests {
         assert!(to_json(&sample()).contains(r#""view_mode": "split""#));
     }
 
-    /// Settings files before the fix after M15 read unchanged; the
-    /// command template is stored as `{"command": …}`.
+    /// Settings files before the fix after M15 read unchanged; entries
+    /// and selections round trip (M20).
     #[test]
-    fn tool_choices_of_older_files_load_and_commands_round_trip() {
+    fn tool_choices_of_older_files_load_and_entries_round_trip() {
         let text = r#"{
             "version": 1,
             "tools": { "diff_tool": { "tool": "meld" }, "merge_tool": "none" }
@@ -1366,45 +1563,254 @@ mod tests {
         let settings = parse(text).unwrap();
         assert_eq!(settings.tools.diff_tool, ToolChoice::Tool("meld".into()));
         assert_eq!(settings.tools.merge_tool, ToolChoice::None);
+        assert_eq!(settings.tools.entries, [ToolEntry::vscode()]);
         let json = to_json(&sample());
-        assert!(
-            json.contains(r#""command": "meld --output={merged} {local} {base} {remote}""#),
-            "{json}"
-        );
+        assert!(json.contains(r#""entry": "tool-1""#), "{json}");
+        assert!(json.contains(r#""editor": "vscode""#), "{json}");
         assert_eq!(parse(&json).unwrap().tools, sample().tools);
     }
 
+    /// M20 (ADR-062, no migration): a settings file from before M20 with
+    /// an editor command and command selections loads without the damaged
+    /// path; the old selections read as "Use Git config", the editor as
+    /// none, everything else stays.
     #[test]
-    fn tool_presets_cover_only_documented_modes() {
-        use git_core::ToolKind::{Diff, Merge};
-        for preset in ToolPreset::ALL {
-            for kind in [Diff, Merge] {
-                if let Some(template) = preset.template(kind) {
-                    assert_eq!(ToolPreset::of(template, kind), Some(preset));
-                    assert!(template.contains("{local}") && template.contains("{remote}"));
-                    if kind == Merge {
-                        assert!(template.contains("{merged}"), "{template}");
-                    }
-                }
+    fn settings_before_the_tool_list_load_without_their_tool_choices() {
+        let text = r#"{
+            "version": 1,
+            "general": { "auto_fetch_minutes": 12 },
+            "appearance": { "theme": "light", "zoom_percent": 125 },
+            "tools": {
+                "diff_tool": { "command": "code --wait --diff {local} {remote}" },
+                "merge_tool": { "command": "meld --output={merged} {local} {base} {remote}" },
+                "terminal_command": "wt -d {path}",
+                "editor_command": "zed {path}",
+                "delete_orig": true
             }
-        }
-        assert_eq!(ToolPreset::Zed.template(Merge), None);
-        assert_eq!(ToolPreset::IntellijIdea.template(Diff), None);
-        // Git's own meld/winmerge/bc entries are covered by the presets.
-        let list = ToolPick::list(
-            Diff,
-            &["meld".into(), "bc3".into(), "vimdiff".into()],
-            &ToolChoice::None,
+        }"#;
+        let settings = parse(text).unwrap();
+        assert_eq!(settings.tools.diff_tool, ToolChoice::GitConfig);
+        assert_eq!(settings.tools.merge_tool, ToolChoice::GitConfig);
+        assert_eq!(settings.tools.editor, None);
+        assert_eq!(settings.tools.entries, [ToolEntry::vscode()]);
+        assert_eq!(settings.tools.terminal_command, "wt -d {path}");
+        assert!(settings.tools.delete_orig);
+        assert_eq!(settings.general.auto_fetch_minutes, 12);
+        assert_eq!(settings.appearance.zoom_percent, 125);
+        assert_eq!(settings.appearance.theme, ThemeChoice::theme("light"));
+        assert!(!to_json(&settings).contains("editor_command"));
+        // An unknown variant is still a damaged file.
+        assert!(parse(r#"{"tools": {"diff_tool": {"magic": 1}}}"#).is_err());
+    }
+
+    #[test]
+    fn stored_tool_lists_are_kept_also_empty() {
+        let empty = parse(r#"{"tools": {"entries": []}}"#).unwrap();
+        assert!(
+            empty.tools.entries.is_empty(),
+            "a deleted VS Code stays deleted"
         );
-        assert_eq!(list.last(), Some(&ToolPick::Git("vimdiff".into())));
-        assert!(!list.contains(&ToolPick::Git("meld".into())));
+        assert!(parse(&to_json(&empty)).unwrap().tools.entries.is_empty());
+        let missing = parse(r#"{"tools": {}}"#).unwrap();
+        assert_eq!(missing.tools.entries, [ToolEntry::vscode()]);
+    }
+
+    fn entry(id: &str, name: &str, open: &str, diff: &str, merge: &str) -> ToolEntry {
+        ToolEntry {
+            id: id.into(),
+            name: name.into(),
+            open: open.into(),
+            diff: diff.into(),
+            merge: merge.into(),
+        }
+    }
+
+    #[test]
+    fn effective_editor_and_tool_choices() {
+        use git_core::ToolKind::{Diff, Merge};
+        let mut tools = ExternalTools::default();
+        tools
+            .entries
+            .push(entry("tool-1", "Zed", "zed {path}", "", ""));
+        assert_eq!(tools.editor_command(), "", "none selected");
+        tools.editor = Some("tool-1".into());
+        assert_eq!(tools.editor_command(), "zed {path}");
+        tools.editor = Some("tool-9".into());
+        assert_eq!(tools.editor_command(), "", "missing entry");
+        tools.editor = Some("tool-1".into());
+        tools.entries[1].open = "  ".into();
+        assert_eq!(tools.editor_command(), "", "empty command");
+        tools.entries[1].open = "zed 'x {path}".into();
+        assert_eq!(tools.editor_command(), "", "unclosed quote");
+        // The stored id stays: filling the command in again works.
+        tools.entries[1].open = "zed {path}".into();
+        assert_eq!(tools.editor_command(), "zed {path}");
+
+        tools.diff_tool = ToolChoice::Entry(VSCODE_ID.into());
+        tools.merge_tool = ToolChoice::Entry("tool-1".into());
         assert_eq!(
-            tool_name(
-                &ToolChoice::Command("/opt/kdiff3/bin/kdiff3 {local}".into()),
-                Diff
-            )
-            .as_deref(),
-            Some("kdiff3")
+            tools.effective_choice(Diff),
+            ToolChoice::Entry(VSCODE_ID.into())
+        );
+        assert_eq!(tools.entry_command(Diff), Some(VSCODE_DIFF));
+        assert_eq!(tools.tool_name(Diff).as_deref(), Some("VS Code"));
+        assert_eq!(
+            tools.effective_choice(Merge),
+            ToolChoice::None,
+            "no merge command"
+        );
+        assert_eq!(tools.entry_command(Merge), None);
+        assert_eq!(tools.tool_name(Merge), None);
+        tools.diff_tool = ToolChoice::Entry("gone".into());
+        assert_eq!(tools.effective_choice(Diff), ToolChoice::None);
+        tools.diff_tool = ToolChoice::Tool("meld".into());
+        assert_eq!(
+            tools.effective_choice(Diff),
+            ToolChoice::Tool("meld".into())
+        );
+        assert_eq!(tools.tool_name(Diff).as_deref(), Some("meld"));
+        assert_eq!(tools.effective_choice(Merge).clone(), ToolChoice::None);
+        tools.merge_tool = ToolChoice::GitConfig;
+        assert_eq!(tools.effective_choice(Merge), ToolChoice::GitConfig);
+    }
+
+    #[test]
+    fn entry_validation() {
+        let mut entries = vec![
+            ToolEntry::vscode(),
+            entry("tool-1", "vs code", "", "", ""),
+            entry("tool-2", " ", "", "", ""),
+        ];
+        assert_eq!(entry_problems(&entries, 0).name, Some(NAME_TAKEN));
+        assert_eq!(entry_problems(&entries, 1).name, Some(NAME_TAKEN));
+        assert_eq!(entry_problems(&entries, 2).name, Some(NAME_EMPTY));
+        entries[1].name = "Meld".into();
+        assert!(!entry_problems(&entries, 0).any());
+        assert!(
+            !entry_problems(&entries, 1).any(),
+            "empty commands are fine"
+        );
+        let problems = |e: ToolEntry| entry_problems(&[e], 0);
+        let p = problems(entry("x", "X", "x '{path}", "", ""));
+        assert_eq!(p.open, Some(UNCLOSED_QUOTE));
+        let p = problems(entry("x", "X", "", "x {local}", ""));
+        assert_eq!(p.diff, Some(DIFF_PLACEHOLDERS));
+        let p = problems(entry("x", "X", "", "x {remote}", ""));
+        assert_eq!(p.diff, Some(DIFF_PLACEHOLDERS));
+        let p = problems(entry("x", "X", "", "x \"{local} {remote}", ""));
+        assert_eq!(p.diff, Some(UNCLOSED_QUOTE));
+        let p = problems(entry("x", "X", "", "", "x {local} {remote} {base}"));
+        assert_eq!(p.merge, Some(MERGE_PLACEHOLDER));
+        let p = problems(entry("x", "X", "", "", "x {merged}"));
+        assert_eq!(p, EntryProblems::default());
+        // A problem keeps the entry out of that purpose only.
+        let e = [entry("x", "X", "x {path}", "x {local}", "x {merged}")];
+        assert!(offered(&e, 0, Purpose::Open));
+        assert!(!offered(&e, 0, Purpose::Diff));
+        assert!(offered(&e, 0, Purpose::Merge));
+        // A name problem keeps it out of the pickers, not from running.
+        let e = [
+            ToolEntry::vscode(),
+            entry("t", "VS CODE", "x {path}", "", ""),
+        ];
+        assert!(runnable(&e, 1, Purpose::Open) && !offered(&e, 1, Purpose::Open));
+    }
+
+    #[test]
+    fn ids_names_and_restore() {
+        let mut entries = vec![ToolEntry::vscode()];
+        assert_eq!(next_id(&entries), "tool-1");
+        entries.push(entry("tool-1", "New tool", "", "", ""));
+        entries.push(entry("tool-3", "Zed", "", "", ""));
+        assert_eq!(next_id(&entries), "tool-2");
+        assert_eq!(
+            next_id(&[]),
+            "tool-1",
+            "vscode is reserved for the built-in entry"
+        );
+        assert_eq!(unique_name(&entries, "New tool"), "New tool 2");
+        assert_eq!(unique_name(&entries, "Zed copy"), "Zed copy");
+        entries.push(entry("tool-2", "zed COPY", "", "", ""));
+        assert_eq!(unique_name(&entries, "Zed copy"), "Zed copy 2");
+        assert_eq!(unique_name(&entries, "Meld"), "Meld");
+
+        // Missing: added at the top; changed: reset in place; others stay.
+        let mut entries = vec![entry("tool-1", "Zed", "zed {path}", "", "")];
+        restore_vscode(&mut entries);
+        assert_eq!(entries[0], ToolEntry::vscode());
+        assert_eq!(entries[1].name, "Zed");
+        entries.swap(0, 1);
+        entries[1].name = "Code".into();
+        entries[1].open = "code -n {path}".into();
+        restore_vscode(&mut entries);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1], ToolEntry::vscode(), "reset where it is");
+        assert_eq!(entries[0].open, "zed {path}");
+        let before = entries.clone();
+        restore_vscode(&mut entries);
+        assert_eq!(entries, before, "unchanged");
+    }
+
+    #[test]
+    fn tool_pickers_list_entries_then_git_tools() {
+        use git_core::ToolKind::{Diff, Merge};
+        let mut tools = ExternalTools::default();
+        tools
+            .entries
+            .push(entry("tool-1", "Zed", "zed {path}", "", ""));
+        tools
+            .entries
+            .push(entry("tool-2", "Meld", "", "meld {local} {remote}", "meld"));
+        let git = [
+            "meld".to_owned(),
+            "gitloom-custom".to_owned(),
+            "vimdiff".to_owned(),
+        ];
+        assert_eq!(
+            tools.tool_options(Diff, &git),
+            [
+                ToolOption::GitConfig,
+                ToolOption::None,
+                ToolOption::Entry(VSCODE_ID.into()),
+                ToolOption::Entry("tool-2".into()),
+                ToolOption::Git("meld".into()),
+                ToolOption::Git("vimdiff".into()),
+            ]
+        );
+        // Meld's merge command lacks {merged}.
+        assert_eq!(
+            tools.tool_options(Merge, &[]),
+            [
+                ToolOption::GitConfig,
+                ToolOption::None,
+                ToolOption::Entry(VSCODE_ID.into())
+            ]
+        );
+        let editors: Vec<_> = tools
+            .editor_entries()
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        assert_eq!(editors, [VSCODE_ID, "tool-1"]);
+        // A chosen Git tool that Git does not list stays selectable.
+        tools.diff_tool = ToolChoice::Tool("p4merge".into());
+        assert_eq!(
+            tools.tool_options(Diff, &[]).last(),
+            Some(&ToolOption::Git("p4merge".into()))
+        );
+        assert_eq!(tools.shown_option(Diff), ToolOption::Git("p4merge".into()));
+        assert_eq!(
+            ToolOption::Entry("tool-2".into()).label(&tools.entries, None),
+            "Meld"
+        );
+        assert_eq!(
+            ToolOption::GitConfig.label(&tools.entries, Some("meld")),
+            "Use Git config (meld)"
+        );
+        assert_eq!(ToolOption::Git("bc".into()).label(&[], None), "bc (Git)");
+        assert_eq!(
+            ToolOption::Entry("tool-1".into()).choice(),
+            ToolChoice::Entry("tool-1".into())
         );
     }
 
@@ -1417,6 +1823,9 @@ mod tests {
         assert_eq!(settings.appearance.zoom_percent, 100);
         assert!(!settings.appearance.avatars, "avatars are opt-in");
         assert_eq!(settings.tools.diff_tool, ToolChoice::GitConfig);
+        assert_eq!(settings.tools.merge_tool, ToolChoice::GitConfig);
+        assert_eq!(settings.tools.editor, None);
+        assert_eq!(settings.tools.entries, [ToolEntry::vscode()]);
         assert!(settings.tools.terminal_command.is_empty());
     }
 
