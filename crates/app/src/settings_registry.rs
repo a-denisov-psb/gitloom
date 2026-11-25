@@ -408,6 +408,13 @@ pub const SETTINGS: &[Setting] = &[
         Ch(Choice::StashTemplate),
         &["stash"],
     ),
+    setting(
+        "External editor",
+        C::ExternalTools,
+        "External editor",
+        Ch(Choice::ExternalEditor),
+        &["editor", "vs code", "ide"],
+    ),
     setting("Diff tool", C::ExternalTools, "Diff tool", F, &["difftool"]),
     setting(
         "Merge tool",
@@ -423,13 +430,21 @@ pub const SETTINGS: &[Setting] = &[
         F,
         &["shell", "console"],
     ),
-    setting(
-        "External editor",
-        C::ExternalTools,
-        "External editor",
-        Ch(Choice::ExternalEditor),
-        &["editor", "vs code", "ide"],
-    ),
+    Setting {
+        label: "Manage tools…",
+        category: Some(C::Tools),
+        field: None,
+        kind: F,
+        keywords: &[
+            "tool list",
+            "editor",
+            "diff tool",
+            "merge tool",
+            "vs code",
+            "custom",
+            "command",
+        ],
+    },
     setting(
         "Delete .orig files after merging",
         C::ExternalTools,

@@ -8,7 +8,7 @@ use crate::graph_columns::ColumnId;
 use iced::{Element, Fill, Length};
 
 use crate::app::{App, Message};
-use crate::settings::{Category, Page, Settings, ThemeChoice, ToolOption};
+use crate::settings::{Category, Page, Purpose, Settings, ThemeChoice, ToolOption};
 use crate::theme;
 use crate::ui::muted;
 
@@ -73,6 +73,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, Message> {
             Some(editor) => theme_editor(editor),
             None => themes_page(app),
         },
+        Category::Tools => tools_page(app),
     };
     HIGHLIGHT.with(|h| h.set(None));
 
@@ -1885,10 +1886,28 @@ fn tool_control<'a>(
     let options = tool_options(settings, kind, info);
     let shown = settings.tools.shown_option(kind);
     let selected = options.iter().find(|o| o.value == shown).cloned();
-    iced::widget::pick_list(options, selected, move |o: Labeled<ToolOption>| {
-        on_choose(o.value)
-    })
-    .width(Length::Fixed(260.0))
+    with_manage_link(
+        iced::widget::pick_list(options, selected, move |o: Labeled<ToolOption>| {
+            on_choose(o.value)
+        })
+        .width(Length::Fixed(260.0))
+        .into(),
+    )
+}
+
+/// "Manage tools…" in External tools, next to each picker (M20).
+pub const MANAGE_TOOLS: &str = "Manage tools…";
+
+fn with_manage_link(picker: Element<'_, Message>) -> Element<'_, Message> {
+    row![
+        picker,
+        button(text(MANAGE_TOOLS).size(13))
+            .on_press(Message::SettingsCategory(Category::Tools))
+            .padding([2, 4])
+            .style(button::text),
+    ]
+    .spacing(12)
+    .align_y(iced::Center)
     .into()
 }
 
@@ -1921,10 +1940,170 @@ fn editor_control(settings: &Settings) -> Element<'_, Message> {
         .clone()
         .filter(|_| !settings.tools.editor_command().is_empty());
     let selected = options.iter().find(|o| o.value == shown).cloned();
-    iced::widget::pick_list(options, selected, |o: Labeled<Option<String>>| {
-        Message::EditorChosen(o.value)
-    })
-    .width(Length::Fixed(260.0))
+    with_manage_link(
+        iced::widget::pick_list(options, selected, |o: Labeled<Option<String>>| {
+            Message::EditorChosen(o.value)
+        })
+        .width(Length::Fixed(260.0))
+        .into(),
+    )
+}
+
+/// Id of the name field of Manage tools (focused by "New tool").
+pub const TOOL_NAME_INPUT: &str = "settings-tool-name";
+
+/// The placeholders of each command, as a one-line hint.
+fn command_hint(purpose: Purpose) -> &'static str {
+    match purpose {
+        Purpose::Open => "{path}: the folder or file (added at the end when missing).",
+        Purpose::Diff => "{local} and {remote}: the old and the new version.",
+        Purpose::Merge => {
+            "{merged}: the file to save the result to; optional {local} (ours), {remote} \
+             (theirs), {base}."
+        }
+    }
+}
+
+/// External tools → Manage tools (M20, ADR-062): the list on the left
+/// (problems marked), the selected entry's form on the right.
+fn tools_page(app: &App) -> Element<'_, Message> {
+    use crate::icons::{self, Icon};
+    use crate::settings::{entry_problems, VSCODE_ID};
+    let entries = &app.settings.tools.entries;
+    let shown = app.shown_tool();
+    let mut list = column![].spacing(2);
+    for (index, entry) in entries.iter().enumerate() {
+        let marker: Element<'_, Message> = if entry_problems(entries, index).any() {
+            crate::ui::panel::with_tooltip_text(
+                icons::tinted(Icon::Alert, 12.0, |p| p.warning).into(),
+                "Something needs fixing".to_owned(),
+            )
+        } else {
+            space::horizontal().width(12).into()
+        };
+        let name = entry.name.trim();
+        let label = if name.is_empty() { "(no name)" } else { name };
+        list = list.push(
+            button(
+                row![text(label.to_owned()), space::horizontal(), marker]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::ToolSelected(entry.id.clone()))
+            .padding([4, 8])
+            .width(Fill)
+            .style(theme::list_item(shown == Some(index))),
+        );
+    }
+    if entries.is_empty() {
+        list = list
+            .push(container(muted("No tools. \"New tool\" adds one.").size(12)).padding([4, 8]));
+    }
+    let form: Element<'_, Message> = match shown {
+        Some(index) => {
+            let entry = &entries[index];
+            let problems = entry_problems(entries, index);
+            let input = |label: &'static str,
+                         placeholder: &'static str,
+                         value: &str,
+                         hint: &'static str,
+                         problem: Option<&'static str>,
+                         on_input: Box<dyn Fn(String) -> Message>,
+                         id: Option<&'static str>| {
+                let mut field = text_input(placeholder, value)
+                    .on_input(on_input)
+                    .padding(6)
+                    .style(theme::input)
+                    .width(Fill);
+                if let Some(id) = id {
+                    field = field.id(id);
+                }
+                let mut content = column![text(label), field].spacing(4);
+                if let Some(problem) = problem {
+                    content = content.push(text(problem).size(12).style(theme::text_warning));
+                }
+                content.push(muted(hint).size(12))
+            };
+            column![
+                input(
+                    "Name",
+                    "Tool name",
+                    &entry.name,
+                    "Shown in the pickers and in \"Waiting for …\".",
+                    problems.name,
+                    Box::new(Message::ToolNameInput),
+                    Some(TOOL_NAME_INPUT),
+                ),
+                input(
+                    "Open command",
+                    "program {path}",
+                    &entry.open,
+                    command_hint(Purpose::Open),
+                    problems.open,
+                    Box::new(|c| Message::ToolCommandInput(Purpose::Open, c)),
+                    None,
+                ),
+                input(
+                    "Diff command",
+                    "program {local} {remote}",
+                    &entry.diff,
+                    command_hint(Purpose::Diff),
+                    problems.diff,
+                    Box::new(|c| Message::ToolCommandInput(Purpose::Diff, c)),
+                    None,
+                ),
+                input(
+                    "Merge command",
+                    "program {local} {remote} {base} {merged}",
+                    &entry.merge,
+                    command_hint(Purpose::Merge),
+                    problems.merge,
+                    Box::new(|c| Message::ToolCommandInput(Purpose::Merge, c)),
+                    None,
+                ),
+            ]
+            .spacing(14)
+            .into()
+        }
+        None => muted("Add a tool with \"New tool\" or bring back VS Code.")
+            .size(12)
+            .into(),
+    };
+    let action = |label: &'static str, message: Option<Message>| {
+        button(text(label))
+            .on_press_maybe(message)
+            .padding([5, 12])
+            .style(button::secondary)
+    };
+    let selected = shown.is_some();
+    let restore_note = if entries.iter().any(|e| e.id == VSCODE_ID) {
+        "Restore VS Code resets its name and commands."
+    } else {
+        "Restore VS Code adds it back at the top."
+    };
+    column![
+        row![
+            container(list).width(Length::Fixed(190.0)),
+            container(form).width(Fill),
+        ]
+        .spacing(20),
+        row![
+            action("New tool", Some(Message::ToolNew)),
+            action("Duplicate", selected.then_some(Message::ToolDuplicate)),
+            action(
+                "Delete…",
+                selected.then_some(Message::ToolDelete { confirmed: false })
+            ),
+            action("Restore VS Code", Some(Message::ToolRestoreVsCode)),
+        ]
+        .spacing(6)
+        .wrap(),
+        muted(format!(
+            "Empty commands are fine: the tool is then not offered for that purpose. {restore_note}"
+        ))
+        .size(12),
+    ]
+    .spacing(16)
     .into()
 }
 
