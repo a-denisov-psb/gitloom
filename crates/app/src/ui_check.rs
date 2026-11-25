@@ -2539,6 +2539,64 @@ mod tests {
         }
     }
 
+    /// Finding #58: a stash whose base commit is no longer in the history
+    /// has no line below its node; hovering the node shows the note. Dark
+    /// and Light.
+    #[test]
+    #[ignore = "renders the UI; run with --ignored"]
+    fn ui_check_stash_without_base() {
+        use crate::settings::ThemeChoice;
+        let mut app = crate::app::tests::graph_app();
+        let view = app.tabs[0].view_mut().unwrap();
+        let old = view.snapshot.clone();
+        let mut stashes = old.stashes.clone();
+        stashes[0].base = Some("gone".into());
+        let commits: Vec<git_core::Commit> = old
+            .commits
+            .iter()
+            .filter(|c| !old.is_stash(&c.id))
+            .cloned()
+            .collect();
+        let rebuilt = crate::snapshot::RepoSnapshot::build(
+            git_core::Log {
+                commits,
+                truncated: false,
+            },
+            old.head.clone(),
+            old.refs.clone(),
+            stashes,
+            old.working_tree.clone(),
+        )
+        .unwrap();
+        assert!(rebuilt.stash_base_missing("s"));
+        view.snapshot = std::sync::Arc::new(rebuilt);
+        let _ = app.update(Message::CommitSelected("s".into()));
+        for (choice, name) in [
+            (ThemeChoice::theme("dusk"), "dark"),
+            (ThemeChoice::theme("light"), "light"),
+        ] {
+            app.settings.appearance.theme = choice.clone();
+            snapshot(&app, &format!("stash-without-base-{name}"));
+            // Hover the node: the note as its tooltip.
+            let path = fresh_path(&format!("stash-without-base-tooltip-{name}"));
+            let mut sim = simulator(&app);
+            // The stash row is the row above "Main work"; its node sits in
+            // the lane left of the message column.
+            let label = sim.find("Main work").unwrap();
+            let bounds = iced_test::selector::Bounded::bounds(&label);
+            let at = iced::Point::new(
+                bounds.x - 19.0,
+                bounds.center_y() - crate::ui::graph::ROW_HEIGHT,
+            );
+            sim.point_at(at);
+            let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: at,
+            })]);
+            let snap = sim.snapshot(&app.theme()).unwrap();
+            assert!(snap.matches_image(&path).unwrap());
+        }
+    }
+
     /// Preferences → Editor (M11-06) and a diff with a larger font and
     /// without line numbers.
     #[test]
