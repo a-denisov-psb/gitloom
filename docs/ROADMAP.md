@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**M20 – Tool list instead of presets** → [`milestones/M20-tool-list.md`](milestones/M20-tool-list.md). After M20: the maintainer's final check with `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7t), then 1.0.0 (M6-13, M6-15; ADR-042) from `develop` when the maintainer asks.
+**Final check and release 1.0.0 (M6-13, M6-15; ADR-042)** → [`milestones/M6-release-readiness.md`](milestones/M6-release-readiness.md): the maintainer runs `docs/RELEASE-CHECKLIST.md` (sections 1 … 8, including 7 … 7t); 1.0.0 is released from `develop` when the maintainer asks.
 
 Single release line (ADR-042): everything from M7 on ships with **1.0.0**. Milestones end without a release; Claude Code continues with the next planned milestone. 1.0.0 (M6-15) is released from `develop` after M20 and the maintainer's full run of `docs/RELEASE-CHECKLIST.md`, only when the maintainer asks.
 
@@ -36,7 +36,7 @@ Safe to use for beginners: every local action can be undone and lands exactly in
 | M17 | 1.0.0 | Theme editor | Done |
 | M18 | 1.0.0 | Theme revision | Done |
 | M19 | 1.0.0 | History files and visible failures | Done |
-| M20 | 1.0.0 | Tool list instead of presets | Planned |
+| M20 | 1.0.0 | Tool list instead of presets | Done |
 
 The planning chat details the next milestones ahead of time so that Claude Code never waits (ADR-042).
 
@@ -149,7 +149,7 @@ Dusk (colors of Ayu Mirage as Zed shows it) replaces Dark and becomes the defaul
 
 Files of a commit and entries of the file history open in the external editor in the state of that commit (a read-only copy in the temp folder; the real file when the commit is HEAD and the file is unchanged), also for commits on branches that are not checked out. Every action that cannot run or fails says so and why (tooltip before, toast after; ADR-044 amendment), starting with the programs Gitloom launches, plus an audit of silent refusals. Planning update 15 (findings #53 and #54), ADR-061. Four tasks (M19-01 … M19-04). Details: [`milestones/M19-history-files-and-failures.md`](milestones/M19-history-files-and-failures.md).
 
-### M20 – Tool list instead of presets (planned)
+### M20 – Tool list instead of presets (done)
 
 Preferences → External tools has no hard-coded editor and tool presets any more: the user builds a list of tools (name plus commands for opening, diffing and merging) and picks one entry for each purpose, and a fresh installation has exactly one entry, VS Code, which can be edited, deleted and restored. Details: [`milestones/M20-tool-list.md`](milestones/M20-tool-list.md).
 

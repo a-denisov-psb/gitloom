@@ -58,15 +58,15 @@ Open: none. For the maintainer's check: checklist section 7t.
 
 ## Milestone acceptance
 
-- [ ] A fresh installation shows one entry "VS Code" under Manage tools; editor is None, diff and merge are "Use Git config".
-- [ ] New tool, Duplicate and Delete work; names are unique; Delete asks first and resets the selections that used the entry.
-- [ ] "Restore VS Code" brings back or resets the entry and leaves everything else alone; a deleted VS Code stays deleted after a restart.
-- [ ] The editor, diff and merge pickers show exactly the entries that have a valid command for that purpose, plus Git's own choices for diff and merge.
-- [ ] Alt+E, the toolbar button, the file menus, Ctrl+D and the merge tool use the chosen entries; "Waiting for <name>…" and the toasts show the entry's name.
-- [ ] The repository override, the command palette and the "No diff tool" dialog use the list; the free text field of the repository editor is gone.
-- [ ] A settings file from before M20 loads without the "damaged settings" message and keeps all other settings.
-- [ ] `EditorPreset`, `ToolPreset` and `ToolPick` are gone; no preset text is left in the UI, the palette or the docs.
-- [ ] ADR-062 is in `docs/DECISIONS.md`; user guide, UX-PARITY, release checklist (section 7t) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
+- [x] A fresh installation shows one entry "VS Code" under Manage tools; editor is None, diff and merge are "Use Git config".
+- [x] New tool, Duplicate and Delete work; names are unique; Delete asks first and resets the selections that used the entry.
+- [x] "Restore VS Code" brings back or resets the entry and leaves everything else alone; a deleted VS Code stays deleted after a restart.
+- [x] The editor, diff and merge pickers show exactly the entries that have a valid command for that purpose, plus Git's own choices for diff and merge.
+- [x] Alt+E, the toolbar button, the file menus, Ctrl+D and the merge tool use the chosen entries; "Waiting for <name>…" and the toasts show the entry's name.
+- [x] The repository override, the command palette and the "No diff tool" dialog use the list; the free text field of the repository editor is gone.
+- [x] A settings file from before M20 loads without the "damaged settings" message and keeps all other settings.
+- [x] `EditorPreset`, `ToolPreset` and `ToolPick` are gone; no preset text is left in the UI, the palette or the docs.
+- [x] ADR-062 is in `docs/DECISIONS.md`; user guide, UX-PARITY, release checklist (section 7t) and CHANGELOG updated; `./scripts/check.sh` green; CI green.
 
 ## Task overview
 
@@ -114,7 +114,7 @@ Acceptance: app tests: Alt+E, the toolbar button, the file menus and the palette
 
 > Done (2026-11-25): repository override picker from `Choice::RepoEditor.options` ("Use global setting (…)" plus the entries with an open command), choice resolved by `app::repo_editor_choice`, a stored command without an entry shows `settings::repo_editor_label` "<program> (not in the list)" (plus a line "This repository: <command>") and still launches; text field, `RepoEditorInput`, `RepoEditorSave` and the page fields removed; a "Manage tools…" link on that page too. Palette choices of both editor rows come from the list. `settings::editor_name(entries, command)` and `program_name` replace the preset mapping; `App::editor_label` names the toolbar tooltip ("Open this repository in VS Code (Alt+E)") and the start failure toast ("Could not start VS Code", `launch_toast` takes the name); "Waiting for <name>…" uses `ExternalTools::tool_name`. `EditorPreset` removed; `rg` finds no `EditorPreset`, `ToolPreset` or `ToolPick` in `crates/`. "Define tool…" already opened External tools since M20-01.
 
-### [ ] M20-04 Documentation and close
+### [x] M20-04 Documentation and close
 
 - `docs/DECISIONS.md`: ADR-062 "Tool list instead of presets" (context: finding #56 and the maintainer's request; the decision table; consequences: no migration, the old selections are dropped, settings files keep their version; ADR-055 stays valid for how commands run, its list of presets is superseded).
 - `docs/user/settings.md`: External tools: the list, how to add a tool with examples for the three commands and their placeholders, Restore VS Code. `docs/user/troubleshooting.md`: a tool that returns before you close it (empty or missing temporary files) and what to do; "The program was not found" with the way to Manage tools.
@@ -134,6 +134,8 @@ Checklist 7t items:
 - [ ] Type a diff command without `{remote}`: a message appears under the field and the entry is missing from the diff picker; fix it and it returns.
 - [ ] Preferences → Repository → External editor offers "Use global setting" and the entries; palette "Set: External editor ›" lists the same entries.
 - [ ] An older `settings.json` (copy one from before M20 if you have it) opens without a "damaged settings" message; editor and tool selections are empty and can be set again.
+
+> Done (2026-11-25): ADR-062 (ADR-055 marked superseded in part); user guide (settings: new section "External tools" with the command table, repository editor; troubleshooting: tool that returns too early, "Could not start <tool>" with Manage tools; undo: the tool list under "Cannot be undone"); UX-PARITY rows and deviation; CHANGELOG (the tool list replaces the presets entry; the other unreleased editor entries rewritten without presets); checklist 7t, and the older items in 7i and 7j that named presets, "Custom" or the command field rewritten for the list. The GitKraken verification item "which diff and merge tools does GitKraken offer" (fix after M15) is removed from section 8: the list is a deliberate deviation (decision table). Branch deletion on origin is refused by the session's proxy (403); listed under maintainer to-dos.
 
 ## After M20
 
