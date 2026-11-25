@@ -5,7 +5,7 @@ mod support;
 
 use git_core::{
     configured_tool, run_difftool, run_mergetool, tool_info, tool_shell_command, CliBackend,
-    DiffTarget, ToolKind, ToolSelection,
+    DiffTarget, StashPart, ToolKind, ToolSelection,
 };
 use support::TestRepo;
 
@@ -156,6 +156,66 @@ fn custom_difftool_for_commit_unstaged_and_staged() {
     assert!(calls(&repo).ends_with("two three \n"), "{}", calls(&repo));
     assert_eq!(calls(&repo).lines().count(), 3);
     assert!(!repo.try_git(&["config", "--get-regexp", "gitloom-custom"]));
+}
+
+/// A command tool that copies LOCAL and REMOTE to `sides/local` and
+/// `sides/remote` next to the repository.
+fn side_copier(repo: &TestRepo) -> (ToolSelection, std::path::PathBuf) {
+    let dir = repo.path().join("..").join("sides");
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("copy.sh");
+    let out = dir.to_string_lossy().replace('\\', "/");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ncat \"$1\" > '{out}/local'; cat \"$2\" > '{out}/remote'\n"),
+    )
+    .unwrap();
+    let program = script.to_string_lossy().replace('\\', "/");
+    let words: Vec<String> = ["sh", &program, "{local}", "{remote}"]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .collect();
+    (
+        ToolSelection::Command(tool_shell_command(&words, false)),
+        dir,
+    )
+}
+
+/// Finding #57: each part of a stash opens with the sides of the internal
+/// diff.
+#[test]
+fn difftool_for_the_parts_of_a_stash() {
+    let repo = TestRepo::new();
+    repo.commit("a.txt", "head\n", "first");
+    repo.write("a.txt", "index\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "worktree\n");
+    repo.write("new.txt", "untracked\n");
+    repo.git(&["stash", "push", "--include-untracked"]);
+    let id = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+    let cli = CliBackend::new(repo.path());
+    let (tool, dir) = side_copier(&repo);
+    let sides = |part, path: &str| {
+        let target = DiffTarget::Stash {
+            id: id.clone(),
+            part,
+        };
+        run_difftool(&cli, &target, &tool, path, None).unwrap();
+        let read = |name| std::fs::read_to_string(dir.join(name)).unwrap();
+        (read("local"), read("remote"))
+    };
+    assert_eq!(
+        sides(StashPart::Staged, "a.txt"),
+        ("head\n".into(), "index\n".into())
+    );
+    assert_eq!(
+        sides(StashPart::Unstaged, "a.txt"),
+        ("index\n".into(), "worktree\n".into())
+    );
+    assert_eq!(
+        sides(StashPart::Untracked, "new.txt"),
+        (String::new(), "untracked\n".into())
+    );
 }
 
 fn conflicted() -> TestRepo {

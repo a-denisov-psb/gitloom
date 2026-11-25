@@ -37,19 +37,7 @@ pub struct SystemLookup;
 
 impl Lookup for SystemLookup {
     fn has_program(&self, name: &str) -> bool {
-        let Some(paths) = std::env::var_os("PATH") else {
-            return false;
-        };
-        let extensions: &[&str] = if cfg!(windows) {
-            &["", ".exe", ".cmd", ".bat"]
-        } else {
-            &[""]
-        };
-        std::env::split_paths(&paths).any(|dir| {
-            extensions
-                .iter()
-                .any(|ext| dir.join(format!("{name}{ext}")).is_file())
-        })
+        self.resolve(name).is_some()
     }
 
     fn env(&self, key: &str) -> Option<String> {
@@ -59,31 +47,55 @@ impl Lookup for SystemLookup {
     fn resolve(&self, name: &str) -> Option<PathBuf> {
         let paths = std::env::var_os("PATH")?;
         let extensions = path_extensions(Platform::current(), self.env("PATHEXT").as_deref());
-        std::env::split_paths(&paths).find_map(|dir| {
-            extensions
-                .iter()
-                .map(|ext| dir.join(format!("{name}{ext}")))
-                .find(|candidate| candidate.is_file())
+        find_program(name, std::env::split_paths(&paths), &extensions, &|p| {
+            p.is_file()
         })
     }
 }
 
-/// Extensions tried after a program name: on Windows `""` and those of
-/// `PATHEXT` (default `.COM;.EXE;.BAT;.CMD`), elsewhere just `""`.
+/// Extensions tried after a program name without an extension: on Windows
+/// those of `PATHEXT` (default `.COM;.EXE;.BAT;.CMD`), never `""`, because
+/// Windows cannot start a file without an extension (the shell script
+/// `code` next to `code.cmd`, finding #56); elsewhere just `""`.
 pub fn path_extensions(platform: Platform, pathext: Option<&str>) -> Vec<String> {
     match platform {
-        Platform::Windows => {
-            let list = pathext.unwrap_or(".COM;.EXE;.BAT;.CMD");
-            std::iter::once(String::new())
-                .chain(
-                    list.split(';')
-                        .filter(|ext| !ext.trim().is_empty())
-                        .map(|ext| ext.trim().to_lowercase()),
-                )
-                .collect()
-        }
+        Platform::Windows => pathext
+            .unwrap_or(".COM;.EXE;.BAT;.CMD")
+            .split(';')
+            .filter(|ext| !ext.trim().is_empty())
+            .map(|ext| ext.trim().to_lowercase())
+            .collect(),
         Platform::MacOs | Platform::Linux => vec![String::new()],
     }
+}
+
+/// First file named `name` in `dirs` (in order). A name without an
+/// extension is tried with each of `extensions` (see [`path_extensions`]);
+/// a name that has one is looked up unchanged. `is_file` is the file check,
+/// so the rule is testable on every system.
+pub fn find_program(
+    name: &str,
+    dirs: impl IntoIterator<Item = PathBuf>,
+    extensions: &[String],
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if name.is_empty() {
+        return None;
+    }
+    let candidates: Vec<String> = if Path::new(name).extension().is_some() {
+        vec![name.to_owned()]
+    } else {
+        extensions
+            .iter()
+            .map(|ext| format!("{name}{ext}"))
+            .collect()
+    };
+    dirs.into_iter().find_map(|dir| {
+        candidates
+            .iter()
+            .map(|file| dir.join(file))
+            .find(|candidate| is_file(candidate))
+    })
 }
 
 /// A program to start.
@@ -286,10 +298,17 @@ pub fn plain_start_error(raw: &str) -> String {
         || lower.contains("access is denied")
     {
         "The program may not be run (permission denied).".into()
+    } else if lower.contains("os error 193)") || lower.contains("not a valid win32 application") {
+        // Windows was given a file it cannot run, e.g. the shell script
+        // `code` next to `code.cmd` (finding #56).
+        NOT_A_PROGRAM.into()
     } else {
         "The system could not start the program.".into()
     }
 }
+
+/// Why a file could not be started on Windows (os error 193).
+pub const NOT_A_PROGRAM: &str = "This file is not a program Windows can run (for example a script without an extension). Use the .exe or .cmd launcher.";
 
 /// Why no terminal can be opened: none is set and none was found.
 pub const NO_TERMINAL: &str =
@@ -553,6 +572,12 @@ mod tests {
         assert_eq!(
             plain_start_error("Could not start x: Permission denied (os error 13)"),
             "The program may not be run (permission denied)."
+        );
+        assert_eq!(
+            plain_start_error(
+                r"Could not start C:\VS Code\bin\code: %1 is not a valid Win32 application. (os error 193)"
+            ),
+            NOT_A_PROGRAM
         );
         assert_eq!(
             plain_start_error("Could not start x: boom"),
@@ -845,14 +870,51 @@ mod tests {
         assert_eq!(launch.program, "zed");
         assert_eq!(
             path_extensions(Platform::Windows, Some(".COM;.EXE;.BAT;.CMD")),
-            ["", ".com", ".exe", ".bat", ".cmd"]
+            [".com", ".exe", ".bat", ".cmd"]
         );
-        assert_eq!(path_extensions(Platform::Windows, None).len(), 5);
+        assert_eq!(path_extensions(Platform::Windows, None).len(), 4);
         assert_eq!(path_extensions(Platform::Linux, Some(".EXE")), [""]);
         // Elsewhere nothing is resolved.
         let launch = editor(Platform::Linux, &lookup, "code {path}", file).unwrap();
         assert_eq!(launch.program, "code");
         assert!(!launch.no_window);
+    }
+
+    /// Finding #56: VS Code's `bin` folder holds the shell script `code`
+    /// and `code.cmd`; Windows can only start `code.cmd`.
+    #[test]
+    fn program_search_skips_files_without_extension_on_windows() {
+        let bin = PathBuf::from("vscode-bin");
+        let zed = PathBuf::from("zed-bin");
+        let files = [bin.join("code"), bin.join("code.cmd"), zed.join("zed.exe")];
+        let is_file = |p: &Path| files.iter().any(|f| f == p);
+        let dirs = || vec![PathBuf::from("empty"), bin.clone(), zed.clone()];
+        let windows = path_extensions(Platform::Windows, Some(".COM;.EXE;.BAT;.CMD"));
+        let linux = path_extensions(Platform::Linux, None);
+        assert_eq!(
+            find_program("code", dirs(), &windows, &is_file),
+            Some(bin.join("code.cmd"))
+        );
+        assert_eq!(
+            find_program("code", dirs(), &linux, &is_file),
+            Some(bin.join("code"))
+        );
+        assert_eq!(
+            find_program("zed", dirs(), &windows, &is_file),
+            Some(zed.join("zed.exe"))
+        );
+        // A name with an extension is looked up as it is.
+        assert_eq!(
+            find_program("code.cmd", dirs(), &windows, &is_file),
+            Some(bin.join("code.cmd"))
+        );
+        assert_eq!(
+            find_program("zed.exe", dirs(), &linux, &is_file),
+            Some(zed.join("zed.exe"))
+        );
+        assert_eq!(find_program("code.exe", dirs(), &windows, &is_file), None);
+        assert_eq!(find_program("idea", dirs(), &windows, &is_file), None);
+        assert_eq!(find_program("", dirs(), &linux, &is_file), None);
     }
 
     #[test]

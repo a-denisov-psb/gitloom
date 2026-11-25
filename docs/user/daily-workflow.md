@@ -54,7 +54,7 @@ Switching to another tab (or to a new tab's start screen) closes the diff, the b
 
 ![Diff view](../screenshots/m5-diff-light.png)
 
-**External** (or Ctrl+D) opens the diff in your diff tool (without one: "No diff tool" with **Define tool…**, which opens Preferences → External tools at the command field), **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
+**External** (or Ctrl+D) opens the diff in your diff tool (also for files of a stash, not for untracked files) (without one: "No diff tool" with **Define tool…**, which opens Preferences → External tools at the command field), **History** opens the file history, **Blame** the file's blame (at the commit of a commit diff, otherwise the working file; not for untracked, added or deleted files and stashes).
 
 ## Staging
 
@@ -68,7 +68,7 @@ With the details panel at the bottom, **Unstaged Files** and **Staged Files** si
 - In the diff: **Stage hunk** in a hunk header (Hunk view) or **Stage block** above a change (Inline, Split), or select lines (click, Shift+click, Ctrl+click; in Split removed lines on the left, added lines on the right) and **Stage selected lines**.
 - **Discard** works per file, hunk, selected lines or for all changes. It always asks first and can be undone (Ctrl+Z). "Discard all" with staged changes asks whether to discard those too.
 - File menus are ordered like GitKraken's. Unstaged: **Stage**, **Discard changes**, **Ignore** (adds the file to `.gitignore`); staged: **Unstage**, **Discard changes** (staged and unstaged changes of the file, back to HEAD; undoable), **Copy commit message prompt…**. All file menus, also in the commit details: **File history**, **File blame**, **Open in external diff tool**, **Open in external editor**, **Open file location**, **Copy file path**.
-- **Open in external diff tool** uses the diff tool from Preferences → External tools: unstaged files compare the index with the working tree, staged files HEAD with the index, files of a commit its first parent with the commit (Git writes both versions to temporary files and removes them afterwards).
+- **Open in external diff tool** uses the diff tool from Preferences → External tools: unstaged files compare the index with the working tree, staged files HEAD with the index, files of a commit its first parent with the commit, files of a stash the two versions its diff shows (staged: HEAD and index; unstaged: index and stashed working tree; untracked: nothing and the file). Git writes both versions to temporary files and removes them afterwards. Only an untracked file of the working tree has nothing to compare.
 
 ## Committing
 
