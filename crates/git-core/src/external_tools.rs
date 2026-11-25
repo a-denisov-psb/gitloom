@@ -9,7 +9,7 @@
 //! and removes the temporary files and nothing is written to any Git
 //! config.
 
-use crate::{Error, GitWriter, Result, RunOptions};
+use crate::{Error, GitWriter, Result, RunOptions, StashPart};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
@@ -130,6 +130,10 @@ pub enum DiffTarget {
     Unstaged,
     /// Index against HEAD.
     Staged,
+    /// One part of stash `id`, with the sides of the internal diff
+    /// (`DiffKind::Stash`, finding #57): Staged `^1 → ^2`, Unstaged
+    /// `^2 → id`, Untracked the empty tree `→ ^3`.
+    Stash { id: String, part: StashPart },
 }
 
 /// Reads the configured tool and the available ones.
@@ -229,6 +233,14 @@ pub fn difftool_args(
         }
         DiffTarget::Unstaged => {}
         DiffTarget::Staged => args.push("--cached".to_owned()),
+        DiffTarget::Stash { id, part } => {
+            let (old, new) = match part {
+                StashPart::Staged => (format!("{id}^1"), format!("{id}^2")),
+                StashPart::Unstaged => (format!("{id}^2"), id.clone()),
+                StashPart::Untracked => (empty_tree.to_owned(), format!("{id}^3")),
+            };
+            args.extend([old, new]);
+        }
     }
     args.push("--".to_owned());
     if let Some(old) = old_path.filter(|old| *old != path) {
@@ -298,7 +310,11 @@ pub fn run_difftool(
     old_path: Option<&str>,
 ) -> Result<()> {
     let empty_tree = match target {
-        DiffTarget::Commit { parent: None, .. } => empty_tree(git)?,
+        DiffTarget::Commit { parent: None, .. }
+        | DiffTarget::Stash {
+            part: StashPart::Untracked,
+            ..
+        } => empty_tree(git)?,
         _ => String::new(),
     };
     let args = difftool_args(target, tool, path, old_path, &empty_tree);
@@ -494,6 +510,29 @@ mod tests {
                 "a.txt"
             ]
         );
+        let stash = |part| DiffTarget::Stash {
+            id: "s1".into(),
+            part,
+        };
+        for (part, old, new) in [
+            (StashPart::Staged, "s1^1", "s1^2"),
+            (StashPart::Unstaged, "s1^2", "s1"),
+            (StashPart::Untracked, "4b825dc", "s1^3"),
+        ] {
+            assert_eq!(
+                difftool_args(&stash(part), &named("x"), "a.txt", None, "4b825dc"),
+                [
+                    "difftool",
+                    "--no-prompt",
+                    "--tool=x",
+                    old,
+                    new,
+                    "--",
+                    "a.txt"
+                ],
+                "{part:?}"
+            );
+        }
         assert_eq!(
             mergetool_args(&named("kdiff3"), "c.txt", false),
             ["mergetool", "--no-prompt", "--tool=kdiff3", "--", "c.txt"]
