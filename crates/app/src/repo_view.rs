@@ -1847,7 +1847,7 @@ mod tests {
         let time = |what: &str, f: &dyn Fn() -> Option<String>| {
             let start = Instant::now();
             let result = f();
-            println!(
+            eprintln!(
                 "{what}: {:.2} ms ({})",
                 start.elapsed().as_secs_f64() * 1000.0,
                 result.map_or("editable".to_owned(), |r| r.chars().take(60).collect())
