@@ -137,10 +137,10 @@ fn reword_before_a_merge_rebuilds_the_merge() {
     repo.git(&["add", "a.txt"]);
     repo.git(&["commit", "--quiet", "--no-edit"]);
     repo.commit("b.txt", "after\n", "After");
-    // topic keeps the old commits; it does not contain the target.
+    // topic does not contain the target: the edit is allowed.
+    assert_eq!(edit_block(&cli, &target).unwrap(), None);
     let facts = edit_facts(&cli, &target).unwrap();
     assert_eq!(facts.branch, "main");
-    assert!(facts.keep_old.is_empty(), "{:?}", facts.keep_old);
 
     let done = reword_unpushed(&cli, &target, "Main one, reworded").unwrap();
     let merge = repo.git(&["rev-parse", "HEAD~1"]);
@@ -182,12 +182,15 @@ fn pushed_other_branch_and_running_operation_are_refused() {
         edit_block(&cli, &side).unwrap(),
         Some(EditBlock::NotOnBranch)
     );
-    // Other refs that contain the commit keep the old one.
+    // Other refs that contain the commit block it (finding #58).
     repo.git(&["tag", "v1", &second]);
     repo.git(&["branch", "copy", &second]);
-    let mut keep = edit_facts(&cli, &second).unwrap().keep_old;
-    keep.sort();
-    assert_eq!(keep, ["copy", "v1"]);
+    assert_eq!(
+        edit_block(&cli, &second).unwrap(),
+        Some(EditBlock::SharedWith(vec!["copy".into(), "tag v1".into()]))
+    );
+    repo.git(&["tag", "-d", "v1"]);
+    repo.git(&["branch", "-D", "copy"]);
 
     // Detached HEAD.
     repo.git(&["switch", "--quiet", "--detach", &second]);
@@ -395,8 +398,165 @@ fn one_blocked_commit_refuses_the_whole_change() {
     assert!(error.contains(&format!("{}: ", &pushed[..7])), "{error}");
     assert!(error.contains("Already pushed to origin/main"), "{error}");
     assert_eq!(repo.head(), head, "nothing changed");
-    // Facts of several commits: refs that keep any old commit.
-    repo.git(&["tag", "v1", &free]);
     let facts = edit_facts_many(&cli, &[free.clone(), head.clone()]).unwrap();
-    assert_eq!(facts.keep_old, ["v1"]);
+    assert_eq!(facts.branch, "main");
+    assert!(!facts.drops_signature);
+}
+
+// Finding #58: commits that another local branch or a tag contains.
+
+fn shared(names: &[&str]) -> Option<EditBlock> {
+    Some(EditBlock::SharedWith(
+        names.iter().map(|n| (*n).to_owned()).collect(),
+    ))
+}
+
+#[test]
+fn another_local_branch_blocks_the_edit() {
+    let (repo, cli) = repo();
+    repo.commit("a.txt", "1\n", "One");
+    let older = repo.commit("a.txt", "2\n", "Two");
+    repo.git(&["branch", "feature/f3"]);
+    let head = repo.commit("a.txt", "3\n", "Three");
+    assert_eq!(edit_block(&cli, &older).unwrap(), shared(&["feature/f3"]));
+    // HEAD is only on the checked-out branch.
+    assert_eq!(edit_block(&cli, &head).unwrap(), None);
+    // Another branch exactly on HEAD counts too.
+    repo.git(&["branch", "release/1.0"]);
+    assert_eq!(edit_block(&cli, &head).unwrap(), shared(&["release/1.0"]));
+    assert_eq!(
+        edit_block(&cli, &older).unwrap(),
+        shared(&["feature/f3", "release/1.0"])
+    );
+    let error = reword_unpushed(&cli, &head, "x").unwrap_err().to_string();
+    assert!(error.contains("Also contained in release/1.0."), "{error}");
+    assert_eq!(repo.head(), head, "nothing changed");
+}
+
+#[test]
+fn lightweight_and_annotated_tags_block_the_edit() {
+    let (repo, cli) = repo();
+    let one = repo.commit("a.txt", "1\n", "One");
+    let two = repo.commit("a.txt", "2\n", "Two");
+    repo.commit("a.txt", "3\n", "Three");
+    repo.git(&["tag", "r1", &one]);
+    repo.git(&["tag", "-a", "-m", "Release 2", "r2", &two]);
+    assert_eq!(edit_block(&cli, &two).unwrap(), shared(&["tag r2"]));
+    assert_eq!(
+        edit_block(&cli, &one).unwrap(),
+        shared(&["tag r1", "tag r2"])
+    );
+}
+
+#[test]
+fn only_the_checked_out_branch_with_a_merge_after_it_is_editable() {
+    let (repo, cli) = repo();
+    repo.commit("a.txt", "base\n", "Base");
+    repo.git(&["switch", "--quiet", "-c", "feature/x"]);
+    let target = repo.commit("a.txt", "x\n", "Target");
+    repo.git(&["switch", "--quiet", "-c", "side", "HEAD~1"]);
+    repo.commit("s.txt", "s\n", "Side");
+    repo.checkout("feature/x");
+    repo.merge("side", "Merge side");
+    repo.commit("b.txt", "after\n", "After");
+    // main and side fork before the target: they do not contain it.
+    assert_eq!(edit_block(&cli, &target).unwrap(), None);
+    let done = reword_unpushed(&cli, &target, "Target, reworded").unwrap();
+    assert_eq!(
+        subjects(&repo),
+        ["After", "Merge side", "Side", "Target, reworded", "Base"]
+    );
+    done.apply(&cli, true).unwrap();
+    done.apply(&cli, false).unwrap();
+    assert_eq!(repo.head(), done.new_head);
+}
+
+#[test]
+fn pushed_wins_over_shared_and_stashes_do_not_count() {
+    let (repo, cli) = repo();
+    let one = repo.commit("a.txt", "1\n", "One");
+    let two = repo.commit("a.txt", "2\n", "Two");
+    repo.git(&["branch", "copy", &one]);
+    repo.fake_upstream("origin", "main", &one);
+    assert_eq!(
+        edit_block(&cli, &one).unwrap(),
+        Some(EditBlock::Pushed("origin/main".into()))
+    );
+    // A stash on HEAD does not block.
+    repo.write("a.txt", "dirty\n");
+    repo.git(&["stash", "push", "--quiet"]);
+    assert_eq!(edit_block(&cli, &two).unwrap(), None);
+    let done = reword_unpushed(&cli, &two, "Two, reworded").unwrap();
+    assert_eq!(message(&repo, "HEAD"), "Two, reworded");
+    // The stash keeps its old base and still applies.
+    assert_eq!(repo.git(&["rev-parse", "stash@{0}^1"]), two);
+    repo.git(&["stash", "apply", "--quiet"]);
+    assert_eq!(
+        std::fs::read(repo.path().join("a.txt")).unwrap(),
+        b"dirty\n"
+    );
+    let _ = done;
+}
+
+#[test]
+fn more_than_three_refs_are_counted() {
+    let (repo, cli) = repo();
+    let one = repo.commit("a.txt", "1\n", "One");
+    repo.commit("a.txt", "2\n", "Two");
+    for name in ["b1", "b2"] {
+        repo.git(&["branch", name, &one]);
+    }
+    for name in ["t1", "t2", "t3"] {
+        repo.git(&["tag", name, &one]);
+    }
+    let block = edit_block(&cli, &one).unwrap().unwrap();
+    assert_eq!(
+        block,
+        shared(&["b1", "b2", "tag t1", "tag t2", "tag t3"]).unwrap()
+    );
+    assert!(
+        block
+            .reason()
+            .starts_with("Also contained in b1, b2, tag t1 and 2 more. Editing it would leave"),
+        "{}",
+        block.reason()
+    );
+}
+
+#[test]
+fn one_shared_commit_refuses_the_whole_change() {
+    let (repo, cli) = repo();
+    repo.commit("a.txt", "0\n", "Zero");
+    let shared_commit = repo.commit("a.txt", "1\n", "One");
+    repo.git(&["branch", "main-copy"]);
+    let free = repo.commit("a.txt", "2\n", "Two");
+    let head = repo.head();
+    let error = rewrite_unpushed(&cli, &[author_edit(&free), author_edit(&shared_commit)])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains(&format!(
+            "{}: Also contained in main-copy.",
+            &shared_commit[..7]
+        )),
+        "{error}"
+    );
+    assert_eq!(repo.head(), head, "nothing changed");
+    // The free commit alone works; a tag created after the check in the UI
+    // is caught by the check in `rewrite_unpushed`.
+    assert_eq!(edit_block(&cli, &free).unwrap(), None);
+    repo.git(&["tag", "late", &free]);
+    let error = rewrite_unpushed(&cli, &[author_edit(&free)])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Also contained in tag late."), "{error}");
+    assert_eq!(repo.head(), head, "nothing changed");
+    repo.git(&["tag", "-d", "late"]);
+    let done = rewrite_unpushed(&cli, &[author_edit(&free)]).unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%an <%ae>"]),
+        "Bo Kim <bo@example.com>"
+    );
+    done.apply(&cli, true).unwrap();
+    assert_eq!(repo.head(), head);
 }

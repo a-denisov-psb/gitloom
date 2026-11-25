@@ -34,7 +34,7 @@ pub struct MessageModal {
     pub author_email: String,
     /// New author (M15-11); `None` keeps the original one.
     pub author: Option<git_core::Identity>,
-    /// Moved branch and refs that keep the old commit, for the note.
+    /// Moved branch and dropped signatures, for the note.
     pub facts: Loadable<git_core::reword::EditFacts>,
     /// Validation message ("Enter a summary").
     pub error: Option<String>,

@@ -2025,8 +2025,9 @@ mod tests {
     }
 
     /// Finding #43: the hovered header with its button (pencil, open
-    /// icon), the modal in edit mode with the note about other refs and
-    /// read-only (pushed, stash); Dark and Light.
+    /// icon), the modal in edit mode with the signature note and read-only
+    /// (pushed, shared with other refs (finding #58), stash); Dark and
+    /// Light.
     #[test]
     #[ignore = "renders the UI; run with --ignored"]
     fn ui_check_message_modal() {
@@ -2071,7 +2072,6 @@ mod tests {
                 id: "c2".into(),
                 result: Ok(git_core::reword::EditFacts {
                     branch: "main".into(),
-                    keep_old: vec!["backup".into(), "v1.2".into()],
                     drops_signature: true,
                 }),
             });
@@ -2091,6 +2091,23 @@ mod tests {
             hovered(&app, &format!("message-button-open-{theme}"));
             let _ = app.update(Message::CommitModalOpen);
             snapshot(&app, &format!("message-modal-pushed-{theme}"));
+            app.message_modal = None;
+            // Shared with other refs (finding #58): read-only with the reason.
+            let _ = app.update(Message::EditBlockLoaded {
+                tab,
+                id: "c2".into(),
+                result: Ok(Some(
+                    git_core::reword::EditBlock::SharedWith(vec![
+                        "feature/f3".into(),
+                        "main".into(),
+                        "tag r1".into(),
+                        "tag r2".into(),
+                    ])
+                    .reason(),
+                )),
+            });
+            let _ = app.update(Message::CommitModalOpen);
+            snapshot(&app, &format!("message-modal-shared-{theme}"));
             // A stash.
             let mut app = crate::app::tests::graph_app();
             app.settings.appearance.theme = choice.clone();
@@ -2156,7 +2173,6 @@ mod tests {
                 ids: vec!["c2".into(), "c1".into()],
                 result: Ok(git_core::reword::EditFacts {
                     branch: "main".into(),
-                    keep_old: vec!["v1.0".into()],
                     drops_signature: false,
                 }),
             });
@@ -3054,7 +3070,6 @@ mod tests {
             id: "c2".into(),
             result: Ok(git_core::reword::EditFacts {
                 branch: "main".into(),
-                keep_old: vec!["backup".into(), "v1.2".into()],
                 drops_signature: true,
             }),
         });

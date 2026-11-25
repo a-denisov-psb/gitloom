@@ -689,6 +689,31 @@ impl RepoSnapshot {
         complete.then_some(false)
     }
 
+    /// Rows (indices into `commits`) that are `id` or descend from it,
+    /// judged from the loaded history; `None` when `id` is not loaded. The
+    /// display order is topological, so every descendant comes before `id`
+    /// and one pass over the rows above it is enough.
+    pub fn descendant_rows(&self, id: &str) -> Option<Vec<bool>> {
+        let &start = self.index.get(id)?;
+        let mut marked = vec![false; start + 1];
+        for i in (0..=start).rev() {
+            let hit = i == start
+                || self.commits.get(i).is_some_and(|commit| {
+                    commit.parents.iter().any(|p| {
+                        self.index
+                            .get(p)
+                            .and_then(|&j| marked.get(j))
+                            .copied()
+                            .unwrap_or(false)
+                    })
+                });
+            if let Some(slot) = marked.get_mut(i) {
+                *slot = hit;
+            }
+        }
+        Some(marked)
+    }
+
     /// Merge commits reachable from `head` but not from `base` (flattened
     /// by a rebase onto `base`), judged from the loaded history.
     pub fn merges_between(&self, base: &str, head: &str) -> usize {
